@@ -1,0 +1,40 @@
+/*
+ * DDSDefs.idl
+ * 
+ * DDS definitions including topic names and QoS configuration constants
+ * Centralizes DDS configuration for consistent usage across applications
+ */
+
+module dds_config {
+
+    // QoS Configuration Constants
+    const string DEFAULT_QOS_FILE_PATH = "../../../../dds/qos/DDS_QOS_PROFILES.xml";
+    
+    // Domain Participant Profiles
+    const string IMAGE_PARTICIPANT_QOS = "DPLibrary::ImageParticipant";
+    const string DEFAULT_PARTICIPANT_QOS = "DPLibrary::DefaultParticipant";
+
+    // Writer/Reader Qos Profiles
+    const string ASSIGNER_QOS = "DataPatternsLibrary::AssignerQoS";
+    const string EVENT_QOS = "DataPatternsLibrary::EventQoS";
+    const string METADATA_QOS = "DataPatternsLibrary::MetadataQoS";
+    const string STATUS_QOS = "DataPatternsLibrary::StatusQoS";
+    const string LARGE_DATA_QOS = "DataPatternsLibrary::LargeDataQoS";
+
+    
+    // Domain ID's
+    const long DEFAULT_DOMAIN_ID = 1;
+
+};
+
+module topics {
+
+    // Example Type Topics (only topics used for ExampleTypes.idl)
+    const string COMMAND_TOPIC = "Command";
+    const string CONFIG_TOPIC = "Config";
+    const string POSITION_TOPIC = "Position";
+    const string STATE_TOPIC = "State";
+    const string BUTTON_TOPIC = "Button";
+    const string IMAGE_TOPIC = "Image";
+
+};

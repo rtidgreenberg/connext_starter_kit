@@ -1,0 +1,327 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dds xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://community.rti.com/schema/7.3.0/rti_routing_service.xsd" version="7.3.0">
+    <qos_library name="DPLibrary">
+
+      <qos_profile name="DefaultParticipant" base_name="BuiltinQosLib::Generic.Common">
+        <domain_participant_qos>
+          <!-- Discovery-related optimizations -->
+          <base_name>
+            <element>BuiltinQosSnippetLib::Optimization.Discovery.Common</element>
+            <element>BuiltinQosSnippetLib::Optimization.Discovery.Endpoint.Fast</element>
+            <element>BuiltinQosSnippetLib::Optimization.ReliabilityProtocol.Common</element>
+          </base_name>
+          <transport_builtin>
+            <shmem>
+              <!-- message_size_max should be >= largest message over SHMEM -->
+              <!-- receive_buffer_size and received_message_count_max should be modified accordingly -->
+              <!-- As a general rule: receive_buffer_size = message_size_max * received_message_count_max -->
+
+              <!-- <message_size_max>262144</message_size_max>
+              <receive_buffer_size>8388608</receive_buffer_size>
+              <received_message_count_max>32</received_message_count_max> -->
+            </shmem>
+            <udpv4>
+              <message_size_max>65530</message_size_max>
+              <!-- These settings help when throughput is high. -->
+              <!-- You need to manually modify these in your kernel. -->
+              <!-- You should add the sysctl commands to your startup script. -->
+              <!--    Linux: https://community.rti.com/howto/improve-rti-connext-dds-network-performance-linux -->
+              <!--    QNX: https://community.rti.com/kb/how-increase-socket-buffer-sizes-qnx -->
+              <!--    Windows: no need to do anything at the OS level -->
+              <send_socket_buffer_size>10485760</send_socket_buffer_size>
+              <recv_socket_buffer_size>10485760</recv_socket_buffer_size>
+              <!-- You should set the ALLOW_INTERFACES_LIST environment variable
+                  to the IP address you'd like to use. This helps avoid potential
+                  duplicate traffic because Connext will use all the available
+                  interfaces to receive data, causing remote DPs to send the same
+                  data to multiple destinations. -->
+              <!-- This is commented out for easier out-of-the-box behavior -->
+              <!-- <allow_interfaces_list>
+                <element>$(ALLOW_INTERFACES_LIST)</element>
+              </allow_interfaces_list> -->
+            </udpv4>
+          </transport_builtin>
+        </domain_participant_qos>
+      </qos_profile>
+
+
+      <qos_profile name="ImageParticipant" base_name="DefaultParticipant">
+        <domain_participant_qos>
+          <transport_builtin>
+            <mask>SHMEM|UDPv4</mask>
+            <shmem>
+              <message_size_max>4096000</message_size_max>
+              <receive_buffer_size>12288000</receive_buffer_size>
+            </shmem>
+          </transport_builtin>
+        </domain_participant_qos>
+      </qos_profile>
+
+    </qos_library>
+
+
+    <qos_library name="DataPatternsLibrary">
+
+    <qos_profile name="EventQoS" base_name="BuiltinQosLib::Generic.Common">
+      <!-- 
+        This QoS Profile can be used by applications in which samples represent
+        events such as button pushes or alerts. When events are triggered,
+        the system should almost always do something, meaning that you
+        don't want the system to lose the event. This means that the system
+        requires strictly reliable communication. 
+
+        Since events and alerts are critical and non-periodic data, it is
+        important to detect situations in which communication between a
+        DataWriter and DataReader is broken. This is why this QoS Profile sets the
+        LivelinessQosPolicy. If the DataWriter does not assert its
+        liveliness in a timely manner, the DataReader will report loss
+        of liveliness to the application.
+        -->
+
+      <!-- Having snippets here makes it easier to understand what QoS is applied -->
+      <base_name>
+        <element>BuiltinQosSnippetLib::QosPolicy.Reliability.Reliable</element>
+        <element>BuiltinQosSnippetLib::QosPolicy.History.KeepAll</element>
+        <element>BuiltinQosSnippetLib::Optimization.ReliabilityProtocol.KeepAll</element>
+      </base_name>
+
+      <datawriter_qos>
+
+        <!-- 
+          In Admin Console can look under QoS tab for "publication name" to 
+          see which QoS Profile is being used
+          -->
+        <publication_name>
+          <name>EventWriter</name>
+        </publication_name>
+
+        <!-- 
+        Liveliness QoS automatically sends out a "heartbeat" message and triggers 
+        the on_liveliness_changed callback if missed 
+        -->
+        <liveliness>
+          <lease_duration>
+            <sec>4</sec>
+            <nanosec>0</nanosec>
+          </lease_duration>
+        </liveliness>
+
+      </datawriter_qos>
+
+      <datareader_qos>
+
+        <!-- 
+          In Admin Console can look under QoS tab for "publication name" to 
+          see which QoS Profile is being used
+          -->
+        <subscription_name>
+          <name>EventReader</name>
+        </subscription_name>
+
+        <!-- 
+        Liveliness QoS automatically sends out a "heartbeat" message and triggers 
+        the on_liveliness_changed callback if missed 
+        -->
+        <liveliness>
+          <lease_duration>
+            <sec>10</sec>
+            <nanosec>0</nanosec>
+          </lease_duration>
+        </liveliness>
+
+      </datareader_qos>
+
+      </qos_profile>
+
+      <qos_profile name="MetadataQoS" base_name="BuiltinQosLib::Generic.Common">
+
+      <!-- 
+        With this QoS Profile, a DataWriter will keep in its queue the last
+        value that was published for each sample instance. Late-joining
+        DataReaders will get that value when they join the system. This
+        QoS Profile inherits from Generic.KeepLastReliable.TransientLocal
+        because the use case requires delivery to late-joiners.
+        -->
+
+      <!-- Having snippets here makes it easier to understand what QoS is applied -->
+      <base_name>
+        <element>BuiltinQosSnippetLib::QosPolicy.Reliability.Reliable</element>
+        <element>BuiltinQosSnippetLib::QosPolicy.History.KeepLast_1</element>
+        <element>BuiltinQosSnippetLib::Optimization.ReliabilityProtocol.KeepLast</element>
+        <element>BuiltinQosSnippetLib::QosPolicy.Durability.TransientLocal</element>
+      </base_name>
+
+      <datawriter_qos>
+
+        <!-- 
+          In Admin Console can look under QoS tab for "publication name" to 
+          see which QoS Profile is being used
+          -->        
+        <publication_name>
+          <name>MetaDataWriter</name>
+        </publication_name>
+
+      </datawriter_qos>
+
+      <datareader_qos>
+
+        <!-- 
+          In Admin Console can look under QoS tab for "publication name" to 
+          see which QoS Profile is being used
+          -->
+        <subscription_name>
+          <name>MetaDataReader</name>
+        </subscription_name>
+
+      </datareader_qos>
+      </qos_profile>
+
+    <qos_profile name="StatusQoS" base_name="BuiltinQosLib::Generic.Common">
+
+      <!-- 
+        This QoS Profile is intended to be used for applications that expect
+        periodic data such as sensor/positional data etc. 
+        There is no reliability mechanism applied as data loss is permitted.
+        The deadline that is set in this QoS Profile can be used to detect when 
+        DataWriters are not publishing data with the expected periodicity.
+        -->
+
+
+      <!-- Having snippets here makes it easier to understand what QoS is applied -->
+      <base_name>
+        <element>BuiltinQosSnippetLib::QosPolicy.Reliability.BestEffort</element>
+        <element>BuiltinQosSnippetLib::QosPolicy.History.KeepLast_1</element>
+      </base_name>
+
+
+      <datawriter_qos>
+
+        <!-- 
+          In Admin Console can look under QoS tab for "publication name" to 
+          see which QoS Profile is being used
+          -->
+        <publication_name>
+          <name>StatusWriter</name>
+        </publication_name>
+
+        <!-- 
+        Deadline QoS triggers on_requested_deadline_missed if the periodic writer  
+        doesn't send out samples within the expected timeframe/expected rate
+        Can trigger failover scenarios etc. 
+        -->
+        <deadline> 
+          <period>
+            <sec>4</sec>
+            <nanosec>0</nanosec>
+          </period>
+        </deadline>
+
+      </datawriter_qos>
+
+      <datareader_qos>
+
+        <!-- 
+          In Admin Console can look under QoS tab for "publication name" to 
+          see which QoS Profile is being used
+          -->
+        <subscription_name>
+          <name>StatusReader</name>
+        </subscription_name>
+
+
+        <!-- 
+        Deadline QoS triggers on_requested_deadline_missed if the periodic writer  
+        doesn't send out samples within the expected timeframe/expected rate
+        Can trigger failover scenarios etc. 
+        -->
+        <deadline>
+          <period>
+            <sec>10</sec>
+            <nanosec>0</nanosec>
+          </period>
+        </deadline>
+
+      </datareader_qos>
+
+      </qos_profile>
+
+      <qos_profile name="LargeDataQoS" base_name="BuiltinQosLib::Generic.Common">
+
+        <base_name>
+          <element>BuiltinQosSnippetLib::QosPolicy.Reliability.BestEffort</element>
+          <element>BuiltinQosSnippetLib::QosPolicy.History.KeepLast_1</element>
+        </base_name>
+
+        <datawriter_qos>
+
+        <!-- 
+          In Admin Console can look under QoS tab for "publication name" to 
+          see which QoS Profile is being used
+          -->
+          <publication_name>
+            <name>LargeDataWriter</name>
+          </publication_name>
+
+        <!-- 
+          This makes the writers/readers on this topic use the "larger" SHMEM message_size_max.
+          By Default Connext uses the smallest transports message_size_max i.e. UDP 
+          -->
+          <transport_selection>
+            <enabled_transports>
+              <element>shmem</element>
+            </enabled_transports>
+          </transport_selection>
+
+        <!-- 
+            The default is normally 23 samples.
+            This just allocates less memory up front for very large samples 
+          -->
+          <resource_limits>
+            <initial_samples>2</initial_samples>
+          </resource_limits>
+
+        </datawriter_qos>
+
+        <datareader_qos>
+
+        <!-- 
+          In Admin Console can look under QoS tab for "publication name" to 
+          see which QoS Profile is being used
+          -->
+          <subscription_name>
+            <name>LargeDataReader</name>
+          </subscription_name>
+
+          <transport_selection>
+            <enabled_transports>
+              <element>shmem</element>
+            </enabled_transports>
+          </transport_selection>
+
+        <resource_limits>
+          <initial_samples>2</initial_samples>
+        </resource_limits>
+ 
+        </datareader_qos>
+      </qos_profile>
+
+
+      <qos_profile name="AssignerQoS">
+
+      <!-- 
+        Use this profile to change QoS Profile assignments without re-compiling
+        All DataWriters/DataReaders get set to this profile and we centralize assignment 
+        Overrides in order of assignment
+        -->
+
+      <datawriter_qos topic_filter="LargeData*" base_name="LargeDataQoS" />
+      <datareader_qos topic_filter="LargeData*" base_name="LargeDataQoS" />
+
+      <datawriter_qos topic_filter="Position*" base_name="StatusQoS" />
+      <datareader_qos topic_filter="Position*" base_name="StatusQoS" />
+
+
+      </qos_profile>
+    </qos_library>
+
+</dds>

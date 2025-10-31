@@ -1,0 +1,108 @@
+/*
+ * ExampleTypes.idl
+ * 
+ * IDL definitions for example data types with basic members
+ * Simple types for demonstration and testing purposes
+ */
+
+module example_types {
+    
+    // Maximum string lengths for bounded strings
+    const unsigned long MAX_ID_LENGTH = 32;
+    const unsigned long MAX_NAME_LENGTH = 64;
+    const unsigned long MAX_MESSAGE_LENGTH = 128;
+    const unsigned long MAX_IMAGE_DATA_SIZE = 1024;
+    
+    // Basic enumerations
+    enum CommandType {
+        COMMAND_START,
+        COMMAND_STOP,
+        COMMAND_PAUSE,
+        COMMAND_RESET,
+        COMMAND_SHUTDOWN
+    };
+    
+    enum SystemState {
+        STATE_INIT,
+        STATE_RUNNING,
+        STATE_ERROR,
+        STATE_RESTARTING,
+        STATE_SHUTTING_DOWN
+    };
+    
+    enum ButtonState {
+        BUTTON_RELEASED,
+        BUTTON_PRESSED,
+        BUTTON_HELD,
+        BUTTON_DOUBLE_CLICK
+    };
+    
+    /**
+     * Command - Basic command structure
+     */
+    struct Command {
+        @key string<MAX_ID_LENGTH> command_id;     // Unique command identifier
+        @key string<MAX_ID_LENGTH> destination_id; // Target destination identifier
+        CommandType command_type;                   // Type of command
+        string<MAX_MESSAGE_LENGTH> message;         // Command message or description
+        unsigned long timestamp_sec;               // Command timestamp
+        boolean urgent;                            // Priority flag
+    };
+    
+    /**
+     * Config - Basic configuration structure
+     */
+    struct Config {
+        @key string<MAX_ID_LENGTH> destination_id;      // Configuration identifier
+        string<MAX_NAME_LENGTH> parameter_name;    // Parameter name
+        string<MAX_MESSAGE_LENGTH> parameter_value; // Parameter value
+        double numeric_value;                       // Numeric parameter value
+        boolean enabled;                           // Enable/disable flag
+    };
+    
+    /**
+     * Position - Current location reporting structure
+     */
+    struct Position {
+        @key string<MAX_ID_LENGTH> source_id;      // Source identifier
+        double latitude;                            // Latitude in degrees
+        double longitude;                          // Longitude in degrees
+        double altitude;                           // Altitude in meters
+        unsigned long timestamp_sec;              // Position timestamp
+    };
+    
+    /**
+     * State - Basic state information structure
+     */
+    struct State {
+        @key string<MAX_ID_LENGTH> source_id;      // Source identifier
+        SystemState state_value;                    // State enumeration
+        double progress_percentage;                 // Progress indicator (0-100%)
+        unsigned long duration_sec;                // Duration in current state
+        boolean transitioning;                     // State transition flag
+    };
+    
+    /**
+     * Button - Basic button input structure
+     */
+    struct Button {
+        @key string<MAX_ID_LENGTH> source_id;      // Source identifier
+        @key string<MAX_ID_LENGTH> button_id;      // Button identifier
+        ButtonState button_state;                   // Current button state
+        unsigned long press_count;                 // Total press count
+        unsigned long last_press_timestamp_sec;    // Last press time
+        double hold_duration_sec;                  // Hold duration for held buttons
+    };
+    
+    /**
+     * Image - Basic image data structure
+     */
+    struct Image {
+        @key string<MAX_ID_LENGTH> image_id;       // Image identifier
+        unsigned long width;                       // Image width in pixels
+        unsigned long height;                      // Image height in pixels
+        string<MAX_NAME_LENGTH> format;            // Image format (e.g., "RGB", "JPEG")
+        sequence<octet, MAX_IMAGE_DATA_SIZE> data; // Image data bytes
+    };
+    
+}; // namespace example_types

@@ -162,7 +162,9 @@ Located in `cxx11/src/utils/`, these classes provide high-level abstractions for
 #### Key Features:
 - **DomainParticipant Management** - Automatic creation, configuration, and cleanup
 - **QoS Profile Integration** - Loads QoS from external XML files  
-- **Distributed Logging** - RTI distributed logger setup and management
+- **Domain Configuration** - DomainParticipant with QoS profiles
+- **Distributed Logging** - RTI distributed logger setup and management - external visibility of logs over DDS with infrastructure services or your own apps
+- **AsyncWaitSet Management** - Thread pool for event-driven processing
 - **Event Handling** - Participant listeners for DDS events
 - **Signal Handling** - Graceful shutdown on SIGINT/SIGTERM
 - **Thread Safety** - Mutex-protected operations for multi-threading

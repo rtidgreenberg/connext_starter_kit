@@ -8,7 +8,7 @@ This example showcases:
 - **DDSInterface Utility**: Easy setup of multiple DDS readers and writers with `ASSIGNER_QOS` profiles
 - **DDSContext Management**: Centralized participant and AsyncWaitSet handling with configurable thread pool (5 threads)
 - **GPS Simulation Publishing**: Continuous position data publishing demonstrating location-based data patterns
-- **Distributed Logger Integration**: System-wide logging accessible via RTI Admin Console with info/error levels
+- **Distributed Logger Integration**: System-wide logging accessible via RTI Admin Console with info/error levels - external visibility of logs over DDS with infrastructure services or your own apps
 - **Remote Administration**: Verbosity levels can be changed remotely through DDS
 - **Event-Driven Architecture**: AsyncWaitSet-based message processing with custom callback functions
 - **Error Handling**: Comprehensive exception handling for DDS operations
@@ -19,7 +19,7 @@ This example showcases:
 - **Single Publisher**: Position message writer publishing GPS coordinates every 500ms
   - **Position Publishing**: GPS coordinates (latitude: 37.7749, longitude: -122.4194, altitude: 15m) simulating San Francisco location
 - **Error Handling**: Robust exception handling for publishing operations with distributed logger integration
-- **Distributed Logging**: Comprehensive status messages sent to RTI distributed logger with info/error levels
+- **Distributed Logging**: Comprehensive status messages sent to RTI distributed logger with info/error levels - external visibility of logs over DDS with infrastructure services or your own apps
 - **Remote Monitoring**: Log messages viewable in RTI Admin Console for system-wide visibility
 
 ## DDS Interfaces Overview

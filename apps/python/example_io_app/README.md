@@ -8,7 +8,11 @@ This Python application demonstrates minimal DDS middleware setup:
 - **Command/Button/Config Publishing**: Basic message publishing every 2 seconds
 - **Position Data Subscription**: Simple async subscriber for Position messages
 - **ASSIGNER_QOS Profile**: Uses XML-based QoS configuration
-- **Distributed Logging**: RTI distributed logger integration
+- **Cross-Language Communication**: Seamless interoperability with C++ applications
+- **Configuration Management**: External QoS profiles and runtime configuration constants
+- **Distributed Logger**: Integrated RTI distributed logging for remote monitoring - external visibility of logs over DDS with infrastructure services or your own apps
+- **Error Handling**: Comprehensive exception handling and graceful shutdown
+- **Real-time Data Processing**: Event-driven architecture with asyncio
 - **Minimal Application Code**: Focus on middleware setup, not application logic
 
 ## Application Behavior
@@ -190,7 +194,7 @@ DEFAULT_CONFIG_DESTINATION = "config_target"   # Modify config targets
 ✅ **Configurable QoS File Path** - Custom QoS profiles via command line  
 ✅ **Centralized Configuration** - Application constants for easy customization  
 ✅ **Robust Error Handling** - Proper exception handling and graceful shutdown  
-✅ **Distributed Logging** - RTI distributed logger integration with detailed logging  
+✅ **Distributed Logging** - RTI distributed logger integration with detailed logging - external visibility of logs over DDS with infrastructure services or your own apps  
 ✅ **Cross-Language Compatible** - Works seamlessly with C++ counterpart  
 ✅ **Flexible Command Line** - Multiple verbosity levels and configuration options  
 ✅ **Production Ready** - Clean architecture with proper resource management

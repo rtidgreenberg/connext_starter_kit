@@ -61,29 +61,33 @@ python example_io_app/example_io_app.py
 
 ```
 connext_starter_kit/
-├── README.md                    # This file - project overview and setup
-├── apps/                        # Application implementations
-│   ├── cxx11/                   # C++ applications  
-│   │   └── example_io_app/      # C++ I/O demonstration application
-│   └── python/                  # Python applications
-│       ├── rti_license.dat      # RTI license file (REQUIRED - copy here)
-│       └── example_io_app/      # Python I/O demonstration application  
-├── dds/                         # DDS data models and utilities
-│   ├── README.md                # DDS layer documentation
-│   ├── datamodel/               # IDL data type definitions
-│   ├── cxx11/                   # C++ utilities and code generation
-│   ├── python/                  # Python code generation
-│   └── qos/                     # Quality of Service profiles
-└── resources/                   # External dependencies and utilities
+├── README.md                        # This file - project overview and setup
+├── .github/prompts/                 # GitHub Copilot prompt templates
+│   └── build_cxx.prompt.md         # C++ application generation instructions
+├── apps/                            # Application implementations
+│   ├── cxx11/                       # C++ applications with AI generation support
+│   │   ├── README.md                # C++ app creation guide with GitHub Copilot
+│   │   └── example_io_app/          # Reference C++ I/O demonstration application
+│   └── python/                      # Python applications
+│       ├── rti_license.dat          # RTI license file (REQUIRED - copy here)
+│       └── example_io_app/          # Python I/O demonstration application  
+├── dds/                             # DDS data models and utilities
+│   ├── README.md                    # DDS layer documentation
+│   ├── datamodel/                   # IDL data type definitions
+│   ├── cxx11/                       # C++ utilities and code generation
+│   ├── python/                      # Python code generation
+│   └── qos/                         # Quality of Service profiles
+└── resources/                       # External dependencies and utilities
     └── rticonnextdds-cmake-utils/   # Git submodule: RTI CMake utilities
 ```
 
 ## 🎯 What's Included
 
 ### **Multi-Language DDS Applications**
-- **C++ Application**: High-performance native application with AsyncWaitSet processing
+- **C++ Application**: Reference implementation with multiple readers/writers and AsyncWaitSet processing
 - **Python Application**: Asyncio-based application for rapid development and integration
 - **Cross-Language Communication**: Applications communicate seamlessly via DDS topics
+- **AI-Powered Generation**: Create new C++ apps using GitHub Copilot and structured prompts
 
 ### **Comprehensive Data Model**
 - **6 IDL Data Types**: Command, Button, Config, Position, State, Image with complete examples
@@ -93,7 +97,7 @@ connext_starter_kit/
 ### **Production-Ready Utilities**
 - **DDSContext Class**: Centralized DomainParticipant and AsyncWaitSet management
 - **DDSInterface Class**: Simplified DataReader/DataWriter creation with error handling
-- **Distributed Logging**: RTI Admin Console integration for system-wide monitoring
+- **Distributed Logging**: RTI Admin Console integration for system-wide monitoring - external visibility of logs over DDS with infrastructure services or your own apps
 - **QoS Profile Management**: Flexible XML-based configuration with ASSIGNER_QOS patterns
 - **RTI CMake Integration**: Git submodule with official RTI CMake utilities for seamless builds
 
@@ -131,6 +135,48 @@ connext_starter_kit/
 | `Image` | `Image` | Large binary data and metadata | - | - |
 
 ## 🛠️ Development Workflow
+
+### **Creating New Applications with GitHub Copilot**
+
+This starter kit includes AI-powered application generation using GitHub Copilot and structured prompts:
+
+#### **C++ Applications**
+Use the build prompt template to rapidly create new DDS applications:
+
+```bash
+# 1. Open the build prompt in your editor
+code .github/prompts/build_cxx.prompt.md
+
+# 2. Use GitHub Copilot Chat with commands like:
+# "Follow instructions in build_cxx.prompt.md. Create a new cxx app with [READERS] as reader(s) and [WRITERS] as writer(s)"
+
+# Examples:
+# - Sensor app: "...with Position and State as readers and Command as writer"  
+# - Control app: "...with Button as reader and Config, State, Command as writers"
+# - Monitor app: "...with Button, Position, State as readers and Image as writer"
+```
+
+**Copilot automatically generates:**
+- Complete application directory structure
+- CMakeLists.txt with proper RTI integration  
+- Command-line parsing utilities (application.hpp)
+- Main application with your specified DDS interfaces
+- Event-driven processing and message publishing loops
+- Comprehensive README documentation
+
+**GitHub Copilot Integration**: Applications can be created entirely using the structured prompt process with commands like:
+```
+Follow instructions in build_cxx.prompt.md. Create a new cxx app with [READERS] as reader and [WRITERS] as writers
+```
+
+#### **Key Benefits**
+- **Rapid Development**: Complete applications in minutes vs hours
+- **Consistent Patterns**: All generated apps follow proven DDS best practices  
+- **Error-Free Integration**: Automatic proper field access and API usage
+- **Documentation Included**: Generated READMEs with usage examples
+- **Cross-Language Compatible**: Works immediately with existing Python apps
+
+See **[C++ Application Creation Guide](apps/cxx11/README.md)** for detailed step-by-step instructions.
 
 ### **Adding New Data Types**
 1. Define new type in `dds/datamodel/*.idl`

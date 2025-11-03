@@ -128,7 +128,7 @@ The `example_io_app` follows these organizational patterns:
 - **Button Publisher**: Publishes `example_types.Button` data with button states and press counts
 - **Config Publisher**: Publishes `example_types.Config` data with parameter configurations
 - **Position Subscriber**: Asynchronously receives and processes `example_types.Position` data
-- **RTI Distributed Logger**: Integrated distributed logging for remote monitoring and debugging
+- **RTI Distributed Logger**: Integrated distributed logging for remote monitoring and debugging - external visibility of logs over DDS with infrastructure services or your own apps
 - **Command-Line Interface**: Full argument parsing with domain ID and verbosity control
 - **Infinite Publisher Loop**: Continuous operation with incrementing data publication
 - **Configurable DDS Verbosity**: 6-level logging control for debugging and monitoring

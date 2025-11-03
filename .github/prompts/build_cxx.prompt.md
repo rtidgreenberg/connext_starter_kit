@@ -1,0 +1,14 @@
+- Don't use distributed logger macro syntax
+- Use example_io_app as explicit reference
+- Follow exact usage in example_io_app of DDS API's
+- Follow exact usage in example_io_app of DDSContext API usage
+- Follow exact usage in example_io_app of DDSInterface API usage
+- Follow exact usage of Distributed Logger api from example_io_app
+- Clean and make after adding new data type
+- Make sure all types are regenerated and included in headers
+- Make sure connext DDS environment variables are set
+- Make sure specific compiler flags are used from reference cmakelists
+- Copy the cmakelists from the reference directory and modify as necessary
+- Make example code as simple as reference example app with 0 application logic
+- Before building application perform a full review of code and verify all fields for data members are accurate
+- Never use rtime-make to build

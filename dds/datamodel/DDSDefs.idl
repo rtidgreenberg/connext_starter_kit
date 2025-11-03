@@ -7,9 +7,6 @@
 
 module dds_config {
 
-    // QoS Configuration Constants
-    const string DEFAULT_QOS_FILE_PATH = "../../../../dds/qos/DDS_QOS_PROFILES.xml";
-    
     // Domain Participant Profiles
     const string IMAGE_PARTICIPANT_QOS = "DPLibrary::ImageParticipant";
     const string DEFAULT_PARTICIPANT_QOS = "DPLibrary::DefaultParticipant";

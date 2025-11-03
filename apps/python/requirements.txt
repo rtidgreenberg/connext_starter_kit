@@ -1,0 +1,8 @@
+# RTI Connext DDS Python API - Required runtime dependency
+rti.connext==7.3.0
+
+# Development dependencies
+pytest>=6.0
+black
+flake8
+mypy

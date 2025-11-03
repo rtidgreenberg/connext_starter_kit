@@ -32,7 +32,7 @@
 #include "DDSInterface.hpp"
 
 constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
-const std::string APP_NAME = "Example IO APP";
+const std::string APP_NAME = "Example CXX IO APP";
 
 
 void process_command_data(dds::sub::DataReader<example_types::Command> reader)
@@ -143,10 +143,6 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
     logger.info("Subscribing to Command, Button, and Config messages...");
     logger.info("Publishing Position messages...");
 
-    // Position tracking variables
-    double current_latitude = 37.7749;    // Starting San Francisco latitude  
-    double current_longitude = -122.4194; // Starting San Francisco longitude
-    auto last_position_update = std::chrono::steady_clock::now();
 
     example_types::Position pos_msg;
     pos_msg.source_id(APP_NAME);
@@ -155,23 +151,10 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
 
       try
       {
-        // Check if 3 seconds have passed since last position update
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_position_update);
-        
-        if (elapsed.count() >= 2) {
-            // Increment position (simulate movement)
-            current_latitude += 0.0001;   // Small increment northward
-            current_longitude += 0.0001;  // Small increment eastward
-            last_position_update = now;
-            logger.info("GPS_UPDATE: Position incremented after 2 seconds");
-        }
-        
-        pos_msg.latitude(current_latitude);    // Use current latitude
-        pos_msg.longitude(current_longitude);  // Use current longitude
-        pos_msg.altitude(15.0);                // Example: 15 meters altitude
-        pos_msg.timestamp_sec(static_cast<unsigned long>(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count()));
-
+        // Populate and send position message
+        pos_msg.latitude(37.7749);
+        pos_msg.longitude(-122.4194);
+        pos_msg.altitude(15.0);
         position_interface->writer().write(pos_msg);
 
         std::cout << "[POSITION] Published ID: " << pos_msg.source_id()
@@ -184,7 +167,7 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
         logger.error("Failed to publish position: " + std::string(ex.what()));
       }
 
-      // Option 2: Use Polling Method to Read Data
+      // Alternate Option: Use Polling Method to Read Data
       // Latency contingent on loop rate
       // process_command_data(command_interface->reader());
 

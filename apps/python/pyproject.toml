@@ -1,0 +1,80 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel", "cmake>=3.12"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "connext-dds-python-app"
+version = "1.0.0"
+description = "RTI Connext DDS Python application with automated code generation"
+readme = "README.md"
+license = {text = "RTI License"}
+authors = [
+    {name = "Real-Time Innovations", email = "support@rti.com"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+requires-python = ">=3.6,<3.13"
+dependencies = [
+    "rti.connext==7.3.0",
+    # RTI Connext Python API - REQUIRED for running this application
+    # Installation guide: https://community.rti.com/static/documentation/connext-dds/current/doc/manuals/connext_dds_professional/installation_guide/installing.html#installing-python-c-or-ada-packages
+    # 
+    # Note: This will be automatically installed when you run 'pip install -e .'
+    # The included install.sh script also handles RTI Python API installation
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "black",
+    "flake8",
+    "mypy",
+]
+
+# [project.scripts]
+# No global scripts - run example_io_app directly
+
+[project.urls]
+Homepage = "https://www.rti.com"
+Repository = "https://github.com/rticommunity/rticonnextdds-examples"
+Documentation = "https://community.rti.com/static/documentation/connext-dds/7.3.0/"
+
+[tool.setuptools]
+packages = ["codegen"]
+package-dir = {"codegen" = "../../dds/python/codegen"}
+
+[tool.setuptools.package-data]
+codegen = ["*.py"]
+
+# Custom build hook to run CMake codegen before package build
+[tool.setuptools.cmdclass]
+build_py = "build_hooks.BuildPyWithCodegen"
+
+# Black code formatting configuration
+[tool.black]
+line-length = 88
+target-version = ['py36', 'py37', 'py38', 'py39', 'py310', 'py311', 'py312']
+
+# MyPy type checking configuration
+[tool.mypy]
+python_version = "3.6"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+# Pytest configuration
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

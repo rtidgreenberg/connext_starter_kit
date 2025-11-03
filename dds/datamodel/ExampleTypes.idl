@@ -77,9 +77,7 @@ module example_types {
     struct State {
         @key string<MAX_ID_LENGTH> source_id;      // Source identifier
         SystemState state_value;                    // State enumeration
-        double progress_percentage;                 // Progress indicator (0-100%)
-        unsigned long duration_sec;                // Duration in current state
-        boolean transitioning;                     // State transition flag
+        string<MAX_MESSAGE_LENGTH> error_message;   // Error message or status description
     };
     
     /**

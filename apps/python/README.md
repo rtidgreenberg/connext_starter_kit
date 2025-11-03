@@ -47,7 +47,9 @@ Located in `example_io_app/`, this application demonstrates RTI Connext DDS midd
 - RTI Connext DDS Python API (automatically installed via requirements.txt)
 - Python 3.8 or later
 - Built DDS Python libraries (`../../dds/python/build/`)
-- RTI license file (`rti_license.dat`)
+- **RTI license file (`rti_license.dat`) must be present in this `apps/python/` directory**
+
+> **Important**: All Python applications should be run from the `apps/python/` directory to ensure the RTI license file is accessible in the current working directory.
 
 ### Setup Instructions
 
@@ -290,7 +292,8 @@ python3 example_io_app.py --domain_id 1 --verbosity 2
 The Python application supports several command-line options for flexible configuration:
 
 ```bash
-python example_io_app.py --help
+# From apps/python/ directory:
+python example_io_app/example_io_app.py --help
 usage: example_io_app.py [-h] [-v VERBOSITY] [-d DOMAIN_ID] [-q QOS_FILE]
 
 Example I/O Application - Publishes Command/Button/Config, Subscribes to Position
@@ -316,17 +319,19 @@ The application supports configurable DDS logging verbosity:
 
 #### Usage Examples
 ```bash
+# From apps/python/ directory (where rti_license.dat is located):
+
 # Run with default settings (domain 1, verbosity 1)
-python3 example_io_app.py
+python example_io_app/example_io_app.py
 
 # Run on domain 5 with minimal logging
-python3 example_io_app.py --domain_id 5 --verbosity 0
+python example_io_app/example_io_app.py --domain_id 5 --verbosity 0
 
 # Run with maximum DDS debugging
-python3 example_io_app.py --domain_id 1 --verbosity 5
+python example_io_app/example_io_app.py --domain_id 1 --verbosity 5
 
 # Run with custom QoS file
-python3 example_io_app.py --qos_file /path/to/custom/qos.xml
+python example_io_app/example_io_app.py --qos_file /path/to/custom/qos.xml
 
 # Show help
 python3 example_io_app.py --help

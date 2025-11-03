@@ -27,17 +27,28 @@ This Python application demonstrates minimal DDS middleware setup:
 # 1. Ensure DDS Python bindings are generated
 cd ../../../dds/python/build && make
 
-# 2. Run the Python application
-cd - && python example_io_app.py --domain_id 1
+# 2. Navigate to python/ directory (contains RTI license file)
+cd ../../../apps/python
 
-# 3. Run with higher verbosity
-python example_io_app.py --domain_id 1 --verbosity 2
+# 3. Activate virtual environment
+source connext_dds_env/bin/activate
+
+# 4. Run the Python application from python/ directory
+python example_io_app/example_io_app.py --domain_id 1
+
+# 5. Run with higher verbosity
+python example_io_app/example_io_app.py --domain_id 1 --verbosity 2
 ```
 
 ## Usage
 
+**Important**: 
+- Run from `apps/python/` directory to ensure RTI license file (`rti_license.dat`) is accessible
+- The license file must be present in the current working directory for Python DDS applications
+
 ```bash
-python example_io_app.py [OPTIONS]
+# From apps/python/ directory:
+python example_io_app/example_io_app.py [OPTIONS]
 
 Options:
   -d, --domain_id <int>    DDS domain ID (default: 1)
@@ -56,14 +67,16 @@ Options:
 
 ### Usage Examples
 ```bash
+# From apps/python/ directory:
+
 # Run with default settings
-python example_io_app.py
+python example_io_app/example_io_app.py
 
-# Run on domain 5 with custom QoS file
-python example_io_app.py --domain_id 5 --qos_file /path/to/custom/qos.xml
+# Run on custom domain with custom QoS file  
+python example_io_app/example_io_app.py --domain_id 5 --qos_file /path/to/custom/qos.xml
 
-# Run with maximum DDS debugging
-python example_io_app.py --domain_id 1 --verbosity 5
+# Run with maximum verbosity for debugging
+python example_io_app/example_io_app.py --domain_id 1 --verbosity 5
 ```
 
 ## Example Output
@@ -141,7 +154,7 @@ cd ../../../../apps/python
 source connext_dds_env/bin/activate
 export NDDSHOME=/path/to/rti_connext_dds-7.3.0
 cd example_io_app
-python example_io_app.py --domain_id 1 --verbosity 2
+python example_io_app/example_io_app.py --domain_id 1 --verbosity 2
 ```
 
 ## Configuration & Customization

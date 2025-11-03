@@ -291,7 +291,7 @@ The Python application supports several command-line options for flexible config
 
 ```bash
 python example_io_app.py --help
-usage: example_io_app.py [-h] [-v VERBOSITY] [-d DOMAIN_ID]
+usage: example_io_app.py [-h] [-v VERBOSITY] [-d DOMAIN_ID] [-q QOS_FILE]
 
 Example I/O Application - Publishes Command/Button/Config, Subscribes to Position
 
@@ -301,6 +301,8 @@ optional arguments:
                         Logging Verbosity (0-5, default: 1)
   -d DOMAIN_ID, --domain_id DOMAIN_ID
                         Domain ID (default: 1)
+  -q QOS_FILE, --qos_file QOS_FILE
+                        Path to QoS profiles XML file (default: ../../dds/qos/DDS_QOS_PROFILES.xml)
 ```
 
 #### Verbosity Levels
@@ -322,6 +324,9 @@ python3 example_io_app.py --domain_id 5 --verbosity 0
 
 # Run with maximum DDS debugging
 python3 example_io_app.py --domain_id 1 --verbosity 5
+
+# Run with custom QoS file
+python3 example_io_app.py --qos_file /path/to/custom/qos.xml
 
 # Show help
 python3 example_io_app.py --help

@@ -8,12 +8,8 @@ help:
 	@echo "  install-rti-api - Install RTI Connext Python API (requires NDDSHOME)"
 	@echo "  codegen     - Run CMake codegen to generate Python DDS bindings"
 	@echo "  install     - Install the package in development mode (includes RTI API)"
-	@echo "  install-dev - Install with development dependencies (includes RTI API)"
 	@echo "  run         - Show how to run the example_io_app application"
 	@echo "  clean       - Clean build artifacts and generated code"
-	@echo "  test        - Run tests (if any)"
-	@echo "  lint        - Run code linting"
-	@echo "  format      - Format code with black"
 	@echo "  check-env   - Check RTI environment variables"
 
 # Generate Python DDS bindings from IDL files
@@ -33,10 +29,6 @@ install: install-rti-api codegen
 	@echo "Installing package in development mode..."
 	pip install -e .
 
-# Install with development dependencies
-install-dev: install-rti-api codegen
-	@echo "Installing package with development dependencies..."
-	pip install -e .[dev]
 
 # Run the example_io_app application
 run:
@@ -60,22 +52,6 @@ clean:
 	cd ../../dds/python && rm -rf build/ && rm -rf codegen/*.py codegen/__pycache__/
 	@echo "Clean completed."
 
-# Run tests
-test:
-	@echo "Running tests..."
-	pytest
-
-# Run code linting
-lint:
-	@echo "Running flake8 linting..."
-	flake8 example_io_app/example_io_app.py build_hooks.py
-	@echo "Running mypy type checking..."
-	mypy example_io_app/example_io_app.py build_hooks.py
-
-# Format code with black
-format:
-	@echo "Formatting code with black..."
-	black example_io_app/example_io_app.py build_hooks.py
 
 # Check RTI environment
 check-env:

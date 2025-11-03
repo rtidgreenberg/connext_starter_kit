@@ -5,7 +5,7 @@ Reference DDS application demonstrating how to quickly create applications using
 ## Purpose
 
 This example showcases:
-- **DDSInterface Utility**: Easy setup of multiple DDS readers and writers with ASSIGNER_QOS profiles
+- **DDSInterface Utility**: Easy setup of multiple DDS readers and writers with `ASSIGNER_QOS` profiles
 - **DDSContext Management**: Centralized participant and AsyncWaitSet handling with configurable thread pool (5 threads)
 - **GPS Simulation Publishing**: Continuous position data publishing demonstrating location-based data patterns
 - **Distributed Logger Integration**: System-wide logging accessible via RTI Admin Console with info/error levels
@@ -15,9 +15,9 @@ This example showcases:
 
 ## Application Behavior
 
-- **Multiple Subscribers**: Command, Button, and Config message readers using AsyncWaitSet with ASSIGNER_QOS profile
+- **Multiple Subscribers**: Command, Button, and Config message readers using AsyncWaitSet with `ASSIGNER_QOS` profile
 - **Single Publisher**: Position message writer publishing GPS coordinates every 500ms
-  - **Position Publishing**: GPS coordinates (latitude, longitude, altitude) with San Francisco location simulation
+  - **Position Publishing**: GPS coordinates (latitude: 37.7749, longitude: -122.4194, altitude: 15m) simulating San Francisco location
 - **Error Handling**: Robust exception handling for publishing operations with distributed logger integration
 - **Distributed Logging**: Comprehensive status messages sent to RTI distributed logger with info/error levels
 - **Remote Monitoring**: Log messages viewable in RTI Admin Console for system-wide visibility
@@ -31,20 +31,24 @@ This example showcases:
 | **Reader** | `example_types::Config` | `Config` | AsyncWaitSet (`process_config_data`) | Handles configuration parameter updates |
 | **Writer** | `example_types::Position` | `Position` | Direct Publishing (500ms) | Publishes GPS coordinates and location data |
 
-All interfaces use the `ASSIGNER_QOS` profile for flexible XML-based QoS configuration per topic.
+All interfaces use the `dds_config::ASSIGNER_QOS` profile (`DataPatternsLibrary::AssignerQoS`) for flexible XML-based QoS configuration per topic.
 
 ## Quick Start
 
 ```bash
+# Set RTI Connext DDS environment
+export NDDSHOME=/path/to/rti_connext_dds-7.3.0
+
 # 1. Build DDS utility library
-cd ../../../dds/cxx11/build && make
+cd ../../../dds/cxx11 && rm -rf build && mkdir build && cd build
+cmake .. && make -j4
 
 # 2. Build example application  
-cd - && mkdir -p build && cd build
-cmake .. && make
+cd ../../../apps/cxx11/example_io_app && rm -rf build && mkdir build && cd build
+cmake .. && make -j4
 
-# 3. Run with distributed logging
-./example_io_app --qos-file ../../../../dds/qos/DDS_QOS_PROFILES.xml
+# 3. Run with default QoS profiles
+./example_io_app
 ```
 
 ## Usage
@@ -54,8 +58,8 @@ cmake .. && make
 
 Options:
   -d, --domain <int>    Domain ID (default: 1)
-  -v, --verbosity <int> RTI verbosity 0-3 (default: 1)
-  -q, --qos-file <str>  QoS profile XML path
+  -v, --verbosity <int> RTI verbosity 0-3 (default: 1)  
+  -q, --qos-file <str>  QoS profile XML path (default: ../../../../dds/qos/DDS_QOS_PROFILES.xml)
   -h, --help           Show help
 ```
 
@@ -69,7 +73,7 @@ Options:
 ./example_io_app -d 42 -v 2
 
 # Monitor output showing GPS coordinates
-[POSITION] Published ID: Example IO APP, Lat: 37.7749, Lon: -122.4194, Alt: 15m
+[POSITION] Published ID: Example CXX IO APP, Lat: 37.7749, Lon: -122.419, Alt: 15m
 ```
 
 ## Utility Classes Demonstrated
@@ -87,7 +91,7 @@ Options:
 ## QoS Profile Configuration
 
 **ASSIGNER_QOS Profile**:
-The application uses the `dds_config::ASSIGNER_QOS` profile, which enables flexible external QoS assignment through XML configuration. This approach provides several benefits:
+The application uses the `dds_config::ASSIGNER_QOS` profile (`DataPatternsLibrary::AssignerQoS`), which enables flexible external QoS assignment through XML configuration. This approach provides several benefits:
 
 - **Topic-Specific Configuration**: QoS settings can be assigned per topic name in the XML profile file
 - **Runtime Flexibility**: Different topics can have different QoS policies without code changes
@@ -96,11 +100,11 @@ The application uses the `dds_config::ASSIGNER_QOS` profile, which enables flexi
 
 Example XML structure for topic-specific QoS assignment:
 ```xml
-<qos_profile name="ASSIGNER_QOS">
-    <datareader_qos topic_filter="CommandTopic">
+<qos_profile name="AssignerQoS">
+    <datareader_qos topic_filter="Command">
         <!-- Command-specific QoS settings -->
     </datareader_qos>
-    <datawriter_qos topic_filter="PositionTopic">
+    <datawriter_qos topic_filter="Position">
         <!-- Position-specific QoS settings -->
     </datawriter_qos>
 </qos_profile>
@@ -119,10 +123,14 @@ This pattern allows the same application code to work with different QoS require
 
 ```cpp
 // Create context with distributed logging and async waitset
+const std::string qos_profile = dds_config::DEFAULT_PARTICIPANT_QOS;
+const std::string APP_NAME = "Example CXX IO APP";
+constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
+
 auto dds_context = std::make_shared<DDSContext>(domain_id, ASYNC_WAITSET_THREADPOOL_SIZE, 
                                                qos_file_path, qos_profile, APP_NAME);
 
-// Create multiple readers with ASSIGNER_QOS profile
+// Create multiple readers with ASSIGNER_QOS profile  
 auto command_interface = std::make_shared<DDSInterface<example_types::Command>>(
     dds_context, KIND::READER, topics::COMMAND_TOPIC, qos_file_path, dds_config::ASSIGNER_QOS);
 
@@ -138,9 +146,9 @@ auto& logger = dds_context->distributed_logger();
 logger.info("Example I/O app is running. Press Ctrl+C to stop.");
 
 // Publish position data with error handling
+example_types::Position pos_msg;
+pos_msg.source_id(APP_NAME);
 try {
-    example_types::Position pos_msg;
-    pos_msg.source_id(APP_NAME);
     pos_msg.latitude(37.7749);
     pos_msg.longitude(-122.4194);
     pos_msg.altitude(15.0);
@@ -160,6 +168,21 @@ The application includes proper initialization and cleanup:
 ## Dependencies
 
 - RTI Connext DDS 7.3.0+ with distributed logger
-- C++14 compiler  
-- DDS utility library (DDSContext, DDSInterface classes)
-- ExampleTypes and DDSDefs generated from IDL files
+- C++14 compiler (tested with GCC 9.4.0)
+- CMake 3.12+ for build configuration
+- DDS utility library (`libdds_utils_datamodel.so`) built from `../../../dds/cxx11/`
+- Generated C++ bindings:
+  - `ExampleTypes.hpp/cpp` - Data type definitions
+  - `DDSDefs.hpp/cpp` - Configuration constants and topic names
+- QoS profiles XML file: `../../../../dds/qos/DDS_QOS_PROFILES.xml`
+
+## Build Process
+
+The application automatically links against the shared DDS utility library and includes the generated codegen headers:
+
+```cmake
+# CMakeLists.txt automatically finds:
+# - DDS shared library: /path/to/dds/cxx11/build/lib/libdds_utils_datamodel.so  
+# - DDS codegen headers: /path/to/dds/cxx11/src/codegen
+# - DDS utils headers: /path/to/dds/cxx11/src/utils
+```

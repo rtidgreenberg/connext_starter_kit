@@ -90,7 +90,7 @@ namespace application {
         ParseReturn parse_result = ParseReturn::ok;
         unsigned int domain_id = dds_config::DEFAULT_DOMAIN_ID;
         rti::config::Verbosity verbosity(rti::config::Verbosity::EXCEPTION);
-        std::string qos_file_path = dds_config::DEFAULT_QOS_FILE_PATH; // Default QoS file
+        std::string qos_file_path = "../../../../dds/qos/DDS_QOS_PROFILES.xml"; // Default QoS file
 
         while (arg_processing < argc) {
             if ((argc > arg_processing + 1) 
@@ -110,7 +110,7 @@ namespace application {
                 arg_processing += 2;
             } else if (strcmp(argv[arg_processing], "-h") == 0
             || strcmp(argv[arg_processing], "--help") == 0) {
-                std::cout << "Example I/O application with Command, Button, Config inputs and State, Status outputs." << std::endl;
+                std::cout << "Example I/O application with Command, Button, Config inputs and Position outputs." << std::endl;
                 show_usage = true;
                 parse_result = ParseReturn::exit;
                 break;

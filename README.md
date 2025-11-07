@@ -182,7 +182,7 @@ See **[C++ Application Creation Guide](apps/cxx11/README.md)** for detailed step
 1. Define new type in `dds/datamodel/*.idl`
 2. Add topic constants to `DDSDefs.idl`
 3. Rebuild DDS bindings: `cd dds/{cxx11,python}/build && make`
-4. Implement in applications using DDSInterface utility classes
+4. Implement in applications
 
 ### **Configuring QoS Profiles**
 1. Edit `dds/qos/DDS_QOS_PROFILES.xml`
@@ -244,23 +244,6 @@ python -m venv connext_dds_env && source connext_dds_env/bin/activate
 - **[C++ Application Guide](apps/cxx11/example_io_app/README.md)** - Native application details
 - **[Python Application Guide](apps/python/README.md)** - Python implementation and setup  
 - **[Python App Specifics](apps/python/example_io_app/README.md)** - Detailed Python application features
-
-## 🤝 Contributing
-
-### **Code Style**
-- **C++**: Follow RTI Connext DDS conventions with modern C++14 patterns
-- **Python**: PEP 8 compliance with type hints and docstrings
-- **IDL**: Consistent naming with clear documentation comments
-
-### **Testing**
-- Build both applications and verify cross-language communication
-- Test with different QoS profiles and domain configurations  
-- Validate distributed logging functionality
-
-### **Commit Guidelines**
-- Clear commit messages describing changes
-- Update relevant README files for architectural changes
-- Test build process after IDL modifications
 
 ## 📄 License
 

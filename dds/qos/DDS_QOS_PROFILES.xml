@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<dds xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://community.rti.com/schema/7.3.0/rti_routing_service.xsd" version="7.3.0">
+<dds xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://community.rti.com/schema/7.3.0/rti_dds_qos_profiles.xsd" version="7.3.0">
     <qos_library name="DPLibrary">
 
       <qos_profile name="DefaultParticipant" base_name="BuiltinQosLib::Generic.Common">
@@ -111,7 +111,7 @@
       <datareader_qos>
 
         <!-- 
-          In Admin Console can look under QoS tab for "publication name" to 
+          In Admin Console can look under QoS tab for "subscription name" to 
           see which QoS Profile is being used
           -->
         <subscription_name>
@@ -131,9 +131,156 @@
 
       </datareader_qos>
 
-      </qos_profile>
+    </qos_profile>
 
-      <qos_profile name="MetadataQoS" base_name="BuiltinQosLib::Generic.Common">
+    <qos_profile name="CommandStrength10QoS" base_name="DataPatternsLibrary::EventQoS">
+      <!-- 
+        This QoS Profile is intended to be used in a mutli command arbitration use case where  
+        different commands have differnt strengths to override as necessary.
+
+        This inherits from the EventQoS to use it's baseline.
+        -->
+
+      <datawriter_qos>
+
+        <!-- 
+          In Admin Console can look under QoS tab for "publication name" to 
+          see which QoS Profile is being used
+          -->
+        <publication_name>
+          <name>CommandStrength10QoSWriter</name>
+        </publication_name>
+
+        <!-- This means only the reader will only accept samples from the strongest writer -->
+        <ownership>
+          <kind>EXCLUSIVE_OWNERSHIP_QOS</kind>
+        </ownership>
+
+        <ownership_strength>
+          <value>10</value>
+        </ownership_strength>
+
+      </datawriter_qos>
+
+      <datareader_qos>
+
+        <!-- 
+          In Admin Console can look under QoS tab for "subscription name" to 
+          see which QoS Profile is being used
+          -->
+        <subscription_name>
+          <name>CommandStrength10QoSReader</name>
+        </subscription_name>
+
+        <!-- On the reader side just need to set to "Exclusive" -->
+        <ownership>
+          <kind>EXCLUSIVE_OWNERSHIP_QOS</kind>
+        </ownership>
+
+      </datareader_qos>
+
+    </qos_profile>
+
+    <qos_profile name="CommandStrength20QoS" base_name="DataPatternsLibrary::EventQoS">
+      <!-- 
+        This QoS Profile is intended to be used in a mutli command arbitration use case where  
+        different commands have differnt strengths to override as necessary.
+
+        This inherits from the EventQoS to use it's baseline.
+        -->
+
+
+      <datawriter_qos>
+
+        <!-- 
+          In Admin Console can look under QoS tab for "publication name" to 
+          see which QoS Profile is being used
+          -->
+        <publication_name>
+          <name>CommandStrength20QoSWriter</name>
+        </publication_name>
+
+        <!-- This means only the reader will only accept samples from the strongest writer -->
+        <ownership>
+          <kind>EXCLUSIVE_OWNERSHIP_QOS</kind>
+        </ownership>
+
+        <ownership_strength>
+          <value>20</value>
+        </ownership_strength>
+
+      </datawriter_qos>
+
+      <datareader_qos>
+
+        <!-- 
+          In Admin Console can look under QoS tab for "subscription name" to 
+          see which QoS Profile is being used
+          -->
+        <subscription_name>
+          <name>CommandStrength20QoSReader</name>
+        </subscription_name>
+
+        <!-- On the reader side just need to set to "Exclusive" -->
+        <ownership>
+          <kind>EXCLUSIVE_OWNERSHIP_QOS</kind>
+        </ownership>
+
+      </datareader_qos>
+
+    </qos_profile>
+
+    <qos_profile name="CommandStrength30QoS" base_name="DataPatternsLibrary::EventQoS">
+      <!-- 
+        This QoS Profile is intended to be used in a mutli command arbitration use case where  
+        different commands have differnt strengths to override as necessary.
+
+        This inherits from the EventQoS to use it's baseline.
+        -->
+
+
+      <datawriter_qos>
+
+        <!-- 
+          In Admin Console can look under QoS tab for "publication name" to 
+          see which QoS Profile is being used
+          -->
+        <publication_name>
+          <name>CommandStrength30QoSWriter</name>
+        </publication_name>
+
+        <!-- This means only the reader will only accept samples from the strongest writer -->
+        <ownership>
+          <kind>EXCLUSIVE_OWNERSHIP_QOS</kind>
+        </ownership>
+
+        <ownership_strength>
+          <value>30</value>
+        </ownership_strength>
+
+      </datawriter_qos>
+
+      <datareader_qos>
+
+        <!-- 
+          In Admin Console can look under QoS tab for "subscription name" to 
+          see which QoS Profile is being used
+          -->
+        <subscription_name>
+          <name>CommandStrength30QoSReader</name>
+        </subscription_name>
+
+        <!-- On the reader side just need to set to "Exclusive" -->
+        <ownership>
+          <kind>EXCLUSIVE_OWNERSHIP_QOS</kind>
+        </ownership>
+
+      </datareader_qos>
+
+    </qos_profile>
+
+
+    <qos_profile name="MetadataQoS" base_name="BuiltinQosLib::Generic.Common">
 
       <!-- 
         With this QoS Profile, a DataWriter will keep in its queue the last
@@ -174,7 +321,7 @@
         </subscription_name>
 
       </datareader_qos>
-      </qos_profile>
+    </qos_profile>
 
     <qos_profile name="StatusQoS" base_name="BuiltinQosLib::Generic.Common">
 
@@ -243,16 +390,16 @@
 
       </datareader_qos>
 
-      </qos_profile>
+    </qos_profile>
 
-      <qos_profile name="LargeDataQoS" base_name="BuiltinQosLib::Generic.Common">
+    <qos_profile name="LargeDataQoS" base_name="BuiltinQosLib::Generic.Common">
 
-        <base_name>
-          <element>BuiltinQosSnippetLib::QosPolicy.Reliability.BestEffort</element>
-          <element>BuiltinQosSnippetLib::QosPolicy.History.KeepLast_1</element>
-        </base_name>
+      <base_name>
+        <element>BuiltinQosSnippetLib::QosPolicy.Reliability.BestEffort</element>
+        <element>BuiltinQosSnippetLib::QosPolicy.History.KeepLast_1</element>
+      </base_name>
 
-        <datawriter_qos>
+      <datawriter_qos>
 
         <!-- 
           In Admin Console can look under QoS tab for "publication name" to 
@@ -302,11 +449,11 @@
           <initial_samples>2</initial_samples>
         </resource_limits>
  
-        </datareader_qos>
-      </qos_profile>
+      </datareader_qos>
+    </qos_profile>
 
 
-      <qos_profile name="AssignerQoS">
+    <qos_profile name="AssignerQoS">
 
       <!-- 
         Use this profile to change QoS Profile assignments without re-compiling
@@ -329,7 +476,7 @@
       <datawriter_qos topic_filter="Command*" base_name="EventQoS" />
       <datareader_qos topic_filter="Command*" base_name="EventQoS" />
 
-      </qos_profile>
-    </qos_library>
+    </qos_profile>
+  </qos_library>
 
 </dds>

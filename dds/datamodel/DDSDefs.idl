@@ -14,11 +14,17 @@ module dds_config {
     // Writer/Reader Qos Profiles
     const string ASSIGNER_QOS = "DataPatternsLibrary::AssignerQoS";
     const string EVENT_QOS = "DataPatternsLibrary::EventQoS";
+    const string COMMANDSTRENGTH10_QOS = "DataPatternsLibrary::CommandStrength10QoS";
+    const string COMMANDSTRENGTH20_QOS = "DataPatternsLibrary::CommandStrength20QoS";
+    const string COMMANDSTRENGTH30_QOS = "DataPatternsLibrary::CommandStrength30QoS";
     const string METADATA_QOS = "DataPatternsLibrary::MetadataQoS";
     const string STATUS_QOS = "DataPatternsLibrary::StatusQoS";
     const string LARGE_DATA_QOS = "DataPatternsLibrary::LargeDataQoS";
 
     
+
+
+
     // Domain ID's
     const long DEFAULT_DOMAIN_ID = 1;
 

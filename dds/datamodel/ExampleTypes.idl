@@ -42,7 +42,7 @@ module example_types {
      */
     struct Command {
         @key string<MAX_ID_LENGTH> command_id;     // Unique command identifier
-        @key string<MAX_ID_LENGTH> destination_id; // Target destination identifier
+        string<MAX_ID_LENGTH> destination_id; // Target destination identifier
         CommandType command_type;                   // Type of command
         string<MAX_MESSAGE_LENGTH> message;         // Command message or description
         unsigned long timestamp_sec;               // Command timestamp

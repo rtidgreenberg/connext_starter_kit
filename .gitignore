@@ -16,3 +16,5 @@ dds/python/build/
 dds/python/codegen/
 
 .vscode/
+
+apps/cxx11/command_control/build/

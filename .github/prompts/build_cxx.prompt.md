@@ -12,3 +12,4 @@
 - Make example code as simple as reference example app with 0 application logic
 - Before building application perform a full review of code and verify all fields for data members are accurate
 - Never use rtime-make to build
+- Ensure consistency of Connext versions when generating and building code

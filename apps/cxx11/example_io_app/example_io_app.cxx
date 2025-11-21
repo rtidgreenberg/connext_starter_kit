@@ -28,8 +28,9 @@
 #include "application.hpp"  // for command line parsing and ctrl-c
 #include "ExampleTypes.hpp"
 #include "DDSDefs.hpp"
-#include "DDSContext.hpp"
-#include "DDSInterface.hpp"
+#include "DDSContextSetup.hpp"
+#include "DDSReaderSetup.hpp"
+#include "DDSWriterSetup.hpp"
 
 constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
 const std::string APP_NAME = "Example CXX IO APP";
@@ -99,45 +100,41 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
     std::cout << "Using QoS file: " << qos_file_path << std::endl;
 
     // This sets up DDS Domain Participant as well as the Async Waitset for the readers
-    auto dds_context = std::make_shared<DDSContext>(domain_id, ASYNC_WAITSET_THREADPOOL_SIZE, qos_file_path, qos_profile, APP_NAME);
+  auto dds_context = std::make_shared<DDSContextSetup>(domain_id, ASYNC_WAITSET_THREADPOOL_SIZE, qos_file_path, qos_profile, APP_NAME);
     
     // Get reference to distributed logger
     auto& logger = dds_context->distributed_logger();
 
     // Setup Reader Interfaces
-    auto command_interface = std::make_shared<DDSInterface<example_types::Command>>(
+    auto command_reader = std::make_shared<DDSReaderSetup<example_types::Command>>(
         dds_context,
-        KIND::READER,
         topics::COMMAND_TOPIC,
         qos_file_path,
         dds_config::ASSIGNER_QOS);
 
-    auto button_interface = std::make_shared<DDSInterface<example_types::Button>>(
+    auto button_reader = std::make_shared<DDSReaderSetup<example_types::Button>>(
         dds_context,
-        KIND::READER,
         topics::BUTTON_TOPIC,
         qos_file_path,
         dds_config::ASSIGNER_QOS);
 
-    auto config_interface = std::make_shared<DDSInterface<example_types::Config>>(
+    auto config_reader = std::make_shared<DDSReaderSetup<example_types::Config>>(
         dds_context,
-        KIND::READER,
         topics::CONFIG_TOPIC,
         qos_file_path,
         dds_config::ASSIGNER_QOS);
 
     // Setup Writer Interfaces
-    auto position_interface = std::make_shared<DDSInterface<example_types::Position>>(
+    auto position_writer = std::make_shared<DDSWriterSetup<example_types::Position>>(
         dds_context,
-        KIND::WRITER,
         topics::POSITION_TOPIC,
         qos_file_path,
         dds_config::ASSIGNER_QOS);
 
     // Enable Asynchronous Event-Driven processing for readers
-    command_interface->enable_async_waitset(process_command_data);
-    button_interface->enable_async_waitset(process_button_data);
-    config_interface->enable_async_waitset(process_config_data);
+    command_reader->enable_async_waitset(process_command_data);
+    button_reader->enable_async_waitset(process_button_data);
+    config_reader->enable_async_waitset(process_config_data);
 
     logger.info("Example I/O app is running. Press Ctrl+C to stop.");
     logger.info("Subscribing to Command, Button, and Config messages...");
@@ -155,7 +152,7 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
         pos_msg.latitude(37.7749);
         pos_msg.longitude(-122.4194);
         pos_msg.altitude(15.0);
-        position_interface->writer().write(pos_msg);
+        position_writer->writer().write(pos_msg);
 
         std::cout << "[POSITION] Published ID: " << pos_msg.source_id()
                   << ", Lat: " << pos_msg.latitude()
@@ -169,10 +166,10 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
 
       // Alternate Option: Use Polling Method to Read Data
       // Latency contingent on loop rate
-      // process_command_data(command_interface->reader());
+      // process_command_data(command_reader->reader());
 
       // Sleep
-      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      std::this_thread::sleep_for(std::chrono::seconds(1));
 
     }
 
@@ -205,8 +202,8 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    // Finalize participant factory after all DDSContext/DDSInterface objects are destroyed
-    // This should be called at application exit after all DDS entities are cleaned up
+  // Finalize participant factory after all DDSContextSetup/DDSReaderSetup/DDSWriterSetup objects are destroyed
+  // This should be called at application exit after all DDS entities are cleaned up
     try
     {
         dds::domain::DomainParticipant::finalize_participant_factory();

@@ -1,5 +1,5 @@
-#ifndef DDS_CONTEXT
-#define DDS_CONTEXT
+#ifndef DDS_CONTEXT_SETUP
+#define DDS_CONTEXT_SETUP
 
 #include <iostream>
 #include <csignal>
@@ -93,7 +93,7 @@ public:
     }
 };
 
-class DDSContext {
+class DDSContextSetup {
 private:
     const int _domain_id;
 
@@ -107,7 +107,7 @@ private:
     DistLogger _dist_logger = dds::core::null;
 
 public:
-    DDSContext(
+    DDSContextSetup(
             const int domain_id,
             const int thread_pool_size = 5,
             const std::string &participant_qos_file = "",
@@ -135,14 +135,15 @@ public:
                         _domain_id,
                         participant_qos);
 
-                std::cout << "DDSContext created with QoS profile: "
+                std::cout << "DDSContextSetup created with QoS profile: "
                           << participant_qos_profile
                           << " from file: " << participant_qos_file
                           << "and Domain ID: " << domain_id << std::endl;
             } else {
                 // Fallback to default
                 _participant = dds::domain::DomainParticipant(1);
-                std::cout << "DDSContext created with default QoS" << std::endl;
+                std::cout << "DDSContextSetup created with default QoS"
+                          << std::endl;
             }
         } catch (const std::exception &e) {
             std::cerr << "Failed to create DomainParticipant with QoS profile: "
@@ -195,23 +196,25 @@ public:
 
             // Log application startup event
             _dist_logger.info(
-                    "DDSContext initialized with distributed logging enabled");
+                    "DDSContextSetup initialized with distributed logging "
+                    "enabled");
         } catch (const std::exception &ex) {
             std::cerr << "Failed to setup distributed logger: " << ex.what()
                       << std::endl;
             // Continue without distributed logging
         }
 
-        std::cout << "AsyncWaitSet created for DDSContext on domain "
+        std::cout << "AsyncWaitSet created for DDSContextSetup on domain "
                   << _domain_id << std::endl;
     }
 
-    ~DDSContext()
+    ~DDSContextSetup()
     {
         // Stop AsyncWaitSet before destruction
         try {
             _async_waitset.stop();
-            std::cout << "AsyncWaitSet stopped during DDSContext destruction"
+            std::cout << "AsyncWaitSet stopped during DDSContextSetup "
+                         "destruction"
                       << std::endl;
         } catch (const std::exception &e) {
             std::cerr << "Error stopping AsyncWaitSet during destruction: "
@@ -228,9 +231,9 @@ public:
         // The DomainParticipant will be destroyed automatically when
         // _participant goes out of scope Don't call
         // finalize_participant_factory() here - it should be done at
-        // application level after ALL DDSContext instances are destroyed
+        // application level after ALL DDSContextSetup instances are destroyed
 
-        std::cout << "DDSContext destroyed" << std::endl;
+        std::cout << "DDSContextSetup destroyed" << std::endl;
     }
 
     // Getter for Domain Participant
@@ -256,7 +259,7 @@ public:
     {
         try {
             _async_waitset.stop();
-            std::cout << "AsyncWaitSet stopped for DDSContext on domain "
+            std::cout << "AsyncWaitSet stopped for DDSContextSetup on domain "
                       << _domain_id << std::endl;
         } catch (const std::exception &e) {
             std::cerr << "Error stopping AsyncWaitSet: " << e.what()
@@ -273,11 +276,11 @@ public:
         // Give some time for async operations to complete
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-        std::cout << "DDSContext shutdown initiated for domain " << _domain_id
-                  << std::endl;
+        std::cout << "DDSContextSetup shutdown initiated for domain "
+                  << _domain_id << std::endl;
     }
 
     // Additional public methods can be added here
 };
 
-#endif  // DDS_CONTEXT
+#endif  // DDS_CONTEXT_SETUP

@@ -28,8 +28,9 @@
 #include "application.hpp"  // for command line parsing and ctrl-c
 #include "ExampleTypes.hpp"
 #include "DDSDefs.hpp"
-#include "DDSContext.hpp"
-#include "DDSInterface.hpp"
+#include "DDSContextSetup.hpp"
+#include "DDSReaderSetup.hpp"
+#include "DDSWriterSetup.hpp"
 
 constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
 const std::string APP_NAME = "Command Control CXX APP";
@@ -90,7 +91,7 @@ void run(unsigned int domain_id, const std::string &qos_file_path)
 
     // This sets up DDS Domain Participant as well as the Async Waitset for the
     // readers
-    auto dds_context = std::make_shared<DDSContext>(
+    auto dds_context = std::make_shared<DDSContextSetup>(
             domain_id,
             ASYNC_WAITSET_THREADPOOL_SIZE,
             qos_file_path,
@@ -101,41 +102,37 @@ void run(unsigned int domain_id, const std::string &qos_file_path)
     auto &logger = dds_context->distributed_logger();
 
     // Setup Reader Interface (Command subscriber)
-    auto command_interface =
-            std::make_shared<DDSInterface<example_types::Command>>(
+    auto command_reader =
+            std::make_shared<DDSReaderSetup<example_types::Command>>(
                     dds_context,
-                    KIND::READER,
                     topics::COMMAND_TOPIC,
                     qos_file_path,
                     dds_config::COMMANDSTRENGTH10_QOS);
 
     // Setup Writer Interfaces (3 Command publishers)
-    auto command_interface_10 =
-            std::make_shared<DDSInterface<example_types::Command>>(
+    auto command_writer_10 =
+            std::make_shared<DDSWriterSetup<example_types::Command>>(
                     dds_context,
-                    KIND::WRITER,
                     topics::COMMAND_TOPIC,
                     qos_file_path,
                     dds_config::COMMANDSTRENGTH10_QOS);
 
-    auto command_interface_20 =
-            std::make_shared<DDSInterface<example_types::Command>>(
+    auto command_writer_20 =
+            std::make_shared<DDSWriterSetup<example_types::Command>>(
                     dds_context,
-                    KIND::WRITER,
                     topics::COMMAND_TOPIC,
                     qos_file_path,
                     dds_config::COMMANDSTRENGTH20_QOS);
 
-    auto command_interface_30 =
-            std::make_shared<DDSInterface<example_types::Command>>(
+    auto command_writer_30 =
+            std::make_shared<DDSWriterSetup<example_types::Command>>(
                     dds_context,
-                    KIND::WRITER,
                     topics::COMMAND_TOPIC,
                     qos_file_path,
                     dds_config::COMMANDSTRENGTH30_QOS);
 
     // Enable Asynchronous Event-Driven processing for command reader
-    command_interface->enable_async_waitset(process_command_data);
+    command_reader->enable_async_waitset(process_command_data);
 
     logger.info("Command Control app is running. Press Ctrl+C to stop.");
     logger.info("Subscribing to Command messages...");
@@ -169,7 +166,7 @@ void run(unsigned int domain_id, const std::string &qos_file_path)
                 };
 
                 // Phase 1: Writer 1 only
-                command_interface_10->writer().write(cmd_msg_1);
+                command_writer_10->writer().write(cmd_msg_1);
 
                 std::cout << "[PHASE 1 - COMMAND1]" << std::endl;
 
@@ -183,8 +180,8 @@ void run(unsigned int domain_id, const std::string &qos_file_path)
                 };
 
                 // Phase 2: Writers 1 and 2 together
-                command_interface_10->writer().write(cmd_msg_1);
-                command_interface_20->writer().write(cmd_msg_2);
+                command_writer_10->writer().write(cmd_msg_1);
+                command_writer_20->writer().write(cmd_msg_2);
 
                 std::cout << "[PHASE 2 - COMMAND1&2]" << std::endl;
 
@@ -197,9 +194,9 @@ void run(unsigned int domain_id, const std::string &qos_file_path)
                 };
 
                 // Phase 3: Writers 1, 2, and 3 all together
-                command_interface_10->writer().write(cmd_msg_1);
-                command_interface_20->writer().write(cmd_msg_2);
-                command_interface_30->writer().write(cmd_msg_3);
+                command_writer_10->writer().write(cmd_msg_1);
+                command_writer_20->writer().write(cmd_msg_2);
+                command_writer_30->writer().write(cmd_msg_3);
 
                 std::cout << "[PHASE 3 - COMMAND1&2&3]" << std::endl;
 
@@ -213,21 +210,21 @@ void run(unsigned int domain_id, const std::string &qos_file_path)
                     // Only modify QoS once at the start of the phase
 
                     // Get QoS
-                    auto qos_50 = command_interface_10->writer().qos();
+                    auto qos_50 = command_writer_10->writer().qos();
 
                     // Change to 50
                     qos_50.policy<OwnershipStrength>().value(50);
 
                     // Set updated QoS
-                    command_interface_10->writer().qos(qos_50);
+                    command_writer_10->writer().qos(qos_50);
                     std::cout << "!!! Writer 1 QoS changed to ownership "
                                  "strength 50 !!!"
                               << std::endl;
                 }
                 // ship it
-                command_interface_10->writer().write(cmd_msg_1);
-                command_interface_20->writer().write(cmd_msg_2);
-                command_interface_30->writer().write(cmd_msg_3);
+                command_writer_10->writer().write(cmd_msg_1);
+                command_writer_20->writer().write(cmd_msg_2);
+                command_writer_30->writer().write(cmd_msg_3);
 
                 std::cout << "[PHASE 4 - WRITER1_STRENGTH50]" << std::endl;
 
@@ -279,7 +276,7 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    // Finalize participant factory after all DDSContext/DDSInterface objects
+    // Finalize participant factory after all DDSContextSetup/DDSReaderSetup/DDSWriterSetup objects
     // are destroyed This should be called at application exit after all DDS
     // entities are cleaned up
     try {

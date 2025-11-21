@@ -1,4 +1,4 @@
-# Autonomy Project Template
+# Flexible Autonomy System Toolkit
 
 A comprehensive project tempalate demonstrating cross-language DDS applications with RTI Connext DDS 7.3.0. This repository provides complete examples of C++ and Python applications communicating through DDS with shared data models, utility classes, and best practices.
 

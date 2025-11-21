@@ -1,6 +1,6 @@
-# RTI Connext DDS Starter Kit
+# Flexible Autonomy System Toolkit
 
-A comprehensive starter kit demonstrating cross-language DDS applications with RTI Connext DDS 7.3.0. This repository provides complete examples of C++ and Python applications communicating through DDS with shared data models, utility classes, and best practices.
+A comprehensive project tempalate demonstrating cross-language DDS applications with RTI Connext DDS 7.3.0. This repository provides complete examples of C++ and Python applications communicating through DDS with shared data models, utility classes, and best practices.
 
 ## 🚀 Quick Start
 

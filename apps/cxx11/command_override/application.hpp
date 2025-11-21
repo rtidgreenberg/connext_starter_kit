@@ -112,7 +112,7 @@ inline ApplicationArguments parse_arguments(int argc, char *argv[])
         } else if (
                 strcmp(argv[arg_processing], "-h") == 0
                 || strcmp(argv[arg_processing], "--help") == 0) {
-            std::cout << "Command Control application with Command inputs and "
+            std::cout << "Command Override application with Command inputs and "
                          "outputs."
                       << std::endl;
             show_usage = true;

@@ -17,4 +17,4 @@ dds/python/codegen/
 
 .vscode/
 
-apps/cxx11/command_control/build/
+apps/cxx11/command_override/build/

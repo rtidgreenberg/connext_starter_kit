@@ -1,8 +1,8 @@
-# Command Control Application
+# Command Override Application
 
 ## Overview
 
-The Command Control application is a sophisticated RTI Connext DDS example that demonstrates advanced DDS patterns including progressive publishing, ownership strength control, and programmatic QoS modification. This application showcases how multiple command writers with different ownership strengths can arbitrate control in a distributed system.
+The Command Override application is a sophisticated RTI Connext DDS example that demonstrates advanced DDS patterns including progressive publishing, ownership strength control, and programmatic QoS modification. This application showcases how multiple command writers with different ownership strengths can arbitrate control in a distributed system.
 
 ## Features
 
@@ -85,23 +85,23 @@ QoS profiles are defined in: `../../../../dds/qos/DDS_QOS_PROFILES.xml`
 
 ### Build Steps
 ```bash
-cd /home/rti/connext_starter_kit/apps/cxx11/command_control/build
+cd /home/rti/connext_starter_kit/apps/cxx11/command_override/build
 make -j4
 ```
 
 ### Running the Application
 ```bash
 # Basic execution
-./command_control
+./command_override
 
 # With custom domain ID
-./command_control -d 2
+./command_override -d 2
 
 # With custom QoS file
-./command_control -q /path/to/qos_profiles.xml
+./command_override -q /path/to/qos_profiles.xml
 
 # With verbosity for debugging
-./command_control -v 3
+./command_override -v 3
 ```
 
 ### Command Line Options
@@ -113,9 +113,9 @@ make -j4
 ## Sample Output
 
 ```
-Command Control application starting on domain 1
+Command Override application starting on domain 1
 RTI Distributed Logger configured for domain 1
-DL Info: : Command Control app is running. Press Ctrl+C to stop.
+DL Info: : Command Override app is running. Press Ctrl+C to stop.
 
 [PHASE 1 - COMMAND1]
 Message Count: 1
@@ -159,13 +159,13 @@ Message Count: 1
 ## File Structure
 
 ```
-command_control/
-├── command_control.cxx    # Main application logic
+command_override/
+├── command_override.cxx    # Main application logic
 ├── application.hpp        # Command line parsing utilities  
 ├── CMakeLists.txt        # Build configuration
 ├── README.md             # This file
 └── build/                # Build output directory
-    └── command_control   # Executable
+    └── command_override   # Executable
 ```
 
 ## Dependencies
@@ -187,7 +187,7 @@ command_control/
 - Use `-v 3` for maximum verbosity
 - Check DDS_QOS_PROFILES.xml for profile definitions
 - Monitor RTI Admin Console for DDS discovery issues
-- Use timeout wrapper for controlled test runs: `timeout 30s ./command_control`
+- Use timeout wrapper for controlled test runs: `timeout 30s ./command_override`
 
 ## Related Documentation
 

@@ -33,7 +33,7 @@
 #include "DDSWriterSetup.hpp"
 
 constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
-const std::string APP_NAME = "Command Control CXX APP";
+const std::string APP_NAME = "Command Override CXX APP";
 
 // Enum for command publishing phases
 enum class PublishingPhase {
@@ -85,7 +85,7 @@ void run(unsigned int domain_id, const std::string &qos_file_path)
     // Use provided QoS file path and generated constants from IDL
     const std::string qos_profile = dds_config::DEFAULT_PARTICIPANT_QOS;
 
-    std::cout << "Command Control application starting on domain " << domain_id
+    std::cout << "Command Override application starting on domain " << domain_id
               << std::endl;
     std::cout << "Using QoS file: " << qos_file_path << std::endl;
 
@@ -134,7 +134,7 @@ void run(unsigned int domain_id, const std::string &qos_file_path)
     // Enable Asynchronous Event-Driven processing for command reader
     command_reader->enable_async_waitset(process_command_data);
 
-    logger.info("Command Control app is running. Press Ctrl+C to stop.");
+    logger.info("Command Override app is running. Press Ctrl+C to stop.");
     logger.info("Subscribing to Command messages...");
     logger.info("Publishing Command messages...");
 
@@ -247,9 +247,9 @@ void run(unsigned int domain_id, const std::string &qos_file_path)
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
 
-    logger.info("Command Control application shutting down...");
+    logger.info("Command Override application shutting down...");
 
-    logger.info("Command Control application stopped");
+    logger.info("Command Override application stopped");
 }
 
 int main(int argc, char *argv[])

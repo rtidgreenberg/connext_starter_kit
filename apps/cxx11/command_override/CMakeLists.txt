@@ -35,13 +35,13 @@ find_library(DDS_UTILS_DATAMODEL_LIB
 )
 
 # Create the executable
-add_executable(command_control
-    command_control.cxx
+add_executable(command_override
+    command_override.cxx
     application.hpp
 )
 
 # Include directories
-target_include_directories(command_control 
+target_include_directories(command_override 
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${DDS_CODEGEN_DIR}
@@ -50,7 +50,7 @@ target_include_directories(command_control
 )
 
 # Link with libraries
-target_link_libraries(command_control
+target_link_libraries(command_override
     PRIVATE
         ${DDS_UTILS_DATAMODEL_LIB}
         RTIConnextDDS::cpp2_api
@@ -62,7 +62,7 @@ target_link_libraries(command_control
 )
 
 # Set compiler definitions
-target_compile_definitions(command_control
+target_compile_definitions(command_override
     PRIVATE
         RTI_UNIX
         RTI_LINUX
@@ -71,7 +71,7 @@ target_compile_definitions(command_control
 
 # Set additional compiler flags
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(command_control PRIVATE
+    target_compile_options(command_override PRIVATE
         -m64
         -Wall
         -Wextra
@@ -87,12 +87,12 @@ message(STATUS "DDS codegen headers: ${DDS_CODEGEN_DIR}")
 message(STATUS "DDS utils headers: ${DDS_UTILS_DIR}")
 
 # Set the runtime path to find the shared library
-set_target_properties(command_control PROPERTIES
+set_target_properties(command_override PROPERTIES
     INSTALL_RPATH "${DDS_LIB_BUILD_DIR}"
     BUILD_WITH_INSTALL_RPATH TRUE
 )
 
 # Install the executable if desired
-install(TARGETS command_control
+install(TARGETS command_override
     RUNTIME DESTINATION bin
 )

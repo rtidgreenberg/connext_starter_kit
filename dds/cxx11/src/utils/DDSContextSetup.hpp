@@ -17,81 +17,7 @@
 using namespace rti::all;
 using namespace rti::dist_logger;
 
-// This is a listener that will be used to receive events from the
-// DomainParticipant i.e. the DDS "Bus"
-class MyParticipantListener
-        : public dds::domain::NoOpDomainParticipantListener {
-public:
-    virtual void on_requested_deadline_missed(
-            dds::pub::AnyDataWriter &writer,
-            const dds::core::status::OfferedDeadlineMissedStatus &status)
-    {
-        std::cout << writer.topic_name()
-                  << "ParticipantListener: on_requested_deadline_missed()"
-                  << std::endl;
-    }
 
-    virtual void on_offered_incompatible_qos(
-            dds::pub::AnyDataWriter &writer,
-            const ::dds::core::status::OfferedIncompatibleQosStatus &status)
-    {
-        std::cout << writer.topic_name()
-                  << "ParticipantListener: on_offered_incompatible_qos()"
-                  << std::endl;
-    }
-
-    virtual void on_sample_rejected(
-            dds::sub::AnyDataReader &reader,
-            const dds::core::status::SampleRejectedStatus &status)
-    {
-        std::cout << reader.topic_name()
-                  << "ParticipantListener: on_sample_rejected()" << std::endl;
-    }
-
-    virtual void on_liveliness_changed(
-            dds::sub::AnyDataReader &reader,
-            const dds::core::status::LivelinessChangedStatus &status)
-    {
-        std::cout << reader.topic_name()
-                  << "ParticipantListener: on_liveliness_changed()"
-                  << std::endl;
-
-        if (status.not_alive_count_change() > 0) {
-            std::cout << "Liveliness lost! not_alive_count_change = "
-                      << status.not_alive_count_change() << std::endl;
-            // Optionally, get the handle of the writer that lost liveliness:
-            auto handle = status.last_publication_handle();
-            // You can use reader.matched_publication_data(handle) to get more
-            // info
-        }
-    }
-
-    virtual void on_sample_lost(
-            dds::sub::AnyDataReader &reader,
-            const dds::core::status::SampleLostStatus &status)
-    {
-        std::cout << reader.topic_name()
-                  << "ParticipantListener: on_sample_lost()" << std::endl;
-    }
-
-    virtual void on_subscription_matched(
-            dds::sub::AnyDataReader &reader,
-            const dds::core::status::SubscriptionMatchedStatus &status)
-    {
-        std::cout << reader.topic_name()
-                  << "ParticipantListener: on_subscription_matched()"
-                  << std::endl;
-    }
-
-    virtual void on_inconsistent_topic(
-            dds::topic::AnyTopic &topic,
-            const dds::core::status::InconsistentTopicStatus &status)
-    {
-        std::cout << topic.name()
-                  << "ParticipantListener: on_inconsistent_topic()"
-                  << std::endl;
-    }
-};
 
 class DDSContextSetup {
 private:
@@ -151,25 +77,6 @@ public:
             // Fallback to default
             _participant = dds::domain::DomainParticipant(1);
         }
-
-        // Create a shared pointer for the Participant Listener and attach it to
-        // the participant. This is a listener that will be used to receive
-        // events from the DomainParticipant i.e. the DDS "Bus"
-        auto participant_listener = std::make_shared<MyParticipantListener>();
-
-        // Pick the Statuses we want to be triggered by the listeners
-        // Data Available is being handled by the Async Waitset
-        dds::core::status::StatusMask mask =
-                dds::core::status::StatusMask::requested_deadline_missed()
-                | dds::core::status::StatusMask::offered_incompatible_qos()
-                | dds::core::status::StatusMask::sample_rejected()
-                | dds::core::status::StatusMask::liveliness_changed()
-                | dds::core::status::StatusMask::sample_lost()
-                | dds::core::status::StatusMask::subscription_matched()
-                | dds::core::status::StatusMask::inconsistent_topic();
-
-        // Attach the listener to the participant
-        _participant.set_listener(participant_listener, mask);
 
         // Setup RTI Distributed Logger
         try {

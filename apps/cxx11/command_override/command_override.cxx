@@ -79,6 +79,14 @@ void process_command_data(dds::sub::DataReader<example_types::Command> reader)
     }
 }
 
+void process_subscription_matched(dds::sub::DataReader<example_types::Command>& reader)
+{
+    auto status = reader.subscription_matched_status();
+    std::cout << "*** Custom Callback *** Subscription matched for topic: " 
+              << reader.topic_description().name() 
+              << " | Publishers: " << status.current_count() << std::endl;
+}
+
 
 void run(unsigned int domain_id, const std::string &qos_file_path)
 {
@@ -109,6 +117,10 @@ void run(unsigned int domain_id, const std::string &qos_file_path)
                     qos_file_path,
                     dds_config::COMMANDSTRENGTH10_QOS);
 
+    // Set a custom handler for subscription matched events (optional)
+    // If not set, default handler will be used
+    command_reader->set_subscription_matched_handler(process_subscription_matched);
+
     // Setup Writer Interfaces (3 Command publishers)
     auto command_writer_10 =
             std::make_shared<DDSWriterSetup<example_types::Command>>(
@@ -132,7 +144,7 @@ void run(unsigned int domain_id, const std::string &qos_file_path)
                     dds_config::COMMANDSTRENGTH30_QOS);
 
     // Enable Asynchronous Event-Driven processing for command reader
-    command_reader->enable_async_waitset(process_command_data);
+    command_reader->set_data_available_handler(process_command_data);
 
     logger.info("Command Override app is running. Press Ctrl+C to stop.");
     logger.info("Subscribing to Command messages...");

@@ -132,9 +132,9 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
         dds_config::ASSIGNER_QOS);
 
     // Enable Asynchronous Event-Driven processing for readers
-    command_reader->enable_async_waitset(process_command_data);
-    button_reader->enable_async_waitset(process_button_data);
-    config_reader->enable_async_waitset(process_config_data);
+    command_reader->set_data_available_handler(process_command_data);
+    button_reader->set_data_available_handler(process_button_data);
+    config_reader->set_data_available_handler(process_config_data);
 
     logger.info("Example I/O app is running. Press Ctrl+C to stop.");
     logger.info("Subscribing to Command, Button, and Config messages...");

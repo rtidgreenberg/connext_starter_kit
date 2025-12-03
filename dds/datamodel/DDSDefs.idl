@@ -39,5 +39,6 @@ module topics {
     const string STATE_TOPIC = "State";
     const string BUTTON_TOPIC = "Button";
     const string IMAGE_TOPIC = "Image";
+    const string FINAL_FLAT_IMAGE_TOPIC = "FinalFlatImage";
 
 };

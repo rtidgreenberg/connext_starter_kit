@@ -18,3 +18,5 @@ dds/python/codegen/
 .vscode/
 
 apps/cxx11/command_override/build/
+
+apps/cxx11/flat_image_app/build/

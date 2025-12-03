@@ -102,5 +102,22 @@ module example_types {
         string<MAX_NAME_LENGTH> format;            // Image format (e.g., "RGB", "JPEG")
         sequence<octet, MAX_IMAGE_DATA_SIZE> data; // Image data bytes
     };
+
+    /**
+     * FinalFlatImage - High-performance image structure using @final FlatData
+     * @final provides maximum zero-copy performance but requires only fixed-size types
+     * Uses numeric format code instead of string, and fixed-size array instead of sequence
+     */
+    @final
+    @transfer_mode(SHMEM_REF)
+    @language_binding(FLAT_DATA)
+    struct FinalFlatImage {
+        @key unsigned long image_id;                   // Numeric image identifier
+        unsigned long width;                           // Image width in pixels
+        unsigned long height;                          // Image height in pixels
+        unsigned long format;                          // Format code: 0=RGB, 1=RGBA, 2=JPEG, etc.
+        octet data[MAX_IMAGE_DATA_SIZE];              // Fixed-size image data array
+    };
+
     
 }; // namespace example_types

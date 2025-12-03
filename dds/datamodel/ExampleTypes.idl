@@ -11,30 +11,31 @@ module example_types {
     const unsigned long MAX_ID_LENGTH = 32;
     const unsigned long MAX_NAME_LENGTH = 64;
     const unsigned long MAX_MESSAGE_LENGTH = 128;
+    const unsigned long MAX_VALUE_LENGTH = 128;
     const unsigned long MAX_IMAGE_DATA_SIZE = 1024;
     
     // Basic enumerations
     enum CommandType {
-        COMMAND_START,
-        COMMAND_STOP,
-        COMMAND_PAUSE,
-        COMMAND_RESET,
-        COMMAND_SHUTDOWN
+        START = 0,  // drop pre-ambles for better discovery performance, keeping unique across all Enums
+        STOP,
+        PAUSE,
+        RESET,
+        SHUTDOWN
     };
     
     enum SystemState {
-        STATE_INIT,
-        STATE_RUNNING,
-        STATE_ERROR,
-        STATE_RESTARTING,
-        STATE_SHUTTING_DOWN
+        INIT,
+        RUNNING = 0,  // use type default for common case 
+        ERROR,
+        RESTARTING,
+        SHUTTING_DOWN
     };
     
     enum ButtonState {
-        BUTTON_RELEASED,
-        BUTTON_PRESSED,
-        BUTTON_HELD,
-        BUTTON_DOUBLE_CLICK
+        RELEASED = 0,
+        PRESSED,
+        HELD,
+        DOUBLE_CLICK
     };
     
     /**
@@ -45,8 +46,8 @@ module example_types {
         string<MAX_ID_LENGTH> destination_id; // Target destination identifier
         CommandType command_type;                   // Type of command
         string<MAX_MESSAGE_LENGTH> message;         // Command message or description
-        unsigned long timestamp_sec;               // Command timestamp
-        boolean urgent;                            // Priority flag
+        // unsigned long timestamp_sec;               // Command timestamp - drop in favor of metadata
+        unsigned short urgent;                            // Priority value: higher = more urgent
     };
     
     /**
@@ -55,7 +56,7 @@ module example_types {
     struct Config {
         @key string<MAX_ID_LENGTH> destination_id;      // Configuration identifier
         string<MAX_NAME_LENGTH> parameter_name;    // Parameter name
-        string<MAX_MESSAGE_LENGTH> parameter_value; // Parameter value
+        string<MAX_VALUE_LENGTH> parameter_value; // Parameter value
         double numeric_value;                       // Numeric parameter value
         boolean enabled;                           // Enable/disable flag
     };
@@ -103,6 +104,8 @@ module example_types {
         sequence<octet, MAX_IMAGE_DATA_SIZE> data; // Image data bytes
     };
 
+// consider factoring out image width+height as nested structure for reuse
+
     /**
      * FinalFlatImage - High-performance image structure using @final FlatData
      * @final provides maximum zero-copy performance but requires only fixed-size types
@@ -113,9 +116,9 @@ module example_types {
     @language_binding(FLAT_DATA)
     struct FinalFlatImage {
         @key unsigned long image_id;                   // Numeric image identifier
-        unsigned long width;                           // Image width in pixels
-        unsigned long height;                          // Image height in pixels
-        unsigned long format;                          // Format code: 0=RGB, 1=RGBA, 2=JPEG, etc.
+        unsigned short width;                           // Image width in pixels
+        unsigned short height;                          // Image height in pixels
+        unsigned byte format;                          // Format code: 0=RGB, 1=RGBA, 2=JPEG, etc.
         octet data[MAX_IMAGE_DATA_SIZE];              // Fixed-size image data array
     };
 

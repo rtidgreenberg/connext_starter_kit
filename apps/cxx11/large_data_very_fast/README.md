@@ -1,12 +1,12 @@
 # Large Data Very Fast Application
 
-Demonstrates RTI Connext DDS FlatData API with Zero Copy transfer for high-performance, low-latency large payload distribution at 10 Hz (3 MB @ 10 Hz = ~30 MB/sec throughput).
+Demonstrates RTI Connext DDS FlatData API with Zero Copy transfer for high-performance, low-latency large payload distribution.
 
 ## Overview
 
 This application showcases:
 - **FlatData with Zero Copy**: Using `@final @language_binding(FLAT_DATA)` with `@transfer_mode(SHMEM_REF)`
-- **High Throughput**: 3 MB payloads at 10 Hz for ~30 MB/second sustained throughput
+- **High Throughput**: Example: 3 MB payloads at 10 Hz for ~30 MB/second sustained throughput
 - **Intra-host zero-copy**: Data accessed directly in shared memory with **no copies**
 - **Inter-host FlatData**: Between hosts, data sent **without serialization** (requires same endianness)
 - **Zero-copy loan API**: Direct memory access for writing and reading samples

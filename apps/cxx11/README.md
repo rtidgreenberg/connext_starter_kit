@@ -11,10 +11,11 @@ Complete reference application demonstrating multiple readers and writers:
 - **Distributed Logging**: RTI Admin Console integration for external log visibility
 - **Event-Driven Architecture**: AsyncWaitSet-based message processing
 
-### [`large_data_very_fast/`](./large_data_very_fast/) - High-Performance FlatData
+### [`fixed_image_flat_zc/`](./fixed_image_flat_zc/) - High-Performance FlatData
 Zero-copy high-throughput demonstration:
 - **3 MB Payloads**: Large data transfers at 10 Hz (~30 MB/sec)
 - **FlatData Zero Copy**: Direct shared memory access, no serialization
+- **Application Acknowledgment**: Ensures data consistency with zero-copy
 - **Reliable QoS**: Acknowledgment-based flow control
 - **AsyncWaitSet Processing**: Event-driven data handling
 

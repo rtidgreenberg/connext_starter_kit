@@ -22,3 +22,5 @@ apps/cxx11/command_override/build/
 apps/cxx11/flat_image_app/build/
 
 apps/cxx11/large_data_very_fast/build/
+
+apps/cxx11/fixed_image_flat_zc/build/

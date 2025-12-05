@@ -1,6 +1,9 @@
-# Large Data Very Fast Application
+# Fixed Image Flat ZC Application
 
-Demonstrates RTI Connext DDS FlatData API with Zero Copy transfer for high-performance, low-latency large payload distribution at 10 Hz (3 MB @ 10 Hz = ~30 MB/sec throughput).
+USE CASE: 
+Large fixed size data low latency transfer intra-host as well as inter-host.
+
+FlatData is used as an optimization for message transfers between hosts over UDP.   If only sending data within a host can do pure Zero Copy.
 
 ## Overview
 
@@ -69,7 +72,7 @@ make
 ## Running
 
 ```bash
-./large_data_very_fast
+./fixed_image_flat_zc
 ```
 
 ### Command-line Options
@@ -155,3 +158,40 @@ struct FinalFlatImage {
 - **@final vs @mutable**: `@final` provides best performance but requires fixed-size types only (primitives, fixed arrays)
 - **Endianness**: Inter-host communication requires matching byte order
 - **Fixed arrays**: `octet data[1024]` provides predictable memory layout for zero-copy access
+
+## Considerations for RTI Services
+
+### Routing Service and Recording Service Limitations
+
+**Important:** RTI Routing Service and Recording Service only support FlatData/Zero-Copy (`SHMEM_REF`) on the **subscription side**. This has significant implications for system design:
+
+#### Recording Limitations
+- Recording Service can **record** FlatData with zero-copy (as a subscriber)
+- Recording Service **cannot replay** with zero-copy transfer mode
+- **Replay requires**: Regular shared memory (`SHMEM`) with large receive buffers configured
+
+#### Impact on System Configuration
+When designing systems that use both FlatData/Zero-Copy and RTI services:
+
+1. **QoS Compatibility**: Publishers must be configured to support both:
+   - Zero-copy transfer (`SHMEM_REF`) for direct subscribers
+   - Regular shared memory (`SHMEM`) for services that replay data
+
+2. **Receive Buffer Sizing**: Systems using replay must configure appropriately sized receive buffers to handle large data without zero-copy optimization
+
+3. **Architecture Considerations**: 
+   - Live data path: Can use zero-copy for maximum performance
+   - Replay/routing path: Must account for additional memory overhead
+   - Plan QoS profiles to accommodate both modes if services are required
+
+**Reference:** [Routing Service - Support for FlatData and Zero-Copy Transfer](https://community.rti.com/static/documentation/connext-dds/current/doc/manuals/connext_dds_professional/services/routing_service/configuration.html#support-for-rti-flatdata-and-zero-copy-transfer-over-shared-memory)
+
+## Resources
+
+### RTI Documentation
+- [Sending Large Data](https://community.rti.com/static/documentation/connext-dds/7.3.1/doc/manuals/connext_dds_professional/users_manual/users_manual/SendingLargeData.htm) - Best practices for large data transfer in RTI Connext DDS
+
+### RTI Examples
+- [FlatData API Example](https://github.com/rticommunity/rticonnextdds-examples/tree/release/7.1.0/examples/connext_dds/flat_data_api/c%2B%2B11) - Complete FlatData API usage examples
+- [FlatData Latency Example](https://github.com/rticommunity/rticonnextdds-examples/tree/release/7.1.0/examples/connext_dds/flat_data_latency/c%2B%2B11) - FlatData performance and latency optimization
+- [GStreamer Plugin using Connext with C API](https://github.com/rticommunity/rticonnextdds-usecases/tree/00a42b44469d99e25237b00f4ee22cc508caeee5/VideoData) - GStreamer integration for video data streaming with RTI Connext DDS

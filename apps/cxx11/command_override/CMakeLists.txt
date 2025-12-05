@@ -55,6 +55,7 @@ target_link_libraries(command_override
         ${DDS_UTILS_DATAMODEL_LIB}
         RTIConnextDDS::cpp2_api
         RTIConnextDDS::distributed_logger_cpp2
+        RTIConnextDDS::metp  # Required for ZeroCopy types used by other apps in library
         dl
         m
         pthread

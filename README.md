@@ -112,7 +112,7 @@ connext_starter_kit/
 | `Position` | `Position` | GPS location | C++ | Python |
 | `State` | `State` | System state | - | - |
 | `Image` | `Image` | Binary data | - | - |
-| `FinalFlatImage` | - | Large data (3 MB @ 10 Hz) | large_data_very_fast | large_data_very_fast |
+| `FinalFlatImage` | - | Large data (3 MB @ 10 Hz) | fixed_image_flat_zc | fixed_image_flat_zc |
 
 ## Development Workflow
 

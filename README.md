@@ -1,6 +1,6 @@
 # Flexible Autonomy System Toolkit
 
-A comprehensive project tempalate demonstrating cross-language DDS applications with RTI Connext DDS 7.3.0. This repository provides complete examples of C++ and Python applications communicating through DDS with shared data models, utility classes, and best practices.
+A project template demonstrating cross-language DDS applications with RTI Connext DDS 7.3.0. Includes C++ and Python applications communicating through DDS with shared data models, utility classes, and best practices.
 
 ## 🚀 Quick Start
 
@@ -81,67 +81,44 @@ connext_starter_kit/
     └── rticonnextdds-cmake-utils/   # Git submodule: RTI CMake utilities
 ```
 
-## 🎯 What's Included
+## What's Included
 
-### **Multi-Language DDS Applications**
-- **C++ Application**: Reference implementation with multiple readers/writers and AsyncWaitSet processing
-- **Python Application**: Asyncio-based application for rapid development and integration
-- **Cross-Language Communication**: Applications communicate seamlessly via DDS topics
-- **AI-Powered Generation**: Create new C++ apps using GitHub Copilot and structured prompts
+### Multi-Language DDS Applications
+- **C++ Applications**: Reference implementations with AsyncWaitSet processing
+- **Python Applications**: Asyncio-based for rapid development
+- **Cross-Language Communication**: Seamless DDS topic communication
+- **AI-Powered Generation**: Create C++ apps using GitHub Copilot
 
-### **Comprehensive Data Model**
-- **6 IDL Data Types**: Command, Button, Config, Position, State, Image with complete examples
-- **Configuration Constants**: Centralized QoS profiles, domain settings, and topic names
-- **Automatic Code Generation**: CMake-driven rtiddsgen integration for both languages
+### Data Model
+- **6 IDL Data Types**: Command, Button, Config, Position, State, Image
+- **FlatData Zero-Copy**: High-performance large data transfers
+- **Configuration Constants**: Centralized QoS profiles and topic names
+- **Automatic Code Generation**: CMake-driven rtiddsgen integration
 
-### **Production-Ready Utilities**
-- **DDSContext Class**: Centralized DomainParticipant and AsyncWaitSet management
-- **DDSInterface Class**: Simplified DataReader/DataWriter creation with error handling
-- **Distributed Logging**: RTI Admin Console integration for system-wide monitoring - external visibility of logs over DDS with infrastructure services or your own apps
-- **QoS Profile Management**: Flexible XML-based configuration with ASSIGNER_QOS patterns
-- **RTI CMake Integration**: Git submodule with official RTI CMake utilities for seamless builds
+### Utility Classes
+- **DDSContext**: Centralized DomainParticipant and AsyncWaitSet management
+- **DDSReaderSetup/WriterSetup**: Simplified DataReader/DataWriter creation with status monitoring
+- **Distributed Logging**: RTI Admin Console integration for external log visibility
+- **QoS Profile Management**: Flexible XML-based configuration
 
-### **Best Practices Demonstration**
-- **Error Handling**: Comprehensive exception handling and logging
-- **Resource Management**: Proper DDS entity lifecycle and cleanup
-- **Event-Driven Architecture**: AsyncWaitSet and asyncio processing patterns
-- **Configuration Management**: External QoS profiles and runtime parameters
+## Architecture Overview
 
-## 🏗️ Architecture Overview
+### Data Types and Topics
+| Data Type | Topic | Description | Example Publishers | Example Subscribers |
+|-----------|-------|-------------|-------------------|---------------------|
+| `Command` | `Command` | Control commands | Python | C++ |
+| `Button` | `Button` | Button events | Python | C++ |
+| `Config` | `Config` | Configuration | Python | C++ |
+| `Position` | `Position` | GPS location | C++ | Python |
+| `State` | `State` | System state | - | - |
+| `Image` | `Image` | Binary data | - | - |
+| `FinalFlatImage` | - | Large data (3 MB @ 10 Hz) | large_data_very_fast | large_data_very_fast |
 
-### **DDS Communication Flow**
-```
-┌─────────────────┐    DDS Topics    ┌─────────────────┐
-│  C++ App        │◄────────────────►│  Python App     │
-│                 │                  │                 │  
-│ • Position Pub  │─────Position────►│ • Position Sub  │
-│ • Command Sub   │◄─────Command─────│ • Command Pub   │
-│ • Button Sub    │◄─────Button──────│ • Button Pub    │
-│ • Config Sub    │◄─────Config──────│ • Config Pub    │
-└─────────────────┘                  └─────────────────┘
-         │                                     │
-         └─────────► RTI Admin Console ◄──────┘
-                   (Distributed Logging)
-```
+## Development Workflow
 
-### **Data Types and Topics**
-| Data Type | Topic Name | Description | Publishers | Subscribers |
-|-----------|------------|-------------|------------|-------------|
-| `Command` | `Command` | Application commands and control | Python | C++ |
-| `Button` | `Button` | Button press events and states | Python | C++ |
-| `Config` | `Config` | Configuration parameters | Python | C++ |  
-| `Position` | `Position` | GPS coordinates and location data | C++ | Python |
-| `State` | `State` | Application state information | - | - |
-| `Image` | `Image` | Large binary data and metadata | - | - |
+### Creating C++ Applications with GitHub Copilot
 
-## 🛠️ Development Workflow
-
-### **Creating New Applications with GitHub Copilot**
-
-This starter kit includes AI-powered application generation using GitHub Copilot and structured prompts:
-
-#### **C++ Applications**
-Use the build prompt template to rapidly create new DDS applications:
+Use build prompt templates to rapidly create DDS applications:
 
 ```bash
 # 1. Open the build prompt in your editor
@@ -169,92 +146,52 @@ code .github/prompts/build_cxx.prompt.md
 Follow instructions in build_cxx.prompt.md. Create a new cxx app with [READERS] as reader and [WRITERS] as writers
 ```
 
-#### **Key Benefits**
-- **Rapid Development**: Complete applications in minutes vs hours
-- **Consistent Patterns**: All generated apps follow proven DDS best practices  
-- **Error-Free Integration**: Automatic proper field access and API usage
-- **Documentation Included**: Generated READMEs with usage examples
-- **Cross-Language Compatible**: Works immediately with existing Python apps
-
-See **[C++ Application Creation Guide](apps/cxx11/README.md)** for detailed step-by-step instructions.
-
-### **Adding New Data Types**
-1. Define new type in `dds/datamodel/*.idl`
-2. Add topic constants to `DDSDefs.idl`
-3. Rebuild DDS bindings: `cd dds/{cxx11,python}/build && make`
-4. Implement in applications
-
-### **Configuring QoS Profiles**
-1. Edit `dds/qos/DDS_QOS_PROFILES.xml`
-2. Use topic filters for type-specific QoS settings  
-3. Applications automatically pick up changes without recompilation
-
-### **Extending Applications**
-- **C++**: Add new DDSInterface instances and AsyncWaitSet callbacks
-- **Python**: Add new asyncio tasks and data handlers
-
-## 📊 Performance Characteristics
-
-### **C++ Application**
-- **Publishing Rate**: 2 Hz (Position data every 500ms)
-- **Processing Model**: AsyncWaitSet with 5-thread pool
-- **Memory Usage**: Minimal overhead with efficient DDS native types
-- **Latency**: Sub-millisecond for local communication
-
-### **Python Application**  
-- **Publishing Rate**: 1 Hz (Command, Button, Config data every 1000ms)
-- **Processing Model**: asyncio event loop with concurrent tasks
-- **Integration**: Easy integration with ML/AI frameworks and web services
-- **Flexibility**: Rapid prototyping and configuration changes
-
-## 🔧 Troubleshooting
-
-### **Common Build Issues**
 ```bash
-# RTI environment not set
-export NDDSHOME=/path/to/rti_connext_dds-7.3.0
+# Open build prompt
+code .github/prompts/build_cxx.prompt.md
 
-# Missing git submodules (CMake will fail without RTI CMake utilities)
-git submodule update --init --recursive
-
-# Missing build directories  
-mkdir -p dds/{cxx11,python}/build apps/cxx11/example_io_app/build
-
-# Python virtual environment
-python -m venv connext_dds_env && source connext_dds_env/bin/activate
+# Use GitHub Copilot Chat
+"Follow instructions in build_cxx.prompt.md. Create a new cxx app with Position and State as readers and Command as writer"
 ```
 
-### **Runtime Issues**
-- **QoS File Not Found**: Check relative paths from build directories
-- **Domain ID Mismatch**: Ensure both applications use same domain (default: 1)
-- **License Issues**: 
-  - **Python Apps**: Copy `rti_license.dat` to `apps/python/` directory and run Python apps from this directory
-  - **C++ Apps**: Use system-wide license from NDDSHOME installation
-  - Verify RTI Connext DDS license is valid and not expired
-  - License file must be in current working directory for Python DDS applications
+See **[C++ Application Creation Guide](apps/cxx11/README.md)** for details.
 
-### **Monitoring and Debugging**
-- **RTI Admin Console**: Monitor distributed logs and DDS communication
-- **Verbosity Levels**: Use `-v 0-3` to control debug output
-- **Network Issues**: Check firewall settings for UDP multicast (port 7400+)
+### Adding New Data Types
+1. Define in `dds/datamodel/*.idl`
+2. Add topic to `DDSDefs.idl`
+3. Rebuild: `cd dds/cxx11/build && make -j4`
 
-## 📚 Documentation
+### Configuring QoS
+1. Edit `dds/qos/DDS_QOS_PROFILES.xml`
+2. Applications automatically pick up changes (no recompilation)
 
-- **[DDS Layer Documentation](dds/README.md)** - Data models, utilities, and code generation
-- **[C++ Application Guide](apps/cxx11/example_io_app/README.md)** - Native application details
-- **[Python Application Guide](apps/python/README.md)** - Python implementation and setup  
-- **[Python App Specifics](apps/python/example_io_app/README.md)** - Detailed Python application features
+## Troubleshooting
 
-## 📄 License
+### Build Issues
+```bash
+# Set RTI environment
+export NDDSHOME=/path/to/rti_connext_dds-7.3.0
 
-This project is licensed under the RTI Software License Agreement. See RTI Connext DDS documentation for terms and conditions.
+# Initialize submodules (required for CMake)
+git submodule update --init --recursive
 
-## 🆘 Support
+# Create build directories
+mkdir -p dds/cxx11/build dds/python/build
+```
 
-- **RTI Community Portal**: https://community.rti.com/
+### Runtime Issues
+- **QoS File Not Found**: Check relative paths from build directory
+- **Domain Mismatch**: Ensure same domain ID (default: 1)
+- **Python License**: Copy `rti_license.dat` to `apps/python/` and run from that directory
+- **Monitoring**: Use RTI Admin Console for distributed logs
+
+## Documentation
+
+- **[DDS Layer](dds/README.md)** - Data models and utilities
+- **[C++ Apps](apps/cxx11/README.md)** - C++ application guide
+- **[Python Apps](apps/python/README.md)** - Python setup and apps
+
+## Support
+
+- **RTI Community**: https://community.rti.com/
 - **RTI Documentation**: https://community.rti.com/static/documentation/
-- **RTI Support**: Contact RTI support for licensed users
-
----
-
-**RTI Connext DDS Starter Kit** - Accelerating DDS development with cross-language examples and best practices.

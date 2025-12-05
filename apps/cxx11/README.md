@@ -1,15 +1,29 @@
 # C++11 DDS Applications
 
-This directory contains C++11 applications built with RTI Connext DDS, showcasing different DDS communication patterns and integration approaches.
+C++11 applications built with RTI Connext DDS, showcasing different DDS communication patterns and integration approaches.
 
 ## Available Applications
 
 ### [`example_io_app/`](./example_io_app/) - Reference Implementation
-Complete reference application demonstrating multiple readers and writers with:
+Complete reference application demonstrating multiple readers and writers:
 - **Multiple Subscribers**: Command, Button, Config readers using AsyncWaitSet
 - **GPS Publisher**: Continuous Position data publishing (500ms intervals)
-- **Distributed Logging**: RTI Admin Console integration - external visibility of logs over DDS with infrastructure services or your own apps
+- **Distributed Logging**: RTI Admin Console integration for external log visibility
 - **Event-Driven Architecture**: AsyncWaitSet-based message processing
+
+### [`large_data_very_fast/`](./large_data_very_fast/) - High-Performance FlatData
+Zero-copy high-throughput demonstration:
+- **3 MB Payloads**: Large data transfers at 10 Hz (~30 MB/sec)
+- **FlatData Zero Copy**: Direct shared memory access, no serialization
+- **Reliable QoS**: Acknowledgment-based flow control
+- **AsyncWaitSet Processing**: Event-driven data handling
+
+### [`command_override/`](./command_override/) - Ownership Control
+Advanced DDS ownership and QoS patterns:
+- **4-Phase Progressive Publishing**: Sequential writer activation
+- **Ownership Strength Control**: Priority-based command arbitration
+- **Dynamic QoS Modification**: Runtime ownership strength changes
+- **Multi-Writer Coordination**: Same topic, different priorities
 
 ## Creating New C++ DDS Applications
 
@@ -17,35 +31,35 @@ Complete reference application demonstrating multiple readers and writers with:
 You can rapidly create new DDS applications using GitHub Copilot and the provided build prompt template. This process leverages the existing DDS infrastructure and utilities.
 
 ### Prerequisites
-Before creating a new application, ensure your development environment is ready:
 
 ```bash
-# 1. Set RTI Connext DDS environment
+# Set RTI Connext DDS environment
 export NDDSHOME=/path/to/rti_connext_dds-7.3.0
 
-# 2. Build DDS utility library (contains generated types and utilities)
-cd ../../dds/cxx11 && rm -rf build && mkdir build && cd build
+# Build DDS utility library (contains generated types and utilities)
+cd ../../dds/cxx11 && mkdir -p build && cd build
 cmake .. && make -j4
 ```
 
 ### Step-by-Step Application Creation
 
 #### Step 1: Define New Data Types (Optional)
-If you need custom data types beyond the existing ones, create new IDL definitions:
+
+If you need custom data types beyond existing ones:
 
 ```bash
 cd ../../dds/datamodel/
-# Edit or create new .idl files with your custom data structures
-# Example: SensorData.idl, ControlCommands.idl, etc.
+# Edit or create new .idl files
 ```
 
-**Existing Data Types Available:**
-- `Button` - Button input events and state
-- `Command` - System commands and control messages  
+**Available Data Types:**
+- `Button` - Button input events
+- `Command` - System commands and control
 - `Config` - Configuration parameters
 - `State` - System state information
 - `Position` - GPS/location data
 - `Image` - Image data with metadata
+- `FinalFlatImage` - High-performance FlatData type
 
 #### Step 2: Add Topic Constants to DDSDefs
 If using new data types, add topic name constants:
@@ -66,7 +80,7 @@ cmake .. && make -j4
 
 #### Step 4: Create Application Using GitHub Copilot
 
-1. **Use the Build Prompt**: Open `.github/prompts/build_cxx.prompt.md` in your editor
+1. **Use Build Prompt**: Open `.github/prompts/build_cxx.prompt.md`
 
 2. **Define Your Application**: Use GitHub Copilot Chat with a command like:
    ```
@@ -87,16 +101,18 @@ cmake .. && make -j4
 
 3. **Copilot Will Generate**:
    - Application directory structure
-   - `CMakeLists.txt` with proper dependencies
+   - `CMakeLists.txt` with dependencies
    - `application.hpp` for command-line parsing
-   - Main application file with your specified readers/writers
-   - Proper DDS interface setup and message processing
+   - Main application with specified readers/writers
+   - DDS interface setup and message processing
 
-#### Step 5: Build and Test Your Application
+#### Step 5: Build and Test
 
 ```bash
-cd your_new_app_name && mkdir build && cd build
+cd your_app_name && mkdir build && cd build
 cmake .. && make -j4
+./your_app_name
+```
 
 # Test the application
 ./your_new_app_name --help

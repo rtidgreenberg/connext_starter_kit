@@ -1,103 +1,54 @@
 # Example I/O Application (Python)
 
-Python implementation of the Example I/O application following the pose_app.py structure as a reference example for middleware setup.
+Python implementation demonstrating minimal DDS middleware setup with RTI Connext.
 
-## Purpose
+## Features
 
-This Python application demonstrates minimal DDS middleware setup:
-- **Command/Button/Config Publishing**: Basic message publishing every 2 seconds
-- **Position Data Subscription**: Simple async subscriber for Position messages
-- **ASSIGNER_QOS Profile**: Uses XML-based QoS configuration
-- **Cross-Language Communication**: Seamless interoperability with C++ applications
-- **Configuration Management**: External QoS profiles and runtime configuration constants
-- **Distributed Logger**: Integrated RTI distributed logging for remote monitoring - external visibility of logs over DDS with infrastructure services or your own apps
+- **Command/Button/Config Publishing**: Message publishing every 2 seconds
+- **Position Subscription**: Async subscriber for Position messages
+- **ASSIGNER_QOS Profile**: XML-based QoS configuration
+- **Cross-Language Communication**: Interoperability with C++ applications
+- **Distributed Logger**: RTI distributed logging for remote monitoring
 - **Error Handling**: Comprehensive exception handling and graceful shutdown
-- **Real-time Data Processing**: Event-driven architecture with asyncio
-- **Minimal Application Code**: Focus on middleware setup, not application logic
+- **Event-Driven**: Asyncio-based architecture
 
 ## Application Behavior
 
 **Publishers (3 Writers)**:
-- **Command Messages**: Published every 2 seconds with basic command data
-- **Button Messages**: Published every 2 seconds with simple button press simulation
-- **Config Messages**: Published every 2 seconds with basic configuration parameter
+- Command, Button, Config messages published every 2 seconds
 
 **Subscriber (1 Reader)**:
-- **Position Messages**: Async processing of incoming GPS coordinates
+- Position messages with async processing
 
 ## Quick Start
 
 ```bash
-# 1. Ensure DDS Python bindings are generated
+# Generate DDS Python bindings
 cd ../../../dds/python/build && make
 
-# 2. Navigate to python/ directory (contains RTI license file)
+# Navigate to python/ directory (contains RTI license)
 cd ../../../apps/python
 
-# 3. Activate virtual environment
+# Activate environment
 source connext_dds_env/bin/activate
 
-# 4. Run the Python application from python/ directory
+# Run application
 python example_io_app/example_io_app.py --domain_id 1
-
-# 5. Run with higher verbosity
-python example_io_app/example_io_app.py --domain_id 1 --verbosity 2
 ```
 
 ## Usage
 
-**Important**: 
-- Run from `apps/python/` directory to ensure RTI license file (`rti_license.dat`) is accessible
-- The license file must be present in the current working directory for Python DDS applications
+**Important**: Run from `apps/python/` directory for license file access.
 
 ```bash
-# From apps/python/ directory:
 python example_io_app/example_io_app.py [OPTIONS]
 
 Options:
   -d, --domain_id <int>    DDS domain ID (default: 1)
   -v, --verbosity <int>    Logging verbosity 0-5 (default: 1)
-  -q, --qos_file <path>    Path to QoS profiles XML file (default: ../../dds/qos/DDS_QOS_PROFILES.xml)
-  -h, --help              Show help message
+  -q, --qos_file <path>    QoS XML path (default: ../../dds/qos/DDS_QOS_PROFILES.xml)
+  -h, --help              Show help
 ```
-
-### Verbosity Levels
-- **0**: SILENT - No DDS internal logging
-- **1**: EXCEPTION - Only exception messages (default)
-- **2**: WARNING - Warnings and exceptions  
-- **3**: STATUS_LOCAL - Local status information
-- **4**: STATUS_REMOTE - Remote participant status
-- **5**: STATUS_ALL - Complete DDS status information
-
-### Usage Examples
-```bash
-# From apps/python/ directory:
-
-# Run with default settings
-python example_io_app/example_io_app.py
-
-# Run on custom domain with custom QoS file  
-python example_io_app/example_io_app.py --domain_id 5 --qos_file /path/to/custom/qos.xml
-
-# Run with maximum verbosity for debugging
-python example_io_app/example_io_app.py --domain_id 1 --verbosity 5
-```
-
-## Example Output
-
-```bash
-Loading QoS profiles from: ../../dds/qos/DDS_QOS_PROFILES.xml
-DomainParticipant created with QoS profile: DPLibrary::DefaultParticipant
-DOMAIN ID: 1
-RTI Distributed Logger configured for domain 1 with application kind: Example Python IO App
-DL Info: : ExampleIOApp initialized with distributed logging enabled
-[SUBSCRIBER] RTI Asyncio reader configured for Position data...
-[PUBLISHER] RTI Asyncio writers configured for Command, Button, and Config data...
-[MAIN] Starting RTI asyncio tasks...
-[COMMAND_PUBLISHER] Published Command - ID: cmd_0000
-DL Info: : Published Command - id:cmd_0000, type:0
-[BUTTON_PUBLISHER] Published Button - ID: btn_1, Count: 0
-DL Info: : Published Button - id:btn_1, state:1, count:0
 [CONFIG_PUBLISHER] Published Config - Parameter: update_rate
 DL Info: : Published Config - parameter:update_rate, value:1.0
 [MAIN] ExampleIOApp processing loop - iteration 0

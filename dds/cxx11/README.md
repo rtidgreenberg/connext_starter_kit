@@ -1,19 +1,19 @@
 # C++11 DDS Shared Library
 
-This directory contains the CMake configuration for generating C++11 code and building a shared library from IDL files using RTI Connext DDS.
+CMake configuration for generating C++11 code from IDL files using RTI Connext DDS and building a shared library.
 
 ## Overview
 
-The CMakeLists.txt in this directory automatically discovers and generates C++11 code from **all IDL files** located in `../datamodel/` using the RTI Code Generator (rtiddsgen). The generated code is compiled into a shared library (`libdds_utils_datamodel.so`) that can be used by C++11 applications.
+The CMakeLists.txt automatically discovers and generates C++11 code from **all IDL files** in `../datamodel/` using rtiddsgen. Generated code is compiled into a shared library (`libdds_utils_datamodel.so`) for use by C++11 applications.
 
 ## Generated Files
 
-The following C++11 files are generated in the `src/codegen/` directory:
+C++11 files generated in `src/codegen/`:
 
-- **PointCloud.cxx/.hpp**: C++11 implementation for sensor_msgs::PointCloudWithNormals message type
-- **PointCloudPlugin.cxx/.hpp**: RTI DDS type plugin for PointCloud
-- **Pose.cxx/.hpp**: C++11 implementation for geometry_msgs::Pose message type  
-- **PosePlugin.cxx/.hpp**: RTI DDS type plugin for Pose
+- **ExampleTypes.cxx/.hpp**: C++11 implementation for Command, Button, Config, Position, State, Image types
+- **ExampleTypesPlugin.cxx/.hpp**: RTI DDS type plugins for ExampleTypes
+- **FinalFlatImage.cxx/.hpp**: FlatData zero-copy type for high-performance large data
+- **FinalFlatImagePlugin.cxx/.hpp**: RTI DDS type plugin for FinalFlatImage
 - **DDSDefs.cxx/.hpp**: C++11 constants for topic names and QoS configuration
 - **DDSDefsPlugin.cxx/.hpp**: RTI DDS type plugin for DDSDefs
 
@@ -33,78 +33,61 @@ git submodule update --init --recursive
 ### Build Process
 
 ```bash
-# Set RTI environment (adjust path to your RTI installation)
+# Set RTI environment
 export NDDSHOME=/path/to/rti_connext_dds-7.3.0
 
-# Build the shared DDS library
-mkdir -p dds/cxx11/build
-cd dds/cxx11/build
-cmake ..
-make
+# Build shared DDS library
+cd dds/cxx11 && mkdir -p build && cd build
+cmake .. && make -j4
 ```
 
 ### Build Output
 
 ```
 dds/cxx11/
-├── CMakeLists.txt              # This build configuration
 ├── src/
 │   ├── codegen/                # Generated C++11 files
-│   │   ├── PointCloud.cxx/.hpp # PointCloud message implementation
-│   │   ├── PointCloudPlugin.cxx/.hpp # PointCloud DDS plugin
-│   │   ├── Pose.cxx/.hpp       # Pose message implementation
-│   │   ├── PosePlugin.cxx/.hpp # Pose DDS plugin
-│   │   ├── DDSDefs.cxx/.hpp   # Topic names and QoS constants
-│   │   └── DDSDefsPlugin.cxx/.hpp # DDSDefs DDS plugin
+│   │   ├── ExampleTypes.cxx/.hpp
+│   │   ├── ExampleTypesPlugin.cxx/.hpp
+│   │   ├── FinalFlatImage.cxx/.hpp
+│   │   ├── FinalFlatImagePlugin.cxx/.hpp
+│   │   ├── DDSDefs.cxx/.hpp
+│   │   └── DDSDefsPlugin.cxx/.hpp
 │   └── utils/                  # Header-only template utilities
-│       ├── DDSContext.hpp     # DDSContext resource manager
-│       └── DDSInterface.hpp   # DDSInterface<T> template
-└── build/                      # CMake build artifacts
-    └── lib/                    # Shared library output
-        └── libdds_utils_datamodel.so # Final shared library
+│       ├── DDSContext.hpp
+│       ├── DDSReaderSetup.hpp
+│       └── DDSWriterSetup.hpp
+└── build/
+    └── lib/
+        └── libdds_utils_datamodel.so
 ```
 
 ## Integration with Applications
 
-The generated shared library is used by C++11 applications in the `../../apps/cxx11_app/` directory. Applications link against this library and include the generated headers to work with DDS message types.
+Generated shared library is used by C++11 applications in `../../apps/cxx11/`. Applications link against this library and include generated headers.
 
 ### Library Features
 
 - **Type Safety**: Generated C++11 classes with compile-time type checking
 - **Plugin Integration**: RTI DDS type plugins for serialization/deserialization
-- **Header-Only Utils**: Template-based DDSContext and DDSInterface utilities
+- **Header-Only Utils**: Template-based DDSContext, DDSReaderSetup, DDSWriterSetup utilities
 - **RPATH Configuration**: Proper runtime library path handling
 
-## Automatic Discovery and Regeneration
+## Automatic Discovery
 
-The CMake configuration provides several automation features:
-
-### **Automatic IDL Discovery**
-- Uses `file(GLOB)` to automatically find all `*.idl` files in `../datamodel/`
-- No manual configuration needed when adding new IDL files
-- Simply add a new `.idl` file to the datamodel directory and rebuild
-
+CMake automatically finds all `*.idl` files in `../datamodel/` using `file(GLOB)`. No manual configuration needed when adding new IDL files.
 
 ## Library Usage
 
-Applications can link against the shared library and use the generated types:
-
 ```cpp
-#include "PointCloud.hpp"
-#include "Pose.hpp"
+#include "ExampleTypes.hpp"
+#include "FinalFlatImage.hpp"
 #include "DDSDefs.hpp"
 #include "DDSContext.hpp"
-#include "DDSInterface.hpp"
+#include "DDSReaderSetup.hpp"
+#include "DDSWriterSetup.hpp"
 
-// Use generated message types
-sensor_msgs::PointCloudWithNormals pointcloud;
-geometry_msgs::Pose pose;
-
-// Use generated topic constants
-std::string topic_name = topics::POINTCLOUD_NORMALS_TOPIC;
-
-// Use utility templates
-auto dds_context = std::make_shared<DDSContext>(domain_id);
-auto interface = std::make_shared<DDSInterface<sensor_msgs::PointCloudWithNormals>>(
-    dds_context, INTERFACE_KIND::READER, topic_name);
+// Use generated types
+example_types::Command cmd;
+example_types::Position pos;
 ```

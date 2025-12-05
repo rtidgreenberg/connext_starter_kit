@@ -1,24 +1,20 @@
 # Python DDS Applications
 
-This directory contains Python applications that demonstrate RTI Connext DDS capabilities using the example data types.
+Python applications demonstrating RTI Connext DDS capabilities with example data types.
 
 ## Application Structure
 
-Each application is organized in its own subfolder with clear separation of concerns:
-
 ```
 apps/python/
-├── example_io_app/         # Example I/O application demonstrating DDS patterns
-│   ├── example_io_app.py   # Main Python DDS application
-│   ├── requirements.txt    # App-specific dependencies
-│   └── README.md           # Application documentation
-├── connext_dds_env/        # Virtual environment (ready to use)
-├── README.md               # This file - main documentation
-├── install.sh              # Installation script (handles everything)
-├── Makefile                # Build commands and utilities
-├── pyproject.toml          # Python package configuration
-├── requirements.txt        # Common Python dependencies
-├── rti_license.dat         # RTI license file
+├── example_io_app/         # Example I/O application
+│   ├── example_io_app.py   # Main application
+│   ├── requirements.txt    # App dependencies
+│   └── README.md           # Documentation
+├── connext_dds_env/        # Virtual environment
+├── README.md               # This file
+├── install.sh              # Installation script
+├── requirements.txt        # Common dependencies
+├── rti_license.dat         # RTI license (REQUIRED)
 └── setup.py                # Setup script
 ```
 
@@ -26,77 +22,65 @@ apps/python/
 
 ### example_io_app
 
-Located in `example_io_app/`, this application demonstrates RTI Connext DDS middleware patterns:
-
-- **Subscribes to:**
-  - Position messages (`example_types.Position`)
-- **Publishes:**
-  - Command messages (`example_types.Command`)
-  - Button messages (`example_types.Button`)
-  - Config messages (`example_types.Config`)
+- **Subscribes to:** Position messages
+- **Publishes:** Command, Button, Config messages
 - **Features:**
   - RTI asyncio framework integration
-  - ASSIGNER_QOS profile usage with `set_topic_datareader_qos`
+  - ASSIGNER_QOS profile usage
   - Distributed logger integration
-  - Async publisher/subscriber pattern
-  - Cross-language communication with C++ example_io_app
+  - Cross-language communication with C++ apps
 
-## Building Applications
+## Setup
 
 ### Prerequisites
-- RTI Connext DDS Python API (automatically installed via requirements.txt)
-- Python 3.8 or later
+- RTI Connext DDS Python API
+- Python 3.8+
 - Built DDS Python libraries (`../../dds/python/build/`)
-- **RTI license file (`rti_license.dat`) must be present in this `apps/python/` directory**
+- **RTI license file (`rti_license.dat`) in `apps/python/` directory**
 
-> **Important**: All Python applications should be run from the `apps/python/` directory to ensure the RTI license file is accessible in the current working directory.
+> **Important**: Run applications from `apps/python/` directory to ensure license file is accessible.
 
-### Setup Instructions
+### Installation
 
-1. **Set up environment and install dependencies:**
-   ```bash
-   # Navigate to python apps directory
-   cd /home/rti/connext_starter_kit/apps/python
-   
-   # Activate virtual environment
-   source connext_dds_env/bin/activate
-   
-   # Set NDDSHOME (required for DDS code generation)
-   export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
-   
-   # Run installation script (installs RTI API and generates DDS bindings)
-   ./install.sh
-   ```
+```bash
+# Navigate to python apps directory
+cd /home/rti/connext_starter_kit/apps/python
 
-2. **Run the application:**
-   ```bash
-   cd example_io_app
-   python3 example_io_app.py --domain_id 1 --verbosity 2
-   ```
+# Activate virtual environment
+source connext_dds_env/bin/activate
 
-## Development Guidelines
+# Set NDDSHOME
+export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
+
+# Run installation (installs RTI API and generates DDS bindings)
+./install.sh
+```
+
+### Run Application
+
+```bash
+cd example_io_app
+python3 example_io_app.py --domain_id 1 --verbosity 2
+```
+
+## Development
 
 ### Adding New Applications
 
-1. **Create Application Directory:**
+1. **Create directory:**
    ```bash
    mkdir apps/python/your_app_name/
    ```
 
-2. **Application Structure:**
+2. **Structure:**
    ```
    your_app_name/
-   ├── your_app_name.py        # Main application file
-   ├── requirements.txt        # Python dependencies (optional)
-   └── README.md              # Application-specific documentation
+   ├── your_app_name.py
+   ├── requirements.txt (optional)
+   └── README.md
    ```
 
-3. **Template Structure:**
-   - Copy from `example_io_app/example_io_app.py` as starting template
-   - Update application name and functionality
-   - Adjust import paths for DDS libraries (use `../../../dds/python`)
-
-### Naming Conventions
+3. **Template**: Copy from `example_io_app/example_io_app.py`
 
 - **Directory Names:** Use lowercase with underscores (e.g., `sensor_fusion`, `navigation_control`)
 - **Main Files:** Use `{app_name}.py` (e.g., `example_io_app.py`, `sensor_fusion.py`)

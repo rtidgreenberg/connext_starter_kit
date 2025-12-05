@@ -1,14 +1,16 @@
-# FinalFlatImage Application
+# Large Data Very Fast Application
 
-This application demonstrates the use of RTI Connext DDS FlatData API with Zero Copy transfer for high-performance, low-latency image data distribution.
+Demonstrates RTI Connext DDS FlatData API with Zero Copy transfer for high-performance, low-latency large payload distribution at 10 Hz (3 MB @ 10 Hz = ~30 MB/sec throughput).
 
 ## Overview
 
-The FinalFlatImage application showcases:
+This application showcases:
 - **FlatData with Zero Copy**: Using `@final @language_binding(FLAT_DATA)` with `@transfer_mode(SHMEM_REF)`
-- **Intra-host zero-copy**: Within a single host, data is accessed directly in shared memory with **no copies**
-- **Inter-host FlatData**: Between hosts, FlatData sends data **without serialization** (requires same endianness)
+- **High Throughput**: 3 MB payloads at 10 Hz for ~30 MB/second sustained throughput
+- **Intra-host zero-copy**: Data accessed directly in shared memory with **no copies**
+- **Inter-host FlatData**: Between hosts, data sent **without serialization** (requires same endianness)
 - **Zero-copy loan API**: Direct memory access for writing and reading samples
+- **Application Acknowledgment**: Uses `wait_for_acknowledgments()` to ensure data consistency with zero-copy shared memory access
 - Event-driven data processing with AsyncWaitSet
 
 ## FlatData + Zero Copy Benefits
@@ -30,6 +32,32 @@ The FinalFlatImage application showcases:
 - **Efficient for large data**: Ideal for images, video frames, sensor data, and large payloads
 - **Predictable performance**: Fixed memory layout provides consistent access patterns
 
+## Data Consistency with Zero-Copy
+
+### Challenge: Direct Memory Access
+With zero-copy shared memory (`SHMEM_REF`), readers access the writer's memory directly. This creates a data consistency challenge: the writer could modify or reuse the memory while readers are still accessing it, potentially causing data corruption.
+
+### Solution: Application-Level Acknowledgment
+This application uses `wait_for_acknowledgments()` after each write to ensure data consistency:
+
+```cpp
+// Write sample to shared memory
+writer->write(*sample);
+
+// Wait for all readers to acknowledge receipt
+// This ensures readers have finished accessing the shared memory
+// before the writer modifies or reuses it
+writer->wait_for_acknowledgments(dds::core::Duration(5, 0));
+```
+
+**Benefits:**
+- **Prevents data corruption**: Writer waits before reusing memory
+- **Reliable zero-copy**: Maintains data integrity with direct memory access
+- **Flow control**: Naturally throttles writer based on reader processing speed
+- **Production-ready pattern**: Recommended practice for zero-copy implementations
+
+**Note:** Without `wait_for_acknowledgments()`, readers might see inconsistent data as the writer modifies shared memory. This is critical for zero-copy scenarios where memory is accessed directly rather than copied.
+
 ## Building
 
 ```bash
@@ -41,7 +69,7 @@ make
 ## Running
 
 ```bash
-./flat_image_app
+./large_data_very_fast
 ```
 
 ### Command-line Options
@@ -52,13 +80,13 @@ make
 
 ## Implementation Details
 
-The application demonstrates the `@final` FlatData zero-copy loan API pattern:
+Demonstrates the `@final` FlatData zero-copy loan API pattern:
 
-1. Creates a DDS DomainParticipant with AsyncWaitSet support
-2. Sets up a DataWriter for FinalFlatImage using the zero-copy loan API
-3. Sets up a DataReader for FinalFlatImage with event-driven callbacks
-4. Publishes FinalFlatImage samples at 1 Hz using direct memory access
-5. Receives and processes FinalFlatImage samples asynchronously without copying
+1. Creates DomainParticipant with AsyncWaitSet support
+2. Sets up DataWriter for FinalFlatImage using zero-copy loan API
+3. Sets up DataReader for FinalFlatImage with event-driven callbacks
+4. Publishes 3 MB FinalFlatImage samples at 10 Hz using direct memory access
+5. Receives and processes samples asynchronously without copying
 
 ### Zero-Copy Loan API Usage (Writer)
 
@@ -80,8 +108,13 @@ for (int i = 0; i < data_size; i++) {
     data_array.set_element(i, static_cast<uint8_t>(i % 256));
 }
 
-// Write transfers ownership - no discard needed
-writer.write(*sample);
+// Write transfers ownership to DDS
+writer->write(*sample);
+
+// CRITICAL: Wait for acknowledgments to ensure data consistency
+// Readers access shared memory directly, so we must wait for them
+// to finish before modifying or reusing this memory
+writer->wait_for_acknowledgments(dds::core::Duration(5, 0));
 ```
 
 ### Zero-Copy Access (Reader)

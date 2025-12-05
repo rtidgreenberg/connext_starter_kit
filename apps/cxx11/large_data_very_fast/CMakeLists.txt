@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.12)
 
-project(FlatImageApplication VERSION 1.0.0 LANGUAGES CXX)
+project(LargeDataVeryFastApplication VERSION 1.0.0 LANGUAGES CXX)
 
 # Set standard
 set(CMAKE_CXX_STANDARD 14)
@@ -35,13 +35,13 @@ find_library(DDS_UTILS_DATAMODEL_LIB
 )
 
 # Create the executable
-add_executable(flat_image_app
-    flat_image_app.cxx
+add_executable(large_data_very_fast
+    large_data_very_fast.cxx
     application.hpp
 )
 
 # Include directories
-target_include_directories(flat_image_app 
+target_include_directories(large_data_very_fast 
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${DDS_CODEGEN_DIR}
@@ -50,7 +50,7 @@ target_include_directories(flat_image_app
 )
 
 # Link with libraries
-target_link_libraries(flat_image_app
+target_link_libraries(large_data_very_fast
     PRIVATE
         ${DDS_UTILS_DATAMODEL_LIB}
         RTIConnextDDS::cpp2_api
@@ -63,7 +63,7 @@ target_link_libraries(flat_image_app
 )
 
 # Set compiler definitions
-target_compile_definitions(flat_image_app
+target_compile_definitions(large_data_very_fast
     PRIVATE
         RTI_UNIX
         RTI_LINUX
@@ -72,7 +72,7 @@ target_compile_definitions(flat_image_app
 
 # Set additional compiler flags
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(flat_image_app PRIVATE
+    target_compile_options(large_data_very_fast PRIVATE
         -m64
         -Wall
         -Wextra
@@ -88,12 +88,12 @@ message(STATUS "DDS codegen headers: ${DDS_CODEGEN_DIR}")
 message(STATUS "DDS utils headers: ${DDS_UTILS_DIR}")
 
 # Set the runtime path to find the shared library
-set_target_properties(flat_image_app PROPERTIES
+set_target_properties(large_data_very_fast PROPERTIES
     INSTALL_RPATH "${DDS_LIB_BUILD_DIR}"
     BUILD_WITH_INSTALL_RPATH TRUE
 )
 
 # Install the executable if desired
-install(TARGETS flat_image_app
+install(TARGETS large_data_very_fast
     RUNTIME DESTINATION bin
 )

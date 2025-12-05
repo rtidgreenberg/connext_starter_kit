@@ -55,19 +55,18 @@ void process_final_flat_image_data(dds::sub::DataReader<example_types::FinalFlat
         
         // Access the fixed-size data array
         auto data_array = root.data();
-        std::cout << ", Data array size: " << example_types::MAX_IMAGE_DATA_SIZE << " bytes" << std::endl;
+        std::cout << ", Data array size: " << example_types::MAX_IMAGE_DATA_SIZE << " bytes (3 MB)" << std::endl;
 
         // overloaded -> operator to use RTI extension
         std::cout << reader->topic_name() << " received" << std::endl;
       }
     }
-} 
-
+}
 
 void run(unsigned int domain_id, const std::string& qos_file_path)
 {
     // Use provided QoS file path and generated constants from IDL
-    const std::string qos_profile = dds_config::DEFAULT_PARTICIPANT_QOS;
+    const std::string qos_profile = dds_config::LARGE_DATA_PARTICIPANT_QOS;
 
     std::cout << "FinalFlatImage application starting on domain " << domain_id << std::endl;
     std::cout << "Using QoS file: " << qos_file_path << std::endl;
@@ -83,14 +82,14 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
         dds_context,
         topics::FINAL_FLAT_IMAGE_TOPIC,
         qos_file_path,
-        dds_config::LARGE_DATA_QOS);
+        dds_config::LARGE_DATA_SHMEM_ZC_QOS);
 
     // Setup Reader Interface for FinalFlatImage type
     auto final_flat_image_reader = std::make_shared<DDSReaderSetup<example_types::FinalFlatImage>>(
         dds_context,
         topics::FINAL_FLAT_IMAGE_TOPIC,
         qos_file_path,
-        dds_config::LARGE_DATA_QOS);
+        dds_config::LARGE_DATA_SHMEM_ZC_QOS);
 
     // Enable Asynchronous Event-Driven processing for reader
     final_flat_image_reader->set_data_available_handler(process_final_flat_image_data);
@@ -121,28 +120,55 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
         
         // Access and populate the fixed-size data array
         auto data_array = root.data();
-        const int data_size = 100; // Sample size for demonstration
-        for (int i = 0; i < data_size && i < static_cast<int>(example_types::MAX_IMAGE_DATA_SIZE); i++) {
+        const int data_size = example_types::MAX_IMAGE_DATA_SIZE; // 3 MB payload
+        for (int i = 0; i < data_size; i++) {
             data_array.set_element(i, static_cast<uint8_t>(i % 256));
         }
 
         // Write the loaned sample - this transfers ownership, don't discard after write
         writer.write(*sample);
 
+        // Get DataWriter protocol status
+        rti::core::status::DataWriterProtocolStatus status = writer->datawriter_protocol_status();
+
+        auto first_unack_seq = status.first_unacknowledged_sample_sequence_number();
+        auto first_available_seq =
+                status.first_available_sample_sequence_number();
+        auto last_available_seq =
+                status.last_available_sample_sequence_number();
+
+        auto send_window = status.send_window_size();
+
+        std::cout << "First unacknowledged sample sequence number: " << first_unack_seq << std::endl;
+        std::cout << "Send window size (max unacknowledged samples): " << send_window << std::endl;
+        std::cout << "First available sample sequence number: "
+                  << first_available_seq << std::endl;
+        std::cout << "Last available sample sequence number: "
+                  << last_available_seq << std::endl;
+
+
         std::cout << "[FINAL_FLAT_IMAGE] Published - ID: " << count
                   << ", Width: 640, Height: 480, Format: 0 (RGB), Data size: " 
-                  << data_size << " bytes (array capacity: " 
-                  << example_types::MAX_IMAGE_DATA_SIZE << ")" << std::endl;
+                  << data_size << " bytes (3 MB payload)" << std::endl;
 
         count++;
+
+        try {
+            writer.wait_for_acknowledgments(dds::core::Duration(5, 0));
+            std::cout << "All samples acknowledged by all reliable DataReaders."
+                      << std::endl;
+        } catch (const dds::core::TimeoutError &) {
+            std::cout << "Timeout: Not all samples were acknowledged in time."
+                      << std::endl;
+        }
       }
       catch (const std::exception &ex)
       {
         logger.error("Failed to publish FinalFlatImage: " + std::string(ex.what()));
       }
 
-      // Sleep
-      std::this_thread::sleep_for(std::chrono::seconds(1));
+      // Sleep for 100ms to achieve 10 Hz send rate
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     }
 

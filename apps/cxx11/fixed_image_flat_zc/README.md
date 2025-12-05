@@ -9,7 +9,7 @@ FlatData is used as an optimization for message transfers between hosts over UDP
 
 This application showcases:
 - **FlatData with Zero Copy**: Using `@final @language_binding(FLAT_DATA)` with `@transfer_mode(SHMEM_REF)`
-- **High Throughput**: 3 MB payloads at 10 Hz for ~30 MB/second sustained throughput
+- **High Throughput**: Example: 3 MB payloads at 10 Hz for ~30 MB/second sustained throughput
 - **Intra-host zero-copy**: Data accessed directly in shared memory with **no copies**
 - **Inter-host FlatData**: Between hosts, data sent **without serialization** (requires same endianness)
 - **Zero-copy loan API**: Direct memory access for writing and reading samples

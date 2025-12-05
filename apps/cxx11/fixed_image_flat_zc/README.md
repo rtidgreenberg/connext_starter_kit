@@ -3,7 +3,8 @@
 USE CASE: 
 Large fixed size data low latency transfer intra-host as well as inter-host.
 
-FlatData is used as an optimization for message transfers between hosts over UDP.   If only sending data within a host can do pure Zero Copy.
+FlatData is used as an optimization for message transfers between hosts over UDP.   
+If only sending data within a host can do pure Zero Copy.
 
 ## Overview
 

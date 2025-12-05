@@ -8,7 +8,7 @@
 module dds_config {
 
     // Domain Participant Profiles
-    const string IMAGE_PARTICIPANT_QOS = "DPLibrary::ImageParticipant";
+    const string LARGE_DATA_PARTICIPANT_QOS = "DPLibrary::LargeDataParticipant";
     const string DEFAULT_PARTICIPANT_QOS = "DPLibrary::DefaultParticipant";
 
     // Writer/Reader Qos Profiles
@@ -19,7 +19,8 @@ module dds_config {
     const string COMMANDSTRENGTH30_QOS = "DataPatternsLibrary::CommandStrength30QoS";
     const string METADATA_QOS = "DataPatternsLibrary::MetadataQoS";
     const string STATUS_QOS = "DataPatternsLibrary::StatusQoS";
-    const string LARGE_DATA_QOS = "DataPatternsLibrary::LargeDataQoS";
+    const string LARGE_DATA_SHMEM_QOS = "DataPatternsLibrary::LargeDataSHMEMQoS";
+    const string LARGE_DATA_SHMEM_ZC_QOS = "DataPatternsLibrary::LargeDataSHMEM_ZCQoS";
 
     
 

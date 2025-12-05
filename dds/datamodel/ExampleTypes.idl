@@ -11,7 +11,7 @@ module example_types {
     const unsigned long MAX_ID_LENGTH = 32;
     const unsigned long MAX_NAME_LENGTH = 64;
     const unsigned long MAX_MESSAGE_LENGTH = 128;
-    const unsigned long MAX_IMAGE_DATA_SIZE = 1024;
+    const unsigned long MAX_IMAGE_DATA_SIZE = 3145728;  // 3 MB (3 * 1024 * 1024)
     
     // Basic enumerations
     enum CommandType {

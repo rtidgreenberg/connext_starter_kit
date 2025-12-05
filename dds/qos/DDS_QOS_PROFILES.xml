@@ -3,6 +3,13 @@
     <qos_library name="DPLibrary">
 
       <qos_profile name="DefaultParticipant" base_name="BuiltinQosLib::Generic.Common">
+
+        <!-- 
+          USE CASE: Baseline Domain Participant QoS to be used system wide and 
+          extended for specific use cases. 
+        -->
+
+
         <domain_participant_qos>
           <!-- Discovery-related optimizations -->
           <base_name>
@@ -45,13 +52,44 @@
       </qos_profile>
 
 
-      <qos_profile name="ImageParticipant" base_name="DefaultParticipant">
+      <qos_profile name="LargeDataParticipant" base_name="DefaultParticipant">
+
+        <!-- 
+          USE CASE: 
+          Participant that is used to transfer "Large" messages i.e. 
+          larger than default 65kB and where resource impact would be considerable 
+          if applied system wide. 
+
+          This is intended to be used in tandem with a LargeDataQoS set at the Topic level  
+          so the application can use either UDP or SHMEM, but the LargeData Topic selects  
+          only SHMEM so it has access to the larger message_size_max.
+        -->
+
         <domain_participant_qos>
           <transport_builtin>
             <mask>SHMEM|UDPv4</mask>
             <shmem>
-              <message_size_max>4096000</message_size_max>
-              <receive_buffer_size>12288000</receive_buffer_size>
+              <!--  
+                Increase the message size that is sent to minimize re-assembly/latency impact 
+                Set to >= largest message size to minimize fragementation of large messages
+                This use case is where each image size is fairly consistent.
+                Example: 3 MB
+              
+              -->
+              <message_size_max>3145728</message_size_max>
+
+              <!-- 
+                This is for the use case where we only care about the last few image frames
+              -->
+              <received_message_count_max>3</received_message_count_max>
+
+              <!-- 
+              
+                Increase the receive buffer size specific to the SHMEM transport 
+                This should be equal to message_size_max * received_message_count_max
+                This example the message_size_max is ~= avg message size.
+              -->
+              <receive_buffer_size>9437184</receive_buffer_size>
             </shmem>
           </transport_builtin>
         </domain_participant_qos>
@@ -64,15 +102,20 @@
 
     <qos_profile name="EventQoS" base_name="BuiltinQosLib::Generic.Common">
       <!-- 
-        This QoS Profile can be used by applications in which samples represent
-        events such as button pushes or alerts. When events are triggered,
+        
+        USE CASE: 
+        Even Topics such as button pushes or alerts. When events are triggered,
         the system should almost always do something, meaning that you
         don't want the system to lose the event. This means that the system
         requires strictly reliable communication. 
 
         Since events and alerts are critical and non-periodic data, it is
         important to detect situations in which communication between a
-        DataWriter and DataReader is broken. This is why this QoS Profile sets the
+        DataWriter and DataReader is broken. 
+
+        This use case also alignes with Aperiodic data i.e. messages are only 
+        sent out aperiodically.
+        This is why this QoS Profile sets the
         LivelinessQosPolicy. If the DataWriter does not assert its
         liveliness in a timely manner, the DataReader will report loss
         of liveliness to the application.
@@ -135,8 +178,11 @@
 
     <qos_profile name="CommandStrength10QoS" base_name="DataPatternsLibrary::EventQoS">
       <!-- 
-        This QoS Profile is intended to be used in a mutli command arbitration use case where  
-        different commands have differnt strengths to override as necessary.
+        USE CASE:
+        Mutli command arbitration where different commands have differnt "strengths" 
+        to override as necessary.
+
+        Example: Auto -> Obstacle Override -> Manual Override
 
         This inherits from the EventQoS to use it's baseline.
         -->
@@ -183,8 +229,12 @@
 
     <qos_profile name="CommandStrength20QoS" base_name="DataPatternsLibrary::EventQoS">
       <!-- 
-        This QoS Profile is intended to be used in a mutli command arbitration use case where  
-        different commands have differnt strengths to override as necessary.
+        USE CASE:
+        Mutli command arbitration where different commands have differnt "strengths" 
+        to override as necessary.
+
+        Example: Auto -> Obstacle Override -> Manual Override
+
 
         This inherits from the EventQoS to use it's baseline.
         -->
@@ -232,8 +282,11 @@
 
     <qos_profile name="CommandStrength30QoS" base_name="DataPatternsLibrary::EventQoS">
       <!-- 
-        This QoS Profile is intended to be used in a mutli command arbitration use case where  
-        different commands have differnt strengths to override as necessary.
+        USE CASE:
+        Mutli command arbitration where different commands have differnt "strengths" 
+        to override as necessary.
+
+        Example: Auto -> Obstacle Override -> Manual Override
 
         This inherits from the EventQoS to use it's baseline.
         -->
@@ -283,11 +336,10 @@
     <qos_profile name="MetadataQoS" base_name="BuiltinQosLib::Generic.Common">
 
       <!-- 
-        With this QoS Profile, a DataWriter will keep in its queue the last
-        value that was published for each sample instance. Late-joining
-        DataReaders will get that value when they join the system. This
-        QoS Profile inherits from Generic.KeepLastReliable.TransientLocal
-        because the use case requires delivery to late-joiners.
+        USE CASE:
+        DataWriter will keep in its queue the last value that was published for 
+        each sample instance. Late-joining DataReaders will get that value when 
+        they join the system. 
         -->
 
       <!-- Having snippets here makes it easier to understand what QoS is applied -->
@@ -326,8 +378,8 @@
     <qos_profile name="StatusQoS" base_name="BuiltinQosLib::Generic.Common">
 
       <!-- 
-        This QoS Profile is intended to be used for applications that expect
-        periodic data such as sensor/positional data etc. 
+        USE CASE:
+        Applications that expect periodic data such as sensor/positional data etc. 
         There is no reliability mechanism applied as data loss is permitted.
         The deadline that is set in this QoS Profile can be used to detect when 
         DataWriters are not publishing data with the expected periodicity.
@@ -392,7 +444,14 @@
 
     </qos_profile>
 
-    <qos_profile name="LargeDataQoS" base_name="BuiltinQosLib::Generic.Common">
+    <qos_profile name="LargeDataSHMEMQoS" base_name="BuiltinQosLib::Generic.Common">
+
+
+      <!-- 
+      USE CASE:
+      Large Data being sent over SHMEM with lowest latency required i.e. no RELIABILITY> 
+      -->
+
 
       <base_name>
         <element>BuiltinQosSnippetLib::QosPolicy.Reliability.BestEffort</element>
@@ -406,7 +465,7 @@
           see which QoS Profile is being used
           -->
           <publication_name>
-            <name>LargeDataWriter</name>
+            <name>LargeDataSHMEMWriter</name>
           </publication_name>
 
         <!-- 
@@ -453,6 +512,65 @@
     </qos_profile>
 
 
+    <qos_profile name="LargeDataSHMEM_ZCQoS" base_name="LargeDataSHMEMQoS">
+
+      <!-- 
+      USE CASE:
+      Large Data using SHMEM with Zero-Copy Transfer Mode
+      Inherits from LargeDataSHMEMQoS and adds QoS for ZC impact
+      
+      KEY FEATURES:
+      - Zero-copy transfers within the same host (true zero-copy in shared memory)
+      - No serialization overhead between hosts (requires same endianness)
+      - Optimized for FlatData with direct memory access
+      - Application Acknowledgement to prevent data inconsistencies between reader and writer due to direct memory access.
+      -->
+
+      <!-- Increase the RELIABILITY traffic rate to ensure minimal latency -->
+      <base_name>
+        <element>BuiltinQosSnippetLib::Optimization.ReliabilityProtocol.HighRate</element>
+      </base_name>
+
+      <datawriter_qos>
+
+        <publication_name>
+          <name>LargeDataSHMEM_ZCWriter</name>
+        </publication_name>
+
+        <reliability>
+          <!-- 
+            Set to RELIABLE and Application Level Acknowledgement so we can 
+            feedback sequence numbers fully processed by reader to writer 
+          -->
+          <kind>RELIABLE_RELIABILITY_QOS</kind>
+          <acknowledgment_kind>APPLICATION_AUTO_ACKNOWLEDGMENT_MODE</acknowledgment_kind>
+        </reliability>
+
+
+          
+
+      </datawriter_qos>
+
+      <datareader_qos>
+
+        <subscription_name>
+          <name>LargeDataSHMEM_ZCQoSReader</name>
+        </subscription_name>
+
+        <reliability>
+          <!-- 
+            Set to RELIABLE and Application Level Acknowledgement so we can 
+            feedback sequence numbers fully processed by reader to writer 
+          -->
+          <kind>RELIABLE_RELIABILITY_QOS</kind>
+          <acknowledgment_kind>APPLICATION_AUTO_ACKNOWLEDGMENT_MODE</acknowledgment_kind>
+        </reliability>
+
+      </datareader_qos>
+
+    </qos_profile>
+
+
     <qos_profile name="AssignerQoS">
 
       <!-- 
@@ -461,8 +579,8 @@
         Overrides in order of assignment
         -->
 
-      <datawriter_qos topic_filter="LargeData*" base_name="LargeDataQoS" />
-      <datareader_qos topic_filter="LargeData*" base_name="LargeDataQoS" />
+      <datawriter_qos topic_filter="LargeData*" base_name="LargeDataSHMEMQoS" />
+      <datareader_qos topic_filter="LargeData*" base_name="LargeDataSHMEMQoS" />
 
       <datawriter_qos topic_filter="Position*" base_name="StatusQoS" />
       <datareader_qos topic_filter="Position*" base_name="StatusQoS" />

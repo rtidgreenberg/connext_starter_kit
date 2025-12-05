@@ -18,10 +18,10 @@
 #include <string>       // Include string header
 #include <iostream>
 #include <functional>
-
 #include "DDSContextSetup.hpp"
 
 using namespace rti::all;
+
 
 template <typename T>
 class DDSWriterSetup {
@@ -81,7 +81,10 @@ public:
             std::cout << "DataWriter created on topic: " << _topic_name
                       << " with QoS profile: " << _qos_profile << std::endl;
         } else {
-            _writer = dds::pub::DataWriter<T>(_topic);
+            _writer = dds::pub::DataWriter<T>(
+                            _topic, 
+                            dds::pub::qos::DataWriterQos());
+                            
             std::cout << "DataWriter created on topic: " << _topic_name
                       << " with default QoS." << std::endl;
         }
@@ -98,9 +101,9 @@ public:
                 | dds::core::status::StatusMask::offered_deadline_missed()
                 | dds::core::status::StatusMask::offered_incompatible_qos());
             
-            // Attach handler directly - on_status_triggered will dispatch
+            // Attach handler directly - _on_status_triggered will dispatch
             _status_condition->handler([this](dds::core::cond::Condition) {
-                on_status_triggered();
+                _on_status_triggered();
             });
             
             // Attach to AsyncWaitSet
@@ -199,8 +202,9 @@ public:
     }
 
 private:
+
     // Default handler for publication matched events
-    void default_on_publication_matched()
+    void _default_on_publication_matched()
     {
         auto status = _writer.publication_matched_status();
         
@@ -215,7 +219,7 @@ private:
     }
 
     // Default handler for liveliness lost events
-    void default_on_liveliness_lost()
+    void _default_on_liveliness_lost()
     {
         auto status = _writer.liveliness_lost_status();
         
@@ -226,7 +230,7 @@ private:
     }
 
     // Default handler for offered deadline missed events
-    void default_on_offered_deadline_missed()
+    void _default_on_offered_deadline_missed()
     {
         auto status = _writer.offered_deadline_missed_status();
         
@@ -237,7 +241,7 @@ private:
     }
 
     // Default handler for offered incompatible QoS events
-    void default_on_offered_incompatible_qos()
+    void _default_on_offered_incompatible_qos()
     {
         auto status = _writer.offered_incompatible_qos_status();
         
@@ -249,7 +253,7 @@ private:
     }
 
     // Handler that checks which status triggered and dispatches accordingly
-    void on_status_triggered()
+    void _on_status_triggered()
     {
         auto status_mask = _writer.status_changes();
         
@@ -258,7 +262,7 @@ private:
             if (_publication_matched_callback) {
                 _publication_matched_callback(_writer);
             } else {
-                default_on_publication_matched();
+                _default_on_publication_matched();
             }
         }
         
@@ -267,7 +271,7 @@ private:
             if (_liveliness_lost_callback) {
                 _liveliness_lost_callback(_writer);
             } else {
-                default_on_liveliness_lost();
+                _default_on_liveliness_lost();
             }
         }
         
@@ -276,7 +280,7 @@ private:
             if (_offered_deadline_missed_callback) {
                 _offered_deadline_missed_callback(_writer);
             } else {
-                default_on_offered_deadline_missed();
+                _default_on_offered_deadline_missed();
             }
         }
         
@@ -285,7 +289,7 @@ private:
             if (_offered_incompatible_qos_callback) {
                 _offered_incompatible_qos_callback(_writer);
             } else {
-                default_on_offered_incompatible_qos();
+                _default_on_offered_incompatible_qos();
             }
         }
     }

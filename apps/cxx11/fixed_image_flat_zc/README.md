@@ -29,6 +29,8 @@ This application showcases:
 - **Endianness requirement**: Sender and receiver must have same byte order (both little-endian or both big-endian)
 - **Network efficiency**: Reduced CPU and lower latency compared to traditional serialization
 
+**Note:** For large data transmission over UDP, increase OS socket buffer sizes to prevent packet loss. See [RTI Perftest OS Tuning Guide](https://community.rti.com/static/documentation/perftest/current/tuning_os.html) for configuration details.
+
 ### Performance Characteristics
 - **Reduced latency**: Eliminates serialization/deserialization and extra copy operations
 - **Lower CPU usage**: No data marshaling or buffer management

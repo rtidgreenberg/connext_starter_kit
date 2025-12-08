@@ -2,6 +2,13 @@
 
 C++11 applications built with RTI Connext DDS, showcasing different DDS communication patterns and integration approaches.
 
+## Table of Contents
+- [Available Applications](#available-applications)
+- [Creating New C++ DDS Applications](#creating-new-c-dds-applications)
+- [Key Integration Patterns](#key-integration-patterns)
+- [Build Dependencies](#build-dependencies)
+- [Getting Started](#getting-started)
+
 ## Available Applications
 
 ### [`example_io_app/`](./example_io_app/) - Reference Implementation
@@ -19,7 +26,7 @@ Zero-copy high-throughput demonstration:
 - **Reliable QoS**: Acknowledgment-based flow control
 - **AsyncWaitSet Processing**: Event-driven data handling
 
-### [`command_override/`](./command_override/) - Ownership Control
+### [`command_override/`](./command_override/) - Command Arbitration using Ownership QoS
 Advanced DDS ownership and QoS patterns:
 - **4-Phase Progressive Publishing**: Sequential writer activation
 - **Ownership Strength Control**: Priority-based command arbitration
@@ -29,7 +36,9 @@ Advanced DDS ownership and QoS patterns:
 ## Creating New C++ DDS Applications
 
 ### Overview
-You can rapidly create new DDS applications using GitHub Copilot and the provided build prompt template. This process leverages the existing DDS infrastructure and utilities.
+You can rapidly create new DDS applications using GitHub Copilot(Claude Sonnet 4.5)  
+and the provided build prompt template.  
+This process leverages the existing DDS infrastructure and  utilities.   
 
 ### Prerequisites
 
@@ -53,7 +62,7 @@ cd ../../dds/datamodel/
 # Edit or create new .idl files
 ```
 
-**Available Data Types:**
+**Available Example Data Types:**
 - `Button` - Button input events
 - `Command` - System commands and control
 - `Config` - Configuration parameters
@@ -62,7 +71,7 @@ cd ../../dds/datamodel/
 - `Image` - Image data with metadata
 - `FinalFlatImage` - High-performance FlatData type
 
-#### Step 2: Add Topic Constants to DDSDefs
+#### Step 2: Add Topic Constants to DDSDefs (Optional)
 If using new data types, add topic name constants:
 
 ```cpp
@@ -73,7 +82,7 @@ module topics {
 };
 ```
 
-#### Step 3: Regenerate DDS Code (If IDL Changed)
+#### Step 3: Regenerate DDS Code (If new/changed IDL) (Optional)
 ```bash
 cd ../../dds/cxx11 && rm -rf build && mkdir build && cd build
 cmake .. && make -j4
@@ -85,7 +94,7 @@ cmake .. && make -j4
 
 2. **Define Your Application**: Use GitHub Copilot Chat with a command like:
    ```
-   Follow instructions in build_cxx.prompt.md. Create a new cxx app with [READERS] as reader(s) and [WRITERS] as writer(s)
+   Follow instructions in build_cxx.prompt.md. Create a new cxx app with [TYPE using TOPIC NAME] as reader(s) and [TYPE using TOPIC NAME] as writer(s)
    ```
    
    **Example Commands:**
@@ -94,18 +103,19 @@ cmake .. && make -j4
    Follow instructions in build_cxx.prompt.md. Create a new cxx app with Position and State as readers and Command as writer
    
    # Control system app  
-   Follow instructions in build_cxx.prompt.md. Create a new cxx app with Button as reader and Config, State, Command as writers
+   Follow instructions in build_cxx.prompt.md. Create a new cxx app with Button using ButtonTopic as reader and Config, State, Command as writers
    
    # Data collection app
    Follow instructions in build_cxx.prompt.md. Create a new cxx app with Button, Position, State as readers and Image as writer
    ```
 
-3. **Copilot Will Generate**:
-   - Application directory structure
-   - `CMakeLists.txt` with dependencies
-   - `application.hpp` for command-line parsing
-   - Main application with specified readers/writers
-   - DDS interface setup and message processing
+3. **Copilot Will**:
+  - Generate Application directory structure
+  - Generate `CMakeLists.txt` with dependencies
+  - Generate `application.hpp` for command-line parsing
+  - Generate main application with specified readers/writers
+  - Generate DDS Writer/Reader setup and message processing
+  - Rebuild DDS Types Library if necessary
 
 #### Step 5: Build and Test
 
@@ -116,6 +126,7 @@ cmake .. && make -j4
 ```
 
 # Test the application
+```
 ./your_new_app_name --help
 ./your_new_app_name
 ```

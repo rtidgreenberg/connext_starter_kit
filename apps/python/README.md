@@ -2,6 +2,16 @@
 
 Python applications demonstrating RTI Connext DDS capabilities with example data types.
 
+## Table of Contents
+- [Application Structure](#application-structure)
+- [Current Applications](#current-applications)
+- [Setup](#setup)
+- [Installation](#installation)
+- [Running Applications](#running-applications)
+- [Building DDS Python Bindings](#building-dds-python-bindings)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+
 ## Application Structure
 
 ```

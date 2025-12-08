@@ -2,6 +2,15 @@
 
 Data Distribution Service (DDS) layer for RTI Connext Starter Kit, providing data models, utility classes, and generated code for cross-language DDS communication.
 
+## Table of Contents
+- [Directory Structure](#directory-structure)
+- [Data Model (IDL Definitions)](#data-model-idl-definitions)
+- [Utility Classes (C++)](#utility-classes-c)
+- [Quality of Service (QoS) Profiles](#quality-of-service-qos-profiles)
+- [Generated Code](#generated-code)
+- [Building](#building)
+- [Use in Applications](#use-in-applications)
+
 ## Directory Structure
 
 ```

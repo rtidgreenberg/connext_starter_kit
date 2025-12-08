@@ -2,6 +2,16 @@
 
 Python implementation demonstrating minimal DDS middleware setup with RTI Connext.
 
+## Table of Contents
+- [Features](#features)
+- [Application Behavior](#application-behavior)
+- [Quick Start](#quick-start)
+- [Usage](#usage)
+- [Architecture](#architecture)
+- [Dependencies](#dependencies)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+
 ## Features
 
 - **Command/Button/Config Publishing**: Message publishing every 2 seconds

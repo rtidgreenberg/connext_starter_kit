@@ -2,6 +2,17 @@
 
 Reference DDS application demonstrating DDSReaderSetup, DDSWriterSetup, and DDSContextSetup utility classes with multiple readers, a writer, and distributed logging.
 
+## Table of Contents
+- [Features](#features)
+- [Application Behavior](#application-behavior)
+- [DDS Interfaces](#dds-interfaces)
+- [Quick Start](#quick-start)
+- [Usage](#usage)
+- [Utility Classes](#utility-classes)
+- [Integration Example](#integration-example)
+- [Application Lifecycle](#application-lifecycle)
+- [Dependencies](#dependencies)
+
 ## Features
 
 - **Reader/Writer Setup**: Easy DDS entity creation with `ASSIGNER_QOS` profiles
@@ -26,7 +37,7 @@ Reference DDS application demonstrating DDSReaderSetup, DDSWriterSetup, and DDSC
 | **Reader** | `example_types::Config` | `Config` | AsyncWaitSet | Configuration updates |
 | **Writer** | `example_types::Position` | `Position` | 500ms intervals | GPS location data |
 
-All interfaces use `dds_config::ASSIGNER_QOS` profile for XML-based QoS configuration.
+All interfaces use `dds_config::ASSIGNER_QOS` profile for runtime XML-based QoS re-assignment.
 
 ## Quick Start
 

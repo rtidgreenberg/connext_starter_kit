@@ -1,195 +1,138 @@
-# Flexible Autonomy System Toolkit
+# Flexible Autonomous System Toolkit
 
-A project template demonstrating cross-language DDS applications with RTI Connext DDS 7.3.0. Includes C++ and Python applications communicating through DDS with shared data models, utility classes, and best practices.
+A project template demonstrating cross-language DDS applications with RTI Connext DDS 7.3.0. Start here to explore use cases and navigate to detailed implementation guides.
 
-## 🚀 Quick Start
+## Table of Contents
+- [🎯 Use Cases and Examples](#-use-cases-and-examples)
+- [📚 Documentation](#-documentation)
+- [🛠️ Getting Started](#️-getting-started)
+- [Support](#support)
+
+## 🎯 Use Cases and Examples
+
+### 1. Generate Prototype C++ Applications with GitHub Copilot
+**Use Case**: Rapidly create new DDS applications using AI-powered code generation
+
+- **📖 Guide**: [C++ Application Creation with Copilot](apps/cxx11/README.md)
+- **🎯 What You'll Learn**:
+  - Use structured prompts to generate complete DDS applications
+  - Specify readers and writers for custom data flows
+  - Automatically generate CMakeLists.txt and project structure
+  - Create event-driven applications with AsyncWaitSet
+
+**Example**: Generate a sensor monitoring app with Position/State readers and Command writer
+```
+"Follow instructions in build_cxx.prompt.md. Create a new cxx app with Position and State as readers and Command as writer"
+```
+
+### 2. Basic I/O Application (Reference Implementation)
+**Use Case**: Learn fundamental DDS patterns and cross-language communication
+
+- **📖 C++ Guide**: [example_io_app C++](apps/cxx11/example_io_app/README.md)
+- **📖 Python Guide**: [example_io_app Python](apps/python/example_io_app/README.md)
+- **🎯 What You'll Learn**:
+  - Set up DomainParticipant and AsyncWaitSet/asyncio
+  - Create DataReaders and DataWriters with QoS profiles
+  - Handle incoming messages with event-driven callbacks
+  - Communicate between C++ and Python applications
+
+**Key Features**: 3 writers (Command, Button, Config), 1 reader (Position), distributed logging
+
+### 3. Command Override with Ownership Strength
+**Use Case**: Priority-based message arbitration with dynamic QoS changes
+
+- **📖 Guide**: [command_override](apps/cxx11/command_override/README.md)
+- **🎯 What You'll Learn**:
+  - Configure EXCLUSIVE ownership for priority control
+  - Use ownership strength to determine message authority
+  - Modify QoS programmatically at runtime
+  - Handle multiple competing publishers
+
+**Key Features**: 3 writers with different strengths (10, 20, 30), dynamic QoS modification, 4-phase demonstration
+
+### 4. Large Data Zero-Copy Transfer
+**Use Case**: High-performance transfer of large data (3 MB images @ 10 Hz) with minimal latency
+
+- **📖 Guide**: [fixed_image_flat_zc](apps/cxx11/fixed_image_flat_zc/README.md)
+- **🎯 What You'll Learn**:
+  - Use FlatData types for zero-copy communication
+  - Configure shared memory transport for maximum performance
+  - Handle data consistency with loaned samples
+  - Monitor throughput and latency
+
+**Key Features**: 3 MB fixed-size images, XCDR2 encoding, zero-copy intra-host, ~18.6 MB/sec throughput
+
+### 5. System Architecture and Best Practices
+**Use Case**: Understand the architectural patterns and design decisions
+
+- **📖 Guide**: [ARCHITECTURE.md](ARCHITECTURE.md)
+- **🎯 What You'll Learn**:
+  - Layered architecture (apps → DDS → middleware)
+  - Data type design patterns (simple, complex, FlatData)
+  - QoS profile selection guidelines
+  - Cross-language communication mechanics
+  - Build system organization
+
+**Key Topics**: Utility classes, topic-application matrix, QoS profiles, CMake structure
+
+## 📚 Documentation
+
+### Getting Started
+- **[System Architecture](ARCHITECTURE.md)** - Technical implementation details and patterns
+- **[DDS Layer](dds/README.md)** - Data models, utilities, and QoS profiles
+- **[C++ Applications](apps/cxx11/README.md)** - C++ development guide
+- **[Python Applications](apps/python/README.md)** - Python setup and development
+
+### Application Guides
+- **[example_io_app (C++)](apps/cxx11/example_io_app/README.md)** - Basic DDS patterns
+- **[example_io_app (Python)](apps/python/example_io_app/README.md)** - Python implementation
+- **[command_override](apps/cxx11/command_override/README.md)** - Ownership control
+- **[fixed_image_flat_zc](apps/cxx11/fixed_image_flat_zc/README.md)** - Zero-copy large data
+
+### Reference
+- **[GitHub Copilot Prompts](.github/prompts/)** - AI-powered app generation templates
+
+## 🛠️ Getting Started
 
 ### Prerequisites
 
 - **RTI Connext DDS 7.3.0+** installed and licensed
-- **RTI License File** (`rti_license.dat`) - required for Python applications
-- **C++14 compiler** (GCC 9.4.0+ or equivalent)
-- **Python 3.8+** with virtual environment support
+- **C++14 compiler** (GCC 7.3.0+ or equivalent) for C++ apps
+- **Python 3.8+** with virtual environment support for Python apps
 - **CMake 3.12+** for build configuration
+- **Git submodules**: Clone with `--recurse-submodules` or run `git submodule update --init --recursive`
 
-### Environment Setup
+### Quick Setup
 
 ```bash
-# Set RTI Connext DDS environment
+# 1. Set RTI environment
 export NDDSHOME=/path/to/rti_connext_dds-7.3.0
 
-# Clone repository with submodules
+# 2. Clone with submodules
 git clone --recurse-submodules <repository-url>
 cd connext_starter_kit
 
-# If already cloned without --recurse-submodules, initialize submodules:
-# git submodule update --init --recursive
-
-# The rticonnextdds-cmake-utils submodule is REQUIRED for building
-
-# IMPORTANT: Copy RTI license file for Python applications
+# 3. For Python apps - copy RTI license file
 cp /path/to/your/rti_license.dat apps/python/
-```
 
-### Build and Run
-
-```bash
-# 1. Build DDS shared libraries and bindings
-cd dds/cxx11 && mkdir build && cd build
+# 4. Build DDS layer (required first)
+cd dds/cxx11 && mkdir -p build && cd build
 cmake .. && make -j4
 
-cd ../../python && mkdir build && cd build  
-cmake .. && make -j4
-
-# 2. Build and run C++ application
-cd ../../../apps/cxx11/example_io_app && mkdir build && cd build
-cmake .. && make -j4
-./example_io_app
-
-# 3. In separate terminal - Setup and run Python application
-cd apps/python
-# Ensure RTI license file is present in the python/ directory
-ls rti_license.dat  # Should exist - copy if missing
-python -m venv connext_dds_env
-source connext_dds_env/bin/activate
-pip install -r requirements.txt
-# Run from python/ directory so license file is found
-python example_io_app/example_io_app.py
+# 5. Choose your path:
+#    - Generate new app with Copilot: See apps/cxx11/README.md
+#    - Build example_io_app: See apps/cxx11/example_io_app/README.md
+#    - Build command_override: See apps/cxx11/command_override/README.md
+#    - Build fixed_image_flat_zc: See apps/cxx11/fixed_image_flat_zc/README.md
+#    - Build Python apps: See apps/python/README.md
 ```
 
-## 📁 Repository Structure
+### Next Steps
 
-```
-connext_starter_kit/
-├── README.md                        # This file - project overview and setup
-├── .github/prompts/                 # GitHub Copilot prompt templates
-│   └── build_cxx.prompt.md         # C++ application generation instructions
-├── apps/                            # Application implementations
-│   ├── cxx11/                       # C++ applications with AI generation support
-│   │   ├── README.md                # C++ app creation guide with GitHub Copilot
-│   │   └── example_io_app/          # Reference C++ I/O demonstration application
-│   └── python/                      # Python applications
-│       ├── rti_license.dat          # RTI license file (REQUIRED - copy here)
-│       └── example_io_app/          # Python I/O demonstration application  
-├── dds/                             # DDS data models and utilities
-│   ├── README.md                    # DDS layer documentation
-│   ├── datamodel/                   # IDL data type definitions
-│   ├── cxx11/                       # C++ utilities and code generation
-│   ├── python/                      # Python code generation
-│   └── qos/                         # Quality of Service profiles
-└── resources/                       # External dependencies and utilities
-    └── rticonnextdds-cmake-utils/   # Git submodule: RTI CMake utilities
-```
-
-## What's Included
-
-### Multi-Language DDS Applications
-- **C++ Applications**: Reference implementations with AsyncWaitSet processing
-- **Python Applications**: Asyncio-based for rapid development
-- **Cross-Language Communication**: Seamless DDS topic communication
-- **AI-Powered Generation**: Create C++ apps using GitHub Copilot
-
-### Data Model
-- **6 IDL Data Types**: Command, Button, Config, Position, State, Image
-- **FlatData Zero-Copy**: High-performance large data transfers
-- **Configuration Constants**: Centralized QoS profiles and topic names
-- **Automatic Code Generation**: CMake-driven rtiddsgen integration
-
-### Utility Classes
-- **DDSContextSetup**: Centralized DomainParticipant and AsyncWaitSet management
-- **DDSReaderSetup/WriterSetup**: Simplified DataReader/DataWriter creation with status monitoring
-- **Distributed Logging**: RTI Admin Console integration for external log visibility
-- **QoS Profile Management**: Flexible XML-based configuration
-
-## Architecture Overview
-
-### Data Types and Topics
-| Data Type | Topic | Description | Example Publishers | Example Subscribers |
-|-----------|-------|-------------|-------------------|---------------------|
-| `Command` | `Command` | Control commands | Python | C++ |
-| `Button` | `Button` | Button events | Python | C++ |
-| `Config` | `Config` | Configuration | Python | C++ |
-| `Position` | `Position` | GPS location | C++ | Python |
-| `State` | `State` | System state | - | - |
-| `Image` | `Image` | Binary data | - | - |
-| `FinalFlatImage` | - | Large data (3 MB @ 10 Hz) | fixed_image_flat_zc | fixed_image_flat_zc |
-
-## Development Workflow
-
-### Creating C++ Applications with GitHub Copilot
-
-Use build prompt templates to rapidly create DDS applications:
-
-```bash
-# 1. Open the build prompt in your editor
-code .github/prompts/build_cxx.prompt.md
-
-# 2. Use GitHub Copilot Chat with commands like:
-# "Follow instructions in build_cxx.prompt.md. Create a new cxx app with [READERS] as reader(s) and [WRITERS] as writer(s)"
-
-# Examples:
-# - Sensor app: "...with Position and State as readers and Command as writer"  
-# - Control app: "...with Button as reader and Config, State, Command as writers"
-# - Monitor app: "...with Button, Position, State as readers and Image as writer"
-```
-
-**Copilot automatically generates:**
-- Complete application directory structure
-- CMakeLists.txt with proper RTI integration  
-- Command-line parsing utilities (application.hpp)
-- Main application with your specified DDS interfaces
-- Event-driven processing and message publishing loops
-- Comprehensive README documentation
-
-**GitHub Copilot Integration**: Applications can be created entirely using the structured prompt process with commands like:
-```
-Follow instructions in build_cxx.prompt.md. Create a new cxx app with [READERS] as reader and [WRITERS] as writers
-```
-
-```bash
-# Open build prompt
-code .github/prompts/build_cxx.prompt.md
-
-# Use GitHub Copilot Chat
-"Follow instructions in build_cxx.prompt.md. Create a new cxx app with Position and State as readers and Command as writer"
-```
-
-See **[C++ Application Creation Guide](apps/cxx11/README.md)** for details.
-
-### Adding New Data Types
-1. Define in `dds/datamodel/*.idl`
-2. Add topic to `DDSDefs.idl`
-3. Rebuild: `cd dds/cxx11/build && make -j4`
-
-### Configuring QoS
-1. Edit `dds/qos/DDS_QOS_PROFILES.xml`
-2. Applications automatically pick up changes (no recompilation)
-
-## Troubleshooting
-
-### Build Issues
-```bash
-# Set RTI environment
-export NDDSHOME=/path/to/rti_connext_dds-7.3.0
-
-# Initialize submodules (required for CMake)
-git submodule update --init --recursive
-
-# Create build directories
-mkdir -p dds/cxx11/build dds/python/build
-```
-
-### Runtime Issues
-- **QoS File Not Found**: Check relative paths from build directory
-- **Domain Mismatch**: Ensure same domain ID (default: 1)
-- **Python License**: Copy `rti_license.dat` to `apps/python/` and run from that directory
-- **Monitoring**: Use RTI Admin Console for distributed logs
-
-## Documentation
-
-- **[DDS Layer](dds/README.md)** - Data models and utilities
-- **[C++ Apps](apps/cxx11/README.md)** - C++ application guide
-- **[Python Apps](apps/python/README.md)** - Python setup and apps
+1. **Read [ARCHITECTURE.md](ARCHITECTURE.md)** to understand the system design
+2. **Choose a use case** from the list above based on your needs
+3. **Follow the specific guide** for detailed build and run instructions
+4. **Explore [DDS Layer documentation](dds/README.md)** to understand data models and utilities
 
 ## Support
 

@@ -2,6 +2,14 @@
 
 CMake configuration for generating C++11 code from IDL files using RTI Connext DDS and building a shared library.
 
+## Table of Contents
+- [Overview](#overview)
+- [Generated Files](#generated-files)
+- [Building](#building)
+- [Integration](#integration)
+- [CMake Configuration](#cmake-configuration)
+- [Troubleshooting](#troubleshooting)
+
 ## Overview
 
 The CMakeLists.txt automatically discovers and generates C++11 code from **all IDL files** in `../datamodel/` using rtiddsgen. Generated code is compiled into a shared library (`libdds_utils_datamodel.so`) for use by C++11 applications.

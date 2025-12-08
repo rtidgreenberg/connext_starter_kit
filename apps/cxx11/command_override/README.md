@@ -2,6 +2,13 @@
 
 Demonstrates RTI Connext DDS advanced patterns including ownership strength control, and programmatic QoS modification.
 
+## Table of Contents
+- [Features](#features)
+- [Behavior](#behavior)
+- [Building](#building)
+- [Running](#running)
+- [Key Concepts](#key-concepts)
+
 ## Features
 
 - **Ownership Strength Control**: Priority-based command arbitration

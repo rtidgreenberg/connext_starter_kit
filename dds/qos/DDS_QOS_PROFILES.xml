@@ -52,7 +52,7 @@
       </qos_profile>
 
 
-      <qos_profile name="LargeDataParticipant" base_name="DefaultParticipant">
+      <qos_profile name="LargeDataSHMEMParticipant" base_name="DefaultParticipant">
 
         <!-- 
           USE CASE: 
@@ -60,9 +60,13 @@
           larger than default 65kB and where resource impact would be considerable 
           if applied system wide. 
 
-          This is intended to be used in tandem with a LargeDataQoS set at the Topic level  
+          This is intended to be used in tandem with a LargeDataSHMEMQoS set at the Topic level  
           so the application can use either UDP or SHMEM, but the LargeData Topic selects  
           only SHMEM so it has access to the larger message_size_max.
+
+          This profile is NOT intended to be used with ZeroCopy SHMEM i.e. SHMEM REF  
+          as we don't need to change the message_size_max or receive_buffer_size when just sending
+          a reference to the memory segment.
         -->
 
         <domain_participant_qos>
@@ -94,6 +98,8 @@
           </transport_builtin>
         </domain_participant_qos>
       </qos_profile>
+
+
 
     </qos_library>
 
@@ -448,8 +454,12 @@
 
 
       <!-- 
-      USE CASE:
-      Large Data being sent over SHMEM with lowest latency required i.e. no RELIABILITY> 
+        USE CASE:
+        Large Data being sent over SHMEM with lowest latency required i.e. no RELIABILITY> 
+        NOT for ZeroCopy SHMEM. 
+        Use in tandem with LargeDataSHMEM Participant where the application can interact  
+        over either SHMEM or UDP, but this specific topic is pinned to just SHMEM so as to 
+        enable the larger message_size_max.
       -->
 
 
@@ -479,7 +489,7 @@
           </transport_selection>
 
         <!-- 
-            The default is normally 23 samples.
+            The default is normally 32 samples.
             This just allocates less memory up front for very large samples 
           -->
           <resource_limits>
@@ -491,13 +501,15 @@
         <datareader_qos>
 
         <!-- 
-          In Admin Console can look under QoS tab for "publication name" to 
+          In Admin Console can look under QoS tab for "subscription name" to 
           see which QoS Profile is being used
           -->
           <subscription_name>
             <name>LargeDataReader</name>
           </subscription_name>
 
+          <!-- We need to select just the SHMEM transport to enable usage of the 
+          larger message_szie_max for this topic -->
           <transport_selection>
             <enabled_transports>
               <element>shmem</element>
@@ -512,18 +524,20 @@
     </qos_profile>
 
 
-    <qos_profile name="LargeDataSHMEM_ZCQoS" base_name="LargeDataSHMEMQoS">
+    <qos_profile name="LargeDataSHMEM_ZCQoS" base_name="BuiltinQosLib::Generic.Common">
 
       <!-- 
       USE CASE:
       Large Data using SHMEM with Zero-Copy Transfer Mode
-      Inherits from LargeDataSHMEMQoS and adds QoS for ZC impact
+
+      This just sends a reference to the SHMEM segment and makes no copies.
+      Using this mode we don't need to increase the SHMEM receive buffer size or  
+      increase the message_size_max.
       
       KEY FEATURES:
-      - Zero-copy transfers within the same host (true zero-copy in shared memory)
-      - No serialization overhead between hosts (requires same endianness)
-      - Optimized for FlatData with direct memory access
       - Application Acknowledgement to prevent data inconsistencies between reader and writer due to direct memory access.
+      - Increased Reliability Mechanism rate to minimize latency.
+      - Set Writer buffers per system requirements to minimize sample re-use as alternative mechanism
       -->
 
       <!-- Increase the RELIABILITY traffic rate to ensure minimal latency -->
@@ -546,8 +560,23 @@
           <acknowledgment_kind>APPLICATION_AUTO_ACKNOWLEDGMENT_MODE</acknowledgment_kind>
         </reliability>
 
+        <writer_resource_limits>
 
-          
+          <writer_loaned_sample_allocation>
+
+            <!-- 
+              To extend the time to reuse a sample, use a large sample pool
+              Depending on system requirements this could be used as an alternative 
+              strategy to mitigate data inconsistency vs using the Apllication Reliability Mechanism.
+              -->
+            <initial_count>32</initial_count>
+
+            <!-- Define any resource upper bound constraints -->
+            <max_count>LENGTH_UNLIMITED</max_count>
+
+          </writer_loaned_sample_allocation>
+
+        </writer_resource_limits>
 
       </datawriter_qos>
 

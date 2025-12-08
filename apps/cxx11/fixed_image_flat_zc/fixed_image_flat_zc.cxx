@@ -65,8 +65,13 @@ void process_final_flat_image_data(dds::sub::DataReader<example_types::FinalFlat
 
 void run(unsigned int domain_id, const std::string& qos_file_path)
 {
-    // Use provided QoS file path and generated constants from IDL
-    const std::string qos_profile = dds_config::LARGE_DATA_PARTICIPANT_QOS;
+
+    /**
+     * Use provided QoS file path and generated constants from IDL
+     * Can use Default Participant QOS as no special QOS is needed at  
+     * Domain Participant level for SHMEM Zero Copy
+     * */
+    const std::string qos_profile = dds_config::DEFAULT_PARTICIPANT_QOS;
 
     std::cout << "FinalFlatImage application starting on domain " << domain_id << std::endl;
     std::cout << "Using QoS file: " << qos_file_path << std::endl;

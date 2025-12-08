@@ -1,11 +1,11 @@
 # Example I/O Application
 
-Reference DDS application demonstrating DDSReaderSetup, DDSWriterSetup, and DDSContext utility classes with multiple readers, a writer, and distributed logging.
+Reference DDS application demonstrating DDSReaderSetup, DDSWriterSetup, and DDSContextSetup utility classes with multiple readers, a writer, and distributed logging.
 
 ## Features
 
 - **Reader/Writer Setup**: Easy DDS entity creation with `ASSIGNER_QOS` profiles
-- **DDSContext Management**: Centralized participant and AsyncWaitSet handling (5-thread pool)
+- **DDSContextSetup Management**: Centralized participant and AsyncWaitSet handling (Default 5-thread pool)
 - **GPS Simulation**: Continuous position data publishing at 500ms intervals
 - **Distributed Logger**: System-wide logging via RTI Admin Console with remote verbosity control
 - **Event-Driven**: AsyncWaitSet-based message processing with custom callbacks
@@ -59,7 +59,7 @@ Options:
 
 ## Utility Classes
 
-**DDSContext**: 
+**DDSContextSetup**: 
 - Manages DomainParticipant lifecycle and QoS profiles
 - Centralized AsyncWaitSet with thread pool
 - Integrates RTI distributed logger
@@ -106,19 +106,20 @@ const std::string qos_profile = dds_config::DEFAULT_PARTICIPANT_QOS;
 const std::string APP_NAME = "Example CXX IO APP";
 constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
 
-auto dds_context = std::make_shared<DDSContext>(domain_id, ASYNC_WAITSET_THREADPOOL_SIZE, 
+auto dds_context = std::make_shared<DDSContextSetup>(domain_id, ASYNC_WAITSET_THREADPOOL_SIZE, 
                                                qos_file_path, qos_profile, APP_NAME);
 
 // Create multiple readers with ASSIGNER_QOS profile  
-auto command_interface = std::make_shared<DDSInterface<example_types::Command>>(
-    dds_context, KIND::READER, topics::COMMAND_TOPIC, qos_file_path, dds_config::ASSIGNER_QOS);
+auto command_reader = std::make_shared<DDSReaderSetup<example_types::Command>>(
+    dds_context, topics::COMMAND_TOPIC, qos_file_path, dds_config::ASSIGNER_QOS);
 
 // Create position writer for GPS data publishing
-auto position_interface = std::make_shared<DDSInterface<example_types::Position>>(
-    dds_context, KIND::WRITER, topics::POSITION_TOPIC, qos_file_path, dds_config::ASSIGNER_QOS);
+auto position_writer = std::make_shared<DDSWriterSetup<example_types::Position>>(
+    dds_context, topics::POSITION_TOPIC, qos_file_path, dds_config::ASSIGNER_QOS);
 
 // Enable async processing with custom callbacks
-command_interface->enable_async_waitset(process_command_data);
+command_reader->set_data_handler(process_command_data);
+command_reader->enable_async();
 
 // Use distributed logger with error handling
 auto& logger = dds_context->distributed_logger();
@@ -131,7 +132,7 @@ try {
     pos_msg.latitude(37.7749);
     pos_msg.longitude(-122.4194);
     pos_msg.altitude(15.0);
-    position_interface->writer().write(pos_msg);
+    position_writer->writer().write(pos_msg);
 } catch (const std::exception &ex) {
     logger.error("Failed to publish position: " + std::string(ex.what()));
 }
@@ -140,7 +141,7 @@ try {
 ## Application Lifecycle
 
 The application includes proper initialization and cleanup:
-- **Startup**: Creates DDSContext with thread pool, initializes all interfaces
+- **Startup**: Creates DDSContextSetup with thread pool, initializes all interfaces
 - **Runtime**: Publishes Position messages every 500ms while listening for incoming data
 - **Shutdown**: Graceful signal handling (Ctrl+C), distributed logger cleanup, DomainParticipant factory finalization
 

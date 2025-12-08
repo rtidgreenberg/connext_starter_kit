@@ -140,7 +140,7 @@ All generated applications follow these established patterns:
 #### **DDSContext Setup**
 ```cpp
 // Centralized DDS participant management
-auto dds_context = std::make_shared<DDSContext>(
+auto dds_context = std::make_shared<DDSContextSetup>(
     domain_id, 
     ASYNC_WAITSET_THREADPOOL_SIZE, 
     qos_file_path, 
@@ -149,21 +149,19 @@ auto dds_context = std::make_shared<DDSContext>(
 );
 ```
 
-#### **DDSInterface Creation** 
+#### **Reader/Writer Setup** 
 ```cpp
 // Reader example
-auto button_interface = std::make_shared<DDSInterface<example_types::Button>>(
+auto button_reader = std::make_shared<DDSReaderSetup<example_types::Button>>(
     dds_context,
-    KIND::READER,
     topics::BUTTON_TOPIC,
     qos_file_path,
     dds_config::ASSIGNER_QOS
 );
 
 // Writer example
-auto config_interface = std::make_shared<DDSInterface<example_types::Config>>(
+auto config_writer = std::make_shared<DDSWriterSetup<example_types::Config>>(
     dds_context,
-    KIND::WRITER, 
     topics::CONFIG_TOPIC,
     qos_file_path,
     dds_config::ASSIGNER_QOS
@@ -183,8 +181,9 @@ void process_your_data(dds::sub::DataReader<example_types::YourType> reader) {
     }
 }
 
-// Enable async processing
-your_interface->enable_async_waitset(process_your_data);
+// Enable async processing with DDSReaderSetup
+your_reader->set_data_handler(process_your_data);
+your_reader->enable_async();
 ```
 
 #### **Message Publishing**
@@ -265,7 +264,7 @@ All applications automatically link against:
 - **RTI Connext DDS 7.3.0+** with distributed logger support
 - **DDS Utilities Library**: `libdds_utils_datamodel.so` 
 - **Generated Headers**: ExampleTypes.hpp, DDSDefs.hpp
-- **Utility Classes**: DDSContext.hpp, DDSInterface.hpp
+- **Utility Classes**: DDSContextSetup.hpp, DDSReaderSetup.hpp, DDSWriterSetup.hpp
 
 ## Getting Started
 

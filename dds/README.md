@@ -70,7 +70,7 @@ Benefits: Centralized configuration, type safety, cross-language consistency.
 
 Located in `cxx11/src/utils/`.
 
-### DDSContext.hpp
+### DDSContextSetup.hpp
 
 Complete DDS context management with participant lifecycle, distributed logging, and event handling.
 
@@ -243,13 +243,14 @@ cmake .. && make -j4
 ```cpp
 #include "ExampleTypes.hpp"
 #include "DDSDefs.hpp"
-#include "DDSContext.hpp"
+#include "DDSContextSetup.hpp"
 #include "DDSReaderSetup.hpp"
 #include "DDSWriterSetup.hpp"
 
-DDSContext context(domain_id, qos_file);
-auto position_writer = DDSWriterSetup<example_types::Position>::create(
-    context, topics::POSITION_TOPIC, dds_config::DEFAULT_QOS
+auto dds_context = std::make_shared<DDSContextSetup>(domain_id, thread_pool_size, 
+                                                      qos_file, qos_profile, app_name);
+auto position_writer = std::make_shared<DDSWriterSetup<example_types::Position>>(
+    dds_context, topics::POSITION_TOPIC, qos_file, dds_config::ASSIGNER_QOS
 );
 ```
 

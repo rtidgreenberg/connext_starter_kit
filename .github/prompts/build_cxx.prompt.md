@@ -1,8 +1,8 @@
 - Don't use distributed logger macro syntax
 - Use example_io_app as explicit reference
 - Follow exact usage in example_io_app of DDS API's
-- Follow exact usage in example_io_app of DDSContext API usage
-- Follow exact usage in example_io_app of DDSInterface API usage
+- Follow exact usage in example_io_app of DDSContextSetup API usage
+- Follow exact usage in example_io_app of DDSReaderSetup and DDSWriterSetup API usage
 - Follow exact usage of Distributed Logger api from example_io_app
 - Clean and make after adding new data type
 - Make sure all types are regenerated and included in headers

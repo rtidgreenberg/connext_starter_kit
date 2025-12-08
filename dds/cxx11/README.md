@@ -54,7 +54,7 @@ dds/cxx11/
 │   │   ├── DDSDefs.cxx/.hpp
 │   │   └── DDSDefsPlugin.cxx/.hpp
 │   └── utils/                  # Header-only template utilities
-│       ├── DDSContext.hpp
+│       ├── DDSContextSetup.hpp
 │       ├── DDSReaderSetup.hpp
 │       └── DDSWriterSetup.hpp
 └── build/
@@ -70,7 +70,7 @@ Generated shared library is used by C++11 applications in `../../apps/cxx11/`. A
 
 - **Type Safety**: Generated C++11 classes with compile-time type checking
 - **Plugin Integration**: RTI DDS type plugins for serialization/deserialization
-- **Header-Only Utils**: Template-based DDSContext, DDSReaderSetup, DDSWriterSetup utilities
+- **Header-Only Utils**: Template-based DDSContextSetup, DDSReaderSetup, DDSWriterSetup utilities
 - **RPATH Configuration**: Proper runtime library path handling
 
 ## Automatic Discovery
@@ -83,7 +83,7 @@ CMake automatically finds all `*.idl` files in `../datamodel/` using `file(GLOB)
 #include "ExampleTypes.hpp"
 #include "FinalFlatImage.hpp"
 #include "DDSDefs.hpp"
-#include "DDSContext.hpp"
+#include "DDSContextSetup.hpp"
 #include "DDSReaderSetup.hpp"
 #include "DDSWriterSetup.hpp"
 

@@ -96,7 +96,7 @@ connext_starter_kit/
 - **Automatic Code Generation**: CMake-driven rtiddsgen integration
 
 ### Utility Classes
-- **DDSContext**: Centralized DomainParticipant and AsyncWaitSet management
+- **DDSContextSetup**: Centralized DomainParticipant and AsyncWaitSet management
 - **DDSReaderSetup/WriterSetup**: Simplified DataReader/DataWriter creation with status monitoring
 - **Distributed Logging**: RTI Admin Console integration for external log visibility
 - **QoS Profile Management**: Flexible XML-based configuration

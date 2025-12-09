@@ -32,3 +32,5 @@ dds/datamodel/cxx11_gen/
 dds/datamodel/python_gen/
 
 dds/datamodel/xml_gen/
+
+services/log_dir/

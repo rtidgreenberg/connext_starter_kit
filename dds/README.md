@@ -15,16 +15,24 @@ Data Distribution Service (DDS) layer for RTI Connext Starter Kit, providing dat
 
 ```
 dds/
-├── datamodel/              # IDL definitions
-│   ├── ExampleTypes.idl    # Data structures
-│   └── DDSDefs.idl         # Configuration constants
-├── qos/                    # Quality of Service configs
+├── CMakeLists.txt          # Unified build configuration
+├── BUILD.md                # Detailed build instructions
+├── README.md               # This file
+├── datamodel/              # IDL definitions and generated code
+│   ├── idl/                # Source IDL files
+│   │   ├── ExampleTypes.idl    # Data structures
+│   │   └── Definitions.idl     # Configuration constants (QoS, domains, topics)
+│   ├── cxx11_gen/          # Generated C++ types (auto-generated)
+│   ├── python_gen/         # Generated Python types (auto-generated)
+│   └── xml_gen/            # Generated XML representations (auto-generated)
+├── qos/                    # Quality of Service configurations
 │   └── DDS_QOS_PROFILES.xml
-├── cxx11/                  # C++11 utilities and generated code
-│   ├── src/utils/          # Utility classes
-│   └── src/codegen/        # Generated C++ types
-└── python/                 # Python generated code
-    └── codegen/            # Generated Python types
+├── utils/cxx11/            # C++11 utility classes (header-only)
+│   ├── DDSContextSetup.hpp # DDS context management
+│   ├── DDSReaderSetup.hpp  # Template reader interface
+│   └── DDSWriterSetup.hpp  # Template writer interface
+└── build/                  # CMake build directory (created during build)
+    └── lib/                # Generated shared libraries
 ```
 
 ## Data Model (IDL Definitions)
@@ -60,75 +68,51 @@ Core data structures demonstrating common DDS patterns.
 - `@final @language_binding(FLAT_DATA)` with `@transfer_mode(SHMEM_REF)`
 - Zero-copy 3 MB payload for high-throughput applications
 
-### DDSDefs.idl
+### Definitions.idl
 
-Centralizes DDS configuration constants and topic names.
+Centralizes DDS configuration constants organized into three modules: `qos_profiles`, `domains`, and `topics`.
 
-**QoS Configuration:**
-- `DEFAULT_QOS_FILE_PATH`, `DEFAULT_PARTICIPANT_QOS`, `LARGE_DATA_PARTICIPANT_QOS`
-- `ASSIGNER_QOS`, `EVENT_QOS`, `METADATA_QOS`, `STATUS_QOS`
-- `LARGE_DATA_SHMEM_QOS`, `LARGE_DATA_SHMEM_ZC_QOS`
-- `DEFAULT_DOMAIN_ID`
+**Module: qos_profiles** - QoS Profile Names:
+- Domain Participant: `DEFAULT_PARTICIPANT`, `LARGE_DATA_PARTICIPANT`
+- Data Patterns: `ASSIGNER`, `EVENT`, `METADATA`, `STATUS`
+- Command Override: `COMMAND_STRENGTH_10`, `COMMAND_STRENGTH_20`, `COMMAND_STRENGTH_30`
+- Large Data: `LARGE_DATA_SHMEM`, `LARGE_DATA_SHMEM_ZC`
 
-**Topic Names:**
-- `COMMAND_TOPIC`, `CONFIG_TOPIC`, `POSITION_TOPIC`, `STATE_TOPIC`, `BUTTON_TOPIC`, `IMAGE_TOPIC`
+**Module: domains** - Domain IDs:
+- `DEFAULT_DOMAIN_ID = 1`
+- `TEST_DOMAIN_ID = 100`
 
-Benefits: Centralized configuration, type safety, cross-language consistency.
+**Module: topics** - Topic Names:
+- `COMMAND_TOPIC`, `CONFIG_TOPIC`, `POSITION_TOPIC`, `STATE_TOPIC`, `BUTTON_TOPIC`, `IMAGE_TOPIC`, `FINAL_FLAT_IMAGE_TOPIC`
+
+Benefits: Centralized configuration, namespace safety (avoids conflicts with DDS library), type safety, cross-language consistency.
 
 ## C++11 Utility Classes
 
-Located in `cxx11/src/utils/`.
+Header-only template classes located in `utils/cxx11/` for simplified DDS application development.
 
-### DDSContextSetup.hpp
+### DDSContextSetup
 
-Complete DDS context management with participant lifecycle, distributed logging, and event handling.
-
-**Features:**
-- DomainParticipant management
-- QoS profile integration
-- Distributed logging
-- AsyncWaitSet with thread pool
-- Signal handling for graceful shutdown
-
-### DDSReaderSetup.hpp & DDSWriterSetup.hpp
-
-Template classes for reader/writer setup with status monitoring and event processing.
+Complete DDS context management (in `DDSContextSetup.hpp`).
 
 **Features:**
-- Status condition handlers
-- AsyncWaitSet integration
-- Callback-based event processing
-- Topic-based QoS assignment
-- Simplified reader/writer creation
+- DomainParticipant lifecycle management
+- QoS profile integration from XML
+- Distributed logging support
+- AsyncWaitSet with configurable thread pool
+- Signal handling for graceful shutdown (SIGINT, SIGTERM)
 
-## QoS Configuration
+### DDSReaderSetup & DDSWriterSetup
 
-Located in `qos/DDS_QOS_PROFILES.xml`.
+Generic template classes (in `DDSReaderSetup.hpp` and `DDSWriterSetup.hpp`) for creating type-safe readers and writers.
 
-### Domain Participant Profiles
-    destination_id: str = idl.field(key=True, max_length=32)
-    # ... other fields
-    
-# DDSDefs.py  
-dds_config = idl.get_module("dds_config")
-topics = idl.get_module("topics")
+**Features:**
+- Automatic topic and QoS configuration
+- Status condition monitoring (LivelinessChanged, DataAvailable, etc.)
+- AsyncWaitSet integration for event-driven processing
+- Callback-based data handling
+- Simplified entity creation with error handling
 
-dds_config.DEFAULT_QOS_FILE_PATH = "../../../../dds/qos/DDS_QOS_PROFILES.xml"
-topics.COMMAND_TOPIC = "Command"
-```
-
-### Code Generation Process:
-
-1. **CMake Integration** - Automated generation via CMake
-2. **rtiddsgen Tool** - RTI's IDL-to-Python compiler
-3. **Dependency Tracking** - Regeneration when IDL files change
-4. **Import Ready** - Generated modules ready for Python import
-
-#### Build Commands:
-```bash
-cd dds/python/build
-cmake ..
-make -j4
 ## QoS Configuration
 
 Located in `qos/DDS_QOS_PROFILES.xml`.
@@ -142,148 +126,125 @@ Located in `qos/DDS_QOS_PROFILES.xml`.
 - **EventQoS** - Event-driven communication
 - **MetadataQoS** - Metadata and configuration
 - **StatusQoS** - Status and health monitoring
+- **CommandStrength10QoS/20QoS/30QoS** - Command override with ownership strength
 - **LargeDataSHMEMQoS** - Large data with shared memory
 - **LargeDataSHMEM_ZCQoS** - Zero-copy transfer mode
 
-## Code Generation
+Profile names are centralized in `Definitions.idl` (qos_profiles module) for cross-language consistency.
 
-### C++ Generation
-```bash
-cd dds/cxx11/build
-cmake .. && make -j4
-```
-Generates: `ExampleTypes.hpp/cxx`, `FinalFlatImage.hpp/cxx`, `DDSDefs.hpp/cxx` with plugins
-
-### Python Generation
-```bash
-cd dds/python/build
-cmake .. && make -j4
-```
-Generates: `ExampleTypes.py`, `DDSDefs.py` with module structure
+## Building
 
 ### Prerequisites
 - **RTI Connext DDS 7.3.0+** installed and licensed
 - **CMake 3.12+** for build automation
-- **C++11 compiler** (GCC, Clang, MSVC)
-- **Python 3.6+** with RTI Python API
+- **C++14 compiler** (GCC 7.3+, Clang, MSVC)
+- **Python 3.6+** with RTI Connext Python API (for Python generation)
 
-### Setup Steps:
-
-1. **Set RTI Environment**
-   ```bash
-   export NDDSHOME=/path/to/rti_connext_dds-7.3.0
-   ```
-
-2. **Generate C++ Code**
-   ```bash
-   cd dds/cxx11/build
-   cmake ..
-   make -j4
-   ```
-
-3. **Generate Python Code**  
-   ```bash
-   cd dds/python/build
-   cmake ..
-   make -j4
-   ```
-
-4. **Verify Generation**
-   ```bash
-   # Check C++ headers
-   ls dds/cxx11/src/codegen/*.hpp
-   
-   # Check Python modules
-   ls dds/python/codegen/*.py
-   ```
-
-### Usage in Applications:
-
-#### C++ Applications:
-```cpp
-#include "ExampleTypes.hpp"
-#include "DDSDefs.hpp"
-
-// Use generated types
-example_types::Position position;
-position.latitude(40.7128);
-position.longitude(-74.0060);
-
-// Use constants
-dds::topic::Topic<example_types::Position> topic(
-    participant, 
-    topics::POSITION_TOPIC
-);
-```
-
-#### Python Applications:  
-```python
-from codegen.ExampleTypes import example_types
-from codegen.DDSDefs import topics, dds_config
-
-# Use generated types
-position = example_types.Position()
-position.latitude = 40.7128  
-position.longitude = -74.0060
-
-# Use constants
-position_topic = dds.Topic(
-    participant,
-## Getting Started
-
-### Build DDS Libraries
+### Quick Start
 
 ```bash
-# Set environment
+# Set RTI environment variable
 export NDDSHOME=/path/to/rti_connext_dds-7.3.0
 
-# Build C++ library
-cd dds/cxx11 && mkdir -p build && cd build
-cmake .. && make -j4
+# Build all type support (C++, Python, XML)
+cd dds
+mkdir -p build && cd build
+cmake ..
+make -j4
 
-# Build Python library
-cd ../../python && mkdir -p build && cd build
-cmake .. && make -j4
+# Verify generated files
+ls ../datamodel/cxx11_gen/*.hpp
+ls ../datamodel/python_gen/*.py
+ls ../datamodel/xml_gen/*.xml
 ```
 
-### Use in Applications
+This generates all type support files automatically:
+- **C++**: `ExampleTypes.hpp/cxx`, `Definitions.hpp/cxx` with plugins → `build/lib/libdds_typesupport.so`
+- **Python**: `ExampleTypes.py`, `Definitions.py` with module structure  
+- **XML**: `ExampleTypes.xml`, `Definitions.xml` for documentation
 
-**C++ Applications:**
+### CMake Build Options
+- `GENERATE_CXX11_TYPES` (default: ON) - Generate C++11 type support
+- `GENERATE_PYTHON_TYPES` (default: ON) - Generate Python type support
+- `GENERATE_XML_TYPES` (default: ON) - Generate XML representations
+- `GENERATE_DEFINITIONS` (default: ON) - Generate Definitions constants (header-only)
+- `BUILD_CXX_TYPES_LIBRARY` (default: ON) - Build C++ type support shared library
+
+See [BUILD.md](BUILD.md) for detailed build instructions and customization options.
+
+## Use in Applications
+
+### C++ Applications
+
+Include the generated types and utility classes:
+
 ```cpp
 #include "ExampleTypes.hpp"
-#include "DDSDefs.hpp"
+#include "Definitions.hpp"
 #include "DDSContextSetup.hpp"
 #include "DDSReaderSetup.hpp"
 #include "DDSWriterSetup.hpp"
 
-auto dds_context = std::make_shared<DDSContextSetup>(domain_id, thread_pool_size, 
-                                                      qos_file, qos_profile, app_name);
+// Create DDS context with QoS profile
+auto dds_context = std::make_shared<DDSContextSetup>(
+    domains::DEFAULT_DOMAIN_ID, 
+    thread_pool_size, 
+    qos_file, 
+    qos_profiles::DEFAULT_PARTICIPANT, 
+    app_name);
+
+// Create writer with topic and QoS profile
 auto position_writer = std::make_shared<DDSWriterSetup<example_types::Position>>(
-    dds_context, topics::POSITION_TOPIC, qos_file, dds_config::ASSIGNER_QOS
+    dds_context, 
+    topics::POSITION_TOPIC, 
+    qos_file, 
+    qos_profiles::ASSIGNER
 );
 ```
 
-**Python Applications:**
-```python
-from codegen import example_types, dds_config, topics
+### Python Applications
 
+Import generated modules and use constants:
+
+```python
+import rti.connextdds as dds
+from python_gen import ExampleTypes
+from python_gen.Definitions import topics, qos_profiles, domains
+
+# Load QoS provider
+qos_provider = dds.QosProvider("path/to/DDS_QOS_PROFILES.xml")
+
+# Create participant with QoS profile
+participant = dds.DomainParticipant(
+    domains.DEFAULT_DOMAIN_ID,
+    qos_provider.participant_qos_from_profile(qos_profiles.DEFAULT_PARTICIPANT)
+)
+
+# Create topic
+topic = dds.Topic(participant, topics.POSITION_TOPIC, ExampleTypes.Position)
+
+# Create writer with QoS profile
 writer = dds.DataWriter(
     publisher, 
-    topics.POSITION_TOPIC,
-    example_types.Position
+    topic,
+    qos_provider.datawriter_qos_from_profile(qos_profiles.ASSIGNER)
 )
 ```
 
 ## Adding New Data Types
 
-1. Define in `datamodel/ExampleTypes.idl`
-2. Add topic name to `datamodel/DDSDefs.idl`
-3. Regenerate code: `cd dds/cxx11/build && make -j4`
-4. Update applications to use new types
+1. Define in `datamodel/idl/ExampleTypes.idl`
+2. Add topic name to `datamodel/idl/Definitions.idl` (topics module)
+3. Regenerate code: `cd dds/build && make -j4`
+4. Update applications to use new types (reference via `topics::YOUR_TOPIC`)
+
+## Modifying QoS Profiles
 
 1. **Edit XML** (`qos/DDS_QOS_PROFILES.xml`)
-2. **Test Changes** with existing applications
-3. **Document Updates** in application README files
+2. **Add profile name** to `datamodel/idl/Definitions.idl` (qos_profiles module) if needed
+3. **Regenerate**: `cd dds/build && make -j4`
+4. **Test Changes** with existing applications
+5. **Document Updates** in application README files
 
 ### Best Practices:
 - ✅ **Use @key annotations** for topic instances

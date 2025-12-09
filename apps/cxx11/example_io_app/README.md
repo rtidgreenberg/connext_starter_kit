@@ -15,7 +15,7 @@ Reference DDS application demonstrating DDSReaderSetup, DDSWriterSetup, and DDSC
 
 ## Features
 
-- **Reader/Writer Setup**: Easy DDS entity creation with `ASSIGNER_QOS` profiles
+- **Reader/Writer Setup**: Easy DDS entity creation with `qos_profiles::ASSIGNER` profiles
 - **DDSContextSetup Management**: Centralized participant and AsyncWaitSet handling (Default 5-thread pool)
 - **GPS Simulation**: Continuous position data publishing at 500ms intervals
 - **Distributed Logger**: System-wide logging via RTI Admin Console with remote verbosity control
@@ -24,7 +24,7 @@ Reference DDS application demonstrating DDSReaderSetup, DDSWriterSetup, and DDSC
 
 ## Application Behavior
 
-- **Subscribers**: Command, Button, Config readers (AsyncWaitSet with `ASSIGNER_QOS`)
+- **Subscribers**: Command, Button, Config readers (AsyncWaitSet with `qos_profiles::ASSIGNER`)
 - **Publisher**: Position data (GPS coordinates: 37.7749, -122.4194, 15m altitude) every 500ms
 - **Distributed Logging**: Info/error messages viewable in RTI Admin Console
 
@@ -37,7 +37,7 @@ Reference DDS application demonstrating DDSReaderSetup, DDSWriterSetup, and DDSC
 | **Reader** | `example_types::Config` | `Config` | AsyncWaitSet | Configuration updates |
 | **Writer** | `example_types::Position` | `Position` | 500ms intervals | GPS location data |
 
-All interfaces use `dds_config::ASSIGNER_QOS` profile for runtime XML-based QoS re-assignment.
+All interfaces use `qos_profiles::ASSIGNER` profile for runtime XML-based QoS re-assignment.
 
 ## Quick Start
 
@@ -82,7 +82,7 @@ Options:
 
 ## QoS Configuration
 
-Uses `dds_config::ASSIGNER_QOS` profile enabling:
+Uses `qos_profiles::ASSIGNER` profile enabling:
 - **Topic-Specific QoS**: Settings assigned per topic in XML
 - **Runtime Flexibility**: Different QoS policies without code changes
 - **External Management**: Tune settings via XML without recompiling
@@ -113,20 +113,20 @@ This pattern allows the same application code to work with different QoS require
 
 ```cpp
 // Create context with distributed logging and async waitset
-const std::string qos_profile = dds_config::DEFAULT_PARTICIPANT_QOS;
+const std::string qos_profile = qos_profiles::DEFAULT_PARTICIPANT;
 const std::string APP_NAME = "Example CXX IO APP";
 constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
 
 auto dds_context = std::make_shared<DDSContextSetup>(domain_id, ASYNC_WAITSET_THREADPOOL_SIZE, 
                                                qos_file_path, qos_profile, APP_NAME);
 
-// Create multiple readers with ASSIGNER_QOS profile  
+// Create multiple readers with qos_profiles::ASSIGNER profile  
 auto command_reader = std::make_shared<DDSReaderSetup<example_types::Command>>(
-    dds_context, topics::COMMAND_TOPIC, qos_file_path, dds_config::ASSIGNER_QOS);
+    dds_context, topics::COMMAND_TOPIC, qos_file_path, qos_profiles::ASSIGNER);
 
 // Create position writer for GPS data publishing
 auto position_writer = std::make_shared<DDSWriterSetup<example_types::Position>>(
-    dds_context, topics::POSITION_TOPIC, qos_file_path, dds_config::ASSIGNER_QOS);
+    dds_context, topics::POSITION_TOPIC, qos_file_path, qos_profiles::ASSIGNER);
 
 // Enable async processing with custom callbacks
 command_reader->set_data_handler(process_command_data);
@@ -164,7 +164,7 @@ The application includes proper initialization and cleanup:
 - DDS utility library (`libdds_utils_datamodel.so`) built from `../../../dds/cxx11/`
 - Generated C++ bindings:
   - `ExampleTypes.hpp/cpp` - Data type definitions
-  - `DDSDefs.hpp/cpp` - Configuration constants and topic names
+  - `Definitions.hpp/cpp` - Configuration constants and topic names
 - QoS profiles XML file: `../../../../dds/qos/DDS_QOS_PROFILES.xml`
 
 ## Build Process

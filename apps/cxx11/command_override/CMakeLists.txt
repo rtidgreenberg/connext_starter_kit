@@ -21,14 +21,14 @@ find_package(RTIConnextDDS
 )
 
 # Set up directories
-set(DDS_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../dds/cxx11")
-set(DDS_LIB_BUILD_DIR "${DDS_LIB_DIR}/build/lib")
-set(DDS_CODEGEN_DIR "${DDS_LIB_DIR}/src/codegen")
-set(DDS_UTILS_DIR "${DDS_LIB_DIR}/src/utils")
+set(DDS_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../dds/build")
+set(DDS_LIB_BUILD_DIR "${DDS_BUILD_DIR}/lib")
+set(DDS_CODEGEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../dds/datamodel/cxx11_gen")
+set(DDS_UTILS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../dds/utils/cxx11")
 
-# Find the shared library
-find_library(DDS_UTILS_DATAMODEL_LIB 
-    NAMES dds_utils_datamodel
+# Find the shared libraries
+find_library(DDS_TYPESUPPORT_LIB 
+    NAMES dds_typesupport
     PATHS ${DDS_LIB_BUILD_DIR}
     NO_DEFAULT_PATH
     REQUIRED
@@ -52,7 +52,7 @@ target_include_directories(command_override
 # Link with libraries
 target_link_libraries(command_override
     PRIVATE
-        ${DDS_UTILS_DATAMODEL_LIB}
+        ${DDS_TYPESUPPORT_LIB}
         RTIConnextDDS::cpp2_api
         RTIConnextDDS::distributed_logger_cpp2
         RTIConnextDDS::metp  # Required for ZeroCopy types used by other apps in library
@@ -83,7 +83,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 
 # Print information
-message(STATUS "DDS shared library: ${DDS_UTILS_DATAMODEL_LIB}")
+message(STATUS "DDS shared library: ${DDS_TYPESUPPORT_LIB}")
 message(STATUS "DDS codegen headers: ${DDS_CODEGEN_DIR}")
 message(STATUS "DDS utils headers: ${DDS_UTILS_DIR}")
 

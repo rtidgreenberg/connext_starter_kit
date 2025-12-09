@@ -17,7 +17,7 @@
 #include <csignal>
 #include <string>
 #include <dds/core/ddscore.hpp>
-#include "DDSDefs.hpp"
+#include "Definitions.hpp"
 
 namespace application {
 
@@ -88,7 +88,7 @@ namespace application {
         int arg_processing = 1;
         bool show_usage = false;
         ParseReturn parse_result = ParseReturn::ok;
-        unsigned int domain_id = dds_config::DEFAULT_DOMAIN_ID;
+        unsigned int domain_id = domains::DEFAULT_DOMAIN_ID;
         rti::config::Verbosity verbosity(rti::config::Verbosity::EXCEPTION);
         std::string qos_file_path = "../../../../dds/qos/DDS_QOS_PROFILES.xml"; // Default QoS file
 

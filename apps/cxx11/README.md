@@ -71,11 +71,11 @@ cd ../../dds/datamodel/
 - `Image` - Image data with metadata
 - `FinalFlatImage` - High-performance FlatData type
 
-#### Step 2: Add Topic Constants to DDSDefs (Optional)
+#### Step 2: Add Topic Constants to Definitions (Optional)
 If using new data types, add topic name constants:
 
 ```cpp
-// Edit ../../dds/datamodel/DDSDefs.idl
+// Edit ../../dds/datamodel/idl/Definitions.idl
 module topics {
     const string YOUR_NEW_TOPIC = "YourNewTopic";
     // Add other topic constants as needed
@@ -84,7 +84,7 @@ module topics {
 
 #### Step 3: Regenerate DDS Code (If new/changed IDL) (Optional)
 ```bash
-cd ../../dds/cxx11 && rm -rf build && mkdir build && cd build
+cd ../../dds/build
 cmake .. && make -j4
 ```
 
@@ -167,7 +167,7 @@ auto button_reader = std::make_shared<DDSReaderSetup<example_types::Button>>(
     dds_context,
     topics::BUTTON_TOPIC,
     qos_file_path,
-    dds_config::ASSIGNER_QOS
+    qos_profiles::ASSIGNER
 );
 
 // Writer example
@@ -175,7 +175,7 @@ auto config_writer = std::make_shared<DDSWriterSetup<example_types::Config>>(
     dds_context,
     topics::CONFIG_TOPIC,
     qos_file_path,
-    dds_config::ASSIGNER_QOS
+    qos_profiles::ASSIGNER
 );
 ```
 
@@ -217,7 +217,7 @@ while (!application::shutdown_requested) {
 
 1. **Follow Naming Conventions**: Use descriptive names that reflect your application's purpose
 2. **Use Existing Data Types**: Leverage existing IDL types when possible to maintain interoperability  
-3. **Consistent QoS Profiles**: Use `dds_config::ASSIGNER_QOS` for flexible XML-based QoS configuration
+3. **Consistent QoS Profiles**: Use `qos_profiles::ASSIGNER` for flexible XML-based QoS configuration
 4. **Error Handling**: Include comprehensive exception handling for all DDS operations
 5. **Distributed Logging**: Integrate with RTI distributed logger for system-wide monitoring - external visibility of logs over DDS with infrastructure services or your own apps
 6. **Signal Handling**: Implement graceful shutdown with Ctrl+C handling
@@ -274,7 +274,7 @@ ls $NDDSHOME/rti_license.dat
 All applications automatically link against:
 - **RTI Connext DDS 7.3.0+** with distributed logger support
 - **DDS Utilities Library**: `libdds_utils_datamodel.so` 
-- **Generated Headers**: ExampleTypes.hpp, DDSDefs.hpp
+- **Generated Headers**: ExampleTypes.hpp, Definitions.hpp
 - **Utility Classes**: DDSContextSetup.hpp, DDSReaderSetup.hpp, DDSWriterSetup.hpp
 
 ## Getting Started

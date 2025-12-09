@@ -1,0 +1,53 @@
+/*
+ * Definitions.idl
+ * 
+ * DDS definitions including topic names, QoS profiles, and domain configuration
+ * Centralizes DDS configuration for consistent usage across applications
+ */
+
+// QoS Profile Names
+module qos_profiles {
+
+    // Domain Participant Profiles
+    const string LARGE_DATA_PARTICIPANT = "DPLibrary::LargeDataParticipant";
+    const string DEFAULT_PARTICIPANT = "DPLibrary::DefaultParticipant";
+
+    // Data Pattern Profiles
+    const string ASSIGNER = "DataPatternsLibrary::AssignerQoS";
+    const string EVENT = "DataPatternsLibrary::EventQoS";
+    const string METADATA = "DataPatternsLibrary::MetadataQoS";
+    const string STATUS = "DataPatternsLibrary::StatusQoS";
+    
+    // Command Override Profiles (with ownership strength)
+    const string COMMAND_STRENGTH_10 = "DataPatternsLibrary::CommandStrength10QoS";
+    const string COMMAND_STRENGTH_20 = "DataPatternsLibrary::CommandStrength20QoS";
+    const string COMMAND_STRENGTH_30 = "DataPatternsLibrary::CommandStrength30QoS";
+    
+    // Large Data Transfer Profiles
+    const string LARGE_DATA_SHMEM = "DataPatternsLibrary::LargeDataSHMEMQoS";
+    const string LARGE_DATA_SHMEM_ZC = "DataPatternsLibrary::LargeDataSHMEM_ZCQoS";
+
+};
+
+// Domain Configuration
+module domains {
+
+    // Domain IDs
+    const long DEFAULT_DOMAIN_ID = 1;
+    const long TEST_DOMAIN_ID = 100;
+
+};
+
+// Topic Names
+module topics {
+
+    // Example Type Topics
+    const string COMMAND_TOPIC = "Command";
+    const string CONFIG_TOPIC = "Config";
+    const string POSITION_TOPIC = "Position";
+    const string STATE_TOPIC = "State";
+    const string BUTTON_TOPIC = "Button";
+    const string IMAGE_TOPIC = "Image";
+    const string FINAL_FLAT_IMAGE_TOPIC = "FinalFlatImage";
+
+};

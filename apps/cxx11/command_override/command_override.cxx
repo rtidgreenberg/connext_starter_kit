@@ -27,7 +27,7 @@
 
 #include "application.hpp"  // for command line parsing and ctrl-c
 #include "ExampleTypes.hpp"
-#include "DDSDefs.hpp"
+#include "Definitions.hpp"
 #include "DDSContextSetup.hpp"
 #include "DDSReaderSetup.hpp"
 #include "DDSWriterSetup.hpp"
@@ -91,7 +91,7 @@ void process_subscription_matched(dds::sub::DataReader<example_types::Command>& 
 void run(unsigned int domain_id, const std::string &qos_file_path)
 {
     // Use provided QoS file path and generated constants from IDL
-    const std::string qos_profile = dds_config::DEFAULT_PARTICIPANT_QOS;
+    const std::string qos_profile = qos_profiles::DEFAULT_PARTICIPANT;
 
     std::cout << "Command Override application starting on domain " << domain_id
               << std::endl;
@@ -115,7 +115,7 @@ void run(unsigned int domain_id, const std::string &qos_file_path)
                     dds_context,
                     topics::COMMAND_TOPIC,
                     qos_file_path,
-                    dds_config::COMMANDSTRENGTH10_QOS);
+                    qos_profiles::COMMAND_STRENGTH_10);
 
     // Set a custom handler for subscription matched events (optional)
     // If not set, default handler will be used
@@ -127,21 +127,21 @@ void run(unsigned int domain_id, const std::string &qos_file_path)
                     dds_context,
                     topics::COMMAND_TOPIC,
                     qos_file_path,
-                    dds_config::COMMANDSTRENGTH10_QOS);
+                    qos_profiles::COMMAND_STRENGTH_10);
 
     auto command_writer_20 =
             std::make_shared<DDSWriterSetup<example_types::Command>>(
                     dds_context,
                     topics::COMMAND_TOPIC,
                     qos_file_path,
-                    dds_config::COMMANDSTRENGTH20_QOS);
+                    qos_profiles::COMMAND_STRENGTH_20);
 
     auto command_writer_30 =
             std::make_shared<DDSWriterSetup<example_types::Command>>(
                     dds_context,
                     topics::COMMAND_TOPIC,
                     qos_file_path,
-                    dds_config::COMMANDSTRENGTH30_QOS);
+                    qos_profiles::COMMAND_STRENGTH_30);
 
     // Enable Asynchronous Event-Driven processing for command reader
     command_reader->set_data_available_handler(process_command_data);

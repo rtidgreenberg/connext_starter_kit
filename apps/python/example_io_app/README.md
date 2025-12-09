@@ -16,7 +16,7 @@ Python implementation demonstrating minimal DDS middleware setup with RTI Connex
 
 - **Command/Button/Config Publishing**: Message publishing every 2 seconds
 - **Position Subscription**: Async subscriber for Position messages
-- **ASSIGNER_QOS Profile**: XML-based QoS configuration
+- **qos_profiles.ASSIGNER Profile**: XML-based QoS configuration
 - **Cross-Language Communication**: Interoperability with C++ applications
 - **Distributed Logger**: RTI distributed logging for remote monitoring
 - **Error Handling**: Comprehensive exception handling and graceful shutdown
@@ -146,7 +146,7 @@ DEFAULT_CONFIG_DESTINATION = "config_target"   # Modify config targets
 
 - **RTI Connext DDS 7.3.0+** with Python API
 - **Python 3.6-3.12** (RTI-compatible versions)
-- **Generated Python DDS types** (ExampleTypes.py, DDSDefs.py)
+- **Generated Python DDS types** (ExampleTypes.py, Definitions.py)
 - **QoS profile XML file** (DDS_QOS_PROFILES.xml)
 - **Virtual environment** (recommended for RTI API isolation)
 

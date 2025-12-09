@@ -27,7 +27,7 @@
 
 #include "application.hpp"  // for command line parsing and ctrl-c
 #include "ExampleTypes.hpp"
-#include "DDSDefs.hpp"
+#include "Definitions.hpp"
 #include "DDSContextSetup.hpp"
 #include "DDSReaderSetup.hpp"
 #include "DDSWriterSetup.hpp"
@@ -94,7 +94,7 @@ void process_config_data(dds::sub::DataReader<example_types::Config> reader)
 void run(unsigned int domain_id, const std::string& qos_file_path)
 {
     // Use provided QoS file path and generated constants from IDL
-    const std::string qos_profile = dds_config::DEFAULT_PARTICIPANT_QOS;
+    const std::string qos_profile = qos_profiles::DEFAULT_PARTICIPANT;
 
     std::cout << "Example I/O application starting on domain " << domain_id << std::endl;
     std::cout << "Using QoS file: " << qos_file_path << std::endl;
@@ -110,26 +110,26 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
         dds_context,
         topics::COMMAND_TOPIC,
         qos_file_path,
-        dds_config::ASSIGNER_QOS);
+        qos_profiles::ASSIGNER);
 
     auto button_reader = std::make_shared<DDSReaderSetup<example_types::Button>>(
         dds_context,
         topics::BUTTON_TOPIC,
         qos_file_path,
-        dds_config::ASSIGNER_QOS);
+        qos_profiles::ASSIGNER);
 
     auto config_reader = std::make_shared<DDSReaderSetup<example_types::Config>>(
         dds_context,
         topics::CONFIG_TOPIC,
         qos_file_path,
-        dds_config::ASSIGNER_QOS);
+        qos_profiles::ASSIGNER);
 
     // Setup Writer Interfaces
     auto position_writer = std::make_shared<DDSWriterSetup<example_types::Position>>(
         dds_context,
         topics::POSITION_TOPIC,
         qos_file_path,
-        dds_config::ASSIGNER_QOS);
+        qos_profiles::ASSIGNER);
 
     // Enable Asynchronous Event-Driven processing for readers
     command_reader->set_data_available_handler(process_command_data);

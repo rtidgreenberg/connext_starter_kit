@@ -19,12 +19,12 @@ import rti.logging.distlog as distlog
 
 # Add the DDS Python codegen path to Python path
 sys.path.insert(
-    0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "dds", "python")
+    0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "dds", "datamodel")
 )
 
 # Import DDS Data Types, Topics and config constants
-from codegen.ExampleTypes import example_types
-from codegen.DDSDefs import topics, dds_config
+from python_gen.ExampleTypes import example_types
+from python_gen.Definitions import topics, qos_profiles, domains
 
 # Application constants
 PUBLISHER_SLEEP_INTERVAL = 2  # seconds for command/button/config publishing
@@ -67,14 +67,14 @@ class ExampleIOApp:
         # a DDS domain. Typically there is one DomainParticipant per application.
         # DomainParticipant QoS is configured in DDS_QOS_PROFILES.xml
         participant_qos = qos_provider.participant_qos_from_profile(
-            dds_config.DEFAULT_PARTICIPANT_QOS
+            qos_profiles.DEFAULT_PARTICIPANT
         )
 
         participant_qos.participant_name.name = app_name
         participant = dds.DomainParticipant(domain_id, participant_qos)
 
         print(
-            f"DomainParticipant created with QoS profile: {dds_config.DEFAULT_PARTICIPANT_QOS}"
+            f"DomainParticipant created with QoS profile: {qos_profiles.DEFAULT_PARTICIPANT}"
         )
         print(f"DOMAIN ID: {domain_id}")
 
@@ -103,7 +103,7 @@ class ExampleIOApp:
         # Using set_topic_data_reader_qos APUI allows us to use the external Assign QoS Profile
         # Otherwise can just use the regular datareader_qos_from_profile API
         position_reader_qos = qos_provider.set_topic_datareader_qos(
-            dds_config.ASSIGNER_QOS, topics.POSITION_TOPIC
+            qos_profiles.ASSIGNER, topics.POSITION_TOPIC
         )
         position_reader = dds.DataReader(
             participant.implicit_subscriber, position_topic, position_reader_qos
@@ -111,21 +111,21 @@ class ExampleIOApp:
 
         # Create DataWriters with QoS configured from DDS_QOS_PROFILES.xml
         command_writer_qos = qos_provider.set_topic_datawriter_qos(
-            dds_config.ASSIGNER_QOS, topics.COMMAND_TOPIC
+            qos_profiles.ASSIGNER, topics.COMMAND_TOPIC
         )
         command_writer = dds.DataWriter(
             participant.implicit_publisher, command_topic, command_writer_qos
         )
 
         button_writer_qos = qos_provider.set_topic_datawriter_qos(
-            dds_config.ASSIGNER_QOS, topics.BUTTON_TOPIC
+            qos_profiles.ASSIGNER, topics.BUTTON_TOPIC
         )
         button_writer = dds.DataWriter(
             participant.implicit_publisher, button_topic, button_writer_qos
         )
 
         config_writer_qos = qos_provider.set_topic_datawriter_qos(
-            dds_config.ASSIGNER_QOS, topics.CONFIG_TOPIC
+            qos_profiles.ASSIGNER, topics.CONFIG_TOPIC
         )
         config_writer = dds.DataWriter(
             participant.implicit_publisher, config_topic, config_writer_qos

@@ -36,7 +36,7 @@ apps/python/
 - **Publishes:** Command, Button, Config messages
 - **Features:**
   - RTI asyncio framework integration
-  - ASSIGNER_QOS profile usage
+  - qos_profiles.ASSIGNER profile usage
   - Distributed logger integration
   - Cross-language communication with C++ apps
 
@@ -154,8 +154,8 @@ MAIN_TASK_SLEEP_INTERVAL = 5  # seconds
 
 # QoS Configuration
 QOS_FILE_PATH = "../../dds/qos/DDS_QOS_PROFILES.xml"
-DEFAULT_PARTICIPANT_QOS = "DPLibrary::DefaultParticipant"
-ASSIGNER_QOS = "DataPatternsLibrary::AssignerQoS"
+qos_profiles.DEFAULT_PARTICIPANT = "DPLibrary::DefaultParticipant"
+qos_profiles.ASSIGNER = "DataPatternsLibrary::AssignerQoS"
 ```
 
 ### QoS Profiles
@@ -238,7 +238,7 @@ deactivate
 ### Generated Python Modules
 The following are automatically created via CMake:
 - `../../dds/python/codegen/ExampleTypes.py` (example_types module)
-- `../../dds/python/codegen/DDSDefs.py` (Topic definitions and QoS constants)
+- `../../dds/python/codegen/Definitions.py` (Topic definitions and QoS constants)
 
 ## Installation and Usage
 
@@ -407,7 +407,7 @@ To modify the application behavior:
 1. **Publishing Rate**: Modify `PUBLISHER_SLEEP_INTERVAL` (default: 2 seconds)
 2. **Status Updates**: Modify `MAIN_TASK_SLEEP_INTERVAL` (default: 5 seconds)
 3. **Domain ID**: Change default domain ID in argument parser (default: 1)
-4. **QoS Profiles**: Update profile names in DDSDefs configuration
+4. **QoS Profiles**: Update profile names in Definitions configuration
 5. **QoS File Location**: Modify path to QoS XML file as needed
 
 ### Cross-Application Communication

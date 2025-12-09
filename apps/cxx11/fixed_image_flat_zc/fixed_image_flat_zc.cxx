@@ -28,7 +28,7 @@
 
 #include "application.hpp"  // for command line parsing and ctrl-c
 #include "ExampleTypes.hpp"
-#include "DDSDefs.hpp"
+#include "Definitions.hpp"
 #include "DDSContextSetup.hpp"
 #include "DDSReaderSetup.hpp"
 #include "DDSWriterSetup.hpp"
@@ -71,7 +71,7 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
      * Can use Default Participant QOS as no special QOS is needed at  
      * Domain Participant level for SHMEM Zero Copy
      * */
-    const std::string qos_profile = dds_config::DEFAULT_PARTICIPANT_QOS;
+    const std::string qos_profile = qos_profiles::DEFAULT_PARTICIPANT;
 
     std::cout << "FinalFlatImage application starting on domain " << domain_id << std::endl;
     std::cout << "Using QoS file: " << qos_file_path << std::endl;
@@ -87,14 +87,14 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
         dds_context,
         topics::FINAL_FLAT_IMAGE_TOPIC,
         qos_file_path,
-        dds_config::LARGE_DATA_SHMEM_ZC_QOS);
+        qos_profiles::LARGE_DATA_SHMEM_ZC);
 
     // Setup Reader Interface for FinalFlatImage type
     auto final_flat_image_reader = std::make_shared<DDSReaderSetup<example_types::FinalFlatImage>>(
         dds_context,
         topics::FINAL_FLAT_IMAGE_TOPIC,
         qos_file_path,
-        dds_config::LARGE_DATA_SHMEM_ZC_QOS);
+        qos_profiles::LARGE_DATA_SHMEM_ZC);
 
     // Enable Asynchronous Event-Driven processing for reader
     final_flat_image_reader->set_data_available_handler(process_final_flat_image_data);

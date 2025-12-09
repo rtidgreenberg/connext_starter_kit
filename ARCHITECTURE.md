@@ -148,11 +148,16 @@ writer_setup.write(command_sample);
 ### IDL Organization
 
 ```
-dds/datamodel/
-├── ExampleTypes.idl    # Business data types (Command, Button, Config, etc.)
-├── DDSDefs.idl         # Topic names and constants
+dds/datamodel/idl/
+├── ExampleTypes.idl    # Business data types (Command, Button, Config, Position, etc.)
+├── Definitions.idl     # Configuration constants (QoS profiles, domains, topics)
 └── (Future additions)  # Additional domain-specific types
 ```
+
+**Definitions.idl modules:**
+- `qos_profiles` - QoS profile name constants
+- `domains` - Domain ID constants  
+- `topics` - Topic name constants
 
 
 ## Quality of Service (QoS)

@@ -46,8 +46,18 @@
               <!-- <allow_interfaces_list>
                 <element>$(ALLOW_INTERFACES_LIST)</element>
               </allow_interfaces_list> -->
+
             </udpv4>
           </transport_builtin>
+
+
+          <resource_limits>
+
+            <!-- Uncomment below to disable Type Objects from being sent out -->
+            <!-- <type_object_max_serialized_length>0</type_object_max_serialized_length>
+            <type_code_max_serialized_length>0</type_code_max_serialized_length> -->
+          </resource_limits>
+
         </domain_participant_qos>
       </qos_profile>
 
@@ -154,6 +164,7 @@
             <nanosec>0</nanosec>
           </lease_duration>
         </liveliness>
+
 
       </datawriter_qos>
 

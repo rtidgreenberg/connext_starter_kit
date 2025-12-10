@@ -34,3 +34,5 @@ dds/datamodel/python_gen/
 dds/datamodel/xml_gen/
 
 services/log_dir/
+
+apps/cxx11/large_data_app/build/

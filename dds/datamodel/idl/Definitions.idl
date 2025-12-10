@@ -9,7 +9,7 @@
 module qos_profiles {
 
     // Domain Participant Profiles
-    const string LARGE_DATA_PARTICIPANT = "DPLibrary::LargeDataParticipant";
+    const string LARGE_DATA_PARTICIPANT = "DPLibrary::LargeDataSHMEMParticipant";
     const string DEFAULT_PARTICIPANT = "DPLibrary::DefaultParticipant";
 
     // Data Pattern Profiles

@@ -50,8 +50,21 @@ A project template demonstrating cross-language DDS applications with RTI Connex
 
 **Key Features**: 3 writers with different strengths (10, 20, 30), dynamic QoS modification, 4-phase demonstration
 
-### 4. Large Data Zero-Copy Transfer
-**Use Case**: High-performance transfer of large data (3 MB images @ 10 Hz) with minimal latency
+### 4. Large Data SHMEM Transfer between C++ and Python
+**Use Case**: Efficient transfer of large data (~900 KB images) using shared memory transport in C++ and Python
+
+- **📖 C++ Guide**: [large_data_app C++](apps/cxx11/large_data_app/README.md)
+- **📖 Python Guide**: [large_data_app Python](apps/python/large_data_app/README.md)
+- **🎯 What You'll Learn**:
+  - Configure large data participant and QoS profiles (LARGE_DATA_SHMEM)
+  - Use shared memory transport for efficient intra-host data transfer
+  - Handle large payloads with Image data type
+  - Cross-language large data communication (C++ ↔ Python over SHMEM)
+
+**Key Features**: 640x480 RGB images (~900 KB), shared memory transport (C++ & Python), 1 Hz publishing, distributed logging
+
+### 5. Large Data Zero-Copy Transfer
+**Use Case**: Maximum performance transfer of large data (3 MB images @ 10 Hz) with zero-copy
 
 - **📖 Guide**: [fixed_image_flat_zc](apps/cxx11/fixed_image_flat_zc/README.md)
 - **🎯 What You'll Learn**:
@@ -62,7 +75,7 @@ A project template demonstrating cross-language DDS applications with RTI Connex
 
 **Key Features**: 3 MB fixed-size images, XCDR2 encoding, zero-copy intra-host, ~18.6 MB/sec throughput
 
-### 5. System Architecture and Best Practices
+### 6. System Architecture and Best Practices
 **Use Case**: Understand the architectural patterns and design decisions
 
 - **📖 Guide**: [ARCHITECTURE.md](ARCHITECTURE.md)
@@ -87,6 +100,8 @@ A project template demonstrating cross-language DDS applications with RTI Connex
 - **[example_io_app (C++)](apps/cxx11/example_io_app/README.md)** - Basic DDS patterns
 - **[example_io_app (Python)](apps/python/example_io_app/README.md)** - Python implementation
 - **[command_override](apps/cxx11/command_override/README.md)** - Ownership control
+- **[large_data_app (C++)](apps/cxx11/large_data_app/README.md)** - Large data with shared memory
+- **[large_data_app (Python)](apps/python/large_data_app/README.md)** - Python large data shared memory transfer
 - **[fixed_image_flat_zc](apps/cxx11/fixed_image_flat_zc/README.md)** - Zero-copy large data
 
 ### Reference

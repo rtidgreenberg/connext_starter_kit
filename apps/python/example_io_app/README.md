@@ -56,7 +56,7 @@ python example_io_app/example_io_app.py [OPTIONS]
 Options:
   -d, --domain_id <int>    DDS domain ID (default: 1)
   -v, --verbosity <int>    Logging verbosity 0-5 (default: 1)
-  -q, --qos_file <path>    QoS XML path (default: ../../dds/qos/DDS_QOS_PROFILES.xml)
+  -q, --qos_file <path>    QoS XML path (default: ../../../dds/qos/DDS_QOS_PROFILES.xml)
   -h, --help              Show help
 ```
 [CONFIG_PUBLISHER] Published Config - Parameter: update_rate

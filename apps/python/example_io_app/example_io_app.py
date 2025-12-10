@@ -82,6 +82,7 @@ class ExampleIOApp:
         logger_options = distlog.LoggerOptions()
         logger_options.domain_id = domain_id
         logger_options.application_kind = app_name + "-DistLogger"
+        logger_options.participant = participant
         distlog.Logger.init(logger_options)
         print(
             f"RTI Distributed Logger configured for domain {domain_id} with application kind: {app_name}"
@@ -262,8 +263,8 @@ def main():
     )
 
     parser.add_argument(
-        "-q", "--qos_file", type=str, default="../../dds/qos/DDS_QOS_PROFILES.xml",
-        help="Path to QoS profiles XML file (default: ../../dds/qos/DDS_QOS_PROFILES.xml)"
+        "-q", "--qos_file", type=str, default="../../../dds/qos/DDS_QOS_PROFILES.xml",
+        help="Path to QoS profiles XML file (default: ../../../dds/qos/DDS_QOS_PROFILES.xml)"
     )
 
     args = parser.parse_args()

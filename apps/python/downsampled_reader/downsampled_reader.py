@@ -28,6 +28,56 @@ from python_gen.Definitions import topics, qos_profiles
 DEFAULT_APP_NAME = "Downsampled Position Reader"
 
 
+# Define custom listener by inheriting from DataReaderListener
+class PositionReaderListener(dds.DataReaderListener):
+    def on_requested_deadline_missed(self, reader, status):
+        """Callback for when requested deadline is missed"""
+        print(f"[DEADLINE_MISSED] Publisher failed to send data within deadline period!")
+        print(f"  Total count: {status.total_count}")
+        print(f"  Total count change: {status.total_count_change}")
+        print(f"  Last instance handle: {status.last_instance_handle}")
+        distlog.Logger.warning(
+            f"Requested deadline missed - total: {status.total_count}, change: {status.total_count_change}"
+        )
+    
+    def on_subscription_matched(self, reader, status):
+        """Callback for when subscription is matched or unmatched with a publication"""
+        if status.current_count_change > 0:
+            print(f"[SUBSCRIPTION_MATCHED] Matched with a new publisher!")
+            print(f"  Current count: {status.current_count}")
+            print(f"  Current count change: {status.current_count_change}")
+            print(f"  Last publication handle: {status.last_publication_handle}")
+            distlog.Logger.info(
+                f"Subscription matched - publishers: {status.current_count}"
+            )
+        elif status.current_count_change < 0:
+            print(f"[SUBSCRIPTION_UNMATCHED] Lost connection to a publisher!")
+            print(f"  Current count: {status.current_count}")
+            print(f"  Current count change: {status.current_count_change}")
+            distlog.Logger.warning(
+                f"Subscription unmatched - publishers: {status.current_count}"
+            )
+    
+    def on_liveliness_changed(self, reader, status):
+        """Callback for when liveliness of a matched publication changes"""
+        if status.alive_count_change > 0:
+            print(f"[LIVELINESS_GAINED] Publisher became alive!")
+            print(f"  Alive count: {status.alive_count}")
+            print(f"  Not alive count: {status.not_alive_count}")
+            print(f"  Last publication handle: {status.last_publication_handle}")
+            distlog.Logger.info(
+                f"Liveliness gained - alive publishers: {status.alive_count}"
+            )
+        elif status.not_alive_count_change > 0:
+            print(f"[LIVELINESS_LOST] Publisher lost liveliness!")
+            print(f"  Alive count: {status.alive_count}")
+            print(f"  Not alive count: {status.not_alive_count}")
+            print(f"  Last publication handle: {status.last_publication_handle}")
+            distlog.Logger.warning(
+                f"Liveliness lost - not alive publishers: {status.not_alive_count}"
+            )
+
+
 async def process_position_data(reader):
     """Process incoming Position data with 1Hz downsampling"""
     async for data in reader.take_data_async():
@@ -88,10 +138,25 @@ class DownsampledReaderApp:
             "DataPatternsLibrary::Status1HzQoS"
         )
         position_reader = dds.DataReader(
-            participant.implicit_subscriber, position_topic, position_reader_qos
+            participant.implicit_subscriber, 
+            position_topic, 
+            position_reader_qos
+        )
+
+        # Set the listener with the appropriate status mask
+        listener = PositionReaderListener()
+        position_reader.set_listener(
+            listener, 
+            dds.StatusMask.REQUESTED_DEADLINE_MISSED | 
+            dds.StatusMask.SUBSCRIPTION_MATCHED |
+            dds.StatusMask.LIVELINESS_CHANGED
         )
 
         print("[SUBSCRIBER] RTI Asyncio reader configured for Position data with 1Hz downsampling...")
+        print("[SUBSCRIBER] Listener callbacks enabled:")
+        print("  - on_requested_deadline_missed: Triggers if publisher stops sending data")
+        print("  - on_subscription_matched: Triggers when publishers connect/disconnect")
+        print("  - on_liveliness_changed: Triggers when publisher liveliness changes")
 
         # Process Position data
         print("[MAIN] Starting RTI asyncio tasks...")

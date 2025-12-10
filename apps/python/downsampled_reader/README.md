@@ -1,14 +1,15 @@
 # Downsampled Reader Application
 
-A Python application demonstrating **time-based filtering** for receiving downsampled data at a reduced rate (1Hz) from a topic that may be published at a higher frequency.
+A Python application demonstrating **time-based filtering** and **status listeners** for receiving downsampled data at a reduced rate (1Hz) from a topic that may be published at a higher frequency, with comprehensive awareness of DDS events.
 
 ## Overview
 
-This application showcases a common DDS pattern where:
+This application showcases common DDS patterns where:
 - **High-frequency data** is published on a topic (e.g., sensor data at 10Hz, 100Hz, or faster)
 - **Multiple subscribers** can receive the same data at different rates based on their needs
 - **GUI/monitoring applications** subscribe with time-based filtering to reduce CPU load and network bandwidth
 - **Control systems** subscribe without filtering to receive every sample for real-time processing
+- **Status listeners** provide real-time awareness of publisher health, connectivity, and data flow
 
 ### Key Benefits
 
@@ -16,6 +17,7 @@ This application showcases a common DDS pattern where:
 2. **Bandwidth Optimization**: Reduces data rate for remote monitoring, dashboards, or logging applications
 3. **CPU Efficiency**: GUI applications avoid processing high-frequency updates that exceed display refresh rates
 4. **Same Topic, Different Rates**: Multiple applications can share the same topic with different QoS settings
+5. **DDS Event Awareness**: Status listeners detect publisher connection, disconnection, liveliness changes, and deadline misses
 
 ## Use Case: GUI Subscribing to Downsampled Data
 
@@ -100,6 +102,63 @@ Since Position is a keyed type, the optimization doesn't apply. For writer-side 
 - Each DataReader can apply different TIME_BASED_FILTER values independently
 - The filtering happens efficiently in the DDS middleware, not in application code
 - Application CPU is saved, but network bandwidth is not reduced
+
+### Status Listeners for DDS Event Awareness
+
+This application demonstrates proper use of **DataReader listeners** to monitor DDS communication events in real-time:
+
+#### Implemented Listener Callbacks
+
+1. **`on_subscription_matched`**: Notifies when publishers connect or disconnect
+   - Triggers when a compatible DataWriter is discovered on the network
+   - Provides current count of matched publishers
+   - Useful for detecting new data sources or lost connections
+
+2. **`on_liveliness_changed`**: Monitors publisher health and availability
+   - Detects when a publisher becomes alive or loses liveliness
+   - Tracks which publishers are actively maintaining their liveliness contract
+   - Critical for failover scenarios and redundant publisher detection
+
+3. **`on_requested_deadline_missed`**: Alerts when data is not received within expected timeframe
+   - Triggers if no samples received within the deadline period (10 seconds for StatusQoS)
+   - Indicates publisher stopped sending, network issues, or system problems
+   - Enables proactive alerting before data staleness becomes critical
+
+#### Listener Implementation Pattern
+
+```python
+# Define custom listener by inheriting from DataReaderListener
+class PositionReaderListener(dds.DataReaderListener):
+    def on_subscription_matched(self, reader, status):
+        # Handle publisher connection/disconnection
+        pass
+    
+    def on_liveliness_changed(self, reader, status):
+        # Handle publisher liveliness changes
+        pass
+    
+    def on_requested_deadline_missed(self, reader, status):
+        # Handle deadline violations
+        pass
+
+# Create reader and set listener with specific status mask
+position_reader = dds.DataReader(participant.implicit_subscriber, topic, qos)
+listener = PositionReaderListener()
+position_reader.set_listener(
+    listener,
+    dds.StatusMask.SUBSCRIPTION_MATCHED |
+    dds.StatusMask.LIVELINESS_CHANGED |
+    dds.StatusMask.REQUESTED_DEADLINE_MISSED
+)
+```
+
+#### Benefits of Status Listeners
+
+- **Proactive Monitoring**: Detect issues before they impact application functionality
+- **Automated Failover**: React to publisher failures and switch to backup sources
+- **System Health Dashboard**: Build monitoring UIs showing real-time connection status
+- **Diagnostics**: Log events for troubleshooting network or configuration issues
+- **Quality of Service**: Verify that QoS contracts (deadline, liveliness) are being met
 
 ## Building and Running
 

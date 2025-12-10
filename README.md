@@ -75,17 +75,19 @@ Cross-language DDS system/application templates to accellerate development.
 
 **Key Features**: 3 MB fixed-size images, XCDR2 encoding, zero-copy intra-host, ~18.6 MB/sec throughput
 
-### 6. Time-Based Filtering for GUI/Monitoring Applications
-**Use Case**: Subscribe to high-frequency data at a reduced rate for GUI displays and monitoring dashboards
+### 6. Time-Based Filtering and Status Listeners
+**Use Case**: Subscribe to high-frequency data at a reduced rate for GUI displays and monitoring dashboards, with comprehensive DDS event awareness
 
 - **📖 Guide**: [downsampled_reader](apps/python/downsampled_reader/README.md)
 - **🎯 What You'll Learn**:
   - Apply time-based filtering with STATUS1HZ_QOS profile
-  - Understand reader-side vs writer-side filtering behavior
+  - Implement status listeners for real-time DDS event monitoring
+  - Use `on_subscription_matched`, `on_liveliness_changed`, and `on_requested_deadline_missed` callbacks
   - Reduce CPU load for GUI applications without affecting other subscribers
   - Configure independent data rates for different readers on same topic
+  - Build proactive monitoring and automated failover systems
 
-**Key Features**: 1Hz downsampling with TIME_BASED_FILTER, BEST_EFFORT QoS for periodic data, reader-side filtering (keyed data), independent per-reader rate control
+**Key Features**: 1Hz downsampling with TIME_BASED_FILTER, BEST_EFFORT QoS for periodic data, reader-side filtering (keyed data), status listener callbacks for publisher health monitoring
 
 ### 7. System Architecture and Best Practices
 **Use Case**: Understand the architectural patterns and design decisions

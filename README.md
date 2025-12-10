@@ -1,8 +1,8 @@
 # Flexible Autonomous System Toolkit
 
-A project template demonstrating cross-language DDS applications with RTI Connext DDS 7.3.0. Start here to explore use cases and navigate to detailed implementation guides.
+Cross-language DDS system template to accellerate development.
 
-## Table of Contents
+## Choose your adventure
 - [🎯 Use Cases and Examples](#-use-cases-and-examples)
 - [📚 Documentation](#-documentation)
 - [🛠️ Getting Started](#️-getting-started)

@@ -14,6 +14,7 @@
 #include <thread>
 #include <chrono>
 #include <atomic>
+#include <ctime>
 
 // include both the standard APIs and extensions
 #include <rti/rti.hpp>
@@ -152,12 +153,14 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
         pos_msg.latitude(37.7749);
         pos_msg.longitude(-122.4194);
         pos_msg.altitude(15.0);
+        pos_msg.timestamp_sec(static_cast<int32_t>(std::time(nullptr)));
         position_writer->writer().write(pos_msg);
 
         std::cout << "[POSITION] Published ID: " << pos_msg.source_id()
                   << ", Lat: " << pos_msg.latitude()
                   << ", Lon: " << pos_msg.longitude()
-                  << ", Alt: " << pos_msg.altitude() << "m" << std::endl;
+                  << ", Alt: " << pos_msg.altitude() << "m"
+                  << ", Timestamp: " << pos_msg.timestamp_sec() << std::endl;
       }
       catch (const std::exception &ex)
       {
@@ -169,7 +172,7 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
       // process_command_data(command_reader->reader());
 
       // Sleep
-      std::this_thread::sleep_for(std::chrono::seconds(1));
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
     }
 

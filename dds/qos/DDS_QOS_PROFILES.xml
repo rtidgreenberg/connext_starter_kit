@@ -11,6 +11,8 @@
 
 
         <domain_participant_qos>
+
+
           <!-- Discovery-related optimizations -->
           <base_name>
             <element>BuiltinQosSnippetLib::Optimization.Discovery.Common</element>
@@ -18,6 +20,15 @@
             <element>BuiltinQosSnippetLib::Optimization.ReliabilityProtocol.Common</element>
           </base_name>
           <transport_builtin>
+
+            <!-- 
+              Toggle control of transports:
+              Default is UDP | SHMEM
+              If you want to disable SHMEM uncomment below
+            -->
+            <!-- <mask>UDPv4</mask> -->
+
+
             <shmem>
               <!-- message_size_max should be >= largest message over SHMEM -->
               <!-- receive_buffer_size and received_message_count_max should be modified accordingly -->
@@ -37,15 +48,28 @@
               <!--    Windows: no need to do anything at the OS level -->
               <send_socket_buffer_size>10485760</send_socket_buffer_size>
               <recv_socket_buffer_size>10485760</recv_socket_buffer_size>
-              <!-- You should set the ALLOW_INTERFACES_LIST environment variable
-                  to the IP address you'd like to use. This helps avoid potential
-                  duplicate traffic because Connext will use all the available
-                  interfaces to receive data, causing remote DPs to send the same
-                  data to multiple destinations. -->
-              <!-- This is commented out for easier out-of-the-box behavior -->
-              <!-- <allow_interfaces_list>
+
+
+
+              <!-- 
+                Set the ALLOW_INTERFACES_LIST or DENY_INTERFACES_LIST to 
+                control what interfaces Connext uses.
+                                
+                By default Connext will use all the available interfaces to 
+                receive data, causing remote DPs to send the same data to 
+                multiple destinations. 
+
+                This helps avoid potential duplicate traffic.
+                -->
+
+            <!-- 
+              <allow_interfaces_list>
                 <element>$(ALLOW_INTERFACES_LIST)</element>
-              </allow_interfaces_list> -->
+              </allow_interfaces_list> 
+              <deny_interfaces_list>
+                <element>$(DENY_INTERFACES_LIST)</element>
+              </deny_interfaces_list>
+              -->
 
             </udpv4>
           </transport_builtin>
@@ -461,8 +485,40 @@
 
     </qos_profile>
 
-    <qos_profile name="LargeDataSHMEMQoS" base_name="BuiltinQosLib::Generic.Common">
+    <qos_profile name="Status1HzQoS" base_name="DataPatternsLibrary::StatusQoS">
+    
 
+      <!-- 
+        The reader will send out a "request" to the data writer.
+
+        If the following applies:
+        - Data type is "unkeyed" 
+        - Liveliness is Infinite
+        - Reliability is set to BEST_EFFORT
+        then the writer will only send samples every x minimum separation to this data reader.
+
+        Otherwise the reader will downsample and discard samples before providing 
+        them to the application.
+
+        This will not impact any other datareaders reading on the same topic from  
+        the same writer.
+
+        For more info search for TIME_BASED_FILTER QoS in the Manual.
+      -->
+      <datareader_qos>
+      
+        <time_based_filter>
+          <minimum_separation>
+            <sec>1</sec>
+            <nanosec>0</nanosec>
+          </minimum_separation>
+        </time_based_filter>
+      
+      </datareader_qos>
+  
+    </qos_profile>
+
+    <qos_profile name="LargeDataSHMEMQoS" base_name="BuiltinQosLib::Generic.Common">
 
       <!-- 
         USE CASE:
@@ -472,7 +528,6 @@
         over either SHMEM or UDP, but this specific topic is pinned to just SHMEM so as to 
         enable the larger message_size_max.
       -->
-
 
       <base_name>
         <element>BuiltinQosSnippetLib::QosPolicy.Reliability.BestEffort</element>
@@ -491,7 +546,12 @@
 
         <!-- 
           This makes the writers/readers on this topic use the "larger" SHMEM message_size_max.
-          By Default Connext uses the smallest transports message_size_max i.e. UDP 
+
+          Connext uses the smallest enabled transports message_size_max i.e.  
+          if UDP and SHMEM transports are enabled, will use UDP's message_szie_max.
+
+          By only enabling SHMEM transport for this specific topic we force usage 
+          of the larger message_size_max.
           -->
           <transport_selection>
             <enabled_transports>

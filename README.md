@@ -75,7 +75,19 @@ Cross-language DDS system/application templates to accellerate development.
 
 **Key Features**: 3 MB fixed-size images, XCDR2 encoding, zero-copy intra-host, ~18.6 MB/sec throughput
 
-### 6. System Architecture and Best Practices
+### 6. Time-Based Filtering for GUI/Monitoring Applications
+**Use Case**: Subscribe to high-frequency data at a reduced rate for GUI displays and monitoring dashboards
+
+- **📖 Guide**: [downsampled_reader](apps/python/downsampled_reader/README.md)
+- **🎯 What You'll Learn**:
+  - Apply time-based filtering with STATUS1HZ_QOS profile
+  - Understand reader-side vs writer-side filtering behavior
+  - Reduce CPU load for GUI applications without affecting other subscribers
+  - Configure independent data rates for different readers on same topic
+
+**Key Features**: 1Hz downsampling with TIME_BASED_FILTER, BEST_EFFORT QoS for periodic data, reader-side filtering (keyed data), independent per-reader rate control
+
+### 7. System Architecture and Best Practices
 **Use Case**: Understand the architectural patterns and design decisions
 
 - **📖 Guide**: [ARCHITECTURE.md](ARCHITECTURE.md)
@@ -103,6 +115,7 @@ Cross-language DDS system/application templates to accellerate development.
 - **[large_data_app (C++)](apps/cxx11/large_data_app/README.md)** - Large data with shared memory
 - **[large_data_app (Python)](apps/python/large_data_app/README.md)** - Python large data shared memory transfer
 - **[fixed_image_flat_zc](apps/cxx11/fixed_image_flat_zc/README.md)** - Zero-copy large data
+- **[downsampled_reader](apps/python/downsampled_reader/README.md)** - Time-based filtering for GUI/monitoring
 
 ### Reference
 - **[GitHub Copilot Prompts](.github/prompts/)** - AI-powered app generation templates

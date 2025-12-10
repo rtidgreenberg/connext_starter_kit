@@ -110,19 +110,6 @@ rti::core::cond::AsyncWaitSet aws = context_setup.get_async_waitset();
 - AsyncWaitSet integration
 - Read callback handler
 
-**Usage:**
-```cpp
-DDSReaderSetup<Position> reader_setup(
-    participant,
-    "Position",
-    "SENSOR_QOS",
-    aws,
-    [](const Position& data) {
-        std::cout << "Position: " << data.latitude() << std::endl;
-    }
-);
-```
-
 ### DDSWriterSetup
 **Purpose**: Simplified DataWriter creation with status monitoring
 
@@ -132,16 +119,6 @@ DDSReaderSetup<Position> reader_setup(
 - AsyncWaitSet integration for status events
 - Write method convenience wrapper
 
-**Usage:**
-```cpp
-DDSWriterSetup<Command> writer_setup(
-    participant,
-    "Command",
-    "ASSIGNER_QOS",
-    aws
-);
-writer_setup.write(command_sample);
-```
 
 ## Data Model Design
 
@@ -253,7 +230,7 @@ RTI Connext DDS ensures wire-protocol compatibility between C++ and Python:
 
 ```
 ┌─────────────┐         DDS Domain          ┌─────────────┐
-│   C++ App   │◄──────────────────────────►│ Python App  │
+│   C++ App   │◄──────────────────────────► │ Python App  │
 │             │                             │             │
 │ Write:      │                             │ Read:       │
 │  Position   ├────────────────────────────►│  Position   │
@@ -295,13 +272,13 @@ async for data in reader.take_data_async():
 connext_starter_kit/
 ├── dds/
 │   ├── cxx11/
-│   │   └── CMakeLists.txt      # Generates C++ from IDL, builds libdds_utils_datamodel.so
+│   │   └── CMakeLists.txt      # Generates C++ from IDL, builds Types Library
 │   └── python/
 │       └── CMakeLists.txt      # Generates Python from IDL
 ├── apps/
 │   └── cxx11/
 │       ├── example_io_app/
-│       │   └── CMakeLists.txt  # Links to libdds_utils_datamodel.so
+│       │   └── CMakeLists.txt  # Links to Types Library
 │       ├── command_override/
 │       │   └── CMakeLists.txt
 │       └── fixed_image_flat_zc/

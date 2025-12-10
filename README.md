@@ -1,6 +1,6 @@
 # Flexible Autonomous System Toolkit
 
-Cross-language DDS system template to accellerate development.
+Cross-language DDS system/application templates to accellerate development.
 
 ## Choose your adventure
 - [🎯 Use Cases and Examples](#-use-cases-and-examples)

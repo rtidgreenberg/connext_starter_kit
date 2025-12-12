@@ -89,7 +89,21 @@ Cross-language DDS system/application templates to accellerate development.
 
 **Key Features**: 1Hz downsampling with TIME_BASED_FILTER, BEST_EFFORT QoS for periodic data, reader-side filtering (keyed data), status listener callbacks for publisher health monitoring
 
-### 7. System Architecture and Best Practices
+### 7. Dynamic Test Environment Isolation with Domain Participant Partitions
+**Use Case**: Isolate message traffic in test environments, CI/CD pipelines, and multi-instance testing scenarios using runtime partition changes
+
+- **📖 Guide**: [dynamic_partition_qos](apps/cxx11/dynamic_partition_qos/README.md)
+- **🎯 What You'll Learn**:
+  - Modify Domain Participant Partitions at runtime using the PARTITION QoSPolicy
+  - Isolate unit tests, integration tests, and CI/CD jobs without separate domains
+  - Test failover scenarios by dynamically switching partitions
+  - Verify partition-based communication segmentation with multiple instances
+  - Combine XML QoS profiles with environment variables for automated testing
+  - Understand how DomainParticipant partitions eliminate Simple Endpoint Discovery
+
+**Key Features**: Unique App IDs for instance tracking, runtime partition changes via terminal input, ignores own publications, supports multiple partitions simultaneously, comprehensive test scenarios for unit test isolation and failover testing
+
+### 8. System Architecture and Best Practices
 **Use Case**: Understand the architectural patterns and design decisions
 
 - **📖 Guide**: [ARCHITECTURE.md](ARCHITECTURE.md)
@@ -118,6 +132,7 @@ Cross-language DDS system/application templates to accellerate development.
 - **[large_data_app (Python)](apps/python/large_data_app/README.md)** - Python large data shared memory transfer
 - **[fixed_image_flat_zc](apps/cxx11/fixed_image_flat_zc/README.md)** - Zero-copy large data
 - **[downsampled_reader](apps/python/downsampled_reader/README.md)** - Time-based filtering for GUI/monitoring
+- **[dynamic_partition_qos](apps/cxx11/dynamic_partition_qos/README.md)** - Test environment isolation with Domain Participant Partitions
 
 ### Reference
 - **[GitHub Copilot Prompts](.github/prompts/)** - AI-powered app generation templates
@@ -153,6 +168,7 @@ cmake .. && make -j4
 #    - Generate new app with Copilot: See apps/cxx11/README.md
 #    - Build example_io_app: See apps/cxx11/example_io_app/README.md
 #    - Build command_override: See apps/cxx11/command_override/README.md
+#    - Build dynamic_partition_qos: See apps/cxx11/dynamic_partition_qos/README.md
 #    - Build fixed_image_flat_zc: See apps/cxx11/fixed_image_flat_zc/README.md
 #    - Build Python apps: See apps/python/README.md
 ```

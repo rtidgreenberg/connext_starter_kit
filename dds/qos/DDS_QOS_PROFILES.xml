@@ -1,10 +1,70 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <dds xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://community.rti.com/schema/7.3.0/rti_dds_qos_profiles.xsd" version="7.3.0">
+
+
+  <!-- 
+    Set up default config ENV variables. 
+    Override with either ENV variables i.e. "export VAR=X" or command line -DVAR=X 
+
+    See variables commented out within QoS as example for usage.
+    -->
+  <configuration_variables>
+    <value>
+
+    <!-- 
+      Partition Variables
+      -->
+    <element>
+      <name>PARTITION_1</name>
+      <value>p_1_val</value>
+    </element>
+    <element>
+      <name>PARTITION_2</name>
+      <value>p_2_val</value>
+    </element>
+
+      <!-- 
+      Initial Peers
+      Default:
+      builtin.udpv4://239.255.0.1  # Default multicast discovery address
+      builtin.udpv4://127.0.0.1    # Localhost (loopback)
+      builtin.shmem://             # Shared memory (if supported on the platform)
+      -->
+      <element>
+        <name>INITIAL_PEERS</name>
+        <value>localhost</value>
+      </element>
+
+      <!-- 
+        Modify this list to constrain which Interfaces Connext broadcasts as available
+        Uncomment appropriate section below to enable.
+      -->
+      <element>
+        <name>ALLOW_INTERFACES_LIST</name>
+        <value>192.168.1.1</value>
+      </element>
+
+      <!-- 
+        Modify this list to constrain which Interfaces Connext does NOT boradcast as available.
+        Applied AFTER ALLOW_INTERFACES_LIST
+        Uncomment appropriate section below to enable.
+
+      -->
+      <element>
+        <name>DENY_INTERFACES_LIST</name>
+        <value>192.168.1.2</value>
+      </element>
+
+
+   </value>
+  </configuration_variables>
+    
+    
     <qos_library name="DPLibrary">
 
       <qos_profile name="DefaultParticipant" base_name="BuiltinQosLib::Generic.Common">
 
-        <!-- 
+      <!-- 
           USE CASE: Baseline Domain Participant QoS to be used system wide and 
           extended for specific use cases. 
         -->
@@ -12,46 +72,63 @@
 
         <domain_participant_qos>
 
+        <!-- Discovery-related optimizations -->
+        <base_name>
+          <element>BuiltinQosSnippetLib::Optimization.Discovery.Common</element>
+          <element>BuiltinQosSnippetLib::Optimization.Discovery.Endpoint.Fast</element>
+          <element>BuiltinQosSnippetLib::Optimization.ReliabilityProtocol.Common</element>
+        </base_name>
 
-          <!-- Discovery-related optimizations -->
-          <base_name>
-            <element>BuiltinQosSnippetLib::Optimization.Discovery.Common</element>
-            <element>BuiltinQosSnippetLib::Optimization.Discovery.Endpoint.Fast</element>
-            <element>BuiltinQosSnippetLib::Optimization.ReliabilityProtocol.Common</element>
-          </base_name>
+        <!-- Uncomment below to uniquely segment Applications within the same Domain 
+          Use case: Simulation/test environments. -->
+          <!-- <partition>
+            <name>
+              <element>$(PARTITION_1)</element>
+              <element>$(PARTITION_2)</element>          
+            </name>
+          </partition> -->
+
+
+          <!-- Uncomment below to set initial peers using config/ENV variable. -->
+          <!-- <discovery>
+            <initial_peers>
+              <element>$(INITIAL_PEERS)</element>
+            </initial_peers>
+          </discovery> -->
+
+
+
           <transport_builtin>
-
-            <!-- 
+          <!-- 
               Toggle control of transports:
               Default is UDP | SHMEM
               If you want to disable SHMEM uncomment below
             -->
-            <!-- <mask>UDPv4</mask> -->
+          <!-- <mask>UDPv4</mask> -->
 
 
             <shmem>
-              <!-- message_size_max should be >= largest message over SHMEM -->
-              <!-- receive_buffer_size and received_message_count_max should be modified accordingly -->
-              <!-- As a general rule: receive_buffer_size = message_size_max * received_message_count_max -->
+            <!-- message_size_max should be >= largest message over SHMEM -->
+            <!-- receive_buffer_size and received_message_count_max should be modified accordingly -->
+            <!-- As a general rule: receive_buffer_size = message_size_max * received_message_count_max -->
 
-              <!-- <message_size_max>262144</message_size_max>
+            <!-- <message_size_max>262144</message_size_max>
               <receive_buffer_size>8388608</receive_buffer_size>
               <received_message_count_max>32</received_message_count_max> -->
             </shmem>
             <udpv4>
               <message_size_max>65530</message_size_max>
-              <!-- These settings help when throughput is high. -->
-              <!-- You need to manually modify these in your kernel. -->
-              <!-- You should add the sysctl commands to your startup script. -->
-              <!--    Linux: https://community.rti.com/howto/improve-rti-connext-dds-network-performance-linux -->
-              <!--    QNX: https://community.rti.com/kb/how-increase-socket-buffer-sizes-qnx -->
-              <!--    Windows: no need to do anything at the OS level -->
+            <!-- These settings help when throughput is high. -->
+            <!-- You need to manually modify these in your kernel. -->
+            <!-- You should add the sysctl commands to your startup script. -->
+            <!--    Linux: https://community.rti.com/howto/improve-rti-connext-dds-network-performance-linux -->
+            <!--    QNX: https://community.rti.com/kb/how-increase-socket-buffer-sizes-qnx -->
+            <!--    Windows: no need to do anything at the OS level -->
               <send_socket_buffer_size>10485760</send_socket_buffer_size>
               <recv_socket_buffer_size>10485760</recv_socket_buffer_size>
 
 
-
-              <!-- 
+            <!-- 
                 Set the ALLOW_INTERFACES_LIST or DENY_INTERFACES_LIST to 
                 control what interfaces Connext uses.
                                 
@@ -77,8 +154,8 @@
 
           <resource_limits>
 
-            <!-- Uncomment below to disable Type Objects from being sent out -->
-            <!-- <type_object_max_serialized_length>0</type_object_max_serialized_length>
+          <!-- Uncomment below to disable Type Objects from being sent out -->
+          <!-- <type_object_max_serialized_length>0</type_object_max_serialized_length>
             <type_code_max_serialized_length>0</type_code_max_serialized_length> -->
           </resource_limits>
 
@@ -88,7 +165,7 @@
 
       <qos_profile name="LargeDataSHMEMParticipant" base_name="DefaultParticipant">
 
-        <!-- 
+      <!-- 
           USE CASE: 
           Participant that is used to transfer "Large" messages i.e. 
           larger than default 65kB and where resource impact would be considerable 
@@ -107,7 +184,7 @@
           <transport_builtin>
             <mask>SHMEM|UDPv4</mask>
             <shmem>
-              <!--  
+            <!--  
                 Increase the message size that is sent to minimize re-assembly/latency impact 
                 Set to >= largest message size to minimize fragementation of large messages
                 This use case is where each image size is fairly consistent.
@@ -116,12 +193,12 @@
               -->
               <message_size_max>3145728</message_size_max>
 
-              <!-- 
+            <!-- 
                 This is for the use case where we only care about the last few image frames
               -->
               <received_message_count_max>3</received_message_count_max>
 
-              <!-- 
+            <!-- 
               
                 Increase the receive buffer size specific to the SHMEM transport 
                 This should be equal to message_size_max * received_message_count_max
@@ -486,7 +563,7 @@
     </qos_profile>
 
     <qos_profile name="Status1HzQoS" base_name="DataPatternsLibrary::StatusQoS">
-    
+
 
       <!-- 
         The reader will send out a "request" to the data writer.
@@ -579,7 +656,7 @@
             <name>LargeDataReader</name>
           </subscription_name>
 
-          <!-- We need to select just the SHMEM transport to enable usage of the 
+        <!-- We need to select just the SHMEM transport to enable usage of the 
           larger message_szie_max for this topic -->
           <transport_selection>
             <enabled_transports>

@@ -2,7 +2,8 @@
 
 ## Overview
 
-This C++ application demonstrates **runtime modification of Domain Participant Partitions** using the [PARTITION QoSPolicy](https://community.rti.com/static/documentation/connext-dds/7.6.0/doc/manuals/connext_dds_professional/users_manual/users_manual/PARTITION_QosPolicy.htm) in RTI Connext DDS for **test environment isolation and dynamic message traffic segmentation**. Each instance generates a unique Application ID (App-XXXX) and can dynamically change Domain Participant partitions at runtime, enabling sophisticated testing scenarios including unit test isolation, failover testing, and multi-instance communication verification.
+This C++ application demonstrates **runtime modification of Domain Participant Partitions** using the [PARTITION QoSPolicy](https://community.rti.com/static/documentation/connext-dds/7.6.0/doc/manuals/connext_dds_professional/users_manual/users_manual/PARTITION_QosPolicy.htm) in RTI Connext DDS for **test environment isolation and dynamic message traffic segmentation**.  
+Each instance generates a unique Application ID (App-XXXX) and can dynamically change Domain Participant partitions at runtime, enabling sophisticated testing scenarios including unit test isolation, failover testing, and multi-instance communication verification.
 
 The application both publishes and subscribes to the `Command` topic while accepting user input from the terminal to change partition names on-the-fly. This allows you to spin up multiple instances and test partition-based communication isolation, verify failover scenarios, and validate message routing in distributed systems.
 

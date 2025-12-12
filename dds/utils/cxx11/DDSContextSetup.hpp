@@ -144,7 +144,7 @@ public:
     }
 
     // Getter for Domain Participant
-    const DomainParticipant &participant() const
+    DomainParticipant &participant()
     {
         return _participant;
     }

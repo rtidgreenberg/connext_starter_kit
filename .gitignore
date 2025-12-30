@@ -25,13 +25,8 @@ apps/cxx11/large_data_very_fast/build/
 
 apps/cxx11/fixed_image_flat_zc/build/
 
+# DDS build directory (contains generated code and libraries)
 dds/build/
-
-dds/datamodel/cxx11_gen/
-
-dds/datamodel/python_gen/
-
-dds/datamodel/xml_gen/
 
 services/log_dir/
 

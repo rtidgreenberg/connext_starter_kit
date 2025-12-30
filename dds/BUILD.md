@@ -87,7 +87,7 @@ make -j4
 
 ### C++ Type Support
 - **Type Support Library**: `build/lib/libdds_typesupport.so` (shared library)
-- **Generated Type Headers**: `datamodel/cxx11_gen/*.hpp`
+- **Generated Type Headers**: `build/cxx11_gen/*.hpp`
 - **Utility Headers**: `utils/cxx11/*.hpp` (header-only, always available)
 
 ### Python Package
@@ -121,7 +121,7 @@ target_link_libraries(my_app PRIVATE ${DDS_TYPESUPPORT_LIB})
 Or include generated code directly:
 ```cmake
 target_include_directories(my_app PRIVATE
-    ${CMAKE_SOURCE_DIR}/../dds/datamodel/cxx11_gen
+    ${CMAKE_SOURCE_DIR}/../dds/build/cxx11_gen
     ${CMAKE_SOURCE_DIR}/../dds/utils/cxx11
 )
 ```

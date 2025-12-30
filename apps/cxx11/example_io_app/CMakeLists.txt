@@ -23,7 +23,7 @@ find_package(RTIConnextDDS
 # Set up directories
 set(DDS_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../dds/build")
 set(DDS_LIB_BUILD_DIR "${DDS_BUILD_DIR}/lib")
-set(DDS_CODEGEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../dds/datamodel/cxx11_gen")
+set(DDS_CODEGEN_DIR "${DDS_BUILD_DIR}/cxx11_gen")
 set(DDS_UTILS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../dds/utils/cxx11")
 
 # Find the shared libraries

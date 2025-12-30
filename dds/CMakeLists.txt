@@ -22,12 +22,12 @@ list(APPEND CMAKE_MODULE_PATH
 
 # Directories
 set(IDL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/datamodel/idl")
-set(CXX11_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/datamodel/cxx11_gen")
-set(PYTHON_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/datamodel/python_gen")
-set(XML_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/datamodel/xml_gen")
+set(CXX11_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/cxx11_gen")
+set(PYTHON_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/python_gen")
+set(XML_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/xml_gen")
 set(UTILS_CXX_DIR "${CMAKE_CURRENT_SOURCE_DIR}/utils/cxx11")
 
-# Create output directories
+# Create output directories in build folder
 file(MAKE_DIRECTORY ${CXX11_OUTPUT_DIR})
 file(MAKE_DIRECTORY ${PYTHON_OUTPUT_DIR})
 file(MAKE_DIRECTORY ${XML_OUTPUT_DIR})

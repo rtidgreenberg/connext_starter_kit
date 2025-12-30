@@ -153,9 +153,9 @@ cmake ..
 make -j4
 
 # Verify generated files
-ls ../datamodel/cxx11_gen/*.hpp
-ls ../datamodel/python_gen/*.py
-ls ../datamodel/xml_gen/*.xml
+ls ../build/cxx11_gen/*.hpp
+ls ../build/python_gen/*.py
+ls ../build/xml_gen/*.xml
 ```
 
 This generates all type support files automatically:

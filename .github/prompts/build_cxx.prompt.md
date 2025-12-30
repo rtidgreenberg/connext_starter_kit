@@ -13,7 +13,7 @@
 - **ONLY change: project name, executable name (add_executable), target names (target_include_directories, target_link_libraries, etc), and source filenames**
 - **DO NOT modify any of these paths from example_io_app/CMakeLists.txt:**
   - `DDS_BUILD_DIR` - must remain `dds/build`
-  - `DDS_CODEGEN_DIR` - must remain `dds/datamodel/cxx11_gen`
+  - `DDS_CODEGEN_DIR` - must remain `dds/build/cxx11_gen`
   - `DDS_UTILS_DIR` - must remain `dds/utils/cxx11`
   - `DDS_TYPESUPPORT_LIB` - must remain `dds_typesupport`
 - **DO NOT use paths from workspace structure context - ONLY use paths from example_io_app/CMakeLists.txt**

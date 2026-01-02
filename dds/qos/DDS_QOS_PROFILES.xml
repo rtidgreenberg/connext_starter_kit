@@ -210,8 +210,13 @@
         </domain_participant_qos>
       </qos_profile>
 
-
-
+      <qos_profile name="LargeDataUdpParticipant" base_name="DefaultParticipant">
+        <participant_qos>
+          <transport_builtin>
+            <mask>UDPv4</mask>
+          </transport_builtin>
+        </participant_qos>
+      </qos_profile>
     </qos_library>
 
 
@@ -220,7 +225,7 @@
     <qos_profile name="EventQoS" base_name="BuiltinQosLib::Generic.Common">
       <!-- 
         
-        USE CASE: 
+        USE CASE:
         Even Topics such as button pushes or alerts. When events are triggered,
         the system should almost always do something, meaning that you
         don't want the system to lose the event. This means that the system
@@ -671,7 +676,6 @@
       </datareader_qos>
     </qos_profile>
 
-
     <qos_profile name="LargeDataSHMEM_ZCQoS" base_name="BuiltinQosLib::Generic.Common">
 
       <!-- 
@@ -681,7 +685,7 @@
       This just sends a reference to the SHMEM segment and makes no copies.
       Using this mode we don't need to increase the SHMEM receive buffer size or  
       increase the message_size_max.
-      
+
       KEY FEATURES:
       - Application Acknowledgement to prevent data inconsistencies between reader and writer due to direct memory access.
       - Increased Reliability Mechanism rate to minimize latency.
@@ -743,6 +747,50 @@
           <acknowledgment_kind>APPLICATION_AUTO_ACKNOWLEDGMENT_MODE</acknowledgment_kind>
         </reliability>
 
+      </datareader_qos>
+
+    </qos_profile>
+
+    <qos_profile name="BurstLargeDataUdpQoS" base_name="BuiltinQosLib::Generic.StrictReliable.LargeData">
+
+      <!-- 
+      USE CASE:
+      Burst of Large Data using UDP with Flat Data
+
+      We need to send a burst of large data and none of then can be lost.
+      Therefore, we'll use Strict Reliability (RELIABLE + KEEP_ALL).
+      We also increase the send_window_size to not slow down the DW.
+      
+      KEY FEATURES:
+      - Strict Reliability to not lose any data
+      - Increased send_window_size to handle bursts and not slow down the DW
+      - Increased Reliability Mechanism rate to minimize latency.
+      -->
+
+      <!-- Increase the RELIABILITY traffic rate to ensure minimal and faster repairs -->
+      <base_name>
+        <element>BuiltinQosSnippetLib::Optimization.ReliabilityProtocol.HighRate</element>
+      </base_name>
+
+      <datawriter_qos>
+        <publication_name>
+          <name>BurstDW</name>
+        </publication_name>
+        <protocol>
+          <!-- Allow a big initial burst of 200 samples without slowing down -->
+          <rtps_reliable_writer>
+            <max_send_window_size>200</max_send_window_size>
+            <min_send_window_size>200</min_send_window_size>
+            <heartbeats_per_max_samples>200</heartbeats_per_max_samples>
+          </rtps_reliable_writer>
+        </protocol>
+
+      </datawriter_qos>
+
+      <datareader_qos>
+        <subscription_name>
+          <name>BurstDR</name>
+        </subscription_name>
       </datareader_qos>
 
     </qos_profile>

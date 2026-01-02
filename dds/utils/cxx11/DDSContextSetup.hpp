@@ -55,7 +55,6 @@ public:
                 // Name the Participant so it's easier to track
                 participant_qos
                         << rti::core::policy::EntityName().name(app_name);
-
                 // Create Participant
                 _participant = dds::domain::DomainParticipant(
                         _domain_id,

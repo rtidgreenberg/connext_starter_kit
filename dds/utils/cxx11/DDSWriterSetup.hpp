@@ -18,6 +18,7 @@
 #include <string>       // Include string header
 #include <iostream>
 #include <functional>
+#include <stdexcept>
 #include "DDSContextSetup.hpp"
 
 using namespace rti::all;
@@ -182,6 +183,25 @@ public:
         std::cout << "Setting offered incompatible QoS handler for " << _topic_name << std::endl;
         _offered_incompatible_qos_callback = handler;
     }
+
+    // Wait indefinitely for a number of DataReaders to match
+    void wait_for_drs_to_match(int expected_dr_matches)
+    {
+        if (expected_dr_matches <= 0) {
+            throw std::invalid_argument(
+                    "Error: expected_dr_matches must be greater than 0");
+        }
+
+        std::cout << "Waiting indefinitely for DataReaders to match with the DataWriter..." << std::endl;
+
+        while (_writer.publication_matched_status().current_count() < expected_dr_matches
+            && !application::shutdown_requested) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        std::cout << "DataWriter matched with " +
+                std::to_string(_writer.publication_matched_status().current_count()) +
+                " DataReaders" << std::endl;
+    };
 
     // Getter for DataWriter
     dds::pub::DataWriter<T> writer() const

@@ -145,6 +145,8 @@ class ParticipantDetailScreen(Screen):
     self.participant = participant
     self.sample_lines = []
     self.table = DataTable()
+    self.dynamic_reader = None
+    self.subscriber = None
 
   def compose(self) -> ComposeResult:
     yield Header()
@@ -159,6 +161,24 @@ class ParticipantDetailScreen(Screen):
         self._sub_task = asyncio.create_task(self.subscribe_topic())
     else:
         self.output_widget.update("Subscription only available for Writer endpoints.")
+
+  async def on_unmount(self) -> None:
+    # Clean up reader and subscriber when screen is unmounted
+    if self.dynamic_reader is not None:
+      try:
+        logging.info(f"[on_unmount] Closing DataReader for topic: {self.endpoint.topic_name}")
+        self.dynamic_reader.close()
+        self.dynamic_reader = None
+      except Exception as e:
+        logging.error(f"[on_unmount] Error closing DataReader: {e}")
+    
+    if self.subscriber is not None:
+      try:
+        logging.info(f"[on_unmount] Closing Subscriber")
+        self.subscriber.close()
+        self.subscriber = None
+      except Exception as e:
+        logging.error(f"[on_unmount] Error closing Subscriber: {e}")
 
   async def subscribe_topic(self):
     try:
@@ -193,6 +213,9 @@ class ParticipantDetailScreen(Screen):
       else:
         subscriber = dds.Subscriber(self.participant)
       
+      # Store subscriber reference for cleanup
+      self.subscriber = subscriber
+      
       # Create DataReader QoS and apply discovered writer's QoS settings
       reader_qos = dds.DataReaderQos()
       
@@ -216,6 +239,9 @@ class ParticipantDetailScreen(Screen):
         logging.info(f"[subscribe_topic] Applying QoS - Reliability: {self.endpoint.reliability.kind}, Durability: {self.endpoint.durability.kind if self.endpoint.durability else 'N/A'}, Ownership: {self.endpoint.ownership.kind if self.endpoint.ownership else 'N/A'}")
         
         dynamic_reader = dds.DynamicData.DataReader(subscriber, dynamic_topic, reader_qos)
+        # Store reader reference for cleanup
+        self.dynamic_reader = dynamic_reader
+        
         qos_info = f"Reliability: {self.endpoint.reliability.kind}\n"
         qos_info += f"Durability: {self.endpoint.durability.kind if self.endpoint.durability else 'N/A'}\n"
         qos_info += f"Ownership: {self.endpoint.ownership.kind if self.endpoint.ownership else 'N/A'}\n"
@@ -225,6 +251,8 @@ class ParticipantDetailScreen(Screen):
       else:
         # Fallback to default QoS if no QoS captured
         dynamic_reader = dds.DynamicData.DataReader(subscriber, dynamic_topic)
+        # Store reader reference for cleanup
+        self.dynamic_reader = dynamic_reader
         self.output_widget.update(f"Subscribed to topic '{self.endpoint.topic_name}' with default QoS.\nWaiting for samples...\n")
 
       while True:
@@ -387,9 +415,32 @@ class RTISPY(App):
         if asyncio.iscoroutine(coro):
             asyncio.create_task(coro)
 
-    async def action_back(self) -> None:
-      # logging.warning("[action_back] before await pop_screen")
-      await self.pop_screen()
+  async def action_back(self) -> None:
+    # logging.warning("[action_back] before await pop_screen")
+    await self.pop_screen()
+  
+  async def action_quit(self) -> None:
+    # Clean up any ParticipantDetailScreen instances before quitting
+    for screen in self.screen_stack:
+      if isinstance(screen, ParticipantDetailScreen):
+        if screen.dynamic_reader is not None:
+          try:
+            logging.info(f"[action_quit] Closing DataReader for topic: {screen.endpoint.topic_name}")
+            screen.dynamic_reader.close()
+            screen.dynamic_reader = None
+          except Exception as e:
+            logging.error(f"[action_quit] Error closing DataReader: {e}")
+        
+        if screen.subscriber is not None:
+          try:
+            logging.info(f"[action_quit] Closing Subscriber")
+            screen.subscriber.close()
+            screen.subscriber = None
+          except Exception as e:
+            logging.error(f"[action_quit] Error closing Subscriber: {e}")
+    
+    # Now exit the application
+    self.exit()
 
 def main():
   parser = argparse.ArgumentParser(description="Discover all readers and writers on a DDS domain.")

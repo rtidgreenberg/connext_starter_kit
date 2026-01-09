@@ -145,6 +145,9 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
     example_types::Position pos_msg;
     pos_msg.source_id(APP_NAME);
 
+    // Counter for tracking iterations
+    int iteration = 0;
+
     while (!application::shutdown_requested) {
 
       try
@@ -161,6 +164,14 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
                   << ", Lon: " << pos_msg.longitude()
                   << ", Alt: " << pos_msg.altitude() << "m"
                   << ", Timestamp: " << pos_msg.timestamp_sec() << std::endl;
+        
+        // Every 10 iterations (5 seconds), log to distributed logger
+        if (iteration % 10 == 0) {
+          logger.info("Application running - Position published at " + 
+                      std::to_string(pos_msg.timestamp_sec()));
+        }
+        
+        iteration++;
       }
       catch (const std::exception &ex)
       {

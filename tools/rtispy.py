@@ -82,7 +82,11 @@ class ParticipantListScreen(Screen):
     self.distlog_reader = None
     self.distlog_subscriber = None
     self.distlog_topic = None
+    self.state_reader = None
+    self.state_subscriber = None
+    self.state_topic = None
     self.logger_messages = []
+    self.state_messages = []
     self.error_messages = []
     self.current_monitoring_key = None
 
@@ -100,10 +104,9 @@ class ParticipantListScreen(Screen):
       self.logger_output = Static("No participant selected. Select a participant to view distributed logger messages.")
       yield self.logger_output
     yield Static("")
-    yield Static("=== Remote Admin Commands ===", id="admin_header")
-    yield Static("Press 'v' to change log verbosity for selected participant", id="admin_directions")
+    yield Static("=== Distributed Logger State ===", id="admin_header")
     with VerticalScroll(id="admin_container"):
-      self.admin_output = Static("")
+      self.admin_output = Static("No participant selected. Select a participant to view distributed logger state.")
       yield self.admin_output
     yield Static("")
     yield Static("=== Error Log ===", id="error_header")
@@ -118,6 +121,8 @@ class ParticipantListScreen(Screen):
   async def on_unmount(self) -> None:
     # Clean up distributed logger reader
     await self.cleanup_distlog_reader()
+    # Clean up state reader
+    await self.cleanup_state_reader()
 
   def log_error(self, error_msg):
     """Log an error message to the error panel"""
@@ -154,6 +159,27 @@ class ParticipantListScreen(Screen):
       except Exception as e:
         error_msg = f"Error closing Subscriber: {e}"
         logging.error(f"[cleanup_distlog_reader] {error_msg}")
+        self.log_error(error_msg)
+
+  async def cleanup_state_reader(self):
+    if self.state_reader is not None:
+      try:
+        logging.info("[cleanup_state_reader] Closing state DataReader")
+        self.state_reader.close()
+        self.state_reader = None
+      except Exception as e:
+        error_msg = f"Error closing state DataReader: {e}"
+        logging.error(f"[cleanup_state_reader] {error_msg}")
+        self.log_error(error_msg)
+    
+    if self.state_subscriber is not None:
+      try:
+        logging.info("[cleanup_state_reader] Closing state Subscriber")
+        self.state_subscriber.close()
+        self.state_subscriber = None
+      except Exception as e:
+        error_msg = f"Error closing state Subscriber: {e}"
+        logging.error(f"[cleanup_state_reader] {error_msg}")
         self.log_error(error_msg)
     
     # Don't delete the topic - it can be reused
@@ -192,21 +218,20 @@ class ParticipantListScreen(Screen):
         # Only clean up and start new monitoring if we're switching to a DIFFERENT participant
         if self.current_monitoring_key != self.selected_key:
           await self.cleanup_distlog_reader()
+          await self.cleanup_state_reader()
           self.logger_messages = []
+          self.state_messages = []
           self.current_monitoring_key = self.selected_key
           self.logger_output.update(f"Monitoring distributed logger for: {participant.name}\nSearching for rti/distlog topic...")
+          self.admin_output.update(f"Searching for rti/distlog/administration/state topic...")
           # Start monitoring in background
           asyncio.create_task(self.monitor_distlog())
+          asyncio.create_task(self.monitor_distlog_state())
         # If same participant, don't resubscribe - just continue monitoring
 
   async def on_key(self, event: events.Key) -> None:
     if event.key == "enter" and self.selected_key is not None:
       await self.app_ref.push_screen(EndpointListScreen(self.app_ref, self.selected_key, self.participant))
-    elif event.key == "v" and self.selected_key is not None:
-      # Handle verbosity change command
-      participant = participants.get(self.selected_key)
-      if participant and self.admin_output:
-        self.admin_output.update(f"Changing log verbosity for {participant.name}...\n(Command functionality to be implemented)")
 
   async def monitor_distlog(self):
     """Monitor the rti/distlog topic for the currently selected participant"""
@@ -330,6 +355,204 @@ class ParticipantListScreen(Screen):
       error_msg = f"Error subscribing to rti/distlog: {e}"
       logging.error(f"[monitor_distlog] {error_msg}")
       self.logger_output.update(error_msg)
+      self.log_error(error_msg)
+
+  async def monitor_distlog_state(self):
+    """Monitor the rti/distlog/administration/state topic for the currently selected participant"""
+    try:
+      # Look for the rti/distlog/administration/state topic in endpoints
+      state_endpoint = None
+      for endpoint_key, endpoint in endpoints.items():
+        if endpoint.p_key == self.selected_key and endpoint.topic_name == "rti/distlog/administration/state":
+          state_endpoint = endpoint
+          break
+      
+      if not state_endpoint:
+        self.admin_output.update(f"rti/distlog/administration/state topic not found for this participant.\nThe participant may not have distributed logging enabled.")
+        return
+      
+      if not state_endpoint.type:
+        self.admin_output.update("Error: No type information available for rti/distlog/administration/state topic.")
+        return
+      
+      if not isinstance(state_endpoint.type, dds.DynamicType):
+        self.admin_output.update("Error: Discovered type is not a DynamicType.")
+        return
+      
+      # Find or create topic
+      try:
+        self.state_topic = self.participant.find_topic("rti/distlog/administration/state")
+        logging.info("[monitor_distlog_state] Reusing existing rti/distlog/administration/state topic")
+      except:
+        self.state_topic = dds.DynamicData.Topic(self.participant, "rti/distlog/administration/state", state_endpoint.type)
+        logging.info("[monitor_distlog_state] Created new rti/distlog/administration/state topic")
+      
+      # Get the selected participant's RTPS IDs for content filtering
+      selected_participant = participants.get(self.selected_key)
+      if not selected_participant:
+        self.admin_output.update("Error: Could not find selected participant information.")
+        return
+      
+      # Create content filtered topic
+      filter_expression = "hostAndAppId.rtps_host_id = %0 AND hostAndAppId.rtps_app_id = %1"
+      filter_parameters = [str(selected_participant.rtps_host_id), str(selected_participant.rtps_app_id)]
+      
+      try:
+        filtered_topic_name = f"rti/distlog/administration/state_filtered_{selected_participant.rtps_host_id}_{selected_participant.rtps_app_id}"
+        content_filtered_topic = dds.DynamicData.ContentFilteredTopic(
+            self.state_topic,
+            filtered_topic_name,
+            dds.Filter(filter_expression, filter_parameters)
+        )
+        logging.info(f"[monitor_distlog_state] Created content filtered topic with host_id={selected_participant.rtps_host_id}, app_id={selected_participant.rtps_app_id}")
+      except Exception as e:
+        error_msg = f"Failed to create content filtered topic for state: {e}"
+        logging.error(f"[monitor_distlog_state] {error_msg}")
+        self.admin_output.update(error_msg)
+        self.log_error(error_msg)
+        return
+      
+      # Create subscriber
+      subscriber_qos = dds.SubscriberQos()
+      qos_set = False
+      
+      if state_endpoint.partition:
+        subscriber_qos.partition.name = state_endpoint.partition.name
+        qos_set = True
+      
+      if state_endpoint.presentation:
+        subscriber_qos.presentation.access_scope = state_endpoint.presentation.access_scope
+        subscriber_qos.presentation.coherent_access = state_endpoint.presentation.coherent_access
+        subscriber_qos.presentation.ordered_access = state_endpoint.presentation.ordered_access
+        qos_set = True
+      
+      if qos_set:
+        self.state_subscriber = dds.Subscriber(self.participant, subscriber_qos)
+      else:
+        self.state_subscriber = dds.Subscriber(self.participant)
+      
+      # Create DataReader QoS
+      reader_qos = dds.DataReaderQos()
+      
+      if state_endpoint.reliability:
+        reader_qos.reliability.kind = state_endpoint.reliability.kind
+        reader_qos.reliability.max_blocking_time = state_endpoint.reliability.max_blocking_time
+      
+      if state_endpoint.durability:
+        reader_qos.durability.kind = state_endpoint.durability.kind
+      
+      if state_endpoint.deadline:
+        reader_qos.deadline.period = state_endpoint.deadline.period
+      
+      if state_endpoint.ownership:
+        reader_qos.ownership.kind = state_endpoint.ownership.kind
+      
+      # Create DataReader with content filtered topic
+      self.state_reader = dds.DynamicData.DataReader(self.state_subscriber, content_filtered_topic, reader_qos)
+      
+      self.admin_output.update(f"Subscribed to rti/distlog/administration/state topic.\nWaiting for state updates...\n")
+      logging.info(f"[monitor_distlog_state] Successfully subscribed to rti/distlog/administration/state with content filter")
+      
+      # Start reading samples
+      asyncio.create_task(self.read_state_samples())
+      
+    except Exception as e:
+      error_msg = f"Error subscribing to rti/distlog/administration/state: {e}"
+      logging.error(f"[monitor_distlog_state] {error_msg}")
+      self.admin_output.update(error_msg)
+      self.log_error(error_msg)
+
+  async def cleanup_state_reader(self):
+    if self.state_reader is not None:
+      try:
+        logging.info("[cleanup_state_reader] Closing state DataReader")
+        self.state_reader.close()
+        self.state_reader = None
+      except Exception as e:
+        error_msg = f"Error closing state DataReader: {e}"
+        logging.error(f"[cleanup_state_reader] {error_msg}")
+        self.log_error(error_msg)
+    
+    if self.state_subscriber is not None:
+      try:
+        logging.info("[cleanup_state_reader] Closing state Subscriber")
+        self.state_subscriber.close()
+        self.state_subscriber = None
+      except Exception as e:
+        error_msg = f"Error closing state Subscriber: {e}"
+        logging.error(f"[cleanup_state_reader] {error_msg}")
+        self.log_error(error_msg)
+
+  def convert_verbosity_level(self, level):
+    """Convert numeric verbosity level to string name"""
+    verbosity_map = {
+      0: "SILENT",
+      100: "FATAL",
+      200: "SEVERE",
+      300: "ERROR",
+      400: "WARNING",
+      500: "NOTICE",
+      600: "INFO",
+      700: "DEBUG",
+      800: "TRACE"
+    }
+    return verbosity_map.get(level, f"UNKNOWN({level})")
+
+  async def read_state_samples(self):
+    """Continuously read samples from the distributed logger state topic"""
+    try:
+      while self.state_reader is not None:
+        samples = self.state_reader.take()
+        for sample in samples:
+          if sample.info.valid:
+            try:
+              # Get all fields except hostAndAppId, administrationDomainId, and state
+              member_names = list(sample.data.fields())
+              
+              # Build display with special handling for rtiLoggerVerbosities
+              lines = []
+              for name in member_names:
+                if name in ['hostAndAppId', 'administrationDomainId', 'state', 'rtiLoggerPrintFormat', 'applicationKind']:
+                  continue
+                
+                if name == 'rtiLoggerVerbosities':
+                  # Handle the sequence of category/verbosity pairs
+                  verbosities = sample.data[name]
+                  lines.append(f"{name}:")
+                  for item in verbosities:
+                    category = item['category']
+                    verbosity = item['verbosity']
+                    lines.append(f"  {category}: {verbosity}")
+                elif name == 'filterLevel':
+                  # Convert numeric level to verbosity name
+                  level_value = sample.data[name]
+                  level_name = self.convert_verbosity_level(level_value)
+                  lines.append(f"{name}: {level_name} ({level_value})")
+                else:
+                  lines.append(f"{name}: {sample.data[name]}")
+              
+              # Join all lines and store as single message
+              state_line = "\n".join(lines)
+              self.state_messages.append(state_line)
+              
+              # Keep only last 5 state messages (fewer since they're multi-line now)
+              if len(self.state_messages) > 5:
+                self.state_messages.pop(0)
+              
+              # Update display
+              display_text = "\n---\n".join(self.state_messages[-5:])
+              self.admin_output.update(display_text)
+              
+            except Exception as e:
+              error_msg = f"Error processing state sample: {e}"
+              logging.error(f"[read_state_samples] {error_msg}")
+              self.log_error(error_msg)
+        
+        await asyncio.sleep(0.1)  # Small delay between reads
+        
+    except Exception as e:
+      error_msg = f"Error reading state samples: {e}"
+      logging.error(f"[read_state_samples] {error_msg}")
       self.log_error(error_msg)
 
   async def read_distlog_samples(self):

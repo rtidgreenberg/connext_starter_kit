@@ -27,7 +27,8 @@ class Participant:
 
 
 class Endpoint:
-  def __init__(self, key=None, topic_name=None, type_name=None, type=None, kind=None, p_ip=None, p_name=None, p_key=None):
+  def __init__(self, key=None, topic_name=None, type_name=None, type=None, kind=None, p_ip=None, p_name=None, p_key=None, 
+               reliability=None, durability=None, deadline=None, ownership=None, presentation=None, partition=None):
       self.key = key,
       self.topic_name = topic_name
       self.type_name = type_name
@@ -36,6 +37,12 @@ class Endpoint:
       self.p_ip = p_ip
       self.p_name = p_name
       self.p_key = p_key
+      self.reliability = reliability
+      self.durability = durability
+      self.deadline = deadline
+      self.ownership = ownership
+      self.presentation = presentation
+      self.partition = partition
 
 class ParticipantListScreen(Screen):
 
@@ -162,18 +169,63 @@ class ParticipantDetailScreen(Screen):
         self.output_widget.update("Error: Discovered type is not a DynamicType. Cannot subscribe with DynamicData.")
         return
       
-      # if not self.endpoint.topic_name:
-      #   logging.debug("NO TOPIC")
-
-      # if not self.participant:
-      #   logging.debug("NO PARTICIPANT")
-
-      
-      # logging.debug(f"TOPIC NAME: {self.endpoint.topic_name}  TYPE: {self.endpoint.type}")
-      
+      # Create topic
       dynamic_topic = dds.DynamicData.Topic(self.participant, self.endpoint.topic_name, self.endpoint.type)
-      dynamic_reader = dds.DynamicData.DataReader(dynamic_topic)
-      self.output_widget.update(f"Subscribed to topic '{self.endpoint.topic_name}' with discovered type.\nWaiting for samples...\n")
+      
+      # Create subscriber with partition and presentation QoS if available
+      subscriber_qos = dds.SubscriberQos()
+      qos_set = False
+      
+      if self.endpoint.partition:
+        subscriber_qos.partition.name = self.endpoint.partition.name
+        qos_set = True
+        logging.info(f"[subscribe_topic] Setting subscriber partitions: {', '.join(self.endpoint.partition.name)}")
+      
+      if self.endpoint.presentation:
+        subscriber_qos.presentation.access_scope = self.endpoint.presentation.access_scope
+        subscriber_qos.presentation.coherent_access = self.endpoint.presentation.coherent_access
+        subscriber_qos.presentation.ordered_access = self.endpoint.presentation.ordered_access
+        qos_set = True
+        logging.info(f"[subscribe_topic] Setting subscriber presentation: access_scope={self.endpoint.presentation.access_scope}")
+      
+      if qos_set:
+        subscriber = dds.Subscriber(self.participant, subscriber_qos)
+      else:
+        subscriber = dds.Subscriber(self.participant)
+      
+      # Create DataReader QoS and apply discovered writer's QoS settings
+      reader_qos = dds.DataReaderQos()
+      
+      if self.endpoint.reliability:
+        # Apply reliability QoS from writer
+        reader_qos.reliability.kind = self.endpoint.reliability.kind
+        reader_qos.reliability.max_blocking_time = self.endpoint.reliability.max_blocking_time
+        
+        # Apply durability QoS if available
+        if self.endpoint.durability:
+          reader_qos.durability.kind = self.endpoint.durability.kind
+        
+        # Apply deadline QoS if available
+        if self.endpoint.deadline:
+          reader_qos.deadline.period = self.endpoint.deadline.period
+        
+        # Apply ownership QoS if available
+        if self.endpoint.ownership:
+          reader_qos.ownership.kind = self.endpoint.ownership.kind
+        
+        logging.info(f"[subscribe_topic] Applying QoS - Reliability: {self.endpoint.reliability.kind}, Durability: {self.endpoint.durability.kind if self.endpoint.durability else 'N/A'}, Ownership: {self.endpoint.ownership.kind if self.endpoint.ownership else 'N/A'}")
+        
+        dynamic_reader = dds.DynamicData.DataReader(subscriber, dynamic_topic, reader_qos)
+        qos_info = f"Reliability: {self.endpoint.reliability.kind}\n"
+        qos_info += f"Durability: {self.endpoint.durability.kind if self.endpoint.durability else 'N/A'}\n"
+        qos_info += f"Ownership: {self.endpoint.ownership.kind if self.endpoint.ownership else 'N/A'}\n"
+        if self.endpoint.partition and len(self.endpoint.partition.name) > 0:
+          qos_info += f"Partitions: {', '.join(self.endpoint.partition.name)}\n"
+        self.output_widget.update(f"Subscribed to topic '{self.endpoint.topic_name}' with matched QoS.\n{qos_info}Waiting for samples...\n")
+      else:
+        # Fallback to default QoS if no QoS captured
+        dynamic_reader = dds.DynamicData.DataReader(subscriber, dynamic_topic)
+        self.output_widget.update(f"Subscribed to topic '{self.endpoint.topic_name}' with default QoS.\nWaiting for samples...\n")
 
       while True:
         await asyncio.sleep(0.1)
@@ -222,10 +274,27 @@ class SubscriptionListener(dds.SubscriptionBuiltinTopicData.DataReaderListener):
         p_key_list = data.participant_key.value
         p_key_string = str(p_key_list)
 
-        reader = Endpoint(topic_name=topic_name,type_name=type_name, type=data.type, kind="Reader", p_key=p_key_string, key=key_string)
+        # Extract individual QoS policies from builtin topic data
+        reliability = data.reliability
+        durability = data.durability
+        deadline = data.deadline
+        ownership = data.ownership
+        presentation = data.presentation
+        partition = data.partition
+
+        logging.info(f"[SubscriptionListener] Discovered Reader: topic='{topic_name}', type='{type_name}', key={key_string}")
+        logging.info(f"[SubscriptionListener] Reader QoS - Reliability: {reliability.kind}, Durability: {durability.kind}, Ownership: {ownership.kind}")
+
+        reader = Endpoint(topic_name=topic_name, type_name=type_name, type=data.type, kind="Reader", 
+                         p_key=p_key_string, key=key_string, reliability=reliability, 
+                         durability=durability, deadline=deadline, ownership=ownership,
+                         presentation=presentation, partition=partition)
 
         if key_string not in endpoints:
           endpoints[key_string] = reader
+          logging.info(f"[SubscriptionListener] Added new Reader endpoint: {topic_name}")
+        else:
+          logging.debug(f"[SubscriptionListener] Reader endpoint already exists: {topic_name}")
 
 # Listener for publication discovery
 class PublicationListener(dds.PublicationBuiltinTopicData.DataReaderListener):
@@ -243,10 +312,27 @@ class PublicationListener(dds.PublicationBuiltinTopicData.DataReaderListener):
         p_key_list = data.participant_key.value
         p_key_string = str(p_key_list)
 
-        writer = Endpoint(topic_name=topic_name,type_name=type_name, type=data.type, kind="Writer", p_key=p_key_string, key=key_string)
+        # Extract individual QoS policies from builtin topic data
+        reliability = data.reliability
+        durability = data.durability
+        deadline = data.deadline
+        ownership = data.ownership
+        presentation = data.presentation
+        partition = data.partition
+
+        logging.info(f"[PublicationListener] Discovered Writer: topic='{topic_name}', type='{type_name}', key={key_string}")
+        logging.info(f"[PublicationListener] Writer QoS - Reliability: {reliability.kind}, Durability: {durability.kind}, Ownership: {ownership.kind}")
+
+        writer = Endpoint(topic_name=topic_name, type_name=type_name, type=data.type, kind="Writer", 
+                         p_key=p_key_string, key=key_string, reliability=reliability, 
+                         durability=durability, deadline=deadline, ownership=ownership,
+                         presentation=presentation, partition=partition)
 
         if key_string not in endpoints:
           endpoints[key_string] = writer
+          logging.info(f"[PublicationListener] Added new Writer endpoint: {topic_name}")
+        else:
+          logging.debug(f"[PublicationListener] Writer endpoint already exists: {topic_name}")
 
 
 class RTISPY(App):

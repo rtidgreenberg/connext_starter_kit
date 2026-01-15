@@ -128,12 +128,17 @@ public:
                       << e.what() << std::endl;
         }
 
-        // Give time for any pending async operations to complete
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
         // The DistLogger instance must be finalized for clean-up
         // before the the participant factory is finalized.
-        DistLogger::finalize();
+        std::cout << "Finalizing DistLogger..." << std::endl;
+        try {
+            DistLogger::finalize();
+            std::cout << "DistLogger finalized successfully" << std::endl;
+        } catch (const std::exception &e) {
+            std::cerr << "Error finalizing DistLogger during destruction: "
+                      << e.what() << std::endl;
+        }
 
         // The DomainParticipant will be destroyed automatically when
         // _participant goes out of scope Don't call

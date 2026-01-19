@@ -22,6 +22,8 @@
 // include both the standard APIs and extensions
 #include <rti/rti.hpp>
 #include <rti/core/cond/AsyncWaitSet.hpp>
+#include <rti/distlogger/DistLogger.hpp>
+#include <rti/config/Logger.hpp>
 
 //
 // For more information about the headers and namespaces, see:
@@ -32,9 +34,13 @@
 #include "application.hpp"  // for command line parsing and ctrl-c
 #include "ExampleTypes.hpp"
 #include "Definitions.hpp"
-#include "DDSContextSetup.hpp"
+#include "DDSParticipantSetup.hpp"
 #include "DDSReaderSetup.hpp"
 #include "DDSWriterSetup.hpp"
+
+// For example legibility.
+using namespace rti::all;
+using namespace rti::dist_logger;
 
 constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
 constexpr int PUBLISH_PERIOD_MS = 2000;
@@ -58,7 +64,7 @@ void process_command_data(dds::sub::DataReader<example_types::Command> reader)
 } 
 
 
-void run(unsigned int domain_id, const std::string& qos_file_path)
+void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
 {
     // Generate random Application ID
     std::random_device rd;
@@ -66,53 +72,40 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
     std::uniform_int_distribution<> distrib(1000, 9999);
     int app_id = distrib(gen);
     
-    // Create application name with App ID
-    std::stringstream app_name_stream;
-    app_name_stream << APP_NAME << " [App-" << app_id << "]";
-    std::string app_name_with_id = app_name_stream.str();
-    
-    // Use provided QoS file path and generated constants from IDL
-    const std::string qos_profile = qos_profiles::DEFAULT_PARTICIPANT;
+    rti::config::Logger::instance().notice(("Dynamic Partition QoS application starting with App ID: " + std::to_string(app_id)).c_str());
 
-    std::cout << "Dynamic Partition QoS application starting on domain " << domain_id << std::endl;
-    std::cout << "Application ID: " << app_id << std::endl;
-    std::cout << "Using QoS file: " << qos_file_path << std::endl;
-
-    // This sets up DDS Domain Participant as well as the Async Waitset for the readers
-    auto dds_context = std::make_shared<DDSContextSetup>(domain_id, ASYNC_WAITSET_THREADPOOL_SIZE, qos_file_path, qos_profile, app_name_with_id);
-    
-    // Get reference to distributed logger
-    auto& logger = dds_context->distributed_logger();
+    // DDSReaderSetup and DDSWriterSetup are example wrapper classes for your convenience that simplify
+    // DDS reader/writer creation and event handling. They manage DataReader/DataWriter lifecycle, attach
+    // status conditions to the centralized AsyncWaitSet, and provide convenient methods to register
+    // callbacks for DDS events (data_available, subscription_matched, liveliness_changed, etc.)
 
     // Setup Writer Interface
     auto command_writer = std::make_shared<DDSWriterSetup<example_types::Command>>(
-        dds_context,
+        participant_setup,
         topics::COMMAND_TOPIC,
-        qos_file_path,
         qos_profiles::ASSIGNER);
 
     // Setup Reader Interface
     auto command_reader = std::make_shared<DDSReaderSetup<example_types::Command>>(
-        dds_context,
+        participant_setup,
         topics::COMMAND_TOPIC,
-        qos_file_path,
         qos_profiles::ASSIGNER);
 
     // Configure reader to ignore own publications
     // Get the DataWriter's instance handle and tell the reader to ignore it
     dds::core::InstanceHandle writer_handle = command_writer->writer()->instance_handle();
-    dds::sub::ignore(dds_context->participant(), writer_handle);
+    dds::sub::ignore(participant_setup->participant(), writer_handle);
 
     // Enable Asynchronous Event-Driven processing for reader
     command_reader->set_data_available_handler(process_command_data);
 
-    logger.info("Dynamic Partition QoS app is running. Press Ctrl+C to stop.");
-    logger.info("Subscribing to Command messages...");
-    logger.info("Publishing Command messages...");
-    logger.info("Type a partition name at any time to change participant partition QoS (e.g., 'MyPartition' or 'Partition1,Partition2')");
+    rti::config::Logger::instance().notice("Dynamic Partition QoS app is running. Press Ctrl+C to stop.");
+    rti::config::Logger::instance().notice("Subscribing to Command messages...");
+    rti::config::Logger::instance().notice("Publishing Command messages...");
+    rti::config::Logger::instance().notice("Type a partition name at any time to change participant partition QoS (e.g., 'MyPartition' or 'Partition1,Partition2')");
 
     // Start input thread for partition changes
-    std::thread input_thread([&logger, &dds_context, app_id]() {
+    std::thread input_thread([participant_setup, app_id]() {
         std::string input;
         while (!application::shutdown_requested) {
             std::getline(std::cin, input);
@@ -154,23 +147,23 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
                 }
                 std::cout << std::endl;
                 
-                logger.info("User requested partition change to: " + input);
+                rti::config::Logger::instance().notice(("User requested partition change to: " + input).c_str());
                 
                 // Get current participant QoS
-                auto participant_qos = dds_context->participant().qos();
+                auto participant_qos = participant_setup->participant().qos();
                 
                 // Update partition policy
                 participant_qos << dds::core::policy::Partition(partitions);
                 
                 // Apply the new QoS to the participant
-                dds_context->participant().qos(participant_qos);
+                participant_setup->participant().qos(participant_qos);
                 
                 std::cout << "Partition QoS applied successfully!" << std::endl;
-                logger.info("Partition QoS updated successfully");
+                rti::config::Logger::instance().notice("Partition QoS updated successfully");
                 
             } catch (const dds::core::Error& ex) {
                 std::cerr << "Error applying partition QoS: " << ex.what() << std::endl;
-                logger.error("Failed to apply partition QoS: " + std::string(ex.what()));
+                rti::config::Logger::instance().error(("Failed to apply partition QoS: " + std::string(ex.what())).c_str());
             }
         }
     });
@@ -192,7 +185,7 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
       try
       {
         // Get and display current partition(s) with App ID
-        auto current_qos = dds_context->participant().qos();
+        auto current_qos = participant_setup->participant().qos();
         auto partitions = current_qos.policy<dds::core::policy::Partition>().name();
 
 
@@ -217,7 +210,8 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
       }
       catch (const std::exception &ex)
       {
-        logger.error("Failed to publish command: " + std::string(ex.what()));
+        std::cerr << "Error: Failed to publish command: " << ex.what() << std::endl;
+        rti::config::Logger::instance().error(("Failed to publish command: " + std::string(ex.what())).c_str());
       }
 
       // Sleep
@@ -230,9 +224,9 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
         input_thread.join();
     }
 
-    logger.info("Dynamic Partition QoS application shutting down...");
+    rti::config::Logger::instance().notice("Dynamic Partition QoS application shutting down...");
     
-    logger.info("Dynamic Partition QoS application stopped");
+    rti::config::Logger::instance().notice("Dynamic Partition QoS application stopped");
 }
 
 int main(int argc, char *argv[])
@@ -252,22 +246,54 @@ int main(int argc, char *argv[])
     rti::config::Logger::instance().verbosity(arguments.verbosity);
 
     try {
-        run(arguments.domain_id, arguments.qos_file_path);
+        // Create DDS Participant Setup (creates DomainParticipant and AsyncWaitSet)
+        // DDSParticipantSetup is an example wrapper class for your convenience that manages the DDS
+        // infrastructure: creates the participant in the specified domain, sets up the AsyncWaitSet with
+        // a configurable thread pool for event-driven processing, loads QoS profiles from the XML file,
+        // and stores them for use by readers/writers
+        auto participant_setup = std::make_shared<DDSParticipantSetup>(
+            arguments.domain_id,
+            ASYNC_WAITSET_THREADPOOL_SIZE,
+            arguments.qos_file_path,
+            qos_profiles::DEFAULT_PARTICIPANT,
+            APP_NAME);
+        
+        // Setup DistLogger with the shared participant
+        // DistLogger provides distributed logging over DDS network. By using the shared participant,
+        // all log messages are published to remote subscribers via DDS topics, enabling centralized
+        // logging and monitoring across distributed systems. This is more powerful than console logging.
+        try {
+            DistLoggerOptions options;
+            options.domain_participant(participant_setup->participant());
+            options.application_kind(APP_NAME);
+            
+            DistLogger::set_options(options);
+            auto& dist_logger = DistLogger::get_instance();
+            
+            // Configure DistLogger verbosity and filter level for filtering which log messages to publish
+            dist_logger.set_verbosity(rti::config::LogCategory::user, arguments.verbosity);
+            dist_logger.set_filter_level(dist_logger.get_info_log_level());
+            
+            rti::config::Logger::instance().notice("DistLogger initialized with shared participant");
+            rti::config::Logger::instance().notice(("Using QoS file: " + arguments.qos_file_path).c_str());
+        } catch (const std::exception& ex) {
+            std::cerr << "Error initializing DistLogger: " << ex.what() << std::endl;
+            throw;
+        }
+        
+        run(participant_setup);
     } catch (const std::exception& ex) {
         // This will catch DDS exceptions
         std::cerr << "Exception in run(): " << ex.what() << std::endl;
         return EXIT_FAILURE;
     }
 
-  // Finalize participant factory after all DDSContextSetup/DDSReaderSetup/DDSWriterSetup objects are destroyed
-  // This should be called at application exit after all DDS entities are cleaned up
-    try
-    {
+    // Finalize participant factory after all DDSParticipantSetup/DDSReaderSetup/DDSWriterSetup objects are destroyed
+    // This should be called at application exit after all DDS entities are cleaned up
+    try {
         dds::domain::DomainParticipant::finalize_participant_factory();
         std::cout << "DomainParticipant factory finalized at application exit" << std::endl;
-    }
-    catch (const std::exception &e)
-    {
+    } catch (const std::exception &e) {
         std::cerr << "Error finalizing participant factory at exit: " << e.what() << std::endl;
     }
 

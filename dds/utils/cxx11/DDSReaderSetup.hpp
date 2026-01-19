@@ -19,10 +19,27 @@
 #include <iostream>
 #include <functional>
 
-#include "DDSContextSetup.hpp"
+#include "DDSParticipantSetup.hpp"
 
 using namespace rti::all;
 
+/*
+ * DDSReaderSetup Class
+ * 
+ * Manages DataReader creation and event-driven callback processing:
+ *   - DataReader: Subscribes to messages on a specified topic with configurable QoS
+ *   - Status Callbacks: Supports multiple DDS event callbacks including:
+ *       * data_available: Fires when new data is available to read
+ *       * subscription_matched: Fires when writers matching the subscription are discovered
+ *       * liveliness_changed: Fires when writer liveliness status changes
+ *       * requested_deadline_missed: Fires when expected data deadline is missed
+ *       * requested_incompatible_qos: Fires when QoS requirements are incompatible
+ *       * sample_lost: Fires when samples are lost due to resource constraints
+ *       * sample_rejected: Fires when samples are rejected by the reader
+ *   - AsyncWaitSet Integration: Registers status conditions with the centralized AsyncWaitSet
+ *                                allowing all status events to be processed asynchronously via
+ *                                thread pool without blocking the application
+ */
 template <typename T>
 class DDSReaderSetup {
 public:
@@ -50,16 +67,15 @@ public:
     using SampleRejectedFunction =
             std::function<void(dds::sub::DataReader<T> &)>;
 
-    // Constructor accepting a DDSContextSetup for Reader setup
+    // Constructor accepting a DDSParticipantSetup for Reader setup
     explicit DDSReaderSetup(
-            std::shared_ptr<DDSContextSetup> &context,
+            std::shared_ptr<DDSParticipantSetup> &p_setup,
             const std::string &topic_name,
-            const std::string &qos_file = "",
             const std::string &qos_profile = "")
-            : _participant(context->participant()),
-              _async_waitset(context->async_waitset()),
+            : _participant(p_setup->participant()),
+              _async_waitset(p_setup->async_waitset()),
               _topic_name(topic_name),
-              _qos_file(qos_file),
+              _qos_file(p_setup->qos_file_path()),
               _qos_profile(qos_profile)
     {
         std::cout << "Created DDS Reader Setup Class" << std::endl;

@@ -245,20 +245,27 @@ int main(int argc, char *argv[])
             qos_profiles::DEFAULT_PARTICIPANT,
             APP_NAME);
         
-        // Setup DistLogger with the shared participant
+        // Setup DistLogger Singleton
         // DistLogger provides distributed logging over DDS network. By using the shared participant,
-        // all log messages are published to remote subscribers via DDS topics, enabling centralized
+        // all RTI Logger messages are published to remote subscribers via DDS topics, enabling centralized
         // logging and monitoring across distributed systems. This is more powerful than console logging.
         try {
             DistLoggerOptions options;
             options.domain_participant(participant_setup->participant());
             options.application_kind(APP_NAME);
+
+            // Disable Logger output to console
+            options.echo_to_stdout(true);
             
             DistLogger::set_options(options);
             auto& dist_logger = DistLogger::get_instance();
             
-            // Configure DistLogger verbosity and filter level for filtering which log messages to publish
+            // Configure DistLogger Verbosity. 
+            // Passthrough for rti::config::logger verbosity control
+            // Change Category to display internal Connext debug logs
             dist_logger.set_verbosity(rti::config::LogCategory::user, arguments.verbosity);
+            
+            // Configure Filter Level. This controls what level gets published
             dist_logger.set_filter_level(dist_logger.get_info_log_level());
             
             rti::config::Logger::instance().notice("DistLogger initialized with shared participant");
@@ -271,18 +278,18 @@ int main(int argc, char *argv[])
         // Run the application
         run(participant_setup);
         
+        // Explicitly finalize DistLogger Singleton before Domain Participant 
+        // destruction as it uses it
+        try {
+            DistLogger::get_instance().finalize();
+            std::cout << "DistLogger finalized" << std::endl;
+        } catch (const std::exception& ex) {
+            std::cerr << "Error finalizing DistLogger: " << ex.what() << std::endl;
+        }
     } catch (const std::exception& ex) {
         // This will catch DDS exceptions
         std::cerr << "Exception in main: " << ex.what() << std::endl;
         return EXIT_FAILURE;
-    }
-
-    // Finalize Distributed Logger before participant factory
-    try {
-        rti::dist_logger::DistLogger::finalize();
-        std::cout << "DistLogger finalized at application exit" << std::endl;
-    } catch (const std::exception &e) {
-        std::cerr << "Error finalizing DistLogger at exit: " << e.what() << std::endl;
     }
 
     // Finalize participant factory after all DDSParticipantSetup/DDSReaderSetup/DDSWriterSetup objects are destroyed

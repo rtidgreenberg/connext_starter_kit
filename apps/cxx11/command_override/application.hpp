@@ -17,7 +17,7 @@
 #include <csignal>
 #include <string>
 #include <dds/core/ddscore.hpp>
-#include "DDSDefs.hpp"
+#include "Definitions.hpp"
 
 namespace application {
 
@@ -61,18 +61,31 @@ inline void set_verbosity(
         rti::config::Verbosity &verbosity,
         int verbosity_value)
 {
+    std::cout << "Setting verbosity to value: ";
     switch (verbosity_value) {
     case 0:
         verbosity = rti::config::Verbosity::SILENT;
+        std::cout << "0-SILENT" << std::endl;
         break;
     case 1:
         verbosity = rti::config::Verbosity::EXCEPTION;
+        std::cout << "1-EXCEPTION" << std::endl;
         break;
     case 2:
         verbosity = rti::config::Verbosity::WARNING;
+        std::cout << "2-WARNING" << std::endl;
         break;
     case 3:
+        verbosity = rti::config::Verbosity::STATUS_LOCAL;
+        std::cout << "3-STATUS_LOCAL" << std::endl;
+        break;
+    case 4:
+        verbosity = rti::config::Verbosity::STATUS_REMOTE;
+        std::cout << "4-STATUS_REMOTE" << std::endl;
+        break;
+    case 5:
         verbosity = rti::config::Verbosity::STATUS_ALL;
+        std::cout << "5-STATUS_ALL" << std::endl;
         break;
     default:
         verbosity = rti::config::Verbosity::EXCEPTION;
@@ -86,7 +99,7 @@ inline ApplicationArguments parse_arguments(int argc, char *argv[])
     int arg_processing = 1;
     bool show_usage = false;
     ParseReturn parse_result = ParseReturn::ok;
-    unsigned int domain_id = dds_config::DEFAULT_DOMAIN_ID;
+    unsigned int domain_id = domains::DEFAULT_DOMAIN_ID;
     rti::config::Verbosity verbosity(rti::config::Verbosity::EXCEPTION);
     std::string qos_file_path =
             "../../../../dds/qos/DDS_QOS_PROFILES.xml";  // Default QoS file

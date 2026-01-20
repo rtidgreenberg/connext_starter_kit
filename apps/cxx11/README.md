@@ -1,76 +1,100 @@
 # C++11 DDS Applications
 
-This directory contains C++11 applications built with RTI Connext DDS, showcasing different DDS communication patterns and integration approaches.
+C++11 applications built with RTI Connext DDS, showcasing different DDS communication patterns and integration approaches.
+
+## Table of Contents
+- [Available Applications](#available-applications)
+- [Creating New C++ DDS Applications](#creating-new-c-dds-applications)
+- [Key Integration Patterns](#key-integration-patterns)
+- [Build Dependencies](#build-dependencies)
+- [Getting Started](#getting-started)
 
 ## Available Applications
 
 ### [`example_io_app/`](./example_io_app/) - Reference Implementation
-Complete reference application demonstrating multiple readers and writers with:
+Complete reference application demonstrating multiple readers and writers:
 - **Multiple Subscribers**: Command, Button, Config readers using AsyncWaitSet
 - **GPS Publisher**: Continuous Position data publishing (500ms intervals)
-- **Distributed Logging**: RTI Admin Console integration - external visibility of logs over DDS with infrastructure services or your own apps
+- **Distributed Logging**: RTI Admin Console integration for external log visibility
 - **Event-Driven Architecture**: AsyncWaitSet-based message processing
+
+### [`fixed_image_flat_zc/`](./fixed_image_flat_zc/) - High-Performance FlatData
+Zero-copy high-throughput demonstration:
+- **3 MB Payloads**: Large data transfers at 10 Hz (~30 MB/sec)
+- **FlatData Zero Copy**: Direct shared memory access, no serialization
+- **Application Acknowledgment**: Ensures data consistency with zero-copy
+- **Reliable QoS**: Acknowledgment-based flow control
+- **AsyncWaitSet Processing**: Event-driven data handling
+
+### [`command_override/`](./command_override/) - Command Arbitration using Ownership QoS
+Advanced DDS ownership and QoS patterns:
+- **4-Phase Progressive Publishing**: Sequential writer activation
+- **Ownership Strength Control**: Priority-based command arbitration
+- **Dynamic QoS Modification**: Runtime ownership strength changes
+- **Multi-Writer Coordination**: Same topic, different priorities
 
 ## Creating New C++ DDS Applications
 
 ### Overview
-You can rapidly create new DDS applications using GitHub Copilot and the provided build prompt template. This process leverages the existing DDS infrastructure and utilities.
+You can rapidly create new DDS applications using GitHub Copilot(Claude Sonnet 4.5)  
+and the provided build prompt template.  
+This process leverages the existing DDS infrastructure and  utilities.   
 
 ### Prerequisites
-Before creating a new application, ensure your development environment is ready:
 
 ```bash
-# 1. Set RTI Connext DDS environment
+# Set RTI Connext DDS environment
 export NDDSHOME=/path/to/rti_connext_dds-7.3.0
 
-# 2. Build DDS utility library (contains generated types and utilities)
-cd ../../dds/cxx11 && rm -rf build && mkdir build && cd build
+# Build DDS utility library (contains generated types and utilities)
+cd ../../dds/cxx11 && mkdir -p build && cd build
 cmake .. && make -j4
 ```
 
 ### Step-by-Step Application Creation
 
 #### Step 1: Define New Data Types (Optional)
-If you need custom data types beyond the existing ones, create new IDL definitions:
+
+If you need custom data types beyond existing ones:
 
 ```bash
 cd ../../dds/datamodel/
-# Edit or create new .idl files with your custom data structures
-# Example: SensorData.idl, ControlCommands.idl, etc.
+# Edit or create new .idl files
 ```
 
-**Existing Data Types Available:**
-- `Button` - Button input events and state
-- `Command` - System commands and control messages  
+**Available Example Data Types:**
+- `Button` - Button input events
+- `Command` - System commands and control
 - `Config` - Configuration parameters
 - `State` - System state information
 - `Position` - GPS/location data
 - `Image` - Image data with metadata
+- `FinalFlatImage` - High-performance FlatData type
 
-#### Step 2: Add Topic Constants to DDSDefs
+#### Step 2: Add Topic Constants to Definitions (Optional)
 If using new data types, add topic name constants:
 
 ```cpp
-// Edit ../../dds/datamodel/DDSDefs.idl
+// Edit ../../dds/datamodel/idl/Definitions.idl
 module topics {
     const string YOUR_NEW_TOPIC = "YourNewTopic";
     // Add other topic constants as needed
 };
 ```
 
-#### Step 3: Regenerate DDS Code (If IDL Changed)
+#### Step 3: Regenerate DDS Code (If new/changed IDL) (Optional)
 ```bash
-cd ../../dds/cxx11 && rm -rf build && mkdir build && cd build
+cd ../../dds/build
 cmake .. && make -j4
 ```
 
 #### Step 4: Create Application Using GitHub Copilot
 
-1. **Use the Build Prompt**: Open `.github/prompts/build_cxx.prompt.md` in your editor
+1. **Use Build Prompt**: Open `.github/prompts/build_cxx.prompt.md`
 
 2. **Define Your Application**: Use GitHub Copilot Chat with a command like:
    ```
-   Follow instructions in build_cxx.prompt.md. Create a new cxx app with [READERS] as reader(s) and [WRITERS] as writer(s)
+   Follow instructions in build_cxx.prompt.md. Create a new cxx app with [TYPE using TOPIC NAME] as reader(s) and [TYPE using TOPIC NAME] as writer(s)
    ```
    
    **Example Commands:**
@@ -79,26 +103,30 @@ cmake .. && make -j4
    Follow instructions in build_cxx.prompt.md. Create a new cxx app with Position and State as readers and Command as writer
    
    # Control system app  
-   Follow instructions in build_cxx.prompt.md. Create a new cxx app with Button as reader and Config, State, Command as writers
+   Follow instructions in build_cxx.prompt.md. Create a new cxx app with Button using ButtonTopic as reader and Config, State, Command as writers
    
    # Data collection app
    Follow instructions in build_cxx.prompt.md. Create a new cxx app with Button, Position, State as readers and Image as writer
    ```
 
-3. **Copilot Will Generate**:
-   - Application directory structure
-   - `CMakeLists.txt` with proper dependencies
-   - `application.hpp` for command-line parsing
-   - Main application file with your specified readers/writers
-   - Proper DDS interface setup and message processing
+3. **Copilot Will**:
+  - Generate Application directory structure
+  - Generate `CMakeLists.txt` with dependencies
+  - Generate `application.hpp` for command-line parsing
+  - Generate main application with specified readers/writers
+  - Generate DDS Writer/Reader setup and message processing
+  - Rebuild DDS Types Library if necessary
 
-#### Step 5: Build and Test Your Application
+#### Step 5: Build and Test
 
 ```bash
-cd your_new_app_name && mkdir build && cd build
+cd your_app_name && mkdir build && cd build
 cmake .. && make -j4
+./your_app_name
+```
 
 # Test the application
+```
 ./your_new_app_name --help
 ./your_new_app_name
 ```
@@ -123,7 +151,7 @@ All generated applications follow these established patterns:
 #### **DDSContext Setup**
 ```cpp
 // Centralized DDS participant management
-auto dds_context = std::make_shared<DDSContext>(
+auto dds_context = std::make_shared<DDSContextSetup>(
     domain_id, 
     ASYNC_WAITSET_THREADPOOL_SIZE, 
     qos_file_path, 
@@ -132,24 +160,22 @@ auto dds_context = std::make_shared<DDSContext>(
 );
 ```
 
-#### **DDSInterface Creation** 
+#### **Reader/Writer Setup** 
 ```cpp
 // Reader example
-auto button_interface = std::make_shared<DDSInterface<example_types::Button>>(
+auto button_reader = std::make_shared<DDSReaderSetup<example_types::Button>>(
     dds_context,
-    KIND::READER,
     topics::BUTTON_TOPIC,
     qos_file_path,
-    dds_config::ASSIGNER_QOS
+    qos_profiles::ASSIGNER
 );
 
 // Writer example
-auto config_interface = std::make_shared<DDSInterface<example_types::Config>>(
+auto config_writer = std::make_shared<DDSWriterSetup<example_types::Config>>(
     dds_context,
-    KIND::WRITER, 
     topics::CONFIG_TOPIC,
     qos_file_path,
-    dds_config::ASSIGNER_QOS
+    qos_profiles::ASSIGNER
 );
 ```
 
@@ -166,8 +192,9 @@ void process_your_data(dds::sub::DataReader<example_types::YourType> reader) {
     }
 }
 
-// Enable async processing
-your_interface->enable_async_waitset(process_your_data);
+// Enable async processing with DDSReaderSetup
+your_reader->set_data_handler(process_your_data);
+your_reader->enable_async();
 ```
 
 #### **Message Publishing**
@@ -190,7 +217,7 @@ while (!application::shutdown_requested) {
 
 1. **Follow Naming Conventions**: Use descriptive names that reflect your application's purpose
 2. **Use Existing Data Types**: Leverage existing IDL types when possible to maintain interoperability  
-3. **Consistent QoS Profiles**: Use `dds_config::ASSIGNER_QOS` for flexible XML-based QoS configuration
+3. **Consistent QoS Profiles**: Use `qos_profiles::ASSIGNER` for flexible XML-based QoS configuration
 4. **Error Handling**: Include comprehensive exception handling for all DDS operations
 5. **Distributed Logging**: Integrate with RTI distributed logger for system-wide monitoring - external visibility of logs over DDS with infrastructure services or your own apps
 6. **Signal Handling**: Implement graceful shutdown with Ctrl+C handling
@@ -247,8 +274,8 @@ ls $NDDSHOME/rti_license.dat
 All applications automatically link against:
 - **RTI Connext DDS 7.3.0+** with distributed logger support
 - **DDS Utilities Library**: `libdds_utils_datamodel.so` 
-- **Generated Headers**: ExampleTypes.hpp, DDSDefs.hpp
-- **Utility Classes**: DDSContext.hpp, DDSInterface.hpp
+- **Generated Headers**: ExampleTypes.hpp, Definitions.hpp
+- **Utility Classes**: DDSContextSetup.hpp, DDSReaderSetup.hpp, DDSWriterSetup.hpp
 
 ## Getting Started
 

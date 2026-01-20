@@ -1,24 +1,55 @@
 # Python DDS Applications
 
-This directory contains Python applications that demonstrate RTI Connext DDS capabilities using the example data types.
+Python applications demonstrating RTI Connext DDS capabilities with example data types.
+
+## Quick Start
+
+1. **Get an RTI license and set the environment variable:**
+   
+   Visit https://www.rti.com/get-connext to request a free trial license (you'll receive it via email within minutes):
+   ```bash
+   export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
+   ```
+
+2. **Run the installation script:**
+   ```bash
+   cd apps/python
+   ./install.sh
+   ```
+
+3. **Run an application:**
+   ```bash
+   cd example_io_app
+   python example_io_app.py --domain_id 1
+   ```
+
+The install script will automatically set up the virtual environment, install all dependencies, and generate DDS bindings.
+
+---
+
+## Table of Contents
+- [Application Structure](#application-structure)
+- [Current Applications](#current-applications)
+- [Setup](#setup)
+- [Installation](#installation)
+- [Running Applications](#running-applications)
+- [Building DDS Python Bindings](#building-dds-python-bindings)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
 
 ## Application Structure
 
-Each application is organized in its own subfolder with clear separation of concerns:
-
 ```
 apps/python/
-├── example_io_app/         # Example I/O application demonstrating DDS patterns
-│   ├── example_io_app.py   # Main Python DDS application
-│   ├── requirements.txt    # App-specific dependencies
-│   └── README.md           # Application documentation
-├── connext_dds_env/        # Virtual environment (ready to use)
-├── README.md               # This file - main documentation
-├── install.sh              # Installation script (handles everything)
-├── Makefile                # Build commands and utilities
-├── pyproject.toml          # Python package configuration
-├── requirements.txt        # Common Python dependencies
-├── rti_license.dat         # RTI license file
+├── example_io_app/         # Example I/O application
+│   ├── example_io_app.py   # Main application
+│   ├── requirements.txt    # App dependencies
+│   └── README.md           # Documentation
+├── connext_dds_env/        # Virtual environment
+├── README.md               # This file
+├── install.sh              # Installation script
+├── requirements.txt        # Common dependencies
+├── rti_license.dat         # RTI license (REQUIRED)
 └── setup.py                # Setup script
 ```
 
@@ -26,77 +57,79 @@ apps/python/
 
 ### example_io_app
 
-Located in `example_io_app/`, this application demonstrates RTI Connext DDS middleware patterns:
-
-- **Subscribes to:**
-  - Position messages (`example_types.Position`)
-- **Publishes:**
-  - Command messages (`example_types.Command`)
-  - Button messages (`example_types.Button`)
-  - Config messages (`example_types.Config`)
+- **Subscribes to:** Position messages
+- **Publishes:** Command, Button, Config messages
 - **Features:**
   - RTI asyncio framework integration
-  - ASSIGNER_QOS profile usage with `set_topic_datareader_qos`
+  - qos_profiles.ASSIGNER profile usage
   - Distributed logger integration
-  - Async publisher/subscriber pattern
-  - Cross-language communication with C++ example_io_app
+  - Cross-language communication with C++ apps
 
-## Building Applications
+---
+
+## Detailed Setup
 
 ### Prerequisites
-- RTI Connext DDS Python API (automatically installed via requirements.txt)
-- Python 3.8 or later
+- RTI Connext DDS Python API
+- Python 3.8+
 - Built DDS Python libraries (`../../dds/python/build/`)
-- **RTI license file (`rti_license.dat`) must be present in this `apps/python/` directory**
+- **RTI license file with `RTI_LICENSE_FILE` environment variable set**
 
-> **Important**: All Python applications should be run from the `apps/python/` directory to ensure the RTI license file is accessible in the current working directory.
+#### Getting an RTI License
 
-### Setup Instructions
+If you don't have an RTI Connext license:
 
-1. **Set up environment and install dependencies:**
+1. Visit https://www.rti.com/get-connext
+2. Fill out the form to request a free trial license
+3. You'll receive an automated email with the license file (`rti_license.dat`) within a few minutes
+4. Set the `RTI_LICENSE_FILE` environment variable to point to the license file:
    ```bash
-   # Navigate to python apps directory
-   cd /home/rti/connext_starter_kit/apps/python
-   
-   # Activate virtual environment
-   source connext_dds_env/bin/activate
-   
-   # Set NDDSHOME (required for DDS code generation)
-   export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
-   
-   # Run installation script (installs RTI API and generates DDS bindings)
-   ./install.sh
+   export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
    ```
 
-2. **Run the application:**
-   ```bash
-   cd example_io_app
-   python3 example_io_app.py --domain_id 1 --verbosity 2
-   ```
+> **Tip**: Add the `export RTI_LICENSE_FILE=...` line to your `~/.bashrc` or `~/.bash_profile` to make it permanent.
 
-## Development Guidelines
+### Installation
+
+```bash
+# Navigate to python apps directory
+cd /home/rti/connext_starter_kit/apps/python
+
+# Activate virtual environment
+source connext_dds_env/bin/activate
+
+# Set NDDSHOME
+export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
+
+# Run installation (installs RTI API and generates DDS bindings)
+./install.sh
+```
+
+### Run Application
+
+```bash
+cd example_io_app
+python3 example_io_app.py --domain_id 1 --verbosity 2
+```
+
+## Development
 
 ### Adding New Applications
 
-1. **Create Application Directory:**
+1. **Create directory:**
    ```bash
    mkdir apps/python/your_app_name/
    ```
 
-2. **Application Structure:**
+2. **Structure:**
    ```
    your_app_name/
-   ├── your_app_name.py        # Main application file
-   ├── requirements.txt        # Python dependencies (optional)
-   └── README.md              # Application-specific documentation
+   ├── your_app_name.py
+   ├── requirements.txt (optional)
+   └── README.md
    ```
 
-3. **Template Structure:**
-   - Copy from `example_io_app/example_io_app.py` as starting template
-   - Update application name and functionality
-   - Adjust import paths for DDS libraries (use `../../../dds/python`)
-
-### Naming Conventions
+3. **Template**: Copy from `example_io_app/example_io_app.py`
 
 - **Directory Names:** Use lowercase with underscores (e.g., `sensor_fusion`, `navigation_control`)
 - **Main Files:** Use `{app_name}.py` (e.g., `example_io_app.py`, `sensor_fusion.py`)
@@ -160,8 +193,8 @@ MAIN_TASK_SLEEP_INTERVAL = 5  # seconds
 
 # QoS Configuration
 QOS_FILE_PATH = "../../dds/qos/DDS_QOS_PROFILES.xml"
-DEFAULT_PARTICIPANT_QOS = "DPLibrary::DefaultParticipant"
-ASSIGNER_QOS = "DataPatternsLibrary::AssignerQoS"
+qos_profiles.DEFAULT_PARTICIPANT = "DPLibrary::DefaultParticipant"
+qos_profiles.ASSIGNER = "DataPatternsLibrary::AssignerQoS"
 ```
 
 ### QoS Profiles
@@ -244,7 +277,7 @@ deactivate
 ### Generated Python Modules
 The following are automatically created via CMake:
 - `../../dds/python/codegen/ExampleTypes.py` (example_types module)
-- `../../dds/python/codegen/DDSDefs.py` (Topic definitions and QoS constants)
+- `../../dds/python/codegen/Definitions.py` (Topic definitions and QoS constants)
 
 ## Installation and Usage
 
@@ -413,7 +446,7 @@ To modify the application behavior:
 1. **Publishing Rate**: Modify `PUBLISHER_SLEEP_INTERVAL` (default: 2 seconds)
 2. **Status Updates**: Modify `MAIN_TASK_SLEEP_INTERVAL` (default: 5 seconds)
 3. **Domain ID**: Change default domain ID in argument parser (default: 1)
-4. **QoS Profiles**: Update profile names in DDSDefs configuration
+4. **QoS Profiles**: Update profile names in Definitions configuration
 5. **QoS File Location**: Modify path to QoS XML file as needed
 
 ### Cross-Application Communication

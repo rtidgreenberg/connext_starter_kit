@@ -20,3 +20,22 @@ dds/python/codegen/
 apps/cxx11/command_override/build/
 
 apps/cxx11/flat_image_app/build/
+
+apps/cxx11/large_data_very_fast/build/
+
+apps/cxx11/fixed_image_flat_zc/build/
+
+# DDS build directory (contains generated code and libraries)
+dds/build/
+
+services/log_dir/
+
+apps/cxx11/large_data_app/build/
+
+apps/cxx11/dynamic_partition_qos/build/
+
+tools/rtispy_env/
+
+tools/__pycache__/
+
+services/converted/

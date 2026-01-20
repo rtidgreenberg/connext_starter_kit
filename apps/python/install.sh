@@ -31,7 +31,16 @@ echo
 # Check if NDDSHOME is set
 if [ -z "$NDDSHOME" ]; then
     echo "ERROR: NDDSHOME environment variable not set"
-    echo "Please set NDDSHOME to your RTI Connext DDS installation directory:"
+    echo ""
+    echo "To set up the RTI Connext environment, run:"
+    echo "  source <path_to_connext>/resource/scripts/rtisetenv_<architecture>.bash"
+    echo ""
+    echo "Example:"
+    echo "  source /opt/rti_connext_dds-7.3.0/resource/scripts/rtisetenv_x64Linux4gcc7.3.0.bash"
+    echo ""
+    echo "This script will set NDDSHOME, update PATH, and configure LD_LIBRARY_PATH."
+    echo ""
+    echo "Alternatively, you can manually set NDDSHOME:"
     echo "  export NDDSHOME=/path/to/rti_connext_dds-7.3.0"
     exit 1
 fi
@@ -53,10 +62,16 @@ elif [ -n "$RTI_LICENSE_FILE" ] && [ -f "$RTI_LICENSE_FILE" ]; then
     fi
 else
     echo "⚠️  WARNING: No rti_license.dat found in current directory"
-    echo "   If your RTI installation requires a license file, copy it here:"
+    echo ""
+    echo "   If your RTI installation requires a license file, you have two options:"
+    echo ""
+    echo "   Option 1: Copy license file to this directory"
     echo "     cp /path/to/your/rti_license.dat ./rti_license.dat"
-    echo "   Alternatively, set RTI_LICENSE_FILE environment variable:"
+    echo ""
+    echo "   Option 2: Set RTI_LICENSE_FILE environment variable"
     echo "     export RTI_LICENSE_FILE=/path/to/your/rti_license.dat"
+    echo ""
+    echo ""
     echo "   If RTI is properly licensed system-wide, you can ignore this warning."
     echo
     read -p "Continue without license file in working directory? (y/N): " -n 1 -r

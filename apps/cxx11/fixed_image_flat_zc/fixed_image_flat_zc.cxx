@@ -11,11 +11,10 @@
 */
 
 #include <iostream>
-#include <sstream>
 #include <thread>
 #include <chrono>
 #include <atomic>
-#include <ctime>
+#include <cstring>
 
 // include both the standard APIs and extensions
 #include <rti/rti.hpp>
@@ -41,10 +40,10 @@ using namespace rti::all;
 using namespace rti::dist_logger;
 
 constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
-const std::string APP_NAME = "Example CXX IO APP";
+const std::string APP_NAME = "FinalFlatImage CXX APP";
 
 
-void process_command_data(dds::sub::DataReader<example_types::Command> reader)
+void process_final_flat_image_data(dds::sub::DataReader<example_types::FinalFlatImage> reader)
 {
     auto samples = reader.take();
     for (const auto& sample : samples)
@@ -52,171 +51,129 @@ void process_command_data(dds::sub::DataReader<example_types::Command> reader)
       // Check if message is not DDS metadata
       if (sample.info().valid())
       {
-
-        // Do something with data message (logged at DEBUG level)
-        std::ostringstream oss;
-        oss << sample.data();
-        rti::config::Logger::instance().debug(("[COMMAND] " + oss.str()).c_str());
+        // Access FinalFlatImage sample root - FlatData types use .root()
+        auto root = sample.data().root();
+        
+        std::cout << "[FINAL_FLAT_IMAGE] Received - ID: " << root.image_id()
+                  << ", Width: " << root.width()
+                  << ", Height: " << root.height()
+                  << ", Format: " << root.format();
+        
+        // Access the fixed-size data array
+        auto data_array = root.data();
+        std::cout << ", Data array size: " << example_types::MAX_IMAGE_DATA_SIZE << " bytes (3 MB)" << std::endl;
 
         // overloaded -> operator to use RTI extension
-        rti::config::Logger::instance().debug(("[COMMAND] Topic '" + std::string(reader->topic_name()) + "' received").c_str());
+        std::cout << reader->topic_name() << " received" << std::endl;
       }
     }
 }
-
-void on_command_liveliness_changed(dds::sub::DataReader<example_types::Command> reader)
-{
-    auto status = reader->liveliness_changed_status();
-    rti::config::Logger::instance().notice(
-        ("[COMMAND] Liveliness changed - alive_count: " +
-         std::to_string(status.alive_count()) + ", not_alive_count: " +
-         std::to_string(status.not_alive_count())).c_str());
-}
-
-
-void process_button_data(dds::sub::DataReader<example_types::Button> reader)
-{
-    auto samples = reader.take();
-    for (const auto& sample : samples)
-    {
-      // Check if message is not DDS metadata
-      if (sample.info().valid())
-      {
-
-        // Do something with data message
-        std::ostringstream oss;
-        oss << sample.data();
-        rti::config::Logger::instance().debug(("[BUTTON] " + oss.str()).c_str());
-
-        // overloaded -> operator to use RTI extension
-        rti::config::Logger::instance().debug(("[BUTTON] Topic '" + std::string(reader->topic_name()) + "' received").c_str());
-      }
-    }
-} 
-
-void process_config_data(dds::sub::DataReader<example_types::Config> reader)
-{
-    auto samples = reader.take();
-    for (const auto& sample : samples)
-    {
-      // Check if message is not DDS metadata
-      if (sample.info().valid())
-      {
-
-        // Do something with data message
-        std::ostringstream oss;
-        oss << sample.data();
-        rti::config::Logger::instance().debug(("[CONFIG] " + oss.str()).c_str());
-
-        // overloaded -> operator to use RTI extension
-        rti::config::Logger::instance().debug(("[CONFIG] Topic '" + std::string(reader->topic_name()) + "' received").c_str());
-      }
-    }
-}
-
-void on_position_publication_matched(dds::pub::DataWriter<example_types::Position> writer)
-{
-    auto status = writer->publication_matched_status();
-    rti::config::Logger::instance().notice(
-        ("[POSITION] Publication matched - current_count: " +
-         std::to_string(status.current_count()) + ", total_count: " +
-         std::to_string(status.total_count())).c_str());
-}
-
 
 void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
 {
-    rti::config::Logger::instance().notice(("Example I/O application starting on domain " + std::to_string(participant_setup->participant().domain_id())).c_str());
+    rti::config::Logger::instance().notice(("FinalFlatImage application starting on domain " + std::to_string(participant_setup->participant().domain_id())).c_str());
 
     // DDSReaderSetup and DDSWriterSetup are example wrapper classes for your convenience that simplify
     // DDS reader/writer creation and event handling. They manage DataReader/DataWriter lifecycle, attach
     // status conditions to the centralized AsyncWaitSet, and provide convenient methods to register
     // callbacks for DDS events (data_available, subscription_matched, liveliness_changed, etc.)
 
-    // Setup Reader Interfaces
-    auto command_reader = std::make_shared<DDSReaderSetup<example_types::Command>>(
+    // Setup Writer Interface for FinalFlatImage type
+    auto final_flat_image_writer = std::make_shared<DDSWriterSetup<example_types::FinalFlatImage>>(
         participant_setup,
-        topics::COMMAND_TOPIC,
-        qos_profiles::ASSIGNER);
+        topics::FINAL_FLAT_IMAGE_TOPIC,
+        qos_profiles::LARGE_DATA_SHMEM_ZC);
 
-    auto button_reader = std::make_shared<DDSReaderSetup<example_types::Button>>(
+    // Setup Reader Interface for FinalFlatImage type
+    auto final_flat_image_reader = std::make_shared<DDSReaderSetup<example_types::FinalFlatImage>>(
         participant_setup,
-        topics::BUTTON_TOPIC,
-        qos_profiles::ASSIGNER);
+        topics::FINAL_FLAT_IMAGE_TOPIC,
+        qos_profiles::LARGE_DATA_SHMEM_ZC);
 
-    auto config_reader = std::make_shared<DDSReaderSetup<example_types::Config>>(
-        participant_setup,
-        topics::CONFIG_TOPIC,
-        qos_profiles::ASSIGNER);
+    // Enable Asynchronous Event-Driven processing for reader
+    final_flat_image_reader->set_data_available_handler(process_final_flat_image_data);
 
-    // Setup Writer Interfaces
-    auto position_writer = std::make_shared<DDSWriterSetup<example_types::Position>>(
-        participant_setup,
-        topics::POSITION_TOPIC,
-        qos_profiles::ASSIGNER);
+    rti::config::Logger::instance().notice("FinalFlatImage app is running. Press Ctrl+C to stop.");
+    rti::config::Logger::instance().notice("Publishing FinalFlatImage messages with @final @language_binding(FLAT_DATA) using zero-copy loan API...");
 
-    // Enable Asynchronous Event-Driven processing for readers
-    command_reader->set_data_available_handler(process_command_data);
-    command_reader->set_liveliness_changed_handler(on_command_liveliness_changed);
-    button_reader->set_data_available_handler(process_button_data);
-    config_reader->set_data_available_handler(process_config_data);
-
-    // Set publication matched callback for writer
-    position_writer->set_publication_matched_handler(on_position_publication_matched);
-
-    rti::config::Logger::instance().notice("Example I/O app is running. Press Ctrl+C to stop.");
-    rti::config::Logger::instance().notice("Subscribing to Command, Button, and Config messages...");
-    rti::config::Logger::instance().notice("Publishing Position messages...");
-
-
-    example_types::Position pos_msg;
-    pos_msg.source_id(APP_NAME);
-
-    // Counter for tracking iterations
-    int iteration = 0;
+    int count = 0;
 
     while (!application::shutdown_requested) {
 
       try
       {
-        // Populate and send position message
-        pos_msg.latitude(37.7749);
-        pos_msg.longitude(-122.4194);
-        pos_msg.altitude(15.0);
-        pos_msg.timestamp_sec(static_cast<int32_t>(std::time(nullptr)));
-        position_writer->writer().write(pos_msg);
-
-        // Log every position publish at DEBUG level (can be filtered)
-        rti::config::Logger::instance().debug(("[POSITION] Published ID: " + std::string(pos_msg.source_id()) +
-                    ", Lat: " + std::to_string(pos_msg.latitude()) +
-                    ", Lon: " + std::to_string(pos_msg.longitude()) +
-                    ", Alt: " + std::to_string(pos_msg.altitude()) + "m" +
-                    ", Timestamp: " + std::to_string(pos_msg.timestamp_sec())).c_str());
+        // Zero-copy FlatData API for @final types using get_loan()
+        auto writer = final_flat_image_writer->writer();
         
-        // Every 10 iterations (5 seconds), log INFORMATIONAL level status to distributed logger
-        if (iteration % 10 == 0) {
-          rti::config::Logger::instance().informational(("Application running - Position published at " + 
-                      std::to_string(pos_msg.timestamp_sec())).c_str());
+        // Get a loan from the writer - this provides zero-copy access to shared memory
+        auto sample = writer->get_loan();
+        
+        // Access the root of the loaned sample
+        auto root = sample->root();
+        
+        // Set fields directly on the loaned sample (zero-copy)
+        root.image_id(count);
+        root.width(640);
+        root.height(480);
+        root.format(0); // 0=RGB, 1=RGBA, 2=JPEG, etc.
+        
+        // Access and populate the fixed-size data array
+        auto data_array = root.data();
+        const int data_size = example_types::MAX_IMAGE_DATA_SIZE; // 3 MB payload
+        for (int i = 0; i < data_size; i++) {
+            data_array.set_element(i, static_cast<uint8_t>(i % 256));
         }
-        
-        iteration++;
+
+        // Write the loaned sample - this transfers ownership, don't discard after write
+        writer.write(*sample);
+
+        // Get DataWriter protocol status
+        rti::core::status::DataWriterProtocolStatus status = writer->datawriter_protocol_status();
+
+        auto first_unack_seq = status.first_unacknowledged_sample_sequence_number();
+        auto first_available_seq =
+                status.first_available_sample_sequence_number();
+        auto last_available_seq =
+                status.last_available_sample_sequence_number();
+
+        auto send_window = status.send_window_size();
+
+        std::cout << "First unacknowledged sample sequence number: " << first_unack_seq << std::endl;
+        std::cout << "Send window size (max unacknowledged samples): " << send_window << std::endl;
+        std::cout << "First available sample sequence number: "
+                  << first_available_seq << std::endl;
+        std::cout << "Last available sample sequence number: "
+                  << last_available_seq << std::endl;
+
+
+        std::cout << "[FINAL_FLAT_IMAGE] Published - ID: " << count
+                  << ", Width: 640, Height: 480, Format: 0 (RGB), Data size: " 
+                  << data_size << " bytes (3 MB payload)" << std::endl;
+
+        count++;
+
+        try {
+            writer.wait_for_acknowledgments(dds::core::Duration(5, 0));
+            std::cout << "All samples acknowledged by all reliable DataReaders."
+                      << std::endl;
+        } catch (const dds::core::TimeoutError &) {
+            std::cout << "Timeout: Not all samples were acknowledged in time."
+                      << std::endl;
+        }
       }
       catch (const std::exception &ex)
       {
-        rti::config::Logger::instance().error(("Failed to publish position: " + std::string(ex.what())).c_str());
+        rti::config::Logger::instance().error(("Failed to publish FinalFlatImage: " + std::string(ex.what())).c_str());
       }
 
-      // Alternate Option: Use Polling Method to Read Data
-      // Latency contingent on loop rate
-      // process_command_data(command_reader->reader());
-
-      // Sleep
-      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      // Sleep for 100ms to achieve 10 Hz send rate
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     }
 
-    rti::config::Logger::instance().informational("Example I/O application shutting down...");
-    rti::config::Logger::instance().notice("Example I/O application stopped");
+    rti::config::Logger::instance().notice("FinalFlatImage application shutting down...");
+
+    rti::config::Logger::instance().notice("FinalFlatImage application stopped");
 }
 
 int main(int argc, char *argv[])
@@ -275,7 +232,6 @@ int main(int argc, char *argv[])
             throw;
         }
         
-        // Run the application
         run(participant_setup);
         
         // Explicitly finalize DistLogger Singleton before Domain Participant 
@@ -288,7 +244,7 @@ int main(int argc, char *argv[])
         }
     } catch (const std::exception& ex) {
         // This will catch DDS exceptions
-        std::cerr << "Exception in main: " << ex.what() << std::endl;
+        std::cerr << "Exception in run(): " << ex.what() << std::endl;
         return EXIT_FAILURE;
     }
 

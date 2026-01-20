@@ -11,11 +11,10 @@
 */
 
 #include <iostream>
-#include <sstream>
 #include <thread>
 #include <chrono>
 #include <atomic>
-#include <ctime>
+#include <vector>
 
 // include both the standard APIs and extensions
 #include <rti/rti.hpp>
@@ -41,10 +40,15 @@ using namespace rti::all;
 using namespace rti::dist_logger;
 
 constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
-const std::string APP_NAME = "Example CXX IO APP";
+const std::string APP_NAME = "Large Data CXX APP";
+
+// Image dimensions for large data transfer
+constexpr uint32_t IMAGE_WIDTH = 640;
+constexpr uint32_t IMAGE_HEIGHT = 480;
+constexpr uint32_t IMAGE_SIZE = IMAGE_WIDTH * IMAGE_HEIGHT * 3;  // RGB format (~900 KB)
 
 
-void process_command_data(dds::sub::DataReader<example_types::Command> reader)
+void process_image_data(dds::sub::DataReader<example_types::Image> reader)
 {
     auto samples = reader.take();
     for (const auto& sample : samples)
@@ -52,171 +56,107 @@ void process_command_data(dds::sub::DataReader<example_types::Command> reader)
       // Check if message is not DDS metadata
       if (sample.info().valid())
       {
-
-        // Do something with data message (logged at DEBUG level)
-        std::ostringstream oss;
-        oss << sample.data();
-        rti::config::Logger::instance().debug(("[COMMAND] " + oss.str()).c_str());
-
-        // overloaded -> operator to use RTI extension
-        rti::config::Logger::instance().debug(("[COMMAND] Topic '" + std::string(reader->topic_name()) + "' received").c_str());
-      }
-    }
-}
-
-void on_command_liveliness_changed(dds::sub::DataReader<example_types::Command> reader)
-{
-    auto status = reader->liveliness_changed_status();
-    rti::config::Logger::instance().notice(
-        ("[COMMAND] Liveliness changed - alive_count: " +
-         std::to_string(status.alive_count()) + ", not_alive_count: " +
-         std::to_string(status.not_alive_count())).c_str());
-}
-
-
-void process_button_data(dds::sub::DataReader<example_types::Button> reader)
-{
-    auto samples = reader.take();
-    for (const auto& sample : samples)
-    {
-      // Check if message is not DDS metadata
-      if (sample.info().valid())
-      {
-
+        const auto& image = sample.data();
+        
         // Do something with data message
-        std::ostringstream oss;
-        oss << sample.data();
-        rti::config::Logger::instance().debug(("[BUTTON] " + oss.str()).c_str());
+        std::cout << "[IMAGE_SUBSCRIBER] Image Received:" << std::endl;
+        std::cout << "  Image ID: " << image.image_id() << std::endl;
+        std::cout << "  Width: " << image.width() << std::endl;
+        std::cout << "  Height: " << image.height() << std::endl;
+        std::cout << "  Format: " << image.format() << std::endl;
+        std::cout << "  Data Size: " << image.data().size() << " bytes" << std::endl;
 
         // overloaded -> operator to use RTI extension
-        rti::config::Logger::instance().debug(("[BUTTON] Topic '" + std::string(reader->topic_name()) + "' received").c_str());
+        std::cout << "  Topic: " << reader->topic_name() << std::endl;
       }
     }
 } 
 
-void process_config_data(dds::sub::DataReader<example_types::Config> reader)
-{
-    auto samples = reader.take();
-    for (const auto& sample : samples)
-    {
-      // Check if message is not DDS metadata
-      if (sample.info().valid())
-      {
-
-        // Do something with data message
-        std::ostringstream oss;
-        oss << sample.data();
-        rti::config::Logger::instance().debug(("[CONFIG] " + oss.str()).c_str());
-
-        // overloaded -> operator to use RTI extension
-        rti::config::Logger::instance().debug(("[CONFIG] Topic '" + std::string(reader->topic_name()) + "' received").c_str());
-      }
-    }
-}
-
-void on_position_publication_matched(dds::pub::DataWriter<example_types::Position> writer)
-{
-    auto status = writer->publication_matched_status();
-    rti::config::Logger::instance().notice(
-        ("[POSITION] Publication matched - current_count: " +
-         std::to_string(status.current_count()) + ", total_count: " +
-         std::to_string(status.total_count())).c_str());
-}
-
 
 void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
 {
-    rti::config::Logger::instance().notice(("Example I/O application starting on domain " + std::to_string(participant_setup->participant().domain_id())).c_str());
+    rti::config::Logger::instance().notice("Large Data application starting...");
 
     // DDSReaderSetup and DDSWriterSetup are example wrapper classes for your convenience that simplify
     // DDS reader/writer creation and event handling. They manage DataReader/DataWriter lifecycle, attach
     // status conditions to the centralized AsyncWaitSet, and provide convenient methods to register
     // callbacks for DDS events (data_available, subscription_matched, liveliness_changed, etc.)
 
-    // Setup Reader Interfaces
-    auto command_reader = std::make_shared<DDSReaderSetup<example_types::Command>>(
+    // Setup Reader Interface with LARGE_DATA_SHMEM QoS
+    auto image_reader = std::make_shared<DDSReaderSetup<example_types::Image>>(
         participant_setup,
-        topics::COMMAND_TOPIC,
-        qos_profiles::ASSIGNER);
+        topics::IMAGE_TOPIC,
+        qos_profiles::LARGE_DATA_SHMEM);
 
-    auto button_reader = std::make_shared<DDSReaderSetup<example_types::Button>>(
+    // Setup Writer Interface with LARGE_DATA_SHMEM QoS
+    auto image_writer = std::make_shared<DDSWriterSetup<example_types::Image>>(
         participant_setup,
-        topics::BUTTON_TOPIC,
-        qos_profiles::ASSIGNER);
+        topics::IMAGE_TOPIC,
+        qos_profiles::LARGE_DATA_SHMEM);
 
-    auto config_reader = std::make_shared<DDSReaderSetup<example_types::Config>>(
-        participant_setup,
-        topics::CONFIG_TOPIC,
-        qos_profiles::ASSIGNER);
+    // Enable Asynchronous Event-Driven processing for reader
+    image_reader->set_data_available_handler(process_image_data);
 
-    // Setup Writer Interfaces
-    auto position_writer = std::make_shared<DDSWriterSetup<example_types::Position>>(
-        participant_setup,
-        topics::POSITION_TOPIC,
-        qos_profiles::ASSIGNER);
+    rti::config::Logger::instance().notice("Large Data app is running. Press Ctrl+C to stop.");
+    rti::config::Logger::instance().notice("Subscribing to Image messages with LARGE_DATA_SHMEM QoS...");
+    rti::config::Logger::instance().notice("Publishing Image messages with LARGE_DATA_SHMEM QoS...");
 
-    // Enable Asynchronous Event-Driven processing for readers
-    command_reader->set_data_available_handler(process_command_data);
-    command_reader->set_liveliness_changed_handler(on_command_liveliness_changed);
-    button_reader->set_data_available_handler(process_button_data);
-    config_reader->set_data_available_handler(process_config_data);
-
-    // Set publication matched callback for writer
-    position_writer->set_publication_matched_handler(on_position_publication_matched);
-
-    rti::config::Logger::instance().notice("Example I/O app is running. Press Ctrl+C to stop.");
-    rti::config::Logger::instance().notice("Subscribing to Command, Button, and Config messages...");
-    rti::config::Logger::instance().notice("Publishing Position messages...");
-
-
-    example_types::Position pos_msg;
-    pos_msg.source_id(APP_NAME);
-
-    // Counter for tracking iterations
-    int iteration = 0;
+    // Initialize image message
+    example_types::Image image_msg;
+    uint32_t image_count = 0;
 
     while (!application::shutdown_requested) {
 
       try
       {
-        // Populate and send position message
-        pos_msg.latitude(37.7749);
-        pos_msg.longitude(-122.4194);
-        pos_msg.altitude(15.0);
-        pos_msg.timestamp_sec(static_cast<int32_t>(std::time(nullptr)));
-        position_writer->writer().write(pos_msg);
+        // Create image ID with zero-padded count
+        char image_id_buffer[32];
+        snprintf(image_id_buffer, sizeof(image_id_buffer), "img_%06u", image_count);
+        
+        // Populate image metadata
+        image_msg.image_id(image_id_buffer);
+        image_msg.width(IMAGE_WIDTH);
+        image_msg.height(IMAGE_HEIGHT);
+        image_msg.format("RGB");
+        
+        // Create simulated image data (pattern based on count for variety)
+        // In real application, this would be actual camera/sensor data
+        std::vector<uint8_t> image_data(IMAGE_SIZE);
+        uint8_t pattern_value = static_cast<uint8_t>(image_count % 256);
+        std::fill(image_data.begin(), image_data.end(), pattern_value);
+        
+        image_msg.data(image_data);
+        
+        // Publish the image
+        image_writer->writer().write(image_msg);
 
-        // Log every position publish at DEBUG level (can be filtered)
-        rti::config::Logger::instance().debug(("[POSITION] Published ID: " + std::string(pos_msg.source_id()) +
-                    ", Lat: " + std::to_string(pos_msg.latitude()) +
-                    ", Lon: " + std::to_string(pos_msg.longitude()) +
-                    ", Alt: " + std::to_string(pos_msg.altitude()) + "m" +
-                    ", Timestamp: " + std::to_string(pos_msg.timestamp_sec())).c_str());
+        std::cout << "[IMAGE_PUBLISHER] Published Image - ID: " << image_msg.image_id()
+                  << ", Size: " << image_msg.data().size() << " bytes"
+                  << " (" << IMAGE_WIDTH << "x" << IMAGE_HEIGHT << ")" << std::endl;
         
-        // Every 10 iterations (5 seconds), log INFORMATIONAL level status to distributed logger
-        if (iteration % 10 == 0) {
-          rti::config::Logger::instance().informational(("Application running - Position published at " + 
-                      std::to_string(pos_msg.timestamp_sec())).c_str());
-        }
+        rti::config::Logger::instance().notice(("Published Image - id:" + std::string(image_msg.image_id()) 
+                    + ", size:" + std::to_string(image_msg.data().size()) + " bytes"
+                    + ", " + std::to_string(IMAGE_WIDTH) + "x" + std::to_string(IMAGE_HEIGHT)).c_str());
         
-        iteration++;
+        image_count++;
       }
       catch (const std::exception &ex)
       {
-        rti::config::Logger::instance().error(("Failed to publish position: " + std::string(ex.what())).c_str());
+        rti::config::Logger::instance().error(("Failed to publish image: " + std::string(ex.what())).c_str());
       }
 
       // Alternate Option: Use Polling Method to Read Data
       // Latency contingent on loop rate
-      // process_command_data(command_reader->reader());
+      // process_image_data(image_reader->reader());
 
-      // Sleep
-      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      // Sleep for 1 second (1 Hz publishing rate)
+      std::this_thread::sleep_for(std::chrono::seconds(1));
 
     }
 
-    rti::config::Logger::instance().informational("Example I/O application shutting down...");
-    rti::config::Logger::instance().notice("Example I/O application stopped");
+    rti::config::Logger::instance().notice("Large Data application shutting down...");
+
+    rti::config::Logger::instance().notice("Large Data application stopped");
 }
 
 int main(int argc, char *argv[])
@@ -242,7 +182,7 @@ int main(int argc, char *argv[])
             arguments.domain_id,
             ASYNC_WAITSET_THREADPOOL_SIZE,
             arguments.qos_file_path,
-            qos_profiles::DEFAULT_PARTICIPANT,
+            qos_profiles::LARGE_DATA_PARTICIPANT,
             APP_NAME);
         
         // Setup DistLogger Singleton
@@ -270,12 +210,12 @@ int main(int argc, char *argv[])
             
             rti::config::Logger::instance().notice("DistLogger initialized with shared participant");
             rti::config::Logger::instance().notice(("Using QoS file: " + arguments.qos_file_path).c_str());
+            rti::config::Logger::instance().notice("Using QoS profile: LARGE_DATA_PARTICIPANT");
         } catch (const std::exception& ex) {
             std::cerr << "Error initializing DistLogger: " << ex.what() << std::endl;
             throw;
         }
         
-        // Run the application
         run(participant_setup);
         
         // Explicitly finalize DistLogger Singleton before Domain Participant 
@@ -288,7 +228,7 @@ int main(int argc, char *argv[])
         }
     } catch (const std::exception& ex) {
         // This will catch DDS exceptions
-        std::cerr << "Exception in main: " << ex.what() << std::endl;
+        std::cerr << "Exception in run(): " << ex.what() << std::endl;
         return EXIT_FAILURE;
     }
 

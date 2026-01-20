@@ -1,15 +1,27 @@
 - Don't use distributed logger macro syntax
 - Use example_io_app as explicit reference
 - Follow exact usage in example_io_app of DDS API's
-- Follow exact usage in example_io_app of DDSContext API usage
-- Follow exact usage in example_io_app of DDSInterface API usage
+- Follow exact usage in example_io_app of DDSContextSetup API usage
+- Follow exact usage in example_io_app of DDSReaderSetup and DDSWriterSetup API usage
 - Follow exact usage of Distributed Logger api from example_io_app
-- Clean and make after adding new data type
+- Clean and make DDS library after adding new data type
 - Make sure all types are regenerated and included in headers
 - Make sure connext DDS environment variables are set
 - Make sure specific compiler flags are used from reference cmakelists
 - Copy the cmakelists from the reference directory and modify as necessary
-- Make example code as simple as reference example app with 0 application logic
+- **CRITICAL: When copying CMakeLists.txt, copy ALL directory paths EXACTLY from example_io_app/CMakeLists.txt**
+- **ONLY change: project name, executable name (add_executable), target names (target_include_directories, target_link_libraries, etc), and source filenames**
+- **DO NOT modify any of these paths from example_io_app/CMakeLists.txt:**
+  - `DDS_BUILD_DIR` - must remain `dds/build`
+  - `DDS_CODEGEN_DIR` - must remain `dds/build/cxx11_gen`
+  - `DDS_UTILS_DIR` - must remain `dds/utils/cxx11`
+  - `DDS_TYPESUPPORT_LIB` - must remain `dds_typesupport`
+- **DO NOT use paths from workspace structure context - ONLY use paths from example_io_app/CMakeLists.txt**
+- Make example code as simple as reference example app with zero application logic
+- If only new data type is referenced and the topic has been created for it create a new topicname with TYPE+Topic syntax format
+- Use DefaultParticipantQoS if none specified
+- Use ASSIGNER_QOS as default of none specified
+- If ASSIGNER_QOS is used, add a TODO comment to the code to make new assignment in XML file
 - Before building application perform a full review of code and verify all fields for data members are accurate
 - Never use rtime-make to build
 - Ensure consistency of Connext versions when generating and building code

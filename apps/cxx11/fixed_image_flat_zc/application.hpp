@@ -123,7 +123,7 @@ namespace application {
                 arg_processing += 2;
             } else if (strcmp(argv[arg_processing], "-h") == 0
             || strcmp(argv[arg_processing], "--help") == 0) {
-                std::cout << "Example I/O application with Command, Button, Config inputs and Position outputs." << std::endl;
+                std::cout << "FinalFlatImage application using @final type with @language_binding(FLAT_DATA) for zero-copy transfers." << std::endl;
                 show_usage = true;
                 parse_result = ParseReturn::exit;
                 break;

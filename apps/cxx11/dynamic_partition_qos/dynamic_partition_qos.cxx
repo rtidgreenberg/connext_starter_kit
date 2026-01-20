@@ -11,11 +11,13 @@
 */
 
 #include <iostream>
-#include <sstream>
 #include <thread>
 #include <chrono>
 #include <atomic>
 #include <ctime>
+#include <sstream>
+#include <iomanip>
+#include <random>
 
 // include both the standard APIs and extensions
 #include <rti/rti.hpp>
@@ -41,182 +43,190 @@ using namespace rti::all;
 using namespace rti::dist_logger;
 
 constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
-const std::string APP_NAME = "Example CXX IO APP";
+constexpr int PUBLISH_PERIOD_MS = 2000;
+const std::string APP_NAME = "Dynamic Partition QoS App";
 
 
 void process_command_data(dds::sub::DataReader<example_types::Command> reader)
 {
     auto samples = reader.take();
+    
     for (const auto& sample : samples)
     {
       // Check if message is not DDS metadata
       if (sample.info().valid())
       {
 
-        // Do something with data message (logged at DEBUG level)
-        std::ostringstream oss;
-        oss << sample.data();
-        rti::config::Logger::instance().debug(("[COMMAND] " + oss.str()).c_str());
-
         // overloaded -> operator to use RTI extension
-        rti::config::Logger::instance().debug(("[COMMAND] Topic '" + std::string(reader->topic_name()) + "' received").c_str());
-      }
-    }
-}
-
-void on_command_liveliness_changed(dds::sub::DataReader<example_types::Command> reader)
-{
-    auto status = reader->liveliness_changed_status();
-    rti::config::Logger::instance().notice(
-        ("[COMMAND] Liveliness changed - alive_count: " +
-         std::to_string(status.alive_count()) + ", not_alive_count: " +
-         std::to_string(status.not_alive_count())).c_str());
-}
-
-
-void process_button_data(dds::sub::DataReader<example_types::Button> reader)
-{
-    auto samples = reader.take();
-    for (const auto& sample : samples)
-    {
-      // Check if message is not DDS metadata
-      if (sample.info().valid())
-      {
-
-        // Do something with data message
-        std::ostringstream oss;
-        oss << sample.data();
-        rti::config::Logger::instance().debug(("[BUTTON] " + oss.str()).c_str());
-
-        // overloaded -> operator to use RTI extension
-        rti::config::Logger::instance().debug(("[BUTTON] Topic '" + std::string(reader->topic_name()) + "' received").c_str());
+        std::cout << "\n\nMESSAGE RECEIVED: " << sample.data().message() << "\n" << std::endl;
       }
     }
 } 
 
-void process_config_data(dds::sub::DataReader<example_types::Config> reader)
-{
-    auto samples = reader.take();
-    for (const auto& sample : samples)
-    {
-      // Check if message is not DDS metadata
-      if (sample.info().valid())
-      {
-
-        // Do something with data message
-        std::ostringstream oss;
-        oss << sample.data();
-        rti::config::Logger::instance().debug(("[CONFIG] " + oss.str()).c_str());
-
-        // overloaded -> operator to use RTI extension
-        rti::config::Logger::instance().debug(("[CONFIG] Topic '" + std::string(reader->topic_name()) + "' received").c_str());
-      }
-    }
-}
-
-void on_position_publication_matched(dds::pub::DataWriter<example_types::Position> writer)
-{
-    auto status = writer->publication_matched_status();
-    rti::config::Logger::instance().notice(
-        ("[POSITION] Publication matched - current_count: " +
-         std::to_string(status.current_count()) + ", total_count: " +
-         std::to_string(status.total_count())).c_str());
-}
-
 
 void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
 {
-    rti::config::Logger::instance().notice(("Example I/O application starting on domain " + std::to_string(participant_setup->participant().domain_id())).c_str());
+    // Generate random Application ID
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> distrib(1000, 9999);
+    int app_id = distrib(gen);
+    
+    rti::config::Logger::instance().notice(("Dynamic Partition QoS application starting with App ID: " + std::to_string(app_id)).c_str());
 
     // DDSReaderSetup and DDSWriterSetup are example wrapper classes for your convenience that simplify
     // DDS reader/writer creation and event handling. They manage DataReader/DataWriter lifecycle, attach
     // status conditions to the centralized AsyncWaitSet, and provide convenient methods to register
     // callbacks for DDS events (data_available, subscription_matched, liveliness_changed, etc.)
 
-    // Setup Reader Interfaces
+    // Setup Writer Interface
+    auto command_writer = std::make_shared<DDSWriterSetup<example_types::Command>>(
+        participant_setup,
+        topics::COMMAND_TOPIC,
+        qos_profiles::ASSIGNER);
+
+    // Setup Reader Interface
     auto command_reader = std::make_shared<DDSReaderSetup<example_types::Command>>(
         participant_setup,
         topics::COMMAND_TOPIC,
         qos_profiles::ASSIGNER);
 
-    auto button_reader = std::make_shared<DDSReaderSetup<example_types::Button>>(
-        participant_setup,
-        topics::BUTTON_TOPIC,
-        qos_profiles::ASSIGNER);
+    // Configure reader to ignore own publications
+    // Get the DataWriter's instance handle and tell the reader to ignore it
+    dds::core::InstanceHandle writer_handle = command_writer->writer()->instance_handle();
+    dds::sub::ignore(participant_setup->participant(), writer_handle);
 
-    auto config_reader = std::make_shared<DDSReaderSetup<example_types::Config>>(
-        participant_setup,
-        topics::CONFIG_TOPIC,
-        qos_profiles::ASSIGNER);
-
-    // Setup Writer Interfaces
-    auto position_writer = std::make_shared<DDSWriterSetup<example_types::Position>>(
-        participant_setup,
-        topics::POSITION_TOPIC,
-        qos_profiles::ASSIGNER);
-
-    // Enable Asynchronous Event-Driven processing for readers
+    // Enable Asynchronous Event-Driven processing for reader
     command_reader->set_data_available_handler(process_command_data);
-    command_reader->set_liveliness_changed_handler(on_command_liveliness_changed);
-    button_reader->set_data_available_handler(process_button_data);
-    config_reader->set_data_available_handler(process_config_data);
 
-    // Set publication matched callback for writer
-    position_writer->set_publication_matched_handler(on_position_publication_matched);
+    rti::config::Logger::instance().notice("Dynamic Partition QoS app is running. Press Ctrl+C to stop.");
+    rti::config::Logger::instance().notice("Subscribing to Command messages...");
+    rti::config::Logger::instance().notice("Publishing Command messages...");
+    rti::config::Logger::instance().notice("Type a partition name at any time to change participant partition QoS (e.g., 'MyPartition' or 'Partition1,Partition2')");
 
-    rti::config::Logger::instance().notice("Example I/O app is running. Press Ctrl+C to stop.");
-    rti::config::Logger::instance().notice("Subscribing to Command, Button, and Config messages...");
-    rti::config::Logger::instance().notice("Publishing Position messages...");
+    // Start input thread for partition changes
+    std::thread input_thread([participant_setup, app_id]() {
+        std::string input;
+        while (!application::shutdown_requested) {
+            std::getline(std::cin, input);
+            
+            if (input.empty()) {
+                continue;
+            }
+            
+            if (input == "q" || input == "exit") {
+                application::shutdown_requested = true;
+                break;
+            }
+            
+            // Parse partition string(s) - split by comma
+            std::vector<std::string> partitions;
+            std::stringstream ss(input);
+            std::string partition;
+            
+            while (std::getline(ss, partition, ',')) {
+                // Trim whitespace
+                size_t start = partition.find_first_not_of(" \t");
+                size_t end = partition.find_last_not_of(" \t");
+                if (start != std::string::npos && end != std::string::npos) {
+                    partitions.push_back(partition.substr(start, end - start + 1));
+                }
+            }
+            
+            if (partitions.empty()) {
+                std::cerr << "Error: No valid partition names provided" << std::endl;
+                continue;
+            }
+            
+            // Apply partition QoS to domain participant
+            try {
+                std::cout << "Applying partition(s): ";
+                for (size_t i = 0; i < partitions.size(); ++i) {
+                    std::cout << "'" << partitions[i] << "'";
+                    if (i < partitions.size() - 1) std::cout << ", ";
+                }
+                std::cout << std::endl;
+                
+                rti::config::Logger::instance().notice(("User requested partition change to: " + input).c_str());
+                
+                // Get current participant QoS
+                auto participant_qos = participant_setup->participant().qos();
+                
+                // Update partition policy
+                participant_qos << dds::core::policy::Partition(partitions);
+                
+                // Apply the new QoS to the participant
+                participant_setup->participant().qos(participant_qos);
+                
+                std::cout << "Partition QoS applied successfully!" << std::endl;
+                rti::config::Logger::instance().notice("Partition QoS updated successfully");
+                
+            } catch (const dds::core::Error& ex) {
+                std::cerr << "Error applying partition QoS: " << ex.what() << std::endl;
+                rti::config::Logger::instance().error(("Failed to apply partition QoS: " + std::string(ex.what())).c_str());
+            }
+        }
+    });
 
+    // Create Command Message
+    example_types::Command cmd_msg;
+    cmd_msg.destination_id("system");
+    cmd_msg.command_type(example_types::CommandType::COMMAND_START);
+    cmd_msg.urgent(false);
+    
+    // Add App ID to message
+    std::stringstream msg_stream;
+    msg_stream << "From APP ID: " << app_id;
+    cmd_msg.message(msg_stream.str());
 
-    example_types::Position pos_msg;
-    pos_msg.source_id(APP_NAME);
-
-    // Counter for tracking iterations
-    int iteration = 0;
-
+    int count = 0;
     while (!application::shutdown_requested) {
 
       try
       {
-        // Populate and send position message
-        pos_msg.latitude(37.7749);
-        pos_msg.longitude(-122.4194);
-        pos_msg.altitude(15.0);
-        pos_msg.timestamp_sec(static_cast<int32_t>(std::time(nullptr)));
-        position_writer->writer().write(pos_msg);
+        // Get and display current partition(s) with App ID
+        auto current_qos = participant_setup->participant().qos();
+        auto partitions = current_qos.policy<dds::core::policy::Partition>().name();
 
-        // Log every position publish at DEBUG level (can be filtered)
-        rti::config::Logger::instance().debug(("[POSITION] Published ID: " + std::string(pos_msg.source_id()) +
-                    ", Lat: " + std::to_string(pos_msg.latitude()) +
-                    ", Lon: " + std::to_string(pos_msg.longitude()) +
-                    ", Alt: " + std::to_string(pos_msg.altitude()) + "m" +
-                    ", Timestamp: " + std::to_string(pos_msg.timestamp_sec())).c_str());
-        
-        // Every 10 iterations (5 seconds), log INFORMATIONAL level status to distributed logger
-        if (iteration % 10 == 0) {
-          rti::config::Logger::instance().informational(("Application running - Position published at " + 
-                      std::to_string(pos_msg.timestamp_sec())).c_str());
+
+        std::cout << "\n------------------ APP ID:" << app_id << " PARTITION: ";
+        if (partitions.empty()) {
+            std::cout << "(default/empty)";
+        } else {
+            for (size_t i = 0; i < partitions.size(); ++i) {
+                std::cout << "'" << partitions[i] << "'";
+                if (i < partitions.size() - 1) std::cout << ", ";
+            }
         }
-        
-        iteration++;
+        std::cout << "-----------------------"  << std::endl;
+        std::cout << "\nEnter partition name(s) (comma-separated for multiple, "
+                     "or 'q'/'exit' to quit): " << std::endl;
+
+
+        // Send Message
+        command_writer->writer().write(cmd_msg);
+
+        count++;
       }
       catch (const std::exception &ex)
       {
-        rti::config::Logger::instance().error(("Failed to publish position: " + std::string(ex.what())).c_str());
+        std::cerr << "Error: Failed to publish command: " << ex.what() << std::endl;
+        rti::config::Logger::instance().error(("Failed to publish command: " + std::string(ex.what())).c_str());
       }
 
-      // Alternate Option: Use Polling Method to Read Data
-      // Latency contingent on loop rate
-      // process_command_data(command_reader->reader());
-
       // Sleep
-      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      std::this_thread::sleep_for(std::chrono::milliseconds(PUBLISH_PERIOD_MS));
 
     }
 
-    rti::config::Logger::instance().informational("Example I/O application shutting down...");
-    rti::config::Logger::instance().notice("Example I/O application stopped");
+    // Wait for input thread to finish
+    if (input_thread.joinable()) {
+        input_thread.join();
+    }
+
+    rti::config::Logger::instance().notice("Dynamic Partition QoS application shutting down...");
+    
+    rti::config::Logger::instance().notice("Dynamic Partition QoS application stopped");
 }
 
 int main(int argc, char *argv[])
@@ -275,7 +285,6 @@ int main(int argc, char *argv[])
             throw;
         }
         
-        // Run the application
         run(participant_setup);
         
         // Explicitly finalize DistLogger Singleton before Domain Participant 
@@ -288,7 +297,7 @@ int main(int argc, char *argv[])
         }
     } catch (const std::exception& ex) {
         // This will catch DDS exceptions
-        std::cerr << "Exception in main: " << ex.what() << std::endl;
+        std::cerr << "Exception in run(): " << ex.what() << std::endl;
         return EXIT_FAILURE;
     }
 

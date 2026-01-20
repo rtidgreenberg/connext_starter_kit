@@ -1,61 +1,216 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <dds xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://community.rti.com/schema/7.3.0/rti_dds_qos_profiles.xsd" version="7.3.0">
+
+
+  <!-- 
+    Set up default config ENV variables. 
+    Override with either ENV variables i.e. "export VAR=X" or command line -DVAR=X 
+
+    See variables commented out within QoS as example for usage.
+    -->
+  <configuration_variables>
+    <value>
+
+    <!-- 
+      Partition Variables
+      -->
+    <element>
+      <name>PARTITION_1</name>
+      <value>p_1_val</value>
+    </element>
+    <element>
+      <name>PARTITION_2</name>
+      <value>p_2_val</value>
+    </element>
+
+      <!-- 
+      Initial Peers
+      Default:
+      builtin.udpv4://239.255.0.1  # Default multicast discovery address
+      builtin.udpv4://127.0.0.1    # Localhost (loopback)
+      builtin.shmem://             # Shared memory (if supported on the platform)
+      -->
+      <element>
+        <name>INITIAL_PEERS</name>
+        <value>localhost</value>
+      </element>
+
+      <!-- 
+        Modify this list to constrain which Interfaces Connext broadcasts as available
+        Uncomment appropriate section below to enable.
+      -->
+      <element>
+        <name>ALLOW_INTERFACES_LIST</name>
+        <value>192.168.1.1</value>
+      </element>
+
+      <!-- 
+        Modify this list to constrain which Interfaces Connext does NOT boradcast as available.
+        Applied AFTER ALLOW_INTERFACES_LIST
+        Uncomment appropriate section below to enable.
+
+      -->
+      <element>
+        <name>DENY_INTERFACES_LIST</name>
+        <value>192.168.1.2</value>
+      </element>
+
+
+   </value>
+  </configuration_variables>
+    
+    
     <qos_library name="DPLibrary">
 
       <qos_profile name="DefaultParticipant" base_name="BuiltinQosLib::Generic.Common">
-        <domain_participant_qos>
-          <!-- Discovery-related optimizations -->
-          <base_name>
-            <element>BuiltinQosSnippetLib::Optimization.Discovery.Common</element>
-            <element>BuiltinQosSnippetLib::Optimization.Discovery.Endpoint.Fast</element>
-            <element>BuiltinQosSnippetLib::Optimization.ReliabilityProtocol.Common</element>
-          </base_name>
-          <transport_builtin>
-            <shmem>
-              <!-- message_size_max should be >= largest message over SHMEM -->
-              <!-- receive_buffer_size and received_message_count_max should be modified accordingly -->
-              <!-- As a general rule: receive_buffer_size = message_size_max * received_message_count_max -->
 
-              <!-- <message_size_max>262144</message_size_max>
+      <!-- 
+          USE CASE: Baseline Domain Participant QoS to be used system wide and 
+          extended for specific use cases. 
+        -->
+
+
+        <domain_participant_qos>
+
+        <!-- Discovery-related optimizations -->
+        <base_name>
+          <element>BuiltinQosSnippetLib::Optimization.Discovery.Common</element>
+          <element>BuiltinQosSnippetLib::Optimization.Discovery.Endpoint.Fast</element>
+          <element>BuiltinQosSnippetLib::Optimization.ReliabilityProtocol.Common</element>
+        </base_name>
+
+        <!-- Uncomment below to uniquely segment Applications within the same Domain 
+          Use case: Simulation/test environments. -->
+          <!-- <partition>
+            <name>
+              <element>$(PARTITION_1)</element>
+              <element>$(PARTITION_2)</element>          
+            </name>
+          </partition> -->
+
+
+          <!-- Uncomment below to set initial peers using config/ENV variable. -->
+          <!-- <discovery>
+            <initial_peers>
+              <element>$(INITIAL_PEERS)</element>
+            </initial_peers>
+          </discovery> -->
+
+
+
+          <transport_builtin>
+          <!-- 
+              Toggle control of transports:
+              Default is UDP | SHMEM
+              If you want to disable SHMEM uncomment below
+            -->
+          <!-- <mask>UDPv4</mask> -->
+
+
+            <shmem>
+            <!-- message_size_max should be >= largest message over SHMEM -->
+            <!-- receive_buffer_size and received_message_count_max should be modified accordingly -->
+            <!-- As a general rule: receive_buffer_size = message_size_max * received_message_count_max -->
+
+            <!-- <message_size_max>262144</message_size_max>
               <receive_buffer_size>8388608</receive_buffer_size>
               <received_message_count_max>32</received_message_count_max> -->
             </shmem>
             <udpv4>
               <message_size_max>65530</message_size_max>
-              <!-- These settings help when throughput is high. -->
-              <!-- You need to manually modify these in your kernel. -->
-              <!-- You should add the sysctl commands to your startup script. -->
-              <!--    Linux: https://community.rti.com/howto/improve-rti-connext-dds-network-performance-linux -->
-              <!--    QNX: https://community.rti.com/kb/how-increase-socket-buffer-sizes-qnx -->
-              <!--    Windows: no need to do anything at the OS level -->
+            <!-- These settings help when throughput is high. -->
+            <!-- You need to manually modify these in your kernel. -->
+            <!-- You should add the sysctl commands to your startup script. -->
+            <!--    Linux: https://community.rti.com/howto/improve-rti-connext-dds-network-performance-linux -->
+            <!--    QNX: https://community.rti.com/kb/how-increase-socket-buffer-sizes-qnx -->
+            <!--    Windows: no need to do anything at the OS level -->
               <send_socket_buffer_size>10485760</send_socket_buffer_size>
               <recv_socket_buffer_size>10485760</recv_socket_buffer_size>
-              <!-- You should set the ALLOW_INTERFACES_LIST environment variable
-                  to the IP address you'd like to use. This helps avoid potential
-                  duplicate traffic because Connext will use all the available
-                  interfaces to receive data, causing remote DPs to send the same
-                  data to multiple destinations. -->
-              <!-- This is commented out for easier out-of-the-box behavior -->
-              <!-- <allow_interfaces_list>
+
+
+            <!-- 
+                Set the ALLOW_INTERFACES_LIST or DENY_INTERFACES_LIST to 
+                control what interfaces Connext uses.
+                                
+                By default Connext will use all the available interfaces to 
+                receive data, causing remote DPs to send the same data to 
+                multiple destinations. 
+
+                This helps avoid potential duplicate traffic.
+                -->
+
+            <!-- 
+              <allow_interfaces_list>
                 <element>$(ALLOW_INTERFACES_LIST)</element>
-              </allow_interfaces_list> -->
+              </allow_interfaces_list> 
+              <deny_interfaces_list>
+                <element>$(DENY_INTERFACES_LIST)</element>
+              </deny_interfaces_list>
+              -->
+
             </udpv4>
           </transport_builtin>
+
+
+          <resource_limits>
+
+          <!-- Uncomment below to disable Type Objects from being sent out -->
+          <!-- <type_object_max_serialized_length>0</type_object_max_serialized_length>
+            <type_code_max_serialized_length>0</type_code_max_serialized_length> -->
+          </resource_limits>
+
         </domain_participant_qos>
       </qos_profile>
 
 
-      <qos_profile name="ImageParticipant" base_name="DefaultParticipant">
+      <qos_profile name="LargeDataSHMEMParticipant" base_name="DefaultParticipant">
+
+      <!-- 
+          USE CASE: 
+          Participant that is used to transfer "Large" messages i.e. 
+          larger than default 65kB and where resource impact would be considerable 
+          if applied system wide. 
+
+          This is intended to be used in tandem with a LargeDataSHMEMQoS set at the Topic level  
+          so the application can use either UDP or SHMEM, but the LargeData Topic selects  
+          only SHMEM so it has access to the larger message_size_max.
+
+          This profile is NOT intended to be used with ZeroCopy SHMEM i.e. SHMEM REF  
+          as we don't need to change the message_size_max or receive_buffer_size when just sending
+          a reference to the memory segment.
+        -->
+
         <domain_participant_qos>
           <transport_builtin>
             <mask>SHMEM|UDPv4</mask>
             <shmem>
-              <message_size_max>4096000</message_size_max>
-              <receive_buffer_size>12288000</receive_buffer_size>
+            <!--  
+                Increase the message size that is sent to minimize re-assembly/latency impact 
+                Set to >= largest message size to minimize fragementation of large messages
+                This use case is where each image size is fairly consistent.
+                Example: 3 MB
+              
+              -->
+              <message_size_max>3145728</message_size_max>
+
+            <!-- 
+                This is for the use case where we only care about the last few image frames
+              -->
+              <received_message_count_max>3</received_message_count_max>
+
+            <!-- 
+              
+                Increase the receive buffer size specific to the SHMEM transport 
+                This should be equal to message_size_max * received_message_count_max
+                This example the message_size_max is ~= avg message size.
+              -->
+              <receive_buffer_size>9437184</receive_buffer_size>
             </shmem>
           </transport_builtin>
         </domain_participant_qos>
       </qos_profile>
+
+
 
     </qos_library>
 
@@ -64,15 +219,20 @@
 
     <qos_profile name="EventQoS" base_name="BuiltinQosLib::Generic.Common">
       <!-- 
-        This QoS Profile can be used by applications in which samples represent
-        events such as button pushes or alerts. When events are triggered,
+        
+        USE CASE: 
+        Even Topics such as button pushes or alerts. When events are triggered,
         the system should almost always do something, meaning that you
         don't want the system to lose the event. This means that the system
         requires strictly reliable communication. 
 
         Since events and alerts are critical and non-periodic data, it is
         important to detect situations in which communication between a
-        DataWriter and DataReader is broken. This is why this QoS Profile sets the
+        DataWriter and DataReader is broken. 
+
+        This use case also alignes with Aperiodic data i.e. messages are only 
+        sent out aperiodically.
+        This is why this QoS Profile sets the
         LivelinessQosPolicy. If the DataWriter does not assert its
         liveliness in a timely manner, the DataReader will report loss
         of liveliness to the application.
@@ -106,6 +266,7 @@
           </lease_duration>
         </liveliness>
 
+
       </datawriter_qos>
 
       <datareader_qos>
@@ -135,8 +296,11 @@
 
     <qos_profile name="CommandStrength10QoS" base_name="DataPatternsLibrary::EventQoS">
       <!-- 
-        This QoS Profile is intended to be used in a mutli command arbitration use case where  
-        different commands have differnt strengths to override as necessary.
+        USE CASE:
+        Mutli command arbitration where different commands have differnt "strengths" 
+        to override as necessary.
+
+        Example: Auto -> Obstacle Override -> Manual Override
 
         This inherits from the EventQoS to use it's baseline.
         -->
@@ -183,8 +347,12 @@
 
     <qos_profile name="CommandStrength20QoS" base_name="DataPatternsLibrary::EventQoS">
       <!-- 
-        This QoS Profile is intended to be used in a mutli command arbitration use case where  
-        different commands have differnt strengths to override as necessary.
+        USE CASE:
+        Mutli command arbitration where different commands have differnt "strengths" 
+        to override as necessary.
+
+        Example: Auto -> Obstacle Override -> Manual Override
+
 
         This inherits from the EventQoS to use it's baseline.
         -->
@@ -232,8 +400,11 @@
 
     <qos_profile name="CommandStrength30QoS" base_name="DataPatternsLibrary::EventQoS">
       <!-- 
-        This QoS Profile is intended to be used in a mutli command arbitration use case where  
-        different commands have differnt strengths to override as necessary.
+        USE CASE:
+        Mutli command arbitration where different commands have differnt "strengths" 
+        to override as necessary.
+
+        Example: Auto -> Obstacle Override -> Manual Override
 
         This inherits from the EventQoS to use it's baseline.
         -->
@@ -283,11 +454,10 @@
     <qos_profile name="MetadataQoS" base_name="BuiltinQosLib::Generic.Common">
 
       <!-- 
-        With this QoS Profile, a DataWriter will keep in its queue the last
-        value that was published for each sample instance. Late-joining
-        DataReaders will get that value when they join the system. This
-        QoS Profile inherits from Generic.KeepLastReliable.TransientLocal
-        because the use case requires delivery to late-joiners.
+        USE CASE:
+        DataWriter will keep in its queue the last value that was published for 
+        each sample instance. Late-joining DataReaders will get that value when 
+        they join the system. 
         -->
 
       <!-- Having snippets here makes it easier to understand what QoS is applied -->
@@ -326,8 +496,8 @@
     <qos_profile name="StatusQoS" base_name="BuiltinQosLib::Generic.Common">
 
       <!-- 
-        This QoS Profile is intended to be used for applications that expect
-        periodic data such as sensor/positional data etc. 
+        USE CASE:
+        Applications that expect periodic data such as sensor/positional data etc. 
         There is no reliability mechanism applied as data loss is permitted.
         The deadline that is set in this QoS Profile can be used to detect when 
         DataWriters are not publishing data with the expected periodicity.
@@ -392,7 +562,49 @@
 
     </qos_profile>
 
-    <qos_profile name="LargeDataQoS" base_name="BuiltinQosLib::Generic.Common">
+    <qos_profile name="Status1HzQoS" base_name="DataPatternsLibrary::StatusQoS">
+
+
+      <!-- 
+        The reader will send out a "request" to the data writer.
+
+        If the following applies:
+        - Data type is "unkeyed" 
+        - Liveliness is Infinite
+        - Reliability is set to BEST_EFFORT
+        then the writer will only send samples every x minimum separation to this data reader.
+
+        Otherwise the reader will downsample and discard samples before providing 
+        them to the application.
+
+        This will not impact any other datareaders reading on the same topic from  
+        the same writer.
+
+        For more info search for TIME_BASED_FILTER QoS in the Manual.
+      -->
+      <datareader_qos>
+      
+        <time_based_filter>
+          <minimum_separation>
+            <sec>1</sec>
+            <nanosec>0</nanosec>
+          </minimum_separation>
+        </time_based_filter>
+      
+      </datareader_qos>
+  
+    </qos_profile>
+
+    <qos_profile name="LargeDataSHMEMQoS" base_name="BuiltinQosLib::Generic.Common">
+
+      <!-- 
+        USE CASE:
+        Large Data being sent over SHMEM with lowest latency required i.e. no RELIABILITY> 
+        NOT for ZeroCopy SHMEM. 
+        Use in tandem with LargeDataSHMEM Participant where the application can interact  
+        over either SHMEM or UDP, but this specific topic is pinned to just SHMEM so as to 
+        enable the larger message_size_max.
+      -->
 
       <base_name>
         <element>BuiltinQosSnippetLib::QosPolicy.Reliability.BestEffort</element>
@@ -406,12 +618,17 @@
           see which QoS Profile is being used
           -->
           <publication_name>
-            <name>LargeDataWriter</name>
+            <name>LargeDataSHMEMWriter</name>
           </publication_name>
 
         <!-- 
           This makes the writers/readers on this topic use the "larger" SHMEM message_size_max.
-          By Default Connext uses the smallest transports message_size_max i.e. UDP 
+
+          Connext uses the smallest enabled transports message_size_max i.e.  
+          if UDP and SHMEM transports are enabled, will use UDP's message_szie_max.
+
+          By only enabling SHMEM transport for this specific topic we force usage 
+          of the larger message_size_max.
           -->
           <transport_selection>
             <enabled_transports>
@@ -420,7 +637,7 @@
           </transport_selection>
 
         <!-- 
-            The default is normally 23 samples.
+            The default is normally 32 samples.
             This just allocates less memory up front for very large samples 
           -->
           <resource_limits>
@@ -432,13 +649,15 @@
         <datareader_qos>
 
         <!-- 
-          In Admin Console can look under QoS tab for "publication name" to 
+          In Admin Console can look under QoS tab for "subscription name" to 
           see which QoS Profile is being used
           -->
           <subscription_name>
             <name>LargeDataReader</name>
           </subscription_name>
 
+        <!-- We need to select just the SHMEM transport to enable usage of the 
+          larger message_szie_max for this topic -->
           <transport_selection>
             <enabled_transports>
               <element>shmem</element>
@@ -453,6 +672,82 @@
     </qos_profile>
 
 
+    <qos_profile name="LargeDataSHMEM_ZCQoS" base_name="BuiltinQosLib::Generic.Common">
+
+      <!-- 
+      USE CASE:
+      Large Data using SHMEM with Zero-Copy Transfer Mode
+
+      This just sends a reference to the SHMEM segment and makes no copies.
+      Using this mode we don't need to increase the SHMEM receive buffer size or  
+      increase the message_size_max.
+      
+      KEY FEATURES:
+      - Application Acknowledgement to prevent data inconsistencies between reader and writer due to direct memory access.
+      - Increased Reliability Mechanism rate to minimize latency.
+      - Set Writer buffers per system requirements to minimize sample re-use as alternative mechanism
+      -->
+
+      <!-- Increase the RELIABILITY traffic rate to ensure minimal latency -->
+      <base_name>
+        <element>BuiltinQosSnippetLib::Optimization.ReliabilityProtocol.HighRate</element>
+      </base_name>
+
+      <datawriter_qos>
+
+        <publication_name>
+          <name>LargeDataSHMEM_ZCWriter</name>
+        </publication_name>
+
+        <reliability>
+          <!-- 
+            Set to RELIABLE and Application Level Acknowledgement so we can 
+            feedback sequence numbers fully processed by reader to writer 
+          -->
+          <kind>RELIABLE_RELIABILITY_QOS</kind>
+          <acknowledgment_kind>APPLICATION_AUTO_ACKNOWLEDGMENT_MODE</acknowledgment_kind>
+        </reliability>
+
+        <writer_resource_limits>
+
+          <writer_loaned_sample_allocation>
+
+            <!-- 
+              To extend the time to reuse a sample, use a large sample pool
+              Depending on system requirements this could be used as an alternative 
+              strategy to mitigate data inconsistency vs using the Apllication Reliability Mechanism.
+              -->
+            <initial_count>32</initial_count>
+
+            <!-- Define any resource upper bound constraints -->
+            <max_count>LENGTH_UNLIMITED</max_count>
+
+          </writer_loaned_sample_allocation>
+
+        </writer_resource_limits>
+
+      </datawriter_qos>
+
+      <datareader_qos>
+
+        <subscription_name>
+          <name>LargeDataSHMEM_ZCQoSReader</name>
+        </subscription_name>
+
+        <reliability>
+          <!-- 
+            Set to RELIABLE and Application Level Acknowledgement so we can 
+            feedback sequence numbers fully processed by reader to writer 
+          -->
+          <kind>RELIABLE_RELIABILITY_QOS</kind>
+          <acknowledgment_kind>APPLICATION_AUTO_ACKNOWLEDGMENT_MODE</acknowledgment_kind>
+        </reliability>
+
+      </datareader_qos>
+
+    </qos_profile>
+
+
     <qos_profile name="AssignerQoS">
 
       <!-- 
@@ -461,8 +756,8 @@
         Overrides in order of assignment
         -->
 
-      <datawriter_qos topic_filter="LargeData*" base_name="LargeDataQoS" />
-      <datareader_qos topic_filter="LargeData*" base_name="LargeDataQoS" />
+      <datawriter_qos topic_filter="LargeData*" base_name="LargeDataSHMEMQoS" />
+      <datareader_qos topic_filter="LargeData*" base_name="LargeDataSHMEMQoS" />
 
       <datawriter_qos topic_filter="Position*" base_name="StatusQoS" />
       <datareader_qos topic_filter="Position*" base_name="StatusQoS" />

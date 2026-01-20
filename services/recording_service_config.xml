@@ -1,0 +1,128 @@
+<?xml version="1.0"?>
+
+<dds xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+     xsi:noNamespaceSchemaLocation="https://community.rti.com/schema/7.5.0/rti_recording_service.xsd">
+
+    <!-- Configuration variables can be set via environment variables or command line
+         Example: export DOMAIN_ID=5
+         These variables can be used throughout the file with $(VARIABLE_NAME) syntax -->
+    <configuration_variables>
+        <value>
+            <element>
+                <name>DOMAIN_ID</name>
+                <value>1</value>
+            </element>
+        </value>
+    </configuration_variables>
+
+    <recording_service name="deploy">
+
+
+    <!-- 
+      REMOTE ADMINISTRATION and LOGGING
+      This section is used for remote control of the service, 
+      can start/stop/pause etc. 
+    -->
+
+    <!-- <administration>
+            <distributed_logger>
+                <enabled>false</enabled>
+            </distributed_logger>
+            <enabled>false</enabled>
+        </administration>
+
+        <monitoring>
+          <enabled>false</enabled>
+            <status_publication_period>
+                <sec>1</sec>
+                <nanosec>0</nanosec>
+            </status_publication_period>
+            <statistics_sampling_period>
+                <sec>0</sec>
+                <nanosec>500000000</nanosec>
+            </statistics_sampling_period>
+        </monitoring> -->
+
+    <!-- Storage settings -->
+        <storage>
+            <sqlite>
+                <storage_format>XCDR_AUTO</storage_format>
+                <fileset>
+                    <workspace_dir>log_dir</workspace_dir>
+                    <execution_dir_expression>xcdr</execution_dir_expression>
+                    <filename_expression>data_%auto:0-9%.dat</filename_expression>
+                <rollover>
+                     <enabled>true</enabled>
+                     <file_size_limit unit="MEGABYTES">2</file_size_limit>
+                     <time_limit>
+                         <hours>0</hours>
+                         <minutes>30</minutes>
+                     </time_limit>
+                </rollover>
+                </fileset>
+            </sqlite>
+        </storage>
+
+
+        <domain_participant name="RecordingServiceParticipant">
+            <domain_id>$(DOMAIN_ID)</domain_id>
+        </domain_participant>
+
+        <!-- Dynamically Record All Topics that are publishing their Type Objects -->
+        <session name="RecordSelectTopics">
+          <topic_group name="RecordSelect" participant_ref="RecordingServiceParticipant">
+           
+           <!-- Set Topics here comma separated, can also use a wildcard such as *Command -->
+            <allow_topic_name_filter>Button,Command,Position</allow_topic_name_filter>
+            <deny_topic_name_filter>rti/*</deny_topic_name_filter>
+
+            <!-- Match QoS Here if necessary -->
+            <!-- <datareader_qos base_name="BuiltinQosLib::Pattern.Streaming" /> -->
+          </topic_group>
+          </session>
+    </recording_service>
+
+  <recording_service name="debug">
+    <!-- This is for the use case when you are running HITL testing on a bench etc.
+        and you want to capture all of the data in an unserialized format(so it is 
+        easy to quickly review). You only need the last 5 GB's of data and don't want
+        the recorded data to exceed that limit so it will overwrite the older data. 
+        This will create 2 files and alternate recording over both files by incrementing/ resetting the
+    index -->
+
+    <!--  Top-level storage settings -->
+    <storage>
+      <sqlite>
+        <storage_format>JSON_SQLITE</storage_format>
+        <fileset>
+          <workspace_dir>log_dir</workspace_dir>
+          <execution_dir_expression>%F%_%T%</execution_dir_expression>
+
+          <!-- This creates a sequence of 2 files at 5 GB each -->
+          <filename_expression>
+                      json-%auto:0-1%-log-filtered.db
+                  </filename_expression>
+          <rollover>
+            <enabled>true</enabled>
+            <!-- Set max size as backup -->
+            <file_size_limit unit="GIGABYTES">5</file_size_limit>
+          </rollover>
+
+        </fileset>
+      </sqlite>
+    </storage>
+
+    <domain_participant name="RecordingServiceParticipant">
+      <domain_id>$(DOMAIN_ID)</domain_id>
+    </domain_participant>
+
+    <session name="RecordAllTopics">
+
+      <topic_group name="RecordAll" participant_ref="RecordingServiceParticipant">
+        <allow_topic_name_filter>*</allow_topic_name_filter>
+        <deny_topic_name_filter>rti/*</deny_topic_name_filter>
+      </topic_group>
+
+    </session>
+  </recording_service>
+</dds>

@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<dds xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+     xsi:noNamespaceSchemaLocation="https://community.rti.com/schema/current/rti_replay_service.xsd">
+
+  <configuration_variables>
+    <value>
+
+      <!-- 
+        Set up default config ENV variables after 6.1.14. 
+        Override with either ENV variables i.e. "export VAR=X" or command line -DVAR=X 
+      -->
+      <element>
+        <name>DOMAIN_ID</name>
+        <value>1</value>
+      </element>
+    </value>
+  </configuration_variables>
+
+  <replay_service name="xcdr">
+
+    <!--  Storage settings -->
+    <storage>
+      <sqlite>
+        <storage_format>XCDR_AUTO</storage_format>
+        <database_dir>log_dir/xcdr</database_dir>
+      </sqlite>
+    </storage>
+
+    <!-- Optionally select the begin and end times for the data to be replayed -->
+    <!--data_selection>
+            <time_range>
+                <begin_time>
+                    <sec>0</sec>
+                    <nanosec>0</nanosec>
+                </begin_time>
+            </time_range>
+        </data_selection-->
+
+
+    <!-- Specify playback behavior, including what local time to start -->
+    <playback>
+
+      <!-- 
+        Specifies the rate to replay data, as a double. For example, to play 
+        data at half speed, use 0.5.   
+        Default: 1 (normal speed) 
+        -->
+      <rate>1</rate>
+
+
+      <!-- 
+        Plays the data in a repeating loop, until Replay Service is stopped. Note that this means that
+        only a termination signal or a remote shutdown command will make it stop replaying data.
+        When no time range data selection has been specified (see Section 4.3.10) then Replay will
+        replay the whole contents of the database file(s) and when it’s time to loop, it will start
+        from the very beginning of the file or files. However, when a specific time range has been
+        specified for replay, the looping will respect the time range and will restart at the
+        specified start time and end at the specified end time.
+
+        Note: in our default SQLite implementation, Replay is able to check if new data has been
+        written by Recorder (or any application) for every given stream being replayed, since the
+        start of the service. This feature is generally not supported when looping without specifying
+        a time range and may yield unexpected results. 
+      -->
+      <enable_looping>false</enable_looping>
+
+
+      <!-- 
+        Specifies the timestamp kind to replay data. If not specified, RECEPTION_TIMESTAMP is assumed.
+        The options are:
+
+        RECEPTION_TIMESTAMP: Time stored when the DDS sample was received by the DataReader. For more
+        details, please see DESTINATION_ORDER QosPolicy in the RTI Connext Core Libraries User’s
+        Manual.
+
+        SOURCE_TIMESTAMP: Time stored by the DataWriter when the DDS sample was written.
+
+        Note: For more information about source timestamp and reception timestamp, please see Section
+        4.1.6.
+
+        Default: RECEPTION_TIMESTAMP. 
+      -->
+      <sample_order>RECEPTION_TIMESTAMP</sample_order>
+
+    </playback>
+
+       
+      <domain_participant name="ReplayServiceParticipant">
+        <domain_id>$(DOMAIN_ID)</domain_id>
+           
+      </domain_participant>
+
+    <session name="DefaultSession" default_participant_ref="ReplayServiceParticipant">
+      <!-- Topics to replay in this session -->
+      <topic_group name="DefaultTopicGroup">
+        <!-- Topics to replay -->
+        <allow_topic_name_filter>Button,Command,Position</allow_topic_name_filter>
+        <deny_topic_name_filter>rti/*</deny_topic_name_filter>
+
+        <!-- Set to republish with original timestamp, otherwise system time is used -->
+        <publish_with_original_timestamp>false</publish_with_original_timestamp>
+      </topic_group>
+      
+    </session>
+  </replay_service>
+
+
+  <replay_service name="json">
+
+    <!--  Storage settings -->
+    <storage>
+      <sqlite>
+        <storage_format>JSON_SQLITE</storage_format>
+        <database_dir>converted/json</database_dir>
+      </sqlite>
+    </storage>
+
+    <!-- Optionally select the begin and end times for the data to be replayed -->
+    <!--data_selection>
+            <time_range>
+                <begin_time>
+                    <sec>0</sec>
+                    <nanosec>0</nanosec>
+                </begin_time>
+            </time_range>
+        </data_selection-->
+
+    <!-- Specify playback behavior, including what local time to start -->
+    <!--playback>
+        </playback-->
+
+
+    <domain_participant name="ReplayServiceParticipant">
+      <domain_id>$(DOMAIN_ID)</domain_id>
+
+    </domain_participant>
+
+    <session name="DefaultSession" default_participant_ref="ReplayServiceParticipant">
+      <!-- Topics to replay in this session -->
+      <topic_group name="DefaultTopicGroup">
+        <!-- Topics to replay -->
+        <allow_topic_name_filter>Button,Command,Position</allow_topic_name_filter>
+        <deny_topic_name_filter>rti/*</deny_topic_name_filter>
+      </topic_group>
+
+    </session>
+  </replay_service>
+
+
+</dds>

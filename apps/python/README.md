@@ -2,6 +2,31 @@
 
 Python applications demonstrating RTI Connext DDS capabilities with example data types.
 
+## Quick Start
+
+1. **Get an RTI license and set the environment variable:**
+   
+   Visit https://www.rti.com/get-connext to request a free trial license (you'll receive it via email within minutes):
+   ```bash
+   export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
+   ```
+
+2. **Run the installation script:**
+   ```bash
+   cd apps/python
+   ./install.sh
+   ```
+
+3. **Run an application:**
+   ```bash
+   cd example_io_app
+   python example_io_app.py --domain_id 1
+   ```
+
+The install script will automatically set up the virtual environment, install all dependencies, and generate DDS bindings.
+
+---
+
 ## Table of Contents
 - [Application Structure](#application-structure)
 - [Current Applications](#current-applications)
@@ -40,15 +65,29 @@ apps/python/
   - Distributed logger integration
   - Cross-language communication with C++ apps
 
-## Setup
+---
+
+## Detailed Setup
 
 ### Prerequisites
 - RTI Connext DDS Python API
 - Python 3.8+
 - Built DDS Python libraries (`../../dds/python/build/`)
-- **RTI license file (`rti_license.dat`) in `apps/python/` directory**
+- **RTI license file with `RTI_LICENSE_FILE` environment variable set**
 
-> **Important**: Run applications from `apps/python/` directory to ensure license file is accessible.
+#### Getting an RTI License
+
+If you don't have an RTI Connext license:
+
+1. Visit https://www.rti.com/get-connext
+2. Fill out the form to request a free trial license
+3. You'll receive an automated email with the license file (`rti_license.dat`) within a few minutes
+4. Set the `RTI_LICENSE_FILE` environment variable to point to the license file:
+   ```bash
+   export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
+   ```
+
+> **Tip**: Add the `export RTI_LICENSE_FILE=...` line to your `~/.bashrc` or `~/.bash_profile` to make it permanent.
 
 ### Installation
 

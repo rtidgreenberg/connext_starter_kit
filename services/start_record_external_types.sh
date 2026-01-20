@@ -19,27 +19,10 @@ if [[ -z "${NDDSHOME}" ]]; then
 fi
 
 
-# Converter Service configuration file
-xml="./recording_service_config.xml"
+# Recording Service configuration file for external types
+xml="./recording_service_config_external_types.xml"
 
-if [ "$1" == "deploy" ] || [ "$1" == "debug" ] ; then
-  config=$1
-else
-  config="deploy"
-  if [ "$1" ]; then
-    echo "Invalid configuration: $1"
-    echo ""
-  fi
-  echo "Using default configuration: $config"
-  echo ""
-  echo "To specify a configuration, pass in:"
-  echo "arg1: Recording Service Configuration name from recording_service_config.xml: [\"deploy\", \"debug\"]"
-  echo "example: start_record.sh debug"
-fi
-
-# Example: Export configuration variables to override defaults in XML
-# These can be used throughout the configuration file with $(VARIABLE_NAME) syntax
-# export DOMAIN_ID=5
+config="xcdr"
 
 ################################################################################
 #                                 VERBOSITY                                    #
@@ -64,14 +47,14 @@ verbosity=ERROR:ERROR
 ################################################################################
 
 echo "
-------------------------CONVERTER SERVICE CONFIGS: -----------------------------
+------------------------RECORDING SERVICE CONFIGS: -----------------------------
 XML FILES used:  $xml
 Logging Verbosity: $verbosity
-CONFIG = $config
+CONFIG = $config (with external types support)
 
-------------------------CONVERTER SERVICE CONFIGS: -----------------------------
+------------------------RECORDING SERVICE CONFIGS: -----------------------------
 "
 
 
-# Run Record Service
-$NDDSHOME/bin/rtirecordingservice -cfgName $config -verbosity $verbosity  -cfgFile $xml
+# Run Recording Service with external types configuration
+$NDDSHOME/bin/rtirecordingservice -cfgName $config -verbosity $verbosity -cfgFile $xml

@@ -20,26 +20,22 @@ fi
 
 
 # Converter Service configuration file
-xml="./recording_service_config.xml"
+xml="./converter_service_config.xml"
 
-if [ "$1" == "deploy" ] || [ "$1" == "debug" ] ; then
+if [ "$1" == "json" ] || [ "$1" == "csv" ] ; then
   config=$1
-else
-  config="deploy"
-  if [ "$1" ]; then
-    echo "Invalid configuration: $1"
-    echo ""
+  if [ "$2" ]; then
+    export DOMAIN_ID=$2
   fi
+else
+  config="json"
   echo "Using default configuration: $config"
   echo ""
   echo "To specify a configuration, pass in:"
-  echo "arg1: Recording Service Configuration name from recording_service_config.xml: [\"deploy\", \"debug\"]"
-  echo "example: start_record.sh debug"
+  echo "arg1: Converter Service Configuration name from converter_service_config.xml: [\"json\", \"csv\"]"
+  echo "arg2: DDS Domain ID (Default: 1)"
+  echo "example: start_convert.sh csv 1"
 fi
-
-# Example: Export configuration variables to override defaults in XML
-# These can be used throughout the configuration file with $(VARIABLE_NAME) syntax
-# export DOMAIN_ID=5
 
 ################################################################################
 #                                 VERBOSITY                                    #
@@ -73,5 +69,5 @@ CONFIG = $config
 "
 
 
-# Run Record Service
-$NDDSHOME/bin/rtirecordingservice -cfgName $config -verbosity $verbosity  -cfgFile $xml
+# Run Converter Service
+$NDDSHOME/bin/rticonverter -cfgName $config -verbosity $verbosity  -cfgFile $xml

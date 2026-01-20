@@ -18,12 +18,24 @@
 #include <string>       // Include string header
 #include <iostream>
 #include <functional>
-#include <stdexcept>
-#include "DDSContextSetup.hpp"
+#include "DDSParticipantSetup.hpp"
 
 using namespace rti::all;
 
-
+/*
+ * DDSWriterSetup Class
+ * 
+ * Manages DataWriter creation and event-driven callback processing:
+ *   - DataWriter: Publishes messages to a specified topic with configurable QoS
+ *   - Status Callbacks: Supports multiple DDS event callbacks including:
+ *       * publication_matched: Fires when readers matching the publication are discovered
+ *       * liveliness_lost: Fires when writer loses liveliness (automatic keepalive missed)
+ *       * offered_deadline_missed: Fires when deadline for publishing is missed
+ *       * offered_incompatible_qos: Fires when QoS policies are incompatible with readers
+ *   - AsyncWaitSet Integration: Registers status conditions with the centralized AsyncWaitSet
+ *                                allowing all status events to be processed asynchronously via
+ *                                thread pool without blocking the application
+ */
 template <typename T>
 class DDSWriterSetup {
 public:
@@ -40,16 +52,15 @@ public:
     using OfferedIncompatibleQosFunction =
             std::function<void(dds::pub::DataWriter<T> &)>;
 
-    // Constructor accepting a DDSContextSetup for Writer setup
+    // Constructor accepting a DDSParticipantSetup for Writer setup
     explicit DDSWriterSetup(
-            std::shared_ptr<DDSContextSetup> &context,
+            std::shared_ptr<DDSParticipantSetup> &p_setup,
             const std::string &topic_name,
-            const std::string &qos_file = "",
             const std::string &qos_profile = "")
-            : _participant(context->participant()),
-              _async_waitset(context->async_waitset()),
+            : _participant(p_setup->participant()),
+              _async_waitset(p_setup->async_waitset()),
               _topic_name(topic_name),
-              _qos_file(qos_file),
+              _qos_file(p_setup->qos_file_path()),
               _qos_profile(qos_profile)
     {
         std::cout << "Created DDS Writer Setup Class" << std::endl;

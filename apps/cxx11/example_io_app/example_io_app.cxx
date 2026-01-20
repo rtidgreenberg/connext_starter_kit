@@ -11,6 +11,7 @@
 */
 
 #include <iostream>
+#include <sstream>
 #include <thread>
 #include <chrono>
 #include <atomic>
@@ -19,6 +20,8 @@
 // include both the standard APIs and extensions
 #include <rti/rti.hpp>
 #include <rti/core/cond/AsyncWaitSet.hpp>
+#include <rti/distlogger/DistLogger.hpp>
+#include <rti/config/Logger.hpp>
 
 //
 // For more information about the headers and namespaces, see:
@@ -29,9 +32,13 @@
 #include "application.hpp"  // for command line parsing and ctrl-c
 #include "ExampleTypes.hpp"
 #include "Definitions.hpp"
-#include "DDSContextSetup.hpp"
+#include "DDSParticipantSetup.hpp"
 #include "DDSReaderSetup.hpp"
 #include "DDSWriterSetup.hpp"
+
+// For example legibility.
+using namespace rti::all;
+using namespace rti::dist_logger;
 
 constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
 const std::string APP_NAME = "Example CXX IO APP";
@@ -46,14 +53,26 @@ void process_command_data(dds::sub::DataReader<example_types::Command> reader)
       if (sample.info().valid())
       {
 
-        // Do something with data message
-        std::cout << sample.data() << std::endl;
+        // Do something with data message (logged at DEBUG level)
+        std::ostringstream oss;
+        oss << sample.data();
+        rti::config::Logger::instance().debug(("[COMMAND] " + oss.str()).c_str());
 
         // overloaded -> operator to use RTI extension
-        std::cout << reader->topic_name() << " received" << std::endl;
+        rti::config::Logger::instance().debug(("[COMMAND] Topic '" + std::string(reader->topic_name()) + "' received").c_str());
       }
     }
-} 
+}
+
+void on_command_liveliness_changed(dds::sub::DataReader<example_types::Command> reader)
+{
+    auto status = reader->liveliness_changed_status();
+    rti::config::Logger::instance().notice(
+        ("[COMMAND] Liveliness changed - alive_count: " +
+         std::to_string(status.alive_count()) + ", not_alive_count: " +
+         std::to_string(status.not_alive_count())).c_str());
+}
+
 
 void process_button_data(dds::sub::DataReader<example_types::Button> reader)
 {
@@ -65,10 +84,12 @@ void process_button_data(dds::sub::DataReader<example_types::Button> reader)
       {
 
         // Do something with data message
-        std::cout << sample.data() << std::endl;
+        std::ostringstream oss;
+        oss << sample.data();
+        rti::config::Logger::instance().debug(("[BUTTON] " + oss.str()).c_str());
 
         // overloaded -> operator to use RTI extension
-        std::cout << reader->topic_name() << " received" << std::endl;
+        rti::config::Logger::instance().debug(("[BUTTON] Topic '" + std::string(reader->topic_name()) + "' received").c_str());
       }
     }
 } 
@@ -83,67 +104,76 @@ void process_config_data(dds::sub::DataReader<example_types::Config> reader)
       {
 
         // Do something with data message
-        std::cout << sample.data() << std::endl;
+        std::ostringstream oss;
+        oss << sample.data();
+        rti::config::Logger::instance().debug(("[CONFIG] " + oss.str()).c_str());
 
         // overloaded -> operator to use RTI extension
-        std::cout << reader->topic_name() << " received" << std::endl;
+        rti::config::Logger::instance().debug(("[CONFIG] Topic '" + std::string(reader->topic_name()) + "' received").c_str());
       }
     }
-} 
+}
 
-
-void run(unsigned int domain_id, const std::string& qos_file_path)
+void on_position_publication_matched(dds::pub::DataWriter<example_types::Position> writer)
 {
-    // Use provided QoS file path and generated constants from IDL
-    const std::string qos_profile = qos_profiles::DEFAULT_PARTICIPANT;
+    auto status = writer->publication_matched_status();
+    rti::config::Logger::instance().notice(
+        ("[POSITION] Publication matched - current_count: " +
+         std::to_string(status.current_count()) + ", total_count: " +
+         std::to_string(status.total_count())).c_str());
+}
 
-    std::cout << "Example I/O application starting on domain " << domain_id << std::endl;
-    std::cout << "Using QoS file: " << qos_file_path << std::endl;
 
-    // This sets up DDS Domain Participant as well as the Async Waitset for the readers
-  auto dds_context = std::make_shared<DDSContextSetup>(domain_id, ASYNC_WAITSET_THREADPOOL_SIZE, qos_file_path, qos_profile, APP_NAME);
-    
-    // Get reference to distributed logger
-    auto& logger = dds_context->distributed_logger();
+void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
+{
+    rti::config::Logger::instance().notice(("Example I/O application starting on domain " + std::to_string(participant_setup->participant().domain_id())).c_str());
+
+    // DDSReaderSetup and DDSWriterSetup are example wrapper classes for your convenience that simplify
+    // DDS reader/writer creation and event handling. They manage DataReader/DataWriter lifecycle, attach
+    // status conditions to the centralized AsyncWaitSet, and provide convenient methods to register
+    // callbacks for DDS events (data_available, subscription_matched, liveliness_changed, etc.)
 
     // Setup Reader Interfaces
     auto command_reader = std::make_shared<DDSReaderSetup<example_types::Command>>(
-        dds_context,
+        participant_setup,
         topics::COMMAND_TOPIC,
-        qos_file_path,
         qos_profiles::ASSIGNER);
 
     auto button_reader = std::make_shared<DDSReaderSetup<example_types::Button>>(
-        dds_context,
+        participant_setup,
         topics::BUTTON_TOPIC,
-        qos_file_path,
         qos_profiles::ASSIGNER);
 
     auto config_reader = std::make_shared<DDSReaderSetup<example_types::Config>>(
-        dds_context,
+        participant_setup,
         topics::CONFIG_TOPIC,
-        qos_file_path,
         qos_profiles::ASSIGNER);
 
     // Setup Writer Interfaces
     auto position_writer = std::make_shared<DDSWriterSetup<example_types::Position>>(
-        dds_context,
+        participant_setup,
         topics::POSITION_TOPIC,
-        qos_file_path,
         qos_profiles::ASSIGNER);
 
     // Enable Asynchronous Event-Driven processing for readers
     command_reader->set_data_available_handler(process_command_data);
+    command_reader->set_liveliness_changed_handler(on_command_liveliness_changed);
     button_reader->set_data_available_handler(process_button_data);
     config_reader->set_data_available_handler(process_config_data);
 
-    logger.info("Example I/O app is running. Press Ctrl+C to stop.");
-    logger.info("Subscribing to Command, Button, and Config messages...");
-    logger.info("Publishing Position messages...");
+    // Set publication matched callback for writer
+    position_writer->set_publication_matched_handler(on_position_publication_matched);
+
+    rti::config::Logger::instance().notice("Example I/O app is running. Press Ctrl+C to stop.");
+    rti::config::Logger::instance().notice("Subscribing to Command, Button, and Config messages...");
+    rti::config::Logger::instance().notice("Publishing Position messages...");
 
 
     example_types::Position pos_msg;
     pos_msg.source_id(APP_NAME);
+
+    // Counter for tracking iterations
+    int iteration = 0;
 
     while (!application::shutdown_requested) {
 
@@ -156,15 +186,24 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
         pos_msg.timestamp_sec(static_cast<int32_t>(std::time(nullptr)));
         position_writer->writer().write(pos_msg);
 
-        std::cout << "[POSITION] Published ID: " << pos_msg.source_id()
-                  << ", Lat: " << pos_msg.latitude()
-                  << ", Lon: " << pos_msg.longitude()
-                  << ", Alt: " << pos_msg.altitude() << "m"
-                  << ", Timestamp: " << pos_msg.timestamp_sec() << std::endl;
+        // Log every position publish at DEBUG level (can be filtered)
+        rti::config::Logger::instance().debug(("[POSITION] Published ID: " + std::string(pos_msg.source_id()) +
+                    ", Lat: " + std::to_string(pos_msg.latitude()) +
+                    ", Lon: " + std::to_string(pos_msg.longitude()) +
+                    ", Alt: " + std::to_string(pos_msg.altitude()) + "m" +
+                    ", Timestamp: " + std::to_string(pos_msg.timestamp_sec())).c_str());
+        
+        // Every 10 iterations (5 seconds), log INFORMATIONAL level status to distributed logger
+        if (iteration % 10 == 0) {
+          rti::config::Logger::instance().informational(("Application running - Position published at " + 
+                      std::to_string(pos_msg.timestamp_sec())).c_str());
+        }
+        
+        iteration++;
       }
       catch (const std::exception &ex)
       {
-        logger.error("Failed to publish position: " + std::string(ex.what()));
+        rti::config::Logger::instance().error(("Failed to publish position: " + std::string(ex.what())).c_str());
       }
 
       // Alternate Option: Use Polling Method to Read Data
@@ -176,9 +215,8 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
 
     }
 
-    logger.info("Example I/O application shutting down...");
-    
-    logger.info("Example I/O application stopped");
+    rti::config::Logger::instance().informational("Example I/O application shutting down...");
+    rti::config::Logger::instance().notice("Example I/O application stopped");
 }
 
 int main(int argc, char *argv[])
@@ -194,26 +232,72 @@ int main(int argc, char *argv[])
     }
     setup_signal_handlers();
 
-    // Sets Connext verbosity to help debugging
-    rti::config::Logger::instance().verbosity(arguments.verbosity);
-
     try {
-        run(arguments.domain_id, arguments.qos_file_path);
+        // Create DDS Participant Setup (creates DomainParticipant and AsyncWaitSet)
+        // DDSParticipantSetup is an example wrapper class for your convenience that manages the DDS
+        // infrastructure: creates the participant in the specified domain, sets up the AsyncWaitSet with
+        // a configurable thread pool for event-driven processing, loads QoS profiles from the XML file,
+        // and stores them for use by readers/writers
+        auto participant_setup = std::make_shared<DDSParticipantSetup>(
+            arguments.domain_id,
+            ASYNC_WAITSET_THREADPOOL_SIZE,
+            arguments.qos_file_path,
+            qos_profiles::DEFAULT_PARTICIPANT,
+            APP_NAME);
+        
+        // Setup DistLogger Singleton
+        // DistLogger provides distributed logging over DDS network. By using the shared participant,
+        // all RTI Logger messages are published to remote subscribers via DDS topics, enabling centralized
+        // logging and monitoring across distributed systems. This is more powerful than console logging.
+        try {
+            DistLoggerOptions options;
+            options.domain_participant(participant_setup->participant());
+            options.application_kind(APP_NAME);
+
+            // Disable Logger output to console
+            options.echo_to_stdout(true);
+            
+            DistLogger::set_options(options);
+            auto& dist_logger = DistLogger::get_instance();
+            
+            // Configure DistLogger Verbosity. 
+            // Passthrough for rti::config::logger verbosity control
+            // Change Category to display internal Connext debug logs
+            dist_logger.set_verbosity(rti::config::LogCategory::user, arguments.verbosity);
+            
+            // Configure Filter Level. This controls what level gets published
+            dist_logger.set_filter_level(dist_logger.get_info_log_level());
+            
+            rti::config::Logger::instance().notice("DistLogger initialized with shared participant");
+            rti::config::Logger::instance().notice(("Using QoS file: " + arguments.qos_file_path).c_str());
+        } catch (const std::exception& ex) {
+            std::cerr << "Error initializing DistLogger: " << ex.what() << std::endl;
+            throw;
+        }
+        
+        // Run the application
+        run(participant_setup);
+        
+        // Explicitly finalize DistLogger Singleton before Domain Participant 
+        // destruction as it uses it
+        try {
+            DistLogger::get_instance().finalize();
+            std::cout << "DistLogger finalized" << std::endl;
+        } catch (const std::exception& ex) {
+            std::cerr << "Error finalizing DistLogger: " << ex.what() << std::endl;
+        }
     } catch (const std::exception& ex) {
         // This will catch DDS exceptions
-        std::cerr << "Exception in run(): " << ex.what() << std::endl;
+        std::cerr << "Exception in main: " << ex.what() << std::endl;
         return EXIT_FAILURE;
     }
 
-  // Finalize participant factory after all DDSContextSetup/DDSReaderSetup/DDSWriterSetup objects are destroyed
-  // This should be called at application exit after all DDS entities are cleaned up
-    try
-    {
+    // Finalize participant factory after all DDSParticipantSetup/DDSReaderSetup/DDSWriterSetup objects are destroyed
+    // This should be called at application exit after all DDS entities are cleaned up
+    try {
         dds::domain::DomainParticipant::finalize_participant_factory();
         std::cout << "DomainParticipant factory finalized at application exit" << std::endl;
-    }
-    catch (const std::exception &e)
-    {
+    } catch (const std::exception &e) {
         std::cerr << "Error finalizing participant factory at exit: " << e.what() << std::endl;
     }
 

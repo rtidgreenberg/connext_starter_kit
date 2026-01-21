@@ -19,6 +19,8 @@
 // include both the standard APIs and extensions
 #include <rti/rti.hpp>
 #include <rti/core/cond/AsyncWaitSet.hpp>
+#include <rti/distlogger/DistLogger.hpp>
+#include <rti/config/Logger.hpp>
 
 //
 // For more information about the headers and namespaces, see:
@@ -29,8 +31,12 @@
 #include "application.hpp"  // for command line parsing and ctrl-c
 #include "ExampleTypes.hpp"
 #include "Definitions.hpp"
-#include "DDSContextSetup.hpp"
+#include "DDSParticipantSetup.hpp"
 #include "DDSReaderSetup.hpp"
+
+// For example legibility.
+using namespace rti::all;
+using namespace rti::dist_logger;
 
 constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
 const std::string APP_NAME = "Burst Subscriber app";
@@ -45,52 +51,38 @@ void process_data(dds::sub::DataReader<example_types::FinalFlatPointCloud> reade
       if (sample.info().valid()) {
             samples_received ++;
             if (samples_received % 100 == 0) {
-                std::cout << "Samples received: " << samples_received <<
-                        ", size: " << sample.data().root().data().element_count() << " B" << std::endl;
+                rti::config::Logger::instance().informational((std::string("Samples received: ") + std::to_string(samples_received) +
+                        ", size: " + std::to_string(sample.data().root().data().element_count()) + " B").c_str());
             }
-        // Process your data here
-        // auto root = sample.data().root();
       }
     }
 } 
 
-void run(unsigned int domain_id, const std::string& qos_file_path)
+void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
 {
-    // Use provided QoS file path and generated constants from IDL
-    // TODO: Make new assignment in XML file for ASSIGNER_QOS if needed
-    const std::string qos_profile = std::string(qos_profiles::LARGE_DATA_UDP_PARTICIPANT);
-
-    std::cout << "Burst subscriber application starting on domain " << domain_id << std::endl;
-    std::cout << "Using QoS file: " << qos_file_path << std::endl;
-
-    // This sets up DDS Domain Participant as well as the Async Waitset for the readers
-    auto dds_context = std::make_shared<DDSContextSetup>(
-            domain_id,
-            ASYNC_WAITSET_THREADPOOL_SIZE,
-            qos_file_path,
-            qos_profile,
-            APP_NAME);
+    auto& rti_logger = rti::config::Logger::instance();
     
-    // Get reference to distributed logger
-    auto& logger = dds_context->distributed_logger();
+    rti_logger.notice((std::string("Burst subscriber application starting on domain ") + std::to_string(participant_setup->participant().domain_id())).c_str());
 
     // Setup Reader Interface for FlatData type
     auto burst_reader = std::make_shared<DDSReaderSetup<example_types::FinalFlatPointCloud>>(
-        dds_context,
+        participant_setup,
         topics::POINT_CLOUD_TOPIC,
-        qos_file_path,
         qos_profiles::BURST_LARGE_DATA_UDP);
 
     // Enable Asynchronous Event-Driven processing for reader
     burst_reader->set_data_available_handler(process_data);
     burst_reader->set_sample_lost_handler(
-        [&logger](dds::sub::DataReader<example_types::FinalFlatPointCloud>& reader)
+        [](dds::sub::DataReader<example_types::FinalFlatPointCloud>& reader)
         {
             auto status = reader.sample_lost_status();
-            logger.warning("Sample lost! Total lost: " + std::to_string(status.total_count()));
+            rti::config::Logger::instance().warning(
+                    (std::string("Sample lost! Total lost: ")
+                     + std::to_string(status.total_count()))
+                            .c_str());
         });
 
-    logger.info("Burst subscriber app is running. Press Ctrl+C to stop.");
+    rti_logger.informational("Burst subscriber app is running. Press Ctrl+C to stop.");
 
     while (!application::shutdown_requested) {
 
@@ -103,7 +95,7 @@ void run(unsigned int domain_id, const std::string& qos_file_path)
 
     }
 
-    logger.info("Burst subscriber application shutting down...");
+    rti_logger.informational("Burst subscriber application shutting down...");
 }
 
 int main(int argc, char *argv[])
@@ -119,28 +111,61 @@ int main(int argc, char *argv[])
     }
     setup_signal_handlers();
 
-    // Sets Connext verbosity to help debugging
-    rti::config::Logger::instance().verbosity(arguments.verbosity);
-
+    // Run the application
     try {
-        run(arguments.domain_id, arguments.qos_file_path);
+        // Create DDS Participant Setup (creates DomainParticipant and AsyncWaitSet)
+        // DDSParticipantSetup is an example wrapper class for your convenience that manages the DDS
+        // infrastructure: creates the participant in the specified domain, sets up the AsyncWaitSet with
+        // a configurable thread pool for event-driven processing, loads QoS profiles from the XML file,
+        // and stores them for use by readers/writers
+        auto participant_setup = std::make_shared<DDSParticipantSetup>(
+            arguments.domain_id,
+            ASYNC_WAITSET_THREADPOOL_SIZE,
+            arguments.qos_file_path,
+            qos_profiles::LARGE_DATA_UDP_PARTICIPANT,
+            APP_NAME);
+        
+        // Setup DistLogger Singleton
+        // DistLogger provides distributed logging over DDS network. By using the shared participant,
+        // all RTI Logger messages are published to remote subscribers via DDS topics, enabling centralized
+        // logging and monitoring across distributed systems. This is more powerful than console logging.
+        DistLoggerOptions options;
+        options.domain_participant(participant_setup->participant());
+        options.application_kind(APP_NAME);
+
+        // Disable Logger output to console
+        options.echo_to_stdout(true);
+        
+        DistLogger::set_options(options);
+        auto& dist_logger = DistLogger::get_instance();
+        
+        // Configure DistLogger Verbosity. 
+        // Passthrough for rti::config::logger verbosity control
+        // Change Category to display internal Connext debug logs
+        dist_logger.set_verbosity(rti::config::LogCategory::user, arguments.verbosity);
+        
+        // Configure Filter Level. This controls what level gets published
+        dist_logger.set_filter_level(dist_logger.get_info_log_level());
+        
+        rti::config::Logger::instance().notice("DistLogger initialized with shared participant");
+        rti::config::Logger::instance().notice(("Using QoS file: " + arguments.qos_file_path).c_str());
+        
+        run(participant_setup);
+        
+        // Explicitly finalize DistLogger Singleton before Domain Participant 
+        // destruction as it uses it
+        DistLogger::get_instance().finalize();
+        std::cout << "DistLogger finalized" << std::endl;
+        
     } catch (const std::exception& ex) {
-        // This will catch DDS exceptions
-        std::cerr << "Exception in run(): " << ex.what() << std::endl;
+        std::cerr << "Exception: " << ex.what() << std::endl;
         return EXIT_FAILURE;
     }
 
-  // Finalize participant factory after all DDSContextSetup/DDSReaderSetup/DDSWriterSetup objects are destroyed
-  // This should be called at application exit after all DDS entities are cleaned up
-    try
-    {
-        dds::domain::DomainParticipant::finalize_participant_factory();
-        std::cout << "DomainParticipant factory finalized at application exit" << std::endl;
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "Error finalizing participant factory at exit: " << e.what() << std::endl;
-    }
+    // Finalize participant factory after all DDSParticipantSetup/DDSReaderSetup/DDSWriterSetup objects are destroyed
+    // This should be called at application exit after all DDS entities are cleaned up
+    dds::domain::DomainParticipant::finalize_participant_factory();
+    std::cout << "DomainParticipant factory finalized at application exit" << std::endl;
 
     return EXIT_SUCCESS;
 }

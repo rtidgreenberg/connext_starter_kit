@@ -119,7 +119,7 @@ module example_types {
         @key unsigned long image_id;                   // Numeric image identifier
         unsigned short width;                           // Image width in pixels
         unsigned short height;                          // Image height in pixels
-        unsigned byte format;                          // Format code: 0=RGB, 1=RGBA, 2=JPEG, etc.
+        unsigned short format;                          // Format code: 0=RGB, 1=RGBA, 2=JPEG, etc.
         octet data[MAX_IMAGE_DATA_SIZE];              // Fixed-size image data array
     };
 

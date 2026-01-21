@@ -26,6 +26,7 @@ set(DDS_LIB_BUILD_DIR "${DDS_BUILD_DIR}/lib")
 set(DDS_CODEGEN_DIR "${DDS_BUILD_DIR}/cxx11_gen")
 set(DDS_UTILS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../dds/utils/cxx11")
 
+
 # Find the shared libraries
 find_library(DDS_TYPESUPPORT_LIB 
     NAMES dds_typesupport
@@ -34,14 +35,19 @@ find_library(DDS_TYPESUPPORT_LIB
     REQUIRED
 )
 
-# Create the executable
-add_executable(large_data_app
-    large_data_app.cxx
+# Create the executables
+add_executable(burst_publisher
+    burst_publisher.cxx
     application.hpp
 )
 
-# Include directories
-target_include_directories(large_data_app 
+add_executable(burst_subscriber
+    burst_subscriber.cxx
+    application.hpp
+)
+
+# Include directories for burst_publisher
+target_include_directories(burst_publisher 
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${DDS_CODEGEN_DIR}
@@ -49,8 +55,17 @@ target_include_directories(large_data_app
         ${RTIConnextDDS_INCLUDE_DIRS}
 )
 
-# Link with libraries
-target_link_libraries(large_data_app
+# Include directories for burst_subscriber
+target_include_directories(burst_subscriber 
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${DDS_CODEGEN_DIR}
+        ${DDS_UTILS_DIR}
+        ${RTIConnextDDS_INCLUDE_DIRS}
+)
+
+# Link with libraries for burst_publisher
+target_link_libraries(burst_publisher
     PRIVATE
         ${DDS_TYPESUPPORT_LIB}
         RTIConnextDDS::cpp2_api
@@ -62,17 +77,50 @@ target_link_libraries(large_data_app
         rt
 )
 
-# Set compiler definitions
-target_compile_definitions(large_data_app
+# Link with libraries for burst_subscriber
+target_link_libraries(burst_subscriber
+    PRIVATE
+        ${DDS_TYPESUPPORT_LIB}
+        RTIConnextDDS::cpp2_api
+        RTIConnextDDS::distributed_logger_cpp2
+        RTIConnextDDS::metp  # Required for ZeroCopy types used by other apps in library
+        dl
+        m
+        pthread
+        rt
+)
+
+# Set compiler definitions for burst_publisher
+target_compile_definitions(burst_publisher
     PRIVATE
         RTI_UNIX
         RTI_LINUX
         RTI_64BIT
 )
 
-# Set additional compiler flags
+# Set compiler definitions for burst_subscriber
+target_compile_definitions(burst_subscriber
+    PRIVATE
+        RTI_UNIX
+        RTI_LINUX
+        RTI_64BIT
+)
+
+# Set additional compiler flags for burst_publisher
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(large_data_app PRIVATE
+    target_compile_options(burst_publisher PRIVATE
+        -m64
+        -Wall
+        -Wextra
+        -Wno-unused-parameter
+        -no-pie
+        -rdynamic
+    )
+endif()
+
+# Set additional compiler flags for burst_subscriber
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(burst_subscriber PRIVATE
         -m64
         -Wall
         -Wextra
@@ -88,12 +136,17 @@ message(STATUS "DDS codegen headers: ${DDS_CODEGEN_DIR}")
 message(STATUS "DDS utils headers: ${DDS_UTILS_DIR}")
 
 # Set the runtime path to find the shared library
-set_target_properties(large_data_app PROPERTIES
+set_target_properties(burst_publisher PROPERTIES
     INSTALL_RPATH "${DDS_LIB_BUILD_DIR}"
     BUILD_WITH_INSTALL_RPATH TRUE
 )
 
-# Install the executable if desired
-install(TARGETS large_data_app
+set_target_properties(burst_subscriber PROPERTIES
+    INSTALL_RPATH "${DDS_LIB_BUILD_DIR}"
+    BUILD_WITH_INSTALL_RPATH TRUE
+)
+
+# Install the executables if desired
+install(TARGETS burst_publisher burst_subscriber
     RUNTIME DESTINATION bin
 )

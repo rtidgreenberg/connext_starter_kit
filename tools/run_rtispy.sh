@@ -41,12 +41,7 @@ if [ -z "$NDDSHOME" ]; then
     echo "   Please source the RTI Connext environment script first:"
     echo "     source <path_to_connext>/resource/scripts/rtisetenv_<architecture>.bash"
     echo
-    read -p "Continue anyway? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Cancelled. Please set up RTI Connext environment first."
-        exit 1
-    fi
+    exit 1
 fi
 
 # Run rtispy with all arguments passed to this script

@@ -188,14 +188,14 @@ void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
         pos_msg.timestamp_sec(static_cast<int32_t>(std::time(nullptr)));
         position_writer->writer().write(pos_msg);
 
-        // Log every position publish at DEBUG level (can be filtered)
-        rti_logger.debug("[POSITION] Published ID: " + std::string(pos_msg.source_id()) +
-                    ", Lat: " + std::to_string(pos_msg.latitude()) +
-                    ", Lon: " + std::to_string(pos_msg.longitude()) +
-                    ", Alt: " + std::to_string(pos_msg.altitude()) + "m" +
-                    ", Timestamp: " + std::to_string(pos_msg.timestamp_sec())).c_str());
+        // Log every position publish
+        std::cout << "[POSITION] Published ID: " << pos_msg.source_id()
+                  << ", Lat: " << pos_msg.latitude()
+                  << ", Lon: " << pos_msg.longitude()
+                  << ", Alt: " << pos_msg.altitude() << "m"
+                  << ", Timestamp: " << pos_msg.timestamp_sec() << std::endl;
         
-        // Every 10 iterations (5 seconds), log INFORMATIONAL level status to distributed logger
+        // Every 10 iterations (5 seconds), log status to distributed logger
         if (iteration % 10 == 0) {
           rti_logger.informational(("Application running - Position published at " + 
                       std::to_string(pos_msg.timestamp_sec())).c_str());

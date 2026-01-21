@@ -60,7 +60,6 @@ void process_final_flat_image_data(dds::sub::DataReader<example_types::FinalFlat
                   << ", Format: " << root.format();
         
         // Access the fixed-size data array
-        auto data_array = root.data();
         std::cout << ", Data array size: " << example_types::MAX_IMAGE_DATA_SIZE << " bytes (3 MB)" << std::endl;
 
         // overloaded -> operator to use RTI extension

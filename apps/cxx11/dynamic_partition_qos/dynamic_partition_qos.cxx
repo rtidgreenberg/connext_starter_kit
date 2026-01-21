@@ -108,6 +108,7 @@ void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
 
     // Start input thread for partition changes
     std::thread input_thread([participant_setup, app_id]() {
+        auto& rti_logger = rti::config::Logger::instance();
         std::string input;
         while (!application::shutdown_requested) {
             std::getline(std::cin, input);
@@ -173,7 +174,7 @@ void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
     // Create Command Message
     example_types::Command cmd_msg;
     cmd_msg.destination_id("system");
-    cmd_msg.command_type(example_types::CommandType::COMMAND_START);
+    cmd_msg.command_type(example_types::CommandType::START);
     cmd_msg.urgent(false);
     
     // Add App ID to message

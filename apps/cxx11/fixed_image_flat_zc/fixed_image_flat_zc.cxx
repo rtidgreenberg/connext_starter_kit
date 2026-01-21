@@ -71,7 +71,9 @@ void process_final_flat_image_data(dds::sub::DataReader<example_types::FinalFlat
 
 void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
 {
-    rti::config::Logger::instance().notice(("FinalFlatImage application starting on domain " + std::to_string(participant_setup->participant().domain_id())).c_str());
+    auto& rti_logger = rti::config::Logger::instance();
+
+    rti_logger.notice(("FinalFlatImage application starting on domain " + std::to_string(participant_setup->participant().domain_id())).c_str());
 
     // DDSReaderSetup and DDSWriterSetup are example wrapper classes for your convenience that simplify
     // DDS reader/writer creation and event handling. They manage DataReader/DataWriter lifecycle, attach
@@ -93,8 +95,8 @@ void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
     // Enable Asynchronous Event-Driven processing for reader
     final_flat_image_reader->set_data_available_handler(process_final_flat_image_data);
 
-    rti::config::Logger::instance().notice("FinalFlatImage app is running. Press Ctrl+C to stop.");
-    rti::config::Logger::instance().notice("Publishing FinalFlatImage messages with @final @language_binding(FLAT_DATA) using zero-copy loan API...");
+    rti_logger.notice("FinalFlatImage app is running. Press Ctrl+C to stop.");
+    rti_logger.notice("Publishing FinalFlatImage messages with @final @language_binding(FLAT_DATA) using zero-copy loan API...");
 
     int count = 0;
 
@@ -163,7 +165,7 @@ void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
       }
       catch (const std::exception &ex)
       {
-        rti::config::Logger::instance().error(("Failed to publish FinalFlatImage: " + std::string(ex.what())).c_str());
+        rti_logger.error(("Failed to publish FinalFlatImage: " + std::string(ex.what())).c_str());
       }
 
       // Sleep for 100ms to achieve 10 Hz send rate
@@ -171,9 +173,9 @@ void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
 
     }
 
-    rti::config::Logger::instance().notice("FinalFlatImage application shutting down...");
+    rti_logger.notice("FinalFlatImage application shutting down...");
 
-    rti::config::Logger::instance().notice("FinalFlatImage application stopped");
+    rti_logger.notice("FinalFlatImage application stopped");
 }
 
 int main(int argc, char *argv[])
@@ -189,6 +191,7 @@ int main(int argc, char *argv[])
     }
     setup_signal_handlers();
 
+    // Setup and Run the application
     try {
         // Create DDS Participant Setup (creates DomainParticipant and AsyncWaitSet)
         // DDSParticipantSetup is an example wrapper class for your convenience that manages the DDS
@@ -201,61 +204,56 @@ int main(int argc, char *argv[])
             arguments.qos_file_path,
             qos_profiles::DEFAULT_PARTICIPANT,
             APP_NAME);
-        
-        // Setup DistLogger Singleton
-        // DistLogger provides distributed logging over DDS network. By using the shared participant,
-        // all RTI Logger messages are published to remote subscribers via DDS topics, enabling centralized
-        // logging and monitoring across distributed systems. This is more powerful than console logging.
-        try {
-            DistLoggerOptions options;
-            options.domain_participant(participant_setup->participant());
-            options.application_kind(APP_NAME);
 
-            // Disable Logger output to console
-            options.echo_to_stdout(true);
-            
-            DistLogger::set_options(options);
-            auto& dist_logger = DistLogger::get_instance();
-            
-            // Configure DistLogger Verbosity. 
-            // Passthrough for rti::config::logger verbosity control
-            // Change Category to display internal Connext debug logs
-            dist_logger.set_verbosity(rti::config::LogCategory::user, arguments.verbosity);
-            
-            // Configure Filter Level. This controls what level gets published
-            dist_logger.set_filter_level(dist_logger.get_info_log_level());
-            
-            rti::config::Logger::instance().notice("DistLogger initialized with shared participant");
-            rti::config::Logger::instance().notice(("Using QoS file: " + arguments.qos_file_path).c_str());
-        } catch (const std::exception& ex) {
-            std::cerr << "Error initializing DistLogger: " << ex.what() << std::endl;
-            throw;
-        }
+        // Setup Distributed Logger Singleton
+        // This publishes the RTI logs over DDS the network, enabling
+        // centralized logging and monitoring across distributed systems. 
+        // By re-using the application Domain Participant, we optimize the resource usage.
+
+        DistLoggerOptions options;
+        options.domain_participant(participant_setup->participant());
+        options.application_kind(APP_NAME);       
+        DistLogger::set_options(options);
+        auto& dist_logger = DistLogger::get_instance();
         
+        // Passthrough to configure RTI logger Verbosity. 
+        // Change Category to display internal Connext logs or user
+        //   platform,
+        //   communication,
+        //   database,
+        //   entities,
+        //   api,
+        //   discovery,
+        //   security,
+        //   user,
+        //   all_categories
+        dist_logger.set_verbosity(rti::config::LogCategory::user, arguments.verbosity);
+        
+        // Configure Filter Level. This controls what level gets published
+        //   get_fatal_log_level 
+        //   get_error_log_level
+        //   get_warning_log_level
+        //   get_notice_log_level
+        //   get_info_log_level
+        //   get_debug_log_level
+        dist_logger.set_filter_level(dist_logger.get_info_log_level());
+
+        // Run
         run(participant_setup);
         
-        // Explicitly finalize DistLogger Singleton before Domain Participant 
-        // destruction as it uses it
-        try {
-            DistLogger::get_instance().finalize();
-            std::cout << "DistLogger finalized" << std::endl;
-        } catch (const std::exception& ex) {
-            std::cerr << "Error finalizing DistLogger: " << ex.what() << std::endl;
-        }
+        // Explicitly finalize DistLogger Singleton 
+        // before Domain Participant destruction
+        DistLogger::get_instance().finalize();
+        std::cout << "DistLogger finalized" << std::endl;
+        
     } catch (const std::exception& ex) {
-        // This will catch DDS exceptions
-        std::cerr << "Exception in run(): " << ex.what() << std::endl;
+        std::cerr << "Exception: " << ex.what() << std::endl;
         return EXIT_FAILURE;
     }
 
-    // Finalize participant factory after all DDSParticipantSetup/DDSReaderSetup/DDSWriterSetup objects are destroyed
-    // This should be called at application exit after all DDS entities are cleaned up
-    try {
-        dds::domain::DomainParticipant::finalize_participant_factory();
-        std::cout << "DomainParticipant factory finalized at application exit" << std::endl;
-    } catch (const std::exception &e) {
-        std::cerr << "Error finalizing participant factory at exit: " << e.what() << std::endl;
-    }
+    // Finalize participant factory after all DDS entities are cleaned up
+    dds::domain::DomainParticipant::finalize_participant_factory();
+    std::cout << "DomainParticipant factory finalized at application exit" << std::endl;
 
     return EXIT_SUCCESS;
 }

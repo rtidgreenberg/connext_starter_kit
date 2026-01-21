@@ -201,3 +201,9 @@ For more details on DDS concepts and implementation, explore the code with inlin
 For questions about RTI Connext DDS:
 - RTI Community Forums: https://community.rti.com
 - RTI Documentation: https://community.rti.com/documentation
+
+---
+
+## Questions or Feedback?
+
+Reach out to us at services_community@rti.com - we welcome your questions and feedback!

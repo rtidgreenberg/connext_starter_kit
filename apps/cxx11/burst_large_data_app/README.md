@@ -28,26 +28,19 @@ warning if data is ever lost.
 
 ## Building
 
-Before building, ensure that the DDS library has been built and all types are regenerated:
+The applications are built as part of the top-level project build:
 
 ```bash
-# Build DDS library (from workspace root)
-cd dds
+cd /path/to/connext_starter_kit
 mkdir -p build && cd build
 cmake ..
-make -j4
-
-# Build both applications
-cd ../../apps/cxx11/burst_large_data_app
-mkdir build && cd build
-cmake ..
-make
+cmake --build .
 ```
 
-This will create two executables:
+This will create two executables in the build directory:
 
-- `burst_publisher` - Publisher application
-- `burst_subscriber` - Subscriber application
+- `./build/apps/cxx11/burst_large_data_app/burst_publisher`
+- `./build/apps/cxx11/burst_large_data_app/burst_subscriber`
 
 ## Running
 
@@ -57,7 +50,28 @@ Simply run this script on both machines (if over LAN) or just the local machine
 (if the applications will communicate over loopback):
 
 ```sh
-source resources/utilities/optimize_socket_buffers.sh
+source /path/to/connext_starter_kit/resources/utilities/optimize_socket_buffers.sh
+```
+
+### Using Run Scripts
+
+```bash
+cd /path/to/connext_starter_kit
+
+# Terminal 1: Start subscriber
+./apps/cxx11/burst_large_data_app/run_subscriber.sh
+
+# Terminal 2: Start publisher
+./apps/cxx11/burst_large_data_app/run_publisher.sh
+```
+
+Or directly from the build directory:
+
+```bash
+cd /path/to/connext_starter_kit/build
+./apps/cxx11/burst_large_data_app/burst_publisher
+./apps/cxx11/burst_large_data_app/burst_subscriber
+```
 ```
 
 ### Publisher
@@ -133,3 +147,9 @@ DL Info: : Burst publisher application shutting down...
 - Subscriber uses asynchronous processing by default
 - Requires Connext DDS environment variables to be set
 - Both applications share the same application.hpp header file
+
+---
+
+## Questions or Feedback?
+
+Reach out to us at services_community@rti.com - we welcome your questions and feedback!

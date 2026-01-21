@@ -2,6 +2,20 @@ cmake_minimum_required(VERSION 3.12)
 project(DDSTypeSupport VERSION 1.0.0 LANGUAGES CXX)
 
 # ============================================================================
+# Ensure this is not being built standalone
+# ============================================================================
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    message(FATAL_ERROR 
+        "The DDS types library cannot be built standalone.\n"
+        "Please build from the top-level directory:\n"
+        "  cd /home/rti/connext_starter_kit\n"
+        "  mkdir -p build && cd build\n"
+        "  cmake .. -DCONNEXTDDS_ARCH=x64Linux4gcc7.3.0\n"
+        "  cmake --build ."
+    )
+endif()
+
+# ============================================================================
 # Configuration Options
 # ============================================================================
 option(GENERATE_CXX11_TYPES "Generate C++11 type support" ON)

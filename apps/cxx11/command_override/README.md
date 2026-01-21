@@ -32,15 +32,25 @@ Demonstrates RTI Connext DDS advanced patterns including ownership strength cont
 
 ## Building
 
+The application is built as part of the top-level project build:
+
 ```bash
-cd /home/rti/connext_starter_kit/apps/cxx11/command_override/build
-make -j4
+cd /path/to/connext_starter_kit
+mkdir -p build && cd build
+cmake ..
+cmake --build .
 ```
 
 ## Running
 
+### Using Run Script
+
 ```bash
-./command_override [OPTIONS]
+cd /path/to/connext_starter_kit
+./apps/cxx11/command_override/run.sh
+```
+
+### Command-line Options
 
 Options:
   -d, --domain <int>    Domain ID (default: 1)
@@ -84,8 +94,8 @@ command_override/
 ## Troubleshooting
 
 ### Common Issues
-1. **Build Errors**: Ensure DDS library is built first (`make` in `dds/cxx11/build`)
-2. **QoS Profile Not Found**: Check QoS file path and profile names
+1. **Build Errors**: Ensure top-level CMake build is complete (`cmake --build .` in build/)
+2. **QoS Profile Not Found**: Check that dds/qos/DDS_QOS_PROFILES.xml exists
 3. **Domain Connectivity**: Verify domain ID matches between instances
 4. **Permission Errors**: Ensure proper file permissions for executable
 
@@ -105,3 +115,9 @@ command_override/
 ---
 
 **Copyright © 2025 Real-Time Innovations, Inc. All rights reserved.**
+
+---
+
+## Questions or Feedback?
+
+Reach out to us at services_community@rti.com - we welcome your questions and feedback!

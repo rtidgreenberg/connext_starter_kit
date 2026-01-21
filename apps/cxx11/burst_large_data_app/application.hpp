@@ -96,7 +96,7 @@ namespace application {
         ParseReturn parse_result = ParseReturn::ok;
         unsigned int domain_id = domains::DEFAULT_DOMAIN_ID;
         rti::config::Verbosity verbosity(rti::config::Verbosity::EXCEPTION);
-        std::string qos_file_path = "../../../../dds/qos/DDS_QOS_PROFILES.xml"; // Default QoS file
+        std::string qos_file_path = "dds/qos/DDS_QOS_PROFILES.xml"; // Default QoS file
         unsigned int send_rate = 100; // Default: 10 Hz
         unsigned int burst_duration = 10; // Default: 10 seconds
 
@@ -148,7 +148,7 @@ namespace application {
             "                               Range: 0-3 \n"
             "                               Default: 1\n"
             "    -q, --qos-file     <str>   Path to QoS profile XML file.\n"\
-            "                               Default: ../../../../dds/qos/DDS_QOS_PROFILES.xml\n"
+            "                               Default: dds/qos/DDS_QOS_PROFILES.xml\n"
             "    -r, --send-rate    <int>   Publishing rate in Hz.\n"\
             "                               Default: 100\n"
             "    -b, --burst-duration <int> Burst duration in seconds.\n"\

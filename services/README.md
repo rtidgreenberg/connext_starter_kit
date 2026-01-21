@@ -226,3 +226,9 @@ services/
 - [RTI Recording Service Manual (7.3.1)](https://community.rti.com/static/documentation/connext-dds/7.3.1/doc/manuals/connext_dds_professional/services/recording_service/index.html)
 - [RTI Replay Service Manual](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/manuals/connext_dds_professional/services/replay_service/)
 - [RTI Converter Service Manual](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/manuals/connext_dds_professional/services/converter_service/)
+
+---
+
+## Questions or Feedback?
+
+Reach out to us at services_community@rti.com - we welcome your questions and feedback!

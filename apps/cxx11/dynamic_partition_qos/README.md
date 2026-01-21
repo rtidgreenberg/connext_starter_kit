@@ -54,22 +54,33 @@ The [PARTITION QoSPolicy](https://community.rti.com/static/documentation/connext
 
 ### Build Steps
 
+The application is built as part of the top-level project build:
+
 ```bash
-cd apps/cxx11/dynamic_partition_qos
+cd /path/to/connext_starter_kit
 mkdir -p build && cd build
 cmake ..
-make -j4
+cmake --build .
 ```
 
-The executable will be created at: `build/dynamic_partition_qos`
+The executable will be created at: `./build/apps/cxx11/dynamic_partition_qos/dynamic_partition_qos`
 
 ## Running the Application
 
 ### Basic Usage
 
+Use the run script (auto-rebuilds if needed):
+
 ```bash
-cd apps/cxx11/dynamic_partition_qos/build
-./dynamic_partition_qos
+cd /path/to/connext_starter_kit
+./apps/cxx11/dynamic_partition_qos/run.sh
+```
+
+Or run directly:
+
+```bash
+cd /path/to/connext_starter_kit/build
+./apps/cxx11/dynamic_partition_qos/dynamic_partition_qos
 ```
 
 **Optional arguments:**
@@ -89,7 +100,7 @@ Once running, the application displays its unique App ID and prompts for partiti
 ```
 Dynamic Partition QoS application starting on domain 0
 Application ID: 3847
-Using QoS file: ../../../../dds/qos/DDS_QOS_PROFILES.xml
+Using QoS file: dds/qos/DDS_QOS_PROFILES.xml
 
 ------------------ APP ID:3847 PARTITION: (default/empty) -----------------------
 Enter partition name(s) (comma-separated for multiple, or 'q'/'exit' to quit):
@@ -373,7 +384,7 @@ According to the [PARTITION QoSPolicy documentation](https://community.rti.com/s
 ### Key Components
 
 1. **Application ID Generation**: Unique random 4-digit ID for instance identification
-2. **DDSContextSetup**: Manages DomainParticipant lifecycle and partition QoS
+2. **DDSParticipantSetup**: Manages DomainParticipant lifecycle and partition QoS
 3. **DDSReaderSetup**: Subscribes to Command topic with async event-driven processing
 4. **DDSWriterSetup**: Publishes Command messages with App ID in message payload
 5. **Input Thread**: Handles terminal input for dynamic partition changes
@@ -527,3 +538,9 @@ By studying this example, you will learn:
 9. ✅ Partition matching rules and pattern matching with regular expressions
 10. ✅ CI/CD integration patterns for DDS-based testing
 11. ✅ Performance implications: DomainParticipants still discover each other but skip endpoint discovery when partitions don't match
+
+---
+
+## Questions or Feedback?
+
+Reach out to us at services_community@rti.com - we welcome your questions and feedback!

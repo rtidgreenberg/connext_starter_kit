@@ -45,10 +45,13 @@ This process leverages the existing DDS infrastructure and  utilities.
 ```bash
 # Set RTI Connext DDS environment
 export NDDSHOME=/path/to/rti_connext_dds-7.3.0
+source $NDDSHOME/resource/scripts/rtisetenv_<target>.bash
 
-# Build DDS utility library (contains generated types and utilities)
-cd ../../dds/cxx11 && mkdir -p build && cd build
-cmake .. && make -j4
+# Build from top-level (automatically builds DDS library and all applications)
+cd /path/to/connext_starter_kit
+mkdir -p build && cd build
+cmake ..
+cmake --build .
 ```
 
 ### Step-by-Step Application Creation
@@ -84,8 +87,8 @@ module topics {
 
 #### Step 3: Regenerate DDS Code (If new/changed IDL) (Optional)
 ```bash
-cd ../../dds/build
-cmake .. && make -j4
+cd /path/to/connext_starter_kit/build
+cmake --build .
 ```
 
 #### Step 4: Create Application Using GitHub Copilot
@@ -120,15 +123,19 @@ cmake .. && make -j4
 #### Step 5: Build and Test
 
 ```bash
-cd your_app_name && mkdir build && cd build
-cmake .. && make -j4
-./your_app_name
-```
+# The top-level build automatically includes your new app
+cd /path/to/connext_starter_kit/build
+cmake --build .
+
+# Run using the convenient run script (auto-rebuilds if needed)
+cd ..
+./apps/cxx11/your_app_name/run.sh
+
+# Or run directly from build
+./build/apps/cxx11/your_app_name/your_app_name
 
 # Test the application
-```
-./your_new_app_name --help
-./your_new_app_name
+./apps/cxx11/your_app_name/run.sh --help
 ```
 
 ### Application Template Structure
@@ -148,10 +155,10 @@ your_new_app_name/
 
 All generated applications follow these established patterns:
 
-#### **DDSContext Setup**
+#### **DDSParticipant Setup**
 ```cpp
 // Centralized DDS participant management
-auto dds_context = std::make_shared<DDSContextSetup>(
+auto dds_participant = std::make_shared<DDSParticipantSetup>(
     domain_id, 
     ASYNC_WAITSET_THREADPOOL_SIZE, 
     qos_file_path, 
@@ -164,7 +171,7 @@ auto dds_context = std::make_shared<DDSContextSetup>(
 ```cpp
 // Reader example
 auto button_reader = std::make_shared<DDSReaderSetup<example_types::Button>>(
-    dds_context,
+    dds_participant,
     topics::BUTTON_TOPIC,
     qos_file_path,
     qos_profiles::ASSIGNER
@@ -172,7 +179,7 @@ auto button_reader = std::make_shared<DDSReaderSetup<example_types::Button>>(
 
 // Writer example
 auto config_writer = std::make_shared<DDSWriterSetup<example_types::Config>>(
-    dds_context,
+    dds_participant,
     topics::CONFIG_TOPIC,
     qos_file_path,
     qos_profiles::ASSIGNER
@@ -249,10 +256,10 @@ rtiadminconsole
 ### Troubleshooting
 
 **Common Issues:**
-- **Build Errors**: Ensure DDS utility library is built first (`../../dds/cxx11/build/`)
-- **Runtime Errors**: Check NDDSHOME environment variable
+- **Build Errors**: Ensure top-level CMake build is complete (`cmake --build .` in build/)
+- **Runtime Errors**: Check NDDSHOME environment variable and architecture setup
 - **No Communication**: Verify all applications use same domain ID and QoS profiles
-- **Missing Types**: Rebuild DDS utilities after IDL changes
+- **Missing Types**: Rebuild from top-level if IDL files change
 
 **Debug Steps:**
 ```bash
@@ -275,7 +282,7 @@ All applications automatically link against:
 - **RTI Connext DDS 7.3.0+** with distributed logger support
 - **DDS Utilities Library**: `libdds_utils_datamodel.so` 
 - **Generated Headers**: ExampleTypes.hpp, Definitions.hpp
-- **Utility Classes**: DDSContextSetup.hpp, DDSReaderSetup.hpp, DDSWriterSetup.hpp
+- **Utility Classes**: DDSParticipantSetup.hpp, DDSReaderSetup.hpp, DDSWriterSetup.hpp
 
 ## Getting Started
 
@@ -286,3 +293,9 @@ All applications automatically link against:
 5. **Monitor with RTI Tools**: Use Admin Console to observe system behavior
 
 The combination of GitHub Copilot, structured prompts, and proven utility classes enables rapid development of robust DDS applications with minimal boilerplate code.
+
+---
+
+## Questions or Feedback?
+
+Reach out to us at services_community@rti.com - we welcome your questions and feedback!

@@ -102,12 +102,12 @@ inline ApplicationArguments parse_arguments(int argc, char *argv[])
     unsigned int domain_id = domains::DEFAULT_DOMAIN_ID;
     rti::config::Verbosity verbosity(rti::config::Verbosity::EXCEPTION);
     std::string qos_file_path =
-            "../../../../dds/qos/DDS_QOS_PROFILES.xml";  // Default QoS file
+            "dds/qos/DDS_QOS_PROFILES.xml";  // Default QoS file
 
     while (arg_processing < argc) {
-        if ((argc > arg_processing + 1)
+        if ((argc > arg_processing + 1) 
             && (strcmp(argv[arg_processing], "-d") == 0
-                || strcmp(argv[arg_processing], "--domain") == 0)) {
+            || strcmp(argv[arg_processing], "--domain") == 0)) {
             domain_id = atoi(argv[arg_processing + 1]);
             arg_processing += 2;
         } else if (
@@ -151,7 +151,7 @@ inline ApplicationArguments parse_arguments(int argc, char *argv[])
                      "    -q, --qos-file     <str>   Path to QoS profile XML "
                      "file.\n"
                      "                               Default: "
-                     "../../../../dds/qos/DDS_QOS_PROFILES.xml"
+                     "dds/qos/DDS_QOS_PROFILES.xml"
                   << std::endl;
     }
 

@@ -103,7 +103,7 @@ namespace application {
         ParseReturn parse_result = ParseReturn::ok;
         unsigned int domain_id = domains::DEFAULT_DOMAIN_ID;
         rti::config::Verbosity verbosity(rti::config::Verbosity::EXCEPTION);
-        std::string qos_file_path = "../../../../dds/qos/DDS_QOS_PROFILES.xml"; // Default QoS file
+        std::string qos_file_path = "dds/qos/DDS_QOS_PROFILES.xml"; // Default QoS file
 
         while (arg_processing < argc) {
             if ((argc > arg_processing + 1) 
@@ -143,7 +143,7 @@ namespace application {
             "                               Range: 0-3 \n"
             "                               Default: 1\n"
             "    -q, --qos-file     <str>   Path to QoS profile XML file.\n"\
-            "                               Default: ../../../../dds/qos/DDS_QOS_PROFILES.xml"
+            "                               Default: dds/qos/DDS_QOS_PROFILES.xml"
             << std::endl;
         }
 

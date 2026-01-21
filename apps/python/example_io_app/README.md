@@ -159,3 +159,9 @@ DEFAULT_CONFIG_DESTINATION = "config_target"   # Modify config targets
 ✅ **Cross-Language Compatible** - Works seamlessly with C++ counterpart  
 ✅ **Flexible Command Line** - Multiple verbosity levels and configuration options  
 ✅ **Production Ready** - Clean architecture with proper resource management
+
+---
+
+## Questions or Feedback?
+
+Reach out to us at services_community@rti.com - we welcome your questions and feedback!

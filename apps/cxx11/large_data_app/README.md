@@ -24,29 +24,33 @@ This application publishes and subscribes to Image data using the `LARGE_DATA_PA
 
 ## Building
 
-### Generate DDS Types
+### Build from Top-Level
+
+The application is built as part of the top-level project build:
 
 ```bash
-cd ../../../dds/build
-cmake .. && make -j4
-```
-
-### Build Application
-
-```bash
-cd apps/cxx11/large_data_app
+cd /path/to/connext_starter_kit
 mkdir -p build && cd build
 cmake ..
-make -j4
+cmake --build .
 ```
 
 ## Running
 
+### Using Run Script
+
+```bash
+cd /path/to/connext_starter_kit
+./apps/cxx11/large_data_app/run.sh
+```
+
+The run script automatically rebuilds if the binary is missing.
+
 ### From Build Directory
 
 ```bash
-cd build
-./large_data_app
+cd /path/to/connext_starter_kit/build
+./apps/cxx11/large_data_app/large_data_app
 ```
 
 ### Command-line Options
@@ -57,7 +61,7 @@ cd build
 Options:
   -d, --domain <ID>       Domain ID (default: 1)
   -v, --verbosity <LEVEL> Logging verbosity (default: 1)
-  -q, --qos-file <PATH>   QoS XML path (default: ../../../../dds/qos/DDS_QOS_PROFILES.xml)
+  -q, --qos-file <PATH>   QoS XML path (default: dds/qos/DDS_QOS_PROFILES.xml)
   -h, --help             Show help
 ```
 
@@ -151,7 +155,7 @@ large_data_app/
 **Key Components**:
 - `process_image_data()` - Callback function for received Image samples
 - `run()` - Main application logic with publisher loop
-- `DDSContextSetup` - Participant and AsyncWaitSet management
+- `DDSParticipantSetup` - Participant and AsyncWaitSet management
 - `DDSReaderSetup<Image>` - Event-driven Image subscriber
 - `DDSWriterSetup<Image>` - Image publisher
 
@@ -194,7 +198,7 @@ See [fixed_image_flat_zc](../fixed_image_flat_zc/README.md) for zero-copy implem
 **Solution**: Increase system shared memory limits or reduce IMAGE_SIZE
 
 **Issue**: Compilation errors about missing headers  
-**Solution**: Ensure DDS types are generated: `cd ../../../dds/build && make -j4`
+**Solution**: Ensure top-level CMake build is complete: `cd /path/to/connext_starter_kit/build && cmake --build .`
 
 **Issue**: Runtime error "cannot open shared object file"  
 **Solution**: Check RPATH is set correctly or run from build directory
@@ -220,3 +224,9 @@ See [fixed_image_flat_zc](../fixed_image_flat_zc/README.md) for zero-copy implem
 - Compare with zero-copy FlatData implementation
 - Add image processing logic in subscriber callback
 - Test cross-language communication with Python large_data_app
+
+---
+
+## Questions or Feedback?
+
+Reach out to us at services_community@rti.com - we welcome your questions and feedback!

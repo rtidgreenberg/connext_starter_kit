@@ -28,7 +28,7 @@ dds/
 ├── qos/                    # Quality of Service configurations
 │   └── DDS_QOS_PROFILES.xml
 ├── utils/cxx11/            # C++11 utility classes (header-only)
-│   ├── DDSContextSetup.hpp # DDS context management
+│   ├── DDSParticipantSetup.hpp # DDS participant management
 │   ├── DDSReaderSetup.hpp  # Template reader interface
 │   └── DDSWriterSetup.hpp  # Template writer interface
 └── build/                  # CMake build directory (created during build)
@@ -91,9 +91,9 @@ Benefits: Centralized configuration, namespace safety (avoids conflicts with DDS
 
 Header-only template classes located in `utils/cxx11/` for simplified DDS application development.
 
-### DDSContextSetup
+### DDSParticipantSetup
 
-Complete DDS context management (in `DDSContextSetup.hpp`).
+Complete DDS participant management (in `DDSParticipantSetup.hpp`).
 
 **Features:**
 - DomainParticipant lifecycle management
@@ -143,19 +143,20 @@ Profile names are centralized in `Definitions.idl` (qos_profiles module) for cro
 ### Quick Start
 
 ```bash
-# Set RTI environment variable
+# Set RTI environment variable and architecture
 export NDDSHOME=/path/to/rti_connext_dds-7.3.0
+source $NDDSHOME/resource/scripts/rtisetenv_<target>.bash
 
-# Build all type support (C++, Python, XML)
-cd dds
+# Build from top-level (automatically builds all type support)
+cd /path/to/connext_starter_kit
 mkdir -p build && cd build
 cmake ..
-make -j4
+cmake --build .
 
 # Verify generated files
-ls ../build/cxx11_gen/*.hpp
-ls ../build/python_gen/*.py
-ls ../build/xml_gen/*.xml
+ls /build/cxx11_gen/*.hpp
+ls /build/python_gen/*.py
+ls /build/xml_gen/*.xml
 ```
 
 This generates all type support files automatically:
@@ -170,7 +171,6 @@ This generates all type support files automatically:
 - `GENERATE_DEFINITIONS` (default: ON) - Generate Definitions constants (header-only)
 - `BUILD_CXX_TYPES_LIBRARY` (default: ON) - Build C++ type support shared library
 
-See [BUILD.md](BUILD.md) for detailed build instructions and customization options.
 
 ## Use in Applications
 
@@ -181,12 +181,12 @@ Include the generated types and utility classes:
 ```cpp
 #include "ExampleTypes.hpp"
 #include "Definitions.hpp"
-#include "DDSContextSetup.hpp"
+#include "DDSParticipantSetup.hpp"
 #include "DDSReaderSetup.hpp"
 #include "DDSWriterSetup.hpp"
 
-// Create DDS context with QoS profile
-auto dds_context = std::make_shared<DDSContextSetup>(
+// Create DDS participant with QoS profile
+auto dds_participant = std::make_shared<DDSParticipantSetup>(
     domains::DEFAULT_DOMAIN_ID, 
     thread_pool_size, 
     qos_file, 
@@ -195,7 +195,7 @@ auto dds_context = std::make_shared<DDSContextSetup>(
 
 // Create writer with topic and QoS profile
 auto position_writer = std::make_shared<DDSWriterSetup<example_types::Position>>(
-    dds_context, 
+    dds_participant, 
     topics::POSITION_TOPIC, 
     qos_file, 
     qos_profiles::ASSIGNER
@@ -235,14 +235,14 @@ writer = dds.DataWriter(
 
 1. Define in `datamodel/idl/ExampleTypes.idl`
 2. Add topic name to `datamodel/idl/Definitions.idl` (topics module)
-3. Regenerate code: `cd dds/build && make -j4`
+3. Regenerate from top-level: `cd /path/to/connext_starter_kit/build && cmake --build . --target cxx_definitions`
 4. Update applications to use new types (reference via `topics::YOUR_TOPIC`)
 
 ## Modifying QoS Profiles
 
 1. **Edit XML** (`qos/DDS_QOS_PROFILES.xml`)
 2. **Add profile name** to `datamodel/idl/Definitions.idl` (qos_profiles module) if needed
-3. **Regenerate**: `cd dds/build && make -j4`
+3. **Rebuild from top-level**: `cd /path/to/connext_starter_kit/build && cmake --build .`
 4. **Test Changes** with existing applications
 5. **Document Updates** in application README files
 
@@ -283,3 +283,9 @@ The DDS layer provides a **complete foundation** for building distributed applic
 - ⚙️ **Configurable** - External QoS and topic management
 
 This foundation enables developers to focus on application logic while leveraging robust, production-ready DDS infrastructure.
+
+---
+
+## Questions or Feedback?
+
+Reach out to us at services_community@rti.com - we welcome your questions and feedback!

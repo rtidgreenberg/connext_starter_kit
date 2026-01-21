@@ -1,6 +1,6 @@
 # Example I/O Application
 
-Reference DDS application demonstrating DDSReaderSetup, DDSWriterSetup, and DDSContextSetup utility classes with multiple readers, a writer, and distributed logging.
+Reference DDS application demonstrating DDSReaderSetup, DDSWriterSetup, and DDSParticipantSetup utility classes with multiple readers, a writer, and distributed logging.
 
 ## Table of Contents
 - [Features](#features)
@@ -16,7 +16,7 @@ Reference DDS application demonstrating DDSReaderSetup, DDSWriterSetup, and DDSC
 ## Features
 
 - **Reader/Writer Setup**: Easy DDS entity creation with `qos_profiles::ASSIGNER` profiles
-- **DDSContextSetup Management**: Centralized participant and AsyncWaitSet handling (Default 5-thread pool)
+- **DDSParticipantSetup Management**: Centralized participant and AsyncWaitSet handling (Default 5-thread pool)
 - **GPS Simulation**: Continuous position data publishing at 500ms intervals
 - **Distributed Logger**: System-wide logging via RTI Admin Console with remote verbosity control
 - **Event-Driven**: AsyncWaitSet-based message processing with custom callbacks
@@ -44,16 +44,17 @@ All interfaces use `qos_profiles::ASSIGNER` profile for runtime XML-based QoS re
 ```bash
 # Set environment
 export NDDSHOME=/path/to/rti_connext_dds-7.3.0
+source $NDDSHOME/resource/scripts/rtisetenv_<target>.bash
 
-# Build DDS library
-cd ../../../dds/cxx11 && mkdir -p build && cd build && cmake .. && make -j4
+# Build from top-level (builds DDS library and all apps)
+cd /path/to/connext_starter_kit
+mkdir -p build && cd build
+cmake ..
+cmake --build .
 
-# Build application
-cd ../../../apps/cxx11/example_io_app && mkdir -p build && cd build
-cmake .. && make -j4
-
-# Run
-./example_io_app
+# Run from top-level or use the run script
+cd ..
+./apps/cxx11/example_io_app/run.sh
 ```
 
 ## Usage
@@ -64,13 +65,13 @@ cmake .. && make -j4
 Options:
   -d, --domain <int>    Domain ID (default: 1)
   -v, --verbosity <int> RTI verbosity 0-3 (default: 1)
-  -q, --qos-file <str>  QoS XML path (default: ../../../../dds/qos/DDS_QOS_PROFILES.xml)
+  -q, --qos-file <str>  QoS XML path (default: dds/qos/DDS_QOS_PROFILES.xml)
   -h, --help           Show help
 ```
 
 ## Utility Classes
 
-**DDSContextSetup**: 
+**DDSParticipantSetup**: 
 - Manages DomainParticipant lifecycle and QoS profiles
 - Centralized AsyncWaitSet with thread pool
 - Integrates RTI distributed logger
@@ -117,7 +118,7 @@ const std::string qos_profile = qos_profiles::DEFAULT_PARTICIPANT;
 const std::string APP_NAME = "Example CXX IO APP";
 constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
 
-auto dds_context = std::make_shared<DDSContextSetup>(domain_id, ASYNC_WAITSET_THREADPOOL_SIZE, 
+auto dds_participant = std::make_shared<DDSParticipantSetup>(domain_id, ASYNC_WAITSET_THREADPOOL_SIZE, 
                                                qos_file_path, qos_profile, APP_NAME);
 
 // Create multiple readers with qos_profiles::ASSIGNER profile  
@@ -152,7 +153,7 @@ try {
 ## Application Lifecycle
 
 The application includes proper initialization and cleanup:
-- **Startup**: Creates DDSContextSetup with thread pool, initializes all interfaces
+- **Startup**: Creates DDSParticipantSetup with thread pool, initializes all interfaces
 - **Runtime**: Publishes Position messages every 500ms while listening for incoming data
 - **Shutdown**: Graceful signal handling (Ctrl+C), distributed logger cleanup, DomainParticipant factory finalization
 
@@ -161,19 +162,17 @@ The application includes proper initialization and cleanup:
 - RTI Connext DDS 7.3.0+ with distributed logger
 - C++14 compiler (tested with GCC 9.4.0)
 - CMake 3.12+ for build configuration
-- DDS utility library (`libdds_utils_datamodel.so`) built from `../../../dds/cxx11/`
 - Generated C++ bindings:
   - `ExampleTypes.hpp/cpp` - Data type definitions
   - `Definitions.hpp/cpp` - Configuration constants and topic names
-- QoS profiles XML file: `../../../../dds/qos/DDS_QOS_PROFILES.xml`
+- QoS profiles XML file: `dds/qos/DDS_QOS_PROFILES.xml`
 
 ## Build Process
 
-The application automatically links against the shared DDS utility library and includes the generated codegen headers:
+The application is built as part of the top-level project build via CMake. All dependencies are automatically resolved:
 
-```cmake
-# CMakeLists.txt automatically finds:
-# - DDS shared library: /path/to/dds/cxx11/build/lib/libdds_utils_datamodel.so  
-# - DDS codegen headers: /path/to/dds/cxx11/src/codegen
-# - DDS utils headers: /path/to/dds/cxx11/src/utils
-```
+---
+
+## Questions or Feedback?
+
+Reach out to us at services_community@rti.com - we welcome your questions and feedback!

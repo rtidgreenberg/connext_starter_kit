@@ -327,3 +327,9 @@ The application uses RTI Distributed Logger for diagnostics:
 - Network bandwidth is NOT reduced by time-based filtering in this application
 - Modify your type to be unkeyed if Bandwidth impact is a higher priority.
 
+---
+
+## Questions or Feedback?
+
+Reach out to us at services_community@rti.com - we welcome your questions and feedback!
+

@@ -245,7 +245,7 @@ void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
 
             // increment message count
             phase_message_count++;
-            logger.notice(
+            rti_logger.notice(
                     ("Message Count: " + std::to_string(phase_message_count))
                             .c_str());
         } catch (const std::exception &ex) {

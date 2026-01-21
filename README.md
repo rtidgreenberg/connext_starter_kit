@@ -1,4 +1,4 @@
-# Flexible Autonomous System Toolkit
+# Connext Autonomy Templates
 
 Cross-language DDS system/application templates to accelerate development.
 
@@ -10,22 +10,45 @@ Cross-language DDS system/application templates to accelerate development.
 - **CMake 3.12+** for build configuration
 - **Git submodules**: Clone with `--recurse-submodules` or run `git submodule update --init --recursive`
 
-## Quick Setup
+## Quick Start
 
-```bash
-# 1. Set RTI environment
-export NDDSHOME=/path/to/rti_connext_dds-7.3.0
+1. **Set RTI environment:**
+   ```bash
+   export NDDSHOME=/path/to/rti_connext_dds-7.3.0
+   ```
 
-# 2. Clone with submodules
-git clone --recurse-submodules <repository-url>
-cd connext_starter_kit
+2. **Clone with submodules:**
+   ```bash
+   git clone --recurse-submodules <repository-url>
+   cd connext_starter_kit
+   ```
 
-# 3. For Python apps - copy RTI license file
-cp /path/to/your/rti_license.dat apps/python/
+3. **Configure your target environment:**
+   Source the helper script for your target architecture:
+   ```bash
+   source $NDDSHOME/resource/scripts/rtisetenv_<target>.bash
+   ```
+   
+   Examples:
+   ```bash
+   source $NDDSHOME/resource/scripts/rtisetenv_x64Linux4gcc7.3.0.bash
+   source $NDDSHOME/resource/scripts/rtisetenv_x64Win64VS2019.bash
+   source $NDDSHOME/resource/scripts/rtisetenv_x64Darwin20clang12.0.0.bash
+   ```
 
-# 4. Build DDS layer (required first)
-cd dds/build && cmake .. && make -j4
-```
+4. **Build the project:**
+   ```bash
+   mkdir -p build && cd build
+   cmake ..
+   cmake --build .
+   ```
+
+5. **For Python apps - set the license file location:**
+   ```bash
+   export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
+   ```
+   
+   Get a free trial license at https://www.rti.com/get-connext
 
 ## Table of Contents - What Do You Want to Do?
 
@@ -66,3 +89,9 @@ cd dds/build && cmake .. && make -j4
 - **[GitHub Copilot Prompts](.github/prompts/)** - AI-powered app generation templates
 - **[RTI Community](https://community.rti.com/)** - Support and resources
 - **[RTI Documentation](https://community.rti.com/static/documentation/)** - Official documentation
+
+---
+
+## Questions or Feedback?
+
+Reach out to us at services_community@rti.com - we welcome your questions and feedback!

@@ -597,3 +597,9 @@ python3 example_io_app.py --domain_id 1 --verbosity 2
 ## License
 Copyright (c) Real-Time Innovations, 2025. All rights reserved.
 RTI grants Licensee a license to use, modify, compile, and create derivative works of the software solely for use with RTI Connext DDS.
+
+---
+
+## Questions or Feedback?
+
+Reach out to us at services_community@rti.com - we welcome your questions and feedback!

@@ -118,30 +118,40 @@ Instead of blocking on acknowledgments, increase the writer's loaned sample allo
 - RTI Connext DDS 7.3.0+ installed and licensed
 - C++14 compiler (GCC 7.3.0+)
 - CMake 3.12+
-- DDS shared library built from `../../../dds/cxx11/`
 
 ### Environment Setup
 
 ```bash
 # Set RTI Connext DDS environment
 export NDDSHOME=/path/to/rti_connext_dds-7.3.0
-
-# Verify DDS library is built
-ls ../../../dds/cxx11/build/lib/libdds_utils_datamodel.so
+source $NDDSHOME/resource/scripts/rtisetenv_<target>.bash
 ```
 
 ### Build
 
-```bash
-# Create build directory
-mkdir -p build && cd build
+The application is built as part of the top-level project build:
 
-# Configure and build
+```bash
+cd /path/to/connext_starter_kit
+mkdir -p build && cd build
 cmake ..
-make -j4
+cmake --build .
 ```
 
 ### Run
+
+Use the convenient run script (auto-rebuilds if needed):
+
+```bash
+cd /path/to/connext_starter_kit
+./apps/cxx11/fixed_image_flat_zc/run.sh
+```
+
+Or run directly from the build directory:
+
+```bash
+./build/apps/cxx11/fixed_image_flat_zc/fixed_image_flat_zc
+```
 
 ```bash
 # Run from build directory (for correct QoS file path)
@@ -157,7 +167,7 @@ Options:
   -d, --domain <int>    Domain ID (default: 1)
   -v, --verbosity <int> RTI verbosity level 0-3 (default: 1)
   -q, --qos-file <str>  Path to QoS profile XML file
-                        (default: ../../../../dds/qos/DDS_QOS_PROFILES.xml)
+                        (default: dds/qos/DDS_QOS_PROFILES.xml)
   -h, --help           Show this help message
 
 Examples:
@@ -171,7 +181,7 @@ Examples:
 
 ```
 FinalFlatImage application starting on domain 1
-DDSContextSetup created with QoS profile: DPLibrary::DefaultParticipant
+DDSParticipantSetup created with QoS profile: DPLibrary::DefaultParticipant
 DataWriter created on topic: FinalFlatImage with QoS profile: DataPatternsLibrary::LargeDataSHMEM_ZCQoS
 DataReader created on topic: FinalFlatImage with QoS profile: DataPatternsLibrary::LargeDataSHMEM_ZCQoS
 [FINAL_FLAT_IMAGE] Published - ID: 0, Width: 640, Height: 480, Format: 0 (RGB), Data size: 3145728 bytes
@@ -316,3 +326,9 @@ When designing systems that use both FlatData/Zero-Copy and RTI services:
 - [FlatData API Example](https://github.com/rticommunity/rticonnextdds-examples/tree/release/7.1.0/examples/connext_dds/flat_data_api/c%2B%2B11) - Complete FlatData API usage examples
 - [FlatData Latency Example](https://github.com/rticommunity/rticonnextdds-examples/tree/release/7.1.0/examples/connext_dds/flat_data_latency/c%2B%2B11) - FlatData performance and latency optimization
 - [GStreamer Plugin using Connext with C API](https://github.com/rticommunity/rticonnextdds-usecases/tree/00a42b44469d99e25237b00f4ee22cc508caeee5/VideoData) - GStreamer integration for video data streaming with RTI Connext DDS
+
+---
+
+## Questions or Feedback?
+
+Reach out to us at services_community@rti.com - we welcome your questions and feedback!

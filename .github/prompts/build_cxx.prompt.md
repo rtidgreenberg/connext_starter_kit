@@ -1,7 +1,7 @@
 - Don't use distributed logger macro syntax
 - Use example_io_app as explicit reference
 - Follow exact usage in example_io_app of DDS API's
-- Follow exact usage in example_io_app of DDSContextSetup API usage
+- Follow exact usage in example_io_app of DDSParticipantSetup API usage
 - Follow exact usage in example_io_app of DDSReaderSetup and DDSWriterSetup API usage
 - Follow exact usage of Distributed Logger api from example_io_app
 - Clean and make DDS library after adding new data type
@@ -25,3 +25,15 @@
 - Before building application perform a full review of code and verify all fields for data members are accurate
 - Never use rtime-make to build
 - Ensure consistency of Connext versions when generating and building code
+
+- Add the new application to the top level Cmakelists file as a subdirectory and include in the printout
+
+- **AFTER creating the CMakeLists.txt file for the application, build from the TOP-LEVEL directory, not from the app directory:**
+  ```bash
+  
+  # Build from the workspace root
+  mkdir -p build && cd build
+  cmake ..
+  cmake --build .
+  ```
+  The top-level CMakeLists.txt automatically builds the DDS types library and all applications including your new app

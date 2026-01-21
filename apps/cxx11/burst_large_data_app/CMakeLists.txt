@@ -35,118 +35,72 @@ find_library(DDS_TYPESUPPORT_LIB
     REQUIRED
 )
 
-# Create the executables
-add_executable(burst_publisher
-    burst_publisher.cxx
-    application.hpp
-)
+# Define the list of executables
+set(EXECUTABLES burst_publisher burst_subscriber)
 
-add_executable(burst_subscriber
-    burst_subscriber.cxx
-    application.hpp
-)
-
-# Include directories for burst_publisher
-target_include_directories(burst_publisher 
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${DDS_CODEGEN_DIR}
-        ${DDS_UTILS_DIR}
-        ${RTIConnextDDS_INCLUDE_DIRS}
-)
-
-# Include directories for burst_subscriber
-target_include_directories(burst_subscriber 
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${DDS_CODEGEN_DIR}
-        ${DDS_UTILS_DIR}
-        ${RTIConnextDDS_INCLUDE_DIRS}
-)
-
-# Link with libraries for burst_publisher
-target_link_libraries(burst_publisher
-    PRIVATE
-        ${DDS_TYPESUPPORT_LIB}
-        RTIConnextDDS::cpp2_api
-        RTIConnextDDS::distributed_logger_cpp2
-        RTIConnextDDS::metp  # Required for ZeroCopy types used by other apps in library
-        dl
-        m
-        pthread
-        rt
-)
-
-# Link with libraries for burst_subscriber
-target_link_libraries(burst_subscriber
-    PRIVATE
-        ${DDS_TYPESUPPORT_LIB}
-        RTIConnextDDS::cpp2_api
-        RTIConnextDDS::distributed_logger_cpp2
-        RTIConnextDDS::metp  # Required for ZeroCopy types used by other apps in library
-        dl
-        m
-        pthread
-        rt
-)
-
-# Set compiler definitions for burst_publisher
-target_compile_definitions(burst_publisher
-    PRIVATE
-        RTI_UNIX
-        RTI_LINUX
-        RTI_64BIT
-)
-
-# Set compiler definitions for burst_subscriber
-target_compile_definitions(burst_subscriber
-    PRIVATE
-        RTI_UNIX
-        RTI_LINUX
-        RTI_64BIT
-)
-
-# Set additional compiler flags for burst_publisher
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(burst_publisher PRIVATE
-        -m64
-        -Wall
-        -Wextra
-        -Wno-unused-parameter
-        -no-pie
-        -rdynamic
+# Create executables and configure them in a loop
+foreach(TARGET ${EXECUTABLES})
+    # Create the executable
+    add_executable(${TARGET}
+        ${TARGET}.cxx
+        application.hpp
     )
-endif()
 
-# Set additional compiler flags for burst_subscriber
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(burst_subscriber PRIVATE
-        -m64
-        -Wall
-        -Wextra
-        -Wno-unused-parameter
-        -no-pie
-        -rdynamic
+    # Include directories
+    target_include_directories(${TARGET} 
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${DDS_CODEGEN_DIR}
+            ${DDS_UTILS_DIR}
+            ${RTIConnextDDS_INCLUDE_DIRS}
     )
-endif()
+
+    # Link with libraries
+    target_link_libraries(${TARGET}
+        PRIVATE
+            ${DDS_TYPESUPPORT_LIB}
+            RTIConnextDDS::cpp2_api
+            RTIConnextDDS::distributed_logger_cpp2
+            RTIConnextDDS::metp  # Required for ZeroCopy types used by other apps in library
+            dl
+            m
+            pthread
+            rt
+    )
+
+    # Set compiler definitions
+    target_compile_definitions(${TARGET}
+        PRIVATE
+            RTI_UNIX
+            RTI_LINUX
+            RTI_64BIT
+    )
+
+    # Set additional compiler flags
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(${TARGET} PRIVATE
+            -m64
+            -Wall
+            -Wextra
+            -Wno-unused-parameter
+            -no-pie
+            -rdynamic
+        )
+    endif()
+
+    # Set the runtime path to find the shared library
+    set_target_properties(${TARGET} PROPERTIES
+        INSTALL_RPATH "${DDS_LIB_BUILD_DIR}"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endforeach()
 
 # Print information
 message(STATUS "DDS shared library: ${DDS_TYPESUPPORT_LIB}")
 message(STATUS "DDS codegen headers: ${DDS_CODEGEN_DIR}")
 message(STATUS "DDS utils headers: ${DDS_UTILS_DIR}")
 
-# Set the runtime path to find the shared library
-set_target_properties(burst_publisher PROPERTIES
-    INSTALL_RPATH "${DDS_LIB_BUILD_DIR}"
-    BUILD_WITH_INSTALL_RPATH TRUE
-)
-
-set_target_properties(burst_subscriber PROPERTIES
-    INSTALL_RPATH "${DDS_LIB_BUILD_DIR}"
-    BUILD_WITH_INSTALL_RPATH TRUE
-)
-
 # Install the executables if desired
-install(TARGETS burst_publisher burst_subscriber
+install(TARGETS ${EXECUTABLES}
     RUNTIME DESTINATION bin
 )

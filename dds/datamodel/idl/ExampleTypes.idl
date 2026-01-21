@@ -13,6 +13,7 @@ module example_types {
     const unsigned long MAX_MESSAGE_LENGTH = 128;
     const unsigned long MAX_VALUE_LENGTH = 128;
     const unsigned long MAX_IMAGE_DATA_SIZE = 3145728;  // 3 MB (3 * 1024 * 1024)
+    const unsigned long MAX_POINT_CLOUD_SIZE = 512000;  // 500 KB (500 * 1024)
     
     // Basic enumerations
     enum CommandType {
@@ -118,8 +119,20 @@ module example_types {
         @key unsigned long image_id;                   // Numeric image identifier
         unsigned short width;                           // Image width in pixels
         unsigned short height;                          // Image height in pixels
-        unsigned byte format;                          // Format code: 0=RGB, 1=RGBA, 2=JPEG, etc.
+        unsigned short format;                          // Format code: 0=RGB, 1=RGBA, 2=JPEG, etc.
         octet data[MAX_IMAGE_DATA_SIZE];              // Fixed-size image data array
+    };
+
+    /**
+     * FinalFlatPointCloud - High-performance image structure using @final FlatData, 500 KB version
+     * @final provides maximum zero-copy performance but requires only fixed-size types
+     */
+    @final
+    @transfer_mode(SHMEM_REF)
+    @language_binding(FLAT_DATA)
+    struct FinalFlatPointCloud {
+        @key unsigned long point_cloud_id;        // Point cloud identifier
+        octet data[MAX_POINT_CLOUD_SIZE];         // Fixed-size image data array
     };
 
     

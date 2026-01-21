@@ -10,6 +10,7 @@ module qos_profiles {
 
     // Domain Participant Profiles
     const string LARGE_DATA_PARTICIPANT = "DPLibrary::LargeDataSHMEMParticipant";
+    const string LARGE_DATA_UDP_PARTICIPANT = "DPLibrary::LargeDataUdpParticipant";
     const string DEFAULT_PARTICIPANT = "DPLibrary::DefaultParticipant";
 
     // Data Pattern Profiles
@@ -26,6 +27,7 @@ module qos_profiles {
     // Large Data Transfer Profiles
     const string LARGE_DATA_SHMEM = "DataPatternsLibrary::LargeDataSHMEMQoS";
     const string LARGE_DATA_SHMEM_ZC = "DataPatternsLibrary::LargeDataSHMEM_ZCQoS";
+    const string BURST_LARGE_DATA_UDP = "DataPatternsLibrary::BurstLargeDataUdpQoS";
 
 };
 
@@ -49,5 +51,6 @@ module topics {
     const string BUTTON_TOPIC = "Button";
     const string IMAGE_TOPIC = "Image";
     const string FINAL_FLAT_IMAGE_TOPIC = "FinalFlatImage";
+    const string POINT_CLOUD_TOPIC = "PointCloud";
 
 };

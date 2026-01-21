@@ -13,9 +13,6 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
-#include <atomic>
-#include <ctime>
-#include <cstring>
 
 // include both the standard APIs and extensions
 #include <rti/rti.hpp>
@@ -41,6 +38,9 @@ using namespace rti::dist_logger;
 
 constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
 const std::string APP_NAME = "Burst Publisher app";
+const int LOG_FREQUENCY = 100;
+const int ACKNOWLEDGMENT_TIMEOUT_MS = 5000;
+const int MICROSECONDS_PER_SECOND = 1000000;
 
 void burst_duration_statistics(
         const std::chrono::high_resolution_clock::time_point& start_time,
@@ -60,13 +60,13 @@ void burst_duration_statistics(
 }
 
 void sleep_until_next_sample(
-        std::chrono::high_resolution_clock::time_point* next_target_time,
+        std::chrono::high_resolution_clock::time_point& next_target_time,
         const std::chrono::microseconds& sample_interval_us)
 {
     auto now = std::chrono::high_resolution_clock::now();
-    *next_target_time = *next_target_time + sample_interval_us;
-    if (*next_target_time > now) {
-        std::this_thread::sleep_until(*next_target_time);
+    next_target_time = next_target_time + sample_interval_us;
+    if (next_target_time > now) {
+        std::this_thread::sleep_until(next_target_time);
     }
 }
 
@@ -74,7 +74,7 @@ void run(std::shared_ptr<DDSParticipantSetup> participant_setup, unsigned int se
 {
     auto& rti_logger = rti::config::Logger::instance();
     
-    rti_logger.notice((std::string("Burst publisher application starting on domain ") + std::to_string(participant_setup->participant().domain_id())).c_str());
+    rti_logger.notice(("Burst publisher application starting on domain " + std::to_string(participant_setup->participant().domain_id())).c_str());
 
     // Setup Writer Interface for type
     auto burst_writer = std::make_shared<DDSWriterSetup<example_types::FinalFlatPointCloud>>(
@@ -91,58 +91,52 @@ void run(std::shared_ptr<DDSParticipantSetup> participant_setup, unsigned int se
     unsigned long samples_to_send = burst_duration * send_rate;
 
     const uint32_t POINT_CLOUD_SIZE = example_types::MAX_POINT_CLOUD_SIZE;
-    char data_to_send[POINT_CLOUD_SIZE];
     unsigned long point_cloud_counter = 0;
     auto writer = burst_writer->writer();
 
-    rti_logger.informational((std::string("Starting burst of ") + std::to_string(samples_to_send) +
-            " point clouds (" + std::to_string(POINT_CLOUD_SIZE) + " B) at " +
-            std::to_string(send_rate) + " Hz. Bandwidth: " +
-            std::to_string(send_rate * POINT_CLOUD_SIZE * 8 / 1000000) + " Mbps").c_str());
+    // NOTE: Using std::cout here for example clarity only. In production,
+    // rti_logger.informational() is recommended for distributed logging.
+    std::cout << "Starting burst of " << samples_to_send << " point clouds (" 
+              << POINT_CLOUD_SIZE << " B) at " << send_rate << " Hz. Bandwidth: " 
+              << (send_rate * POINT_CLOUD_SIZE * 8 / 1000000) << " Mbps" << std::endl;
 
     // Let's measure how long it takes to send these samples
     auto burst_start_time = std::chrono::high_resolution_clock::now();
     
-    // Calculate the interval between samples in microseconds with high
-    // precision, instead of just sleeping
-    auto sample_interval_us = std::chrono::microseconds(1000000 / send_rate);
+    // Calculate the interval between samples in microseconds with high precision
+    // (MICROSECONDS_PER_SECOND microseconds = 1 second)
+    auto sample_interval_us = std::chrono::microseconds(MICROSECONDS_PER_SECOND / send_rate);
     auto next_target_time = burst_start_time + sample_interval_us;
     
-    try
-    {
-        while (!application::shutdown_requested && point_cloud_counter < samples_to_send) {
+    while (!application::shutdown_requested && point_cloud_counter < samples_to_send) {
+        try {
             point_cloud_counter++;
             auto sample = writer->get_loan();
             auto root = sample->root();
             
             // Set fields directly on the loaned sample
             root.point_cloud_id(point_cloud_counter);
-            
-            // Access and populate the fixed-size data array
-            auto data_array = rti::flat::plain_cast(root.data());
-            memcpy(data_to_send, data_array, POINT_CLOUD_SIZE);
 
             // Write the loaned sample. This transfers ownership
             writer.write(*sample);
-            if (point_cloud_counter % 100 == 0) {
-                rti_logger.informational((std::string("Published ID: ") + std::to_string(point_cloud_counter) + " point clouds").c_str());
-            }
-
-            // Sleep until next sample needs to be sent
-            if (point_cloud_counter < samples_to_send) {
-                sleep_until_next_sample(&next_target_time, sample_interval_us);
+            if (point_cloud_counter % LOG_FREQUENCY == 0) {
+                rti_logger.informational(("Published ID: " + std::to_string(point_cloud_counter) + " point clouds").c_str());
             }
         }
-    }
-    catch (const std::exception &ex)
-    {
-        rti_logger.error((std::string("Failed to publish point cloud: ") + std::string(ex.what())).c_str());
+        catch (const std::exception &ex)
+        {
+            rti_logger.error(("Failed to publish point cloud " + std::to_string(point_cloud_counter) + ": " + ex.what()).c_str());
+        }
+
+        // Sleep until next sample needs to be sent
+        if (point_cloud_counter < samples_to_send) {
+            sleep_until_next_sample(next_target_time, sample_interval_us);
+        }
     }
 
     // Wait for all samples to be acknowledged by the DataReader
-    writer.wait_for_acknowledgments(dds::core::Duration::from_millisecs(5000));
+    writer.wait_for_acknowledgments(dds::core::Duration::from_millisecs(ACKNOWLEDGMENT_TIMEOUT_MS));
     rti_logger.informational("DataReader has confirmed that it has received all the samples.");
-    std::cout << "" << std::endl;
 
     // Calculate how long it took to send the burst and print it
     burst_duration_statistics(burst_start_time, point_cloud_counter);

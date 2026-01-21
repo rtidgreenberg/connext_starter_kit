@@ -13,8 +13,6 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
-#include <atomic>
-#include <ctime>
 
 // include both the standard APIs and extensions
 #include <rti/rti.hpp>
@@ -40,21 +38,33 @@ using namespace rti::dist_logger;
 
 constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
 const std::string APP_NAME = "Burst Subscriber app";
-unsigned long samples_received = 0;
+const int LOG_FREQUENCY = 100;
+const int MAIN_LOOP_SLEEP_MS = 500;
 
-void process_data(dds::sub::DataReader<example_types::FinalFlatPointCloud> reader)
+void process_data(dds::sub::DataReader<example_types::FinalFlatPointCloud>& reader)
 {
-    auto samples = reader.take();
-    for (const auto& sample : samples)
-    {
-      // Check if message is not DDS metadata
-      if (sample.info().valid()) {
-            samples_received ++;
-            if (samples_received % 100 == 0) {
-                rti::config::Logger::instance().informational((std::string("Samples received: ") + std::to_string(samples_received) +
-                        ", size: " + std::to_string(sample.data().root().data().element_count()) + " B").c_str());
+    static unsigned long samples_received = 0;
+    try {
+        auto samples = reader.take();
+        for (const auto& sample : samples)
+        {
+            // Check if message is not DDS metadata
+            if (sample.info().valid()) {
+                samples_received++;
+                if (samples_received % LOG_FREQUENCY == 0) {
+                    // NOTE: Using std::cout here for example clarity only. In production,
+                    // rti_logger.informational() is recommended for distributed logging.
+                    std::cout << "Samples received: " << samples_received 
+                              << ", size: " << sample.data().root().data().element_count() 
+                              << " B" << std::endl;
+                }
             }
-      }
+        }
+    }
+    catch (const std::exception &ex)
+    {
+        rti::config::Logger::instance().error(
+                (std::string("Failed to process data: ") + std::string(ex.what())).c_str());
     }
 } 
 
@@ -72,27 +82,22 @@ void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
 
     // Enable Asynchronous Event-Driven processing for reader
     burst_reader->set_data_available_handler(process_data);
+
+    // Attach a handler for Sample Lost DDS event
     burst_reader->set_sample_lost_handler(
         [](dds::sub::DataReader<example_types::FinalFlatPointCloud>& reader)
         {
             auto status = reader.sample_lost_status();
-            rti::config::Logger::instance().warning(
-                    (std::string("Sample lost! Total lost: ")
-                     + std::to_string(status.total_count()))
-                            .c_str());
+            // NOTE: Using std::cout here for example clarity only. In production,
+            // rti_logger.warning() is recommended for distributed logging.
+            std::cout << "Sample lost! Total lost: " << status.total_count() << std::endl;
         });
 
     rti_logger.informational("Burst subscriber app is running. Press Ctrl+C to stop.");
 
     while (!application::shutdown_requested) {
-
-      // Alternate Option: Use Polling Method to Read Data
-      // Latency contingent on loop rate
-      // process_data(burst_reader->reader());
-
-      // Sleep
-      std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
+        // Sleep
+        std::this_thread::sleep_for(std::chrono::milliseconds(MAIN_LOOP_SLEEP_MS));
     }
 
     rti_logger.informational("Burst subscriber application shutting down...");

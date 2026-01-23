@@ -16,23 +16,22 @@ Data Distribution Service (DDS) layer for RTI Connext Starter Kit, providing dat
 ```
 dds/
 ├── CMakeLists.txt          # Unified build configuration
-├── BUILD.md                # Detailed build instructions
 ├── README.md               # This file
-├── datamodel/              # IDL definitions and generated code
-│   ├── idl/                # Source IDL files
-│   │   ├── ExampleTypes.idl    # Data structures
-│   │   └── Definitions.idl     # Configuration constants (QoS, domains, topics)
-│   ├── cxx11_gen/          # Generated C++ types (auto-generated)
-│   ├── python_gen/         # Generated Python types (auto-generated)
-│   └── xml_gen/            # Generated XML representations (auto-generated)
+├── datamodel/              # IDL definitions
+│   └── idl/                # Source IDL files
+│       ├── ExampleTypes.idl    # Data structures
+│       └── Definitions.idl     # Configuration constants (QoS, domains, topics)
 ├── qos/                    # Quality of Service configurations
 │   └── DDS_QOS_PROFILES.xml
-├── utils/cxx11/            # C++11 utility classes (header-only)
-│   ├── DDSParticipantSetup.hpp # DDS participant management
-│   ├── DDSReaderSetup.hpp  # Template reader interface
-│   └── DDSWriterSetup.hpp  # Template writer interface
-└── build/                  # CMake build directory (created during build)
-    └── lib/                # Generated shared libraries
+└── utils/                  # Utility classes
+    └── cxx11/              # C++11 utility classes (header-only)
+        ├── DDSParticipantSetup.hpp # DDS participant management
+        ├── DDSReaderSetup.hpp      # Template reader interface
+        └── DDSWriterSetup.hpp      # Template writer interface
+
+Note: The top-level build directory (../../build/) is where the CMake build system 
+generates all DDS types, builds the DDS library, and compiles application binaries:
+
 ```
 
 ## Data Model (IDL Definitions)
@@ -44,7 +43,7 @@ Core data structures demonstrating common DDS patterns.
 #### Data Types:
 
 **Command** - Control Messages
-- `command_id` (key), `destination_id` (key), `command_type`, `message`, `timestamp_sec`, `urgent`
+- `command_id` (key), `destination_id`, `command_type`, `message`, `urgent`
 - Types: START, STOP, PAUSE, RESET, SHUTDOWN
 
 **Position** - Location Data
@@ -93,25 +92,52 @@ Header-only template classes located in `utils/cxx11/` for simplified DDS applic
 
 ### DDSParticipantSetup
 
-Complete DDS participant management (in `DDSParticipantSetup.hpp`).
+Manages the core DDS infrastructure for applications (in `DDSParticipantSetup.hpp`).
+
+**Manages:**
+- **DomainParticipant**: Application's connection to a DDS domain with configurable QoS profile
+- **AsyncWaitSet**: Centralized event dispatcher with configurable thread pool for asynchronous processing of all DDS status events
+- **QoS File Path**: Stores XML QoS configuration path for reuse by DDSReaderSetup/DDSWriterSetup
+
+**Constructor Parameters:**
+- `domain_id` - DDS domain ID
+- `thread_pool_size` - AsyncWaitSet thread pool size (default: 5)
+- `participant_qos_file` - Path to XML QoS file
+- `participant_qos_profile` - QoS profile name for participant
+- `app_name` - Application name for participant entity naming
+
+**Public Methods:**
+- `participant()` - Returns reference to DomainParticipant
+- `async_waitset()` - Returns reference to AsyncWaitSet
+- `qos_file_path()` - Returns stored QoS file path
+
+### DDSReaderSetup
+
+Template class for DataReader creation with event-driven callback processing (in `DDSReaderSetup.hpp`).
 
 **Features:**
-- DomainParticipant lifecycle management
-- QoS profile integration from XML
-- Distributed logging support
-- AsyncWaitSet with configurable thread pool
-- Signal handling for graceful shutdown (SIGINT, SIGTERM)
+- Creates DataReader with topic and QoS from DDSParticipantSetup's stored QoS file path
+- Supports status callbacks: `data_available`, `subscription_matched`, `liveliness_changed`, `requested_deadline_missed`, `requested_incompatible_qos`, `sample_lost`, `sample_rejected`
+- Registers status conditions with centralized AsyncWaitSet for asynchronous processing
 
-### DDSReaderSetup & DDSWriterSetup
+**Constructor Parameters:**
+- `p_setup` - Shared pointer to DDSParticipantSetup (provides participant, AsyncWaitSet, and QoS file path)
+- `topic_name` - Topic name string
+- `qos_profile` - QoS profile name (optional)
 
-Generic template classes (in `DDSReaderSetup.hpp` and `DDSWriterSetup.hpp`) for creating type-safe readers and writers.
+### DDSWriterSetup
+
+Template class for DataWriter creation with event-driven callback processing (in `DDSWriterSetup.hpp`).
 
 **Features:**
-- Automatic topic and QoS configuration
-- Status condition monitoring (LivelinessChanged, DataAvailable, etc.)
-- AsyncWaitSet integration for event-driven processing
-- Callback-based data handling
-- Simplified entity creation with error handling
+- Creates DataWriter with topic and QoS from DDSParticipantSetup's stored QoS file path
+- Supports status callbacks: `publication_matched`, `liveliness_lost`, `offered_deadline_missed`, `offered_incompatible_qos`
+- Registers status conditions with centralized AsyncWaitSet for asynchronous processing
+
+**Constructor Parameters:**
+- `p_setup` - Shared pointer to DDSParticipantSetup (provides participant, AsyncWaitSet, and QoS file path)
+- `topic_name` - Topic name string
+- `qos_profile` - QoS profile name (optional)
 
 ## QoS Configuration
 
@@ -153,10 +179,10 @@ mkdir -p build && cd build
 cmake ..
 cmake --build .
 
-# Verify generated files
-ls /build/cxx11_gen/*.hpp
-ls /build/python_gen/*.py
-ls /build/xml_gen/*.xml
+# Verify generated files (from workspace root)
+ls build/dds/cxx11_gen/*.hpp
+ls build/dds/python_gen/*.py
+ls build/dds/xml_gen/*.xml
 ```
 
 This generates all type support files automatically:
@@ -197,7 +223,6 @@ auto dds_participant = std::make_shared<DDSParticipantSetup>(
 auto position_writer = std::make_shared<DDSWriterSetup<example_types::Position>>(
     dds_participant, 
     topics::POSITION_TOPIC, 
-    qos_file, 
     qos_profiles::ASSIGNER
 );
 ```

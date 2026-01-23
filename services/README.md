@@ -58,12 +58,12 @@ export DOMAIN_ID=5
 **Configuration File**: `recording_service_config_external_types.xml`
 
 **Prerequisites**: 
-Run CMake in the `dds` folder to convert IDL files to XML format:
+Run the top-level build to generate XML type definitions:
 ```bash
-cd ../dds/build
-cmake ..
-make
-# This generates XML type definitions in dds/build/xml_gen/ directory
+cd /path/to/connext_starter_kit
+mkdir -p build && cd build
+cmake .. && cmake --build .
+# This generates XML type definitions in build/dds/xml_gen/ directory
 ```
 
 **Running**:

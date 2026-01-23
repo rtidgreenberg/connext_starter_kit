@@ -123,19 +123,19 @@ auto dds_participant = std::make_shared<DDSParticipantSetup>(domain_id, ASYNC_WA
 
 // Create multiple readers with qos_profiles::ASSIGNER profile  
 auto command_reader = std::make_shared<DDSReaderSetup<example_types::Command>>(
-    dds_context, topics::COMMAND_TOPIC, qos_file_path, qos_profiles::ASSIGNER);
+    dds_participant, topics::COMMAND_TOPIC, qos_profiles::ASSIGNER);
 
 // Create position writer for GPS data publishing
 auto position_writer = std::make_shared<DDSWriterSetup<example_types::Position>>(
-    dds_context, topics::POSITION_TOPIC, qos_file_path, qos_profiles::ASSIGNER);
+    dds_participant, topics::POSITION_TOPIC, qos_profiles::ASSIGNER);
 
 // Enable async processing with custom callbacks
 command_reader->set_data_handler(process_command_data);
 command_reader->enable_async();
 
-// Use distributed logger with error handling
-auto& logger = dds_context->distributed_logger();
-logger.info("Example I/O app is running. Press Ctrl+C to stop.");
+// Use RTI Logger for distributed logging
+auto& rti_logger = rti::config::Logger::instance();
+rti_logger.notice("Example I/O app is running. Press Ctrl+C to stop.");
 
 // Publish position data with error handling
 example_types::Position pos_msg;
@@ -146,7 +146,7 @@ try {
     pos_msg.altitude(15.0);
     position_writer->writer().write(pos_msg);
 } catch (const std::exception &ex) {
-    logger.error("Failed to publish position: " + std::string(ex.what()));
+    rti_logger.error(("Failed to publish position: " + std::string(ex.what())).c_str());
 }
 ```
 

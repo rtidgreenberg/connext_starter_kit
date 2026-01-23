@@ -22,10 +22,10 @@ This application publishes and subscribes to Image data (~900 KB per sample) usi
 
 ## Building
 
-The Python application uses generated DDS types from the `dds/` directory. Ensure types are generated:
+The Python application uses generated DDS types from the top-level build directory. Ensure types are generated:
 
 ```bash
-cd ../../../dds/build
+cd connext_starter_kit/build
 cmake .. && make -j4
 ```
 
@@ -34,7 +34,7 @@ cmake .. && make -j4
 ### Activate Virtual Environment
 
 ```bash
-cd apps/python
+cd /home/rti/connext_starter_kit/apps/python
 source connext_dds_env/bin/activate
 ```
 

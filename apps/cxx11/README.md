@@ -33,10 +33,34 @@ Advanced DDS ownership and QoS patterns:
 - **Dynamic QoS Modification**: Runtime ownership strength changes
 - **Multi-Writer Coordination**: Same topic, different priorities
 
+### [`large_data_app/`](./large_data_app/) - Shared Memory Large Data Transfer
+High-performance transfer of large data using shared memory:
+- **~900 KB Images**: 640x480 RGB image data
+- **Shared Memory Transport**: Efficient intra-host communication
+- **LARGE_DATA_SHMEM QoS**: Optimized profiles for large payloads
+- **Publisher and Subscriber**: Combined in single application
+- **AsyncWaitSet Processing**: Event-driven data handling
+
+### [`burst_large_data_app/`](./burst_large_data_app/) - High-Rate Burst Traffic
+Simulates burst transmission of large data over LAN:
+- **Point Cloud Data**: High-rate large payload transmission
+- **Strict Reliability**: KEEP_ALL + RELIABLE QoS
+- **Configurable Parameters**: Adjustable send rate and burst duration
+- **Network Optimized**: Requires increased socket buffer sizes
+- **Performance Statistics**: Throughput and acknowledgment metrics
+
+### [`dynamic_partition_qos/`](./dynamic_partition_qos/) - Runtime Partition Management
+Dynamic partition modification for environment isolation:
+- **Runtime QoS Changes**: Modify partitions without restart
+- **Unique Application IDs**: Auto-generated identifiers for tracking
+- **Test Isolation**: Separate unit test and production traffic
+- **Terminal Input**: Interactive partition switching
+- **Self-Ignore Pattern**: Filters own publications using dds::sub::ignore()
+
 ## Creating New C++ DDS Applications
 
 ### Overview
-You can rapidly create new DDS applications using GitHub Copilot(Claude Sonnet 4.5)  
+You can rapidly create new DDS applications using GitHub Copilot 
 and the provided build prompt template.  
 This process leverages the existing DDS infrastructure and  utilities.   
 
@@ -173,7 +197,6 @@ auto dds_participant = std::make_shared<DDSParticipantSetup>(
 auto button_reader = std::make_shared<DDSReaderSetup<example_types::Button>>(
     dds_participant,
     topics::BUTTON_TOPIC,
-    qos_file_path,
     qos_profiles::ASSIGNER
 );
 
@@ -181,7 +204,6 @@ auto button_reader = std::make_shared<DDSReaderSetup<example_types::Button>>(
 auto config_writer = std::make_shared<DDSWriterSetup<example_types::Config>>(
     dds_participant,
     topics::CONFIG_TOPIC,
-    qos_file_path,
     qos_profiles::ASSIGNER
 );
 ```
@@ -206,6 +228,9 @@ your_reader->enable_async();
 
 #### **Message Publishing**
 ```cpp
+// Get RTI Logger instance for distributed logging
+auto& rti_logger = rti::config::Logger::instance();
+
 // Publishing loop with error handling
 while (!application::shutdown_requested) {
     try {
@@ -214,7 +239,7 @@ while (!application::shutdown_requested) {
         your_interface->writer().write(your_message);
         std::cout << "[YOUR_TYPE] Published: " << your_message << std::endl;
     } catch (const std::exception &ex) {
-        logger.error("Failed to publish: " + std::string(ex.what()));
+        rti_logger.error(("Failed to publish: " + std::string(ex.what())).c_str());
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 }

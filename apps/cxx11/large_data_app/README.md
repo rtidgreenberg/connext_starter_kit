@@ -184,9 +184,8 @@ std::this_thread::sleep_for(std::chrono::seconds(1));  // Change to desired rate
 For maximum performance with FlatData types (requires FinalFlatImage):
 ```cpp
 auto image_writer = std::make_shared<DDSWriterSetup<example_types::FinalFlatImage>>(
-    dds_context,
+    dds_participant,
     topics::FINAL_FLAT_IMAGE_TOPIC,
-    qos_file_path,
     qos_profiles::LARGE_DATA_SHMEM_ZC);
 ```
 

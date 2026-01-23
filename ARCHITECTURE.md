@@ -18,34 +18,35 @@ The toolkit uses a layered architecture separating data definitions, utilities, 
 ```
 ┌─────────────────────────────────────────────────┐
 │         Applications (apps/)                    │
-│  ┌──────────────┐      ┌──────────────┐         │
-│  │  C++ Apps    │      │ Python Apps  │         │
-│  │ example_io   │      │ example_io   │         │
-│  │ cmd_override │      │              │         │
-│  │ fixed_image  │      │              │         │
-│  └──────────────┘      └──────────────┘         │
+│  ┌───────────────────┐ ┌───────────────────┐    │
+│  │    C++ Apps       │ │   Python Apps     │    │
+│  │ example_io        │ │ example_io        │    │
+│  │ command_override  │ │ large_data        │    │
+│  │ fixed_image_flat  │ │ downsampled_reader│    │
+│  │ large_data        │ │                   │    │
+│  │ burst_large_data  │ │                   │    │
+│  │ dynamic_partition │ │                   │    │
+│  └───────────────────┘ └───────────────────┘    │
 └─────────────────────────────────────────────────┘
                     │
                     │ Uses DDS APIs
                     ▼
 ┌─────────────────────────────────────────────────┐
 │         DDS Layer (dds/)                        │
-│  ┌──────────────┐  ┌──────────────┐             │
-│  │  Data Model  │  │   Utilities  │             │
-│  │  (IDL files) │  │ DDSContext   │             │
-│  │              │  │ Reader/Writer│             │
-│  └──────────────┘  └──────────────┘             │
+│  ┌──────────────┐  ┌────────────────────┐       │
+│  │  Data Model  │  │     Utilities      │       │
+│  │  (IDL files) │  │ DDSParticipantSetup│       │
+│  │              │  │ DDSWriterSetup     │       │
+│  │              │  │ DDSReaderSetup     │       │
+│  └──────────────┘  └────────────────────┘       │
 │  ┌──────────────┐  ┌──────────────┐             │
 │  │  QoS XML     │  │  Generated   │             │
 │  │  Profiles    │  │  Code (C++/  │             │
 │  │              │  │  Python)     │             │
 │  └──────────────┘  └──────────────┘             │
-└─────────────────────────────────────────────────┘
-                    │
-                    │ RTI Connext DDS 7.3.0
-                    ▼
-┌─────────────────────────────────────────────────┐
-│         RTI Connext DDS Middleware              │
+│  ┌───────────────────────────────────────────┐  │
+│  │        RTI Connext DDS Middleware         │  │
+│  └───────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -75,6 +76,7 @@ The toolkit uses a layered architecture separating data definitions, utilities, 
 | Data Type | Topic | Size | Description | Use Case |
 |-----------|-------|------|-------------|----------|
 | `FinalFlatImage` | `FinalFlatImage` | 3 MB fixed | Zero-copy flat data | Large data @ 10 Hz |
+| `FinalFlatPointCloud` | `FinalFlatPointCloud` | 500 KB fixed | Zero-copy flat data | Point cloud data |
 
 **FlatData Characteristics:**
 - **XCDR2 Encoding**: Uses XCDR encoding version 2 with host platform endianness
@@ -85,7 +87,7 @@ The toolkit uses a layered architecture separating data definitions, utilities, 
 
 ## Utility Classes
 
-### DDSContextSetup
+### DDSParticipantSetup
 **Purpose**: Centralized DomainParticipant and AsyncWaitSet management
 
 **Features:**
@@ -96,28 +98,30 @@ The toolkit uses a layered architecture separating data definitions, utilities, 
 
 **Usage:**
 ```cpp
-DDSContextSetup context_setup(domain_id);
-dds::domain::DomainParticipant participant = context_setup.get_participant();
-rti::core::cond::AsyncWaitSet aws = context_setup.get_async_waitset();
+auto dds_participant = std::make_shared<DDSParticipantSetup>(
+    domain_id, thread_pool_size, qos_file_path, qos_profile, app_name);
+
+// Access managed resources
+dds::domain::DomainParticipant& participant = dds_participant->participant();
+rti::core::cond::AsyncWaitSet& aws = dds_participant->async_waitset();
+const std::string& qos_path = dds_participant->qos_file_path();
 ```
 
 ### DDSReaderSetup
-**Purpose**: Simplified DataReader creation with status monitoring
+**Purpose**: Template class for DataReader creation with event-driven callback processing
 
 **Features:**
-- DataReader creation with topic and QoS
-- Automatic DataAvailable status condition
-- AsyncWaitSet integration
-- Read callback handler
+- Creates DataReader with topic and QoS from DDSParticipantSetup's stored QoS file path
+- Supports status callbacks: `data_available`, `subscription_matched`, `liveliness_changed`, `requested_deadline_missed`, `requested_incompatible_qos`, `sample_lost`, `sample_rejected`
+- Registers status conditions with centralized AsyncWaitSet for asynchronous processing
 
 ### DDSWriterSetup
-**Purpose**: Simplified DataWriter creation with status monitoring
+**Purpose**: Template class for DataWriter creation with event-driven callback processing
 
 **Features:**
-- DataWriter creation with topic and QoS
-- PublicationMatched status monitoring
-- AsyncWaitSet integration for status events
-- Write method convenience wrapper
+- Creates DataWriter with topic and QoS from DDSParticipantSetup's stored QoS file path
+- Supports status callbacks: `publication_matched`, `liveliness_lost`, `offered_deadline_missed`, `offered_incompatible_qos`
+- Registers status conditions with centralized AsyncWaitSet for asynchronous processing
 
 
 ## Data Model Design
@@ -127,8 +131,7 @@ rti::core::cond::AsyncWaitSet aws = context_setup.get_async_waitset();
 ```
 dds/datamodel/idl/
 ├── ExampleTypes.idl    # Business data types (Command, Button, Config, Position, etc.)
-├── Definitions.idl     # Configuration constants (QoS profiles, domains, topics)
-└── (Future additions)  # Additional domain-specific types
+└── Definitions.idl     # Configuration constants (QoS profiles, domains, topics)
 ```
 
 **Definitions.idl modules:**
@@ -214,10 +217,10 @@ Applications can reference "AssignerQoS" instead of specific profiles. The topic
 
 ```cpp
 // This will use StatusQoS because topic name matches "Position*"
-DDSWriterSetup<Position> writer(participant, "Position", "AssignerQoS", aws);
+auto writer = std::make_shared<DDSWriterSetup<Position>>(dds_participant, "Position", "AssignerQoS");
 
 // This will use EventQoS because topic name matches "Button*"
-DDSReaderSetup<Button> reader(participant, "Button", "AssignerQoS", aws, callback);
+auto reader = std::make_shared<DDSReaderSetup<Button>>(dds_participant, "Button", "AssignerQoS");
 ```
 
 This allows QoS changes in XML without application recompilation.
@@ -270,19 +273,28 @@ async for data in reader.take_data_async():
 
 ```
 connext_starter_kit/
+├── CMakeLists.txt              # Top-level CMake (builds dds/ and apps/)
 ├── dds/
-│   ├── cxx11/
-│   │   └── CMakeLists.txt      # Generates C++ from IDL, builds Types Library
-│   └── python/
-│       └── CMakeLists.txt      # Generates Python from IDL
+│   ├── CMakeLists.txt          # Generates C++/Python from IDL, builds Types Library
+│   └── build/
+│       ├── cxx11_gen/          # Generated C++ code
+│       └── python_gen/         # Generated Python code
 ├── apps/
-│   └── cxx11/
-│       ├── example_io_app/
-│       │   └── CMakeLists.txt  # Links to Types Library
-│       ├── command_override/
-│       │   └── CMakeLists.txt
-│       └── fixed_image_flat_zc/
-│           └── CMakeLists.txt
+│   ├── cxx11/
+│   │   ├── example_io_app/
+│   │   │   └── CMakeLists.txt  # Links to Types Library
+│   │   ├── command_override/
+│   │   │   └── CMakeLists.txt
+│   │   ├── fixed_image_flat_zc/
+│   │   │   └── CMakeLists.txt
+│   │   ├── large_data_app/
+│   │   │   └── CMakeLists.txt
+│   │   ├── burst_large_data_app/
+│   │   │   └── CMakeLists.txt
+│   │   └── dynamic_partition_qos/
+│   │       └── CMakeLists.txt
+│   └── python/
+│       └── (Python apps - no CMake required)
 └── resources/
     └── rticonnextdds-cmake-utils/  # Git submodule (REQUIRED)
 ```
@@ -316,14 +328,15 @@ Applications
 ### Build Order
 
 ```bash
-# 1. Build DDS shared library (generates C++ code from IDL)
-cd dds/cxx11/build && cmake .. && make -j4
+# 1. Build from top-level (generates code from IDL, builds DDS library and apps)
+cd build && cmake .. && make -j4
 
-# 2. Build Python bindings (generates Python code from IDL)
-cd ../../python/build && cmake .. && make -j4
+# Or build individual components:
+# 1. Build DDS shared library (generates C++/Python code from IDL)
+cd dds/build && cmake .. && make -j4
 
-# 3. Build applications (links to DDS library)
-cd ../../../apps/cxx11/example_io_app/build && cmake .. && make -j4
+# 2. Build applications (links to DDS library)
+cd apps/cxx11/example_io_app/build && cmake .. && make -j4
 ```
 
 **Important**: Applications depend on the DDS shared library, so the DDS layer must be built first.

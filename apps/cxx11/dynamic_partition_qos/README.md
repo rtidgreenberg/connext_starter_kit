@@ -88,7 +88,7 @@ cd /path/to/connext_starter_kit/build
 ./dynamic_partition_qos -d <domain_id> -q <qos_file_path> -v <verbosity>
 ```
 
-- `-d, --domain`: DDS Domain ID (default: 0)
+- `-d, --domain`: DDS Domain ID (default: 1)
 - `-q, --qos`: Path to QoS XML file
 - `-v, --verbosity`: Connext logging verbosity (0-5)
 - `-h, --help`: Show help message
@@ -279,13 +279,13 @@ This application demonstrates **runtime Domain Participant partition changes** v
 
 ```cpp
 // Get current participant QoS
-auto participant_qos = dds_context->participant().qos();
+auto participant_qos = dds_participant->participant().qos();
 
 // Update partition policy
 participant_qos << dds::core::policy::Partition(partitions);
 
 // Apply the new QoS
-dds_context->participant().qos(participant_qos);
+dds_participant->participant().qos(participant_qos);
 ```
 
 ### XML-Based Configuration with Environment Variables

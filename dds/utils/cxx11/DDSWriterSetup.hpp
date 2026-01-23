@@ -327,7 +327,7 @@ private:
 
     dds::domain::DomainParticipant _participant = dds::core::null;
 
-    // Async Waitset - reference to the one owned by DDSContextSetup
+    // Async Waitset - reference to the one owned by DDSParticipantSetup
     rti::core::cond::AsyncWaitSet &_async_waitset;
 
     dds::pub::DataWriter<T> _writer = dds::core::null;

@@ -43,13 +43,21 @@ The install script will automatically set up the virtual environment, install al
 apps/python/
 ├── example_io_app/         # Example I/O application
 │   ├── example_io_app.py   # Main application
-│   ├── requirements.txt    # App dependencies
+│   └── README.md           # Documentation
+├── large_data_app/         # Large data transfer demo
+│   ├── large_data_app.py   # Main application
+│   └── README.md           # Documentation
+├── downsampled_reader/     # Time-based filtering demo
+│   ├── downsampled_reader.py
 │   └── README.md           # Documentation
 ├── connext_dds_env/        # Virtual environment
 ├── README.md               # This file
 ├── install.sh              # Installation script
+├── Makefile                # Build automation
+├── pyproject.toml          # Project configuration
+├── build_hooks.py          # Build hooks
 ├── requirements.txt        # Common dependencies
-├── rti_license.dat         # RTI license (REQUIRED)
+├── rti_license.dat         # RTI license (optional if RTI_LICENSE_FILE env var is set)
 └── setup.py                # Setup script
 ```
 

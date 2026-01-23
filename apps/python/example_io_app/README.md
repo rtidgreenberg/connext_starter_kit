@@ -33,11 +33,13 @@ Python implementation demonstrating minimal DDS middleware setup with RTI Connex
 ## Quick Start
 
 ```bash
-# Generate DDS Python bindings
-cd ../../../dds/python/build && make
+# Build DDS types (generates Python bindings)
+cd /path/to/connext_starter_kit
+mkdir -p build && cd build
+cmake .. && cmake --build .
 
-# Navigate to python/ directory (contains RTI license)
-cd ../../../apps/python
+# Navigate to python/ directory
+cd ../apps/python
 
 # Activate environment
 source connext_dds_env/bin/activate

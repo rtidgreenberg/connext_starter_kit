@@ -10,7 +10,7 @@ important that you set up your send/receive socket buffer sizes to a higher
 value before you start the applications. Unfortunately, Linux systems do not
 use default values that are high enough to support this use case. You can easily
 increase the size of your socket buffers with the
-[optimize_socket_buffers.sh](../../../resources/utilities/optimize_socket_buffers.sh)
+[optimize_socket_buffers.sh](../../../tools/optimize_socket_buffers.sh)
 script.
 
 ## Description
@@ -50,7 +50,7 @@ Simply run this script on both machines (if over LAN) or just the local machine
 (if the applications will communicate over loopback):
 
 ```sh
-source /path/to/connext_starter_kit/resources/utilities/optimize_socket_buffers.sh
+sudo /path/to/connext_starter_kit/tools/optimize_socket_buffers.sh
 ```
 
 ### Using Run Scripts

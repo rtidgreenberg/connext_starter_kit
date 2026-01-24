@@ -2,59 +2,47 @@
 
 This directory contains utility tools for RTI Connext DDS development and debugging.
 
-## rtispy.py
+## Quick Start
 
-### Quick Start
+1. **Get an RTI license** - Visit https://www.rti.com/get-connext
 
-1. **Get an RTI license and set the environment variable:**
-   
-   Visit https://www.rti.com/get-connext to request a free trial license (you'll receive it via email within minutes):
+2. **Check your email** - You'll receive an automated email with `rti_license.dat` within minutes
+
+3. **Set the license environment variable:**
    ```bash
    export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
    ```
 
-2. **Run the script** (it will automatically install all requirements):
+4. **Run RTI Spy:**
    ```bash
    ./run_rtispy.sh --domain 1
    ```
 
-That's it! The run script will automatically set up the virtual environment and install all dependencies on first use.
+That's it! The run script automatically handles NDDSHOME detection, virtual environment setup, and dependency installation.
 
 ---
 
-### Dependencies:
+## optimize_socket_buffers.sh
+
+Optimizes Linux socket buffer sizes for better DDS network performance. Useful for large data transfers or high-throughput scenarios.
+
+```bash
+sudo ./optimize_socket_buffers.sh
+```
+
+This sets `rmem_max` and `wmem_max` to 10 MB for improved UDP performance.
+
+---
+
+## rtispy.py
+
+### Dependencies
 - RTI Python API
 - Textual
 
-#### Connext Python API
-- [RTI Connext Python API modules](https://community.rti.com/static/documentation/connext-dds/current/doc/manuals/connext_dds_professional/installation_guide/installing.html#installing-python-c-or-ada-packages)
+### Manual Installation
 
-#### Textual
-```bash
-pip install textual textual-dev
-```
-
----
-
-### Detailed Setup
-
-#### Getting an RTI License
-
-If you don't have an RTI Connext license:
-
-1. Visit https://www.rti.com/get-connext
-2. Fill out the form to request a free trial license
-3. You'll receive an automated email with the license file (`rti_license.dat`) within a few minutes
-4. Set the `RTI_LICENSE_FILE` environment variable to point to the license file:
-   ```bash
-   export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
-   ```
-
-> **Tip**: Add the `export RTI_LICENSE_FILE=...` line to your `~/.bashrc` or `~/.bash_profile` to make it permanent.
-
-#### Automated Installation (Recommended)
-
-Run the provided installation script which will create a virtual environment and install all dependencies:
+Installation is handled automatically by `run_rtispy.sh`. For manual installation:
 
 ```bash
 cd tools
@@ -62,29 +50,11 @@ cd tools
 ```
 
 The script will:
-- Create a virtual environment in `tools/rtispy_env/`
+- Auto-detect `NDDSHOME` from `~/rti_connext_dds-*`
+- Create a shared virtual environment at the repository root (`connext_dds_env/`)
 - Install RTI Connext Python API (version 7.3.0)
 - Install Textual UI framework
 - Verify all installations
-
-#### Manual Installation
-
-1. **Create and activate a Python virtual environment:**
-```bash
-python3 -m venv rtispy_env
-source rtispy_env/bin/activate
-```
-
-2. **Set up RTI Connext environment:**
-```bash
-source <path_to_connext>/resource/scripts/rtisetenv_<architecture>.bash
-```
-
-3. **Install dependencies:**
-```bash
-pip install rti.connext==7.3.0
-pip install textual textual-dev
-```
 
 ### Overview
 
@@ -108,8 +78,9 @@ RTI Spy is a powerful Python-based monitoring tool for RTI Connext DDS applicati
 
 #### Manual Execution
 ```bash
-source rtispy_env/bin/activate
-source <path_to_connext>/resource/scripts/rtisetenv_<architecture>.bash
+source ../connext_dds_env/bin/activate
+export NDDSHOME=~/rti_connext_dds-7.3.0  # or your installation path
+export RTI_LICENSE_FILE=$NDDSHOME/rti_license.dat
 python rtispy.py --domain 1
 ```
 

@@ -2,10 +2,27 @@
 
 Python implementation demonstrating minimal DDS middleware setup with RTI Connext.
 
+## Quick Start
+
+1. **Get an RTI license** - Visit https://www.rti.com/get-connext
+
+2. **Check your email** - You'll receive an automated email with `rti_license.dat` within minutes
+
+3. **Set the license environment variable:**
+   ```bash
+   export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
+   ```
+
+4. **Run the application:**
+   ```bash
+   ./run.sh --domain_id 1
+   ```
+
+---
+
 ## Table of Contents
 - [Features](#features)
 - [Application Behavior](#application-behavior)
-- [Quick Start](#quick-start)
 - [Usage](#usage)
 - [Architecture](#architecture)
 - [Dependencies](#dependencies)
@@ -30,30 +47,10 @@ Python implementation demonstrating minimal DDS middleware setup with RTI Connex
 **Subscriber (1 Reader)**:
 - Position messages with async processing
 
-## Quick Start
-
-```bash
-# Build DDS types (generates Python bindings)
-cd /path/to/connext_starter_kit
-mkdir -p build && cd build
-cmake .. && cmake --build .
-
-# Navigate to python/ directory
-cd ../apps/python
-
-# Activate environment
-source connext_dds_env/bin/activate
-
-# Run application
-python example_io_app/example_io_app.py --domain_id 1
-```
-
 ## Usage
 
-**Important**: Run from `apps/python/` directory for license file access.
-
 ```bash
-python example_io_app/example_io_app.py [OPTIONS]
+./run.sh [OPTIONS]
 
 Options:
   -d, --domain_id <int>    DDS domain ID (default: 1)

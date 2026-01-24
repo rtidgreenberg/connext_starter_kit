@@ -2,6 +2,24 @@
 
 A Python application demonstrating **time-based filtering** and **status listeners** for receiving downsampled data at a reduced rate (1Hz) from a topic that may be published at a higher frequency, with comprehensive awareness of DDS events.
 
+## Quick Start
+
+1. **Get an RTI license** - Visit https://www.rti.com/get-connext
+
+2. **Check your email** - You'll receive an automated email with `rti_license.dat` within minutes
+
+3. **Set the license environment variable:**
+   ```bash
+   export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
+   ```
+
+4. **Run the application:**
+   ```bash
+   ./run.sh --domain_id 1
+   ```
+
+---
+
 ## Overview
 
 This application showcases common DDS patterns where:

@@ -9,24 +9,40 @@ echo
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="$SCRIPT_DIR/rtispy_env"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+VENV_DIR="$REPO_ROOT/connext_dds_env"
 
-# Check if virtual environment already exists
-if [ -d "$VENV_DIR" ]; then
-    echo "Virtual environment already exists at: $VENV_DIR"
-    read -p "Remove and recreate? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo "Removing existing virtual environment..."
-        rm -rf "$VENV_DIR"
+# --- NDDSHOME Auto-Detection ---
+if [ -z "$NDDSHOME" ]; then
+    echo "NDDSHOME not set. Searching for RTI Connext installation..."
+    
+    # Find latest version in ~/rti_connext_dds-*
+    LATEST_RTI=$(ls -d ~/rti_connext_dds-* 2>/dev/null | sort -V | tail -n 1)
+    
+    if [ -n "$LATEST_RTI" ] && [ -d "$LATEST_RTI" ]; then
+        export NDDSHOME="$LATEST_RTI"
+        echo "✓ Found RTI installation: $NDDSHOME"
     else
-        echo "Using existing virtual environment"
+        echo "ERROR: NDDSHOME not set and no RTI installation found in ~/rti_connext_dds-*"
+        echo ""
+        echo "Please either:"
+        echo "  1. Set NDDSHOME environment variable:"
+        echo "     export NDDSHOME=/path/to/rti_connext_dds-x.x.x"
+        echo ""
+        echo "  2. Install RTI Connext DDS in your home directory"
+        echo ""
+        exit 1
     fi
+else
+    echo "✓ NDDSHOME: $NDDSHOME"
 fi
 
-# Create virtual environment if it doesn't exist
-if [ ! -d "$VENV_DIR" ]; then
-    echo "Creating virtual environment..."
+# --- Virtual Environment Setup ---
+echo
+if [ -d "$VENV_DIR" ]; then
+    echo "✓ Virtual environment already exists at: $VENV_DIR"
+else
+    echo "Creating virtual environment at repository root..."
     python3 -m venv "$VENV_DIR"
     echo "✓ Virtual environment created at: $VENV_DIR"
 fi
@@ -34,58 +50,28 @@ fi
 # Activate virtual environment
 echo
 echo "Activating virtual environment..."
-source "$VENV_DIR/bin/activate"
+source "$VENV_DIR/bin/activate" 2>/dev/null || true
+export PATH="$VENV_DIR/bin:$PATH"
 echo "✓ Virtual environment activated"
-
-# Check if NDDSHOME is set
-echo
-if [ -z "$NDDSHOME" ]; then
-    echo "⚠️  WARNING: NDDSHOME environment variable not set"
-    echo "   RTI Connext DDS environment should be set up before running rtispy."
-    echo ""
-    echo "   To set up the RTI Connext environment, run:"
-    echo "     source <path_to_connext>/resource/scripts/rtisetenv_<architecture>.bash"
-    echo ""
-    echo "   Example:"
-    echo "     source /opt/rti_connext_dds-7.3.0/resource/scripts/rtisetenv_x64Linux4gcc7.3.0.bash"
-    echo ""
-    echo "   This script will set NDDSHOME, update PATH, and configure LD_LIBRARY_PATH."
-    echo
-    read -p "Continue anyway? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Installation cancelled. Please set up RTI Connext environment first."
-        exit 1
-    fi
-else
-    echo "✓ NDDSHOME: $NDDSHOME"
-fi
 
 # Upgrade pip
 echo
 echo "Upgrading pip..."
 pip install --upgrade pip
 
-# Install RTI Python API
+# --- Install Dependencies ---
 echo
-echo "Installing RTI Connext Python API..."
-pip install rti.connext==7.3.0
-echo "✓ RTI Python API installed successfully"
+echo "Installing dependencies from requirements.txt..."
+pip install -r "$SCRIPT_DIR/requirements.txt"
+echo "✓ Dependencies installed successfully"
 
-# Install Textual and dependencies
-echo
-echo "Installing Textual UI framework..."
-pip install textual textual-dev
-echo "✓ Textual installed successfully"
-
-# Verify installation
+# Verify installations
 echo
 echo "Verifying installations..."
-if python -c "import rti.connextdds; print('RTI API version:', rti.connextdds.__version__)" 2>/dev/null; then
+if python -c "import rti.connextdds" 2>/dev/null; then
     echo "✓ RTI Python API verification successful"
 else
     echo "⚠️  WARNING: RTI Python API verification failed"
-    echo "   The API was installed but may not be working correctly"
 fi
 
 if python -c "import textual; print('Textual version:', textual.__version__)" 2>/dev/null; then
@@ -94,36 +80,30 @@ else
     echo "⚠️  WARNING: Textual verification failed"
 fi
 
-# Check for RTI license file
+# --- License File Check ---
 echo
 echo "Checking for RTI license file..."
-if [ -f "$SCRIPT_DIR/rti_license.dat" ]; then
-    echo "✓ Found rti_license.dat in tools directory"
-elif [ -n "$RTI_LICENSE_FILE" ] && [ -f "$RTI_LICENSE_FILE" ]; then
-    echo "✓ RTI_LICENSE_FILE environment variable set: $RTI_LICENSE_FILE"
+if [ -n "$RTI_LICENSE_FILE" ] && [ -f "$RTI_LICENSE_FILE" ]; then
+    echo "✓ RTI_LICENSE_FILE is set: $RTI_LICENSE_FILE"
+elif [ -f "$NDDSHOME/rti_license.dat" ]; then
+    echo "✓ Found license file at: $NDDSHOME/rti_license.dat"
 else
-    echo "⚠️  WARNING: No rti_license.dat found"
+    echo "⚠️  WARNING: No RTI license file found"
     echo ""
-    echo "   If your RTI installation requires a license file, you have two options:"
-    echo ""
-    echo "   Option 1: Copy license file to this directory"
-    echo "     cp /path/to/your/rti_license.dat $SCRIPT_DIR/rti_license.dat"
-    echo ""
-    echo "   Option 2: Set RTI_LICENSE_FILE environment variable"
-    echo "     export RTI_LICENSE_FILE=/path/to/your/rti_license.dat"
-    echo ""
+    echo "   RTI Spy requires a license file to run."
+    echo "   Please either:"
+    echo "     1. Set RTI_LICENSE_FILE environment variable"
+    echo "     2. Place rti_license.dat in $NDDSHOME/"
 fi
 
 echo
 echo "=== Installation Complete ==="
 echo
 echo "To run RTI Spy:"
-echo "  source $VENV_DIR/bin/activate"
-if [ -n "$NDDSHOME" ]; then
-    echo "  source \$NDDSHOME/resource/scripts/rtisetenv_<architecture>.bash"
-fi
-echo "  python $SCRIPT_DIR/rtispy.py --domain 1"
-echo
-echo "Or use the provided run script:"
 echo "  ./run_rtispy.sh --domain 1"
+echo ""
+echo "The run script will automatically:"
+echo "  - Detect NDDSHOME if not set"
+echo "  - Validate license file"
+echo "  - Activate the virtual environment"
 echo

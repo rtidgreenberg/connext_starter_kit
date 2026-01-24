@@ -153,11 +153,10 @@ class ExampleIOApp:
                     command_sample.command_id = f"cmd_{command_count:04d}"
                     command_sample.destination_id = DEFAULT_COMMAND_DESTINATION
                     command_sample.command_type = (
-                        example_types.CommandType.COMMAND_START
+                        example_types.CommandType.START
                     )
                     command_sample.message = f"Command from {app_name}"
-                    command_sample.timestamp_sec = current_time
-                    command_sample.urgent = False
+                    command_sample.urgent = 0
 
                     command_writer.write(command_sample)
                     print(
@@ -172,7 +171,7 @@ class ExampleIOApp:
                     button_sample.source_id = app_name
                     button_sample.button_id = "btn_1"
                     button_sample.button_state = (
-                        example_types.ButtonState.BUTTON_PRESSED
+                        example_types.ButtonState.PRESSED
                     )
                     button_sample.press_count = button_count
                     button_sample.last_press_timestamp_sec = current_time

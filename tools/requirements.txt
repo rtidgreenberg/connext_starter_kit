@@ -1,0 +1,4 @@
+# RTI Spy Tool Dependencies
+rti.connext==7.3.0
+textual
+textual-dev

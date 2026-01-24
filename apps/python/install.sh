@@ -1,127 +1,140 @@
 #!/bin/bash
-# Installation script for Connext DDS Python Application
-# Handles RTI Python API installation and package setup
+# Installation script for Connext DDS Python Applications
+# Sets up virtual environment and installs dependencies
 
 set -e  # Exit on any error
 
 echo "=== Connext DDS Python Application Setup ==="
 echo
 
-# Check if we're in a virtual environment and warn if not
-if [[ -z "$VIRTUAL_ENV" ]]; then
-    echo "⚠️  WARNING: No virtual environment detected"
-    echo "   It's recommended to use a virtual environment to avoid package conflicts."
-    echo "   To set up a virtual environment:"
-    echo "     python3 -m venv connext_dds_env"
-    echo "     source connext_dds_env/bin/activate"
-    echo "     ./install.sh"
-    echo
-    read -p "Continue without virtual environment? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Installation cancelled. Please set up a virtual environment first."
-        exit 1
-    fi
-else
-    echo "✓ Virtual environment detected: $VIRTUAL_ENV"
-fi
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+VENV_DIR="$REPO_ROOT/connext_dds_env"
 
-echo
-
-# Check if NDDSHOME is set
+# --- NDDSHOME Auto-Detection ---
 if [ -z "$NDDSHOME" ]; then
-    echo "ERROR: NDDSHOME environment variable not set"
-    echo ""
-    echo "To set up the RTI Connext environment, run:"
-    echo "  source <path_to_connext>/resource/scripts/rtisetenv_<architecture>.bash"
-    echo ""
-    echo "Example:"
-    echo "  source /opt/rti_connext_dds-7.3.0/resource/scripts/rtisetenv_x64Linux4gcc7.3.0.bash"
-    echo ""
-    echo "This script will set NDDSHOME, update PATH, and configure LD_LIBRARY_PATH."
-    echo ""
-    echo "Alternatively, you can manually set NDDSHOME:"
-    echo "  export NDDSHOME=/path/to/rti_connext_dds-7.3.0"
-    exit 1
-fi
-
-echo "✓ NDDSHOME: $NDDSHOME"
-
-# Check for RTI license file
-echo
-echo "Checking for RTI license file..."
-if [ -f "rti_license.dat" ]; then
-    echo "✓ Found rti_license.dat in current directory"
-    echo "  RTI Connext DDS will automatically use this license file"
-elif [ -n "$RTI_LICENSE_FILE" ] && [ -f "$RTI_LICENSE_FILE" ]; then
-    echo "✓ RTI_LICENSE_FILE environment variable set: $RTI_LICENSE_FILE"
-    if [ -f "$RTI_LICENSE_FILE" ]; then
-        echo "  License file exists and will be used"
+    echo "NDDSHOME not set. Searching for RTI Connext installation..."
+    
+    # Find latest version in ~/rti_connext_dds-*
+    LATEST_RTI=$(ls -d ~/rti_connext_dds-* 2>/dev/null | sort -V | tail -n 1)
+    
+    if [ -n "$LATEST_RTI" ] && [ -d "$LATEST_RTI" ]; then
+        export NDDSHOME="$LATEST_RTI"
+        echo "✓ Found RTI installation: $NDDSHOME"
     else
-        echo "⚠️  WARNING: RTI_LICENSE_FILE points to non-existent file: $RTI_LICENSE_FILE"
-    fi
-else
-    echo "⚠️  WARNING: No rti_license.dat found in current directory"
-    echo ""
-    echo "   If your RTI installation requires a license file, you have two options:"
-    echo ""
-    echo "   Option 1: Copy license file to this directory"
-    echo "     cp /path/to/your/rti_license.dat ./rti_license.dat"
-    echo ""
-    echo "   Option 2: Set RTI_LICENSE_FILE environment variable"
-    echo "     export RTI_LICENSE_FILE=/path/to/your/rti_license.dat"
-    echo ""
-    echo ""
-    echo "   If RTI is properly licensed system-wide, you can ignore this warning."
-    echo
-    read -p "Continue without license file in working directory? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Installation cancelled. Please copy your license file and run the script again."
+        echo "ERROR: NDDSHOME not set and no RTI installation found in ~/rti_connext_dds-*"
+        echo ""
+        echo "Please either:"
+        echo "  1. Set NDDSHOME environment variable:"
+        echo "     export NDDSHOME=/path/to/rti_connext_dds-x.x.x"
+        echo ""
+        echo "  2. Install RTI Connext DDS in your home directory"
+        echo ""
         exit 1
     fi
+else
+    echo "✓ NDDSHOME: $NDDSHOME"
 fi
 
-# Install RTI Python API
+# --- Virtual Environment Setup ---
 echo
-echo "Installing RTI Connext Python API..."
-pip install rti.connext==7.3.0
-echo "✓ RTI Python API installed successfully"
+if [ -d "$VENV_DIR" ]; then
+    echo "✓ Virtual environment already exists at: $VENV_DIR"
+else
+    echo "Creating virtual environment at repository root..."
+    python3 -m venv "$VENV_DIR"
+    echo "✓ Virtual environment created at: $VENV_DIR"
+fi
 
-# Verify installation
+# Activate virtual environment
+echo
+echo "Activating virtual environment..."
+source "$VENV_DIR/bin/activate" 2>/dev/null || true
+export PATH="$VENV_DIR/bin:$PATH"
+echo "✓ Virtual environment activated"
+
+# Upgrade pip
+echo
+echo "Upgrading pip..."
+pip install --upgrade pip
+
+# --- Install Dependencies ---
+echo
+echo "Installing dependencies from requirements.txt..."
+pip install -r "$SCRIPT_DIR/requirements.txt"
+echo "✓ Dependencies installed successfully"
+
+# Verify RTI installation
 echo
 echo "Verifying RTI Python API installation..."
-if python -c "import rti.connextdds; print('RTI API version:', rti.connextdds.__version__)" 2>/dev/null; then
+if python -c "import rti.connextdds" 2>/dev/null; then
     echo "✓ RTI Python API verification successful"
 else
-    echo "WARNING: RTI Python API verification failed"
-    echo "The API was installed but may not be working correctly"
+    echo "⚠️  WARNING: RTI Python API verification failed"
+    echo "   The API was installed but may not be working correctly"
 fi
 
-# Generate DDS bindings
+# --- Generate Python Bindings if Missing ---
 echo
-echo "Generating Python DDS bindings..."
-make codegen
-echo "✓ DDS bindings generated successfully"
+BINDINGS_FILE="$REPO_ROOT/dds/build/python_gen/ExampleTypes.py"
+if [ ! -f "$BINDINGS_FILE" ]; then
+    echo "Python bindings not found. Running top-level cmake build..."
+    echo ""
+    
+    mkdir -p "$REPO_ROOT/build"
+    cd "$REPO_ROOT/build"
+    cmake ..
+    cmake --build .
+    cd "$SCRIPT_DIR"
+    
+    if [ ! -f "$BINDINGS_FILE" ]; then
+        echo "⚠️  WARNING: Failed to generate Python bindings."
+        echo "   Please check cmake build output for errors."
+        echo "   You may need to set CONNEXTDDS_ARCH for C++ builds."
+    else
+        echo "✓ Python bindings generated successfully"
+    fi
+else
+    echo "✓ Python bindings already exist"
+fi
 
-# Install the package
+# --- License File Check ---
 echo
-echo "Installing Python package in development mode..."
-pip install -e .
-echo "✓ Package installed successfully"
+echo "Checking for RTI license file..."
+if [ -n "$RTI_LICENSE_FILE" ] && [ -f "$RTI_LICENSE_FILE" ]; then
+    echo "✓ RTI_LICENSE_FILE is set: $RTI_LICENSE_FILE"
+elif [ -f "$NDDSHOME/rti_license.dat" ]; then
+    echo "✓ Found license file at: $NDDSHOME/rti_license.dat"
+else
+    echo "⚠️  WARNING: No RTI license file found"
+    echo ""
+    echo "   Python applications require a license file to run."
+    echo "   Please either:"
+    echo "     1. Set RTI_LICENSE_FILE environment variable"
+    echo "     2. Place rti_license.dat in $NDDSHOME/"
+fi
 
 echo
 echo "=== Installation Complete ==="
 echo
-
-echo "✓ Installation completed"
-echo
-echo "To run the example I/O application:"
-echo "  cd example_io_app"
-echo "  python example_io_app.py --domain_id 1 --verbosity 2"
-echo
-echo "Other useful commands:"
-echo "  make run        - Run the application"
-echo "  make clean      - Clean build artifacts"
-echo "  make help       - Show all available commands"
+echo "To run Python applications, use the run.sh script in each app directory:"
+echo ""
+echo "  Example I/O App:"
+echo "    cd $SCRIPT_DIR/example_io_app"
+echo "    ./run.sh --domain_id 1"
+echo ""
+echo "  Large Data App:"
+echo "    cd $SCRIPT_DIR/large_data_app"
+echo "    ./run.sh --domain_id 1"
+echo ""
+echo "  Downsampled Reader:"
+echo "    cd $SCRIPT_DIR/downsampled_reader"
+echo "    ./run.sh --domain_id 1"
+echo ""
+echo "The run.sh scripts will automatically:"
+echo "  - Detect NDDSHOME if not set"
+echo "  - Validate license file"
+echo "  - Activate the virtual environment"
+echo "  - Build Python bindings if missing"
 echo

@@ -4,26 +4,22 @@ Python applications demonstrating RTI Connext DDS capabilities with example data
 
 ## Quick Start
 
-1. **Get an RTI license and set the environment variable:**
-   
-   Visit https://www.rti.com/get-connext to request a free trial license (you'll receive it via email within minutes):
+1. **Get an RTI license** - Visit https://www.rti.com/get-connext
+
+2. **Check your email** - You'll receive an automated email with `rti_license.dat` within minutes
+
+3. **Set the license environment variable:**
    ```bash
    export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
    ```
 
-2. **Run the installation script:**
+4. **Run an application:**
    ```bash
-   cd apps/python
-   ./install.sh
+   cd apps/python/example_io_app
+   ./run.sh --domain_id 1
    ```
 
-3. **Run an application:**
-   ```bash
-   cd example_io_app
-   python example_io_app.py --domain_id 1
-   ```
-
-The install script will automatically set up the virtual environment, install all dependencies, and generate DDS bindings.
+That's it! The `run.sh` script automatically handles NDDSHOME detection, virtual environment setup, and dependency installation.
 
 ---
 
@@ -43,22 +39,21 @@ The install script will automatically set up the virtual environment, install al
 apps/python/
 ├── example_io_app/         # Example I/O application
 │   ├── example_io_app.py   # Main application
+│   ├── run.sh              # Run script (handles all setup)
 │   └── README.md           # Documentation
 ├── large_data_app/         # Large data transfer demo
 │   ├── large_data_app.py   # Main application
+│   ├── run.sh              # Run script
 │   └── README.md           # Documentation
 ├── downsampled_reader/     # Time-based filtering demo
 │   ├── downsampled_reader.py
+│   ├── run.sh              # Run script
 │   └── README.md           # Documentation
-├── connext_dds_env/        # Virtual environment
 ├── README.md               # This file
-├── install.sh              # Installation script
-├── Makefile                # Build automation
-├── pyproject.toml          # Project configuration
-├── build_hooks.py          # Build hooks
-├── requirements.txt        # Common dependencies
-├── rti_license.dat         # RTI license (optional if RTI_LICENSE_FILE env var is set)
-└── setup.py                # Setup script
+├── install.sh              # Installation script (called by run.sh if needed)
+└── requirements.txt        # Common dependencies
+
+connext_dds_env/            # Shared virtual environment (at repository root)
 ```
 
 ## Current Applications
@@ -78,10 +73,10 @@ apps/python/
 ## Detailed Setup
 
 ### Prerequisites
-- RTI Connext DDS Python API
+- RTI Connext DDS 7.3.0+ installed
 - Python 3.8+
-- Built DDS Python libraries (`../../dds/python/build/`)
-- **RTI license file with `RTI_LICENSE_FILE` environment variable set**
+- Built DDS Python bindings (from top-level cmake build)
+- RTI license file
 
 #### Getting an RTI License
 
@@ -90,35 +85,46 @@ If you don't have an RTI Connext license:
 1. Visit https://www.rti.com/get-connext
 2. Fill out the form to request a free trial license
 3. You'll receive an automated email with the license file (`rti_license.dat`) within a few minutes
-4. Set the `RTI_LICENSE_FILE` environment variable to point to the license file:
-   ```bash
-   export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
-   ```
+4. Either:
+   - Set the `RTI_LICENSE_FILE` environment variable:
+     ```bash
+     export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
+     ```
+   - Or place the license file at `$NDDSHOME/rti_license.dat`
 
 > **Tip**: Add the `export RTI_LICENSE_FILE=...` line to your `~/.bashrc` or `~/.bash_profile` to make it permanent.
 
+> **Note**: The `run.sh` scripts will automatically check for the license file and provide helpful error messages if not found.
+
 ### Installation
 
+Installation is handled automatically by each app's `run.sh` script. For manual installation:
+
 ```bash
-# Navigate to python apps directory
-cd /home/rti/connext_starter_kit/apps/python
-
-# Activate virtual environment
-source connext_dds_env/bin/activate
-
-# Set NDDSHOME
-export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
-
-# Run installation (installs RTI API and generates DDS bindings)
+cd apps/python
 ./install.sh
 ```
 
+The install script:
+- Auto-detects `NDDSHOME` from `~/rti_connext_dds-*` (uses latest version)
+- Creates a shared virtual environment at the repository root (`connext_dds_env/`)
+- Installs dependencies from `requirements.txt`
+- Triggers DDS Python binding generation if missing
+
 ### Run Application
+
+Use the `run.sh` script in each app directory:
 
 ```bash
 cd example_io_app
-python3 example_io_app.py --domain_id 1 --verbosity 2
+./run.sh --domain_id 1 --verbosity 2
 ```
+
+The run script handles all environment setup automatically, including:
+- NDDSHOME detection
+- License file validation
+- Virtual environment activation
+- PYTHONPATH configuration for DDS bindings
 
 ## Development
 
@@ -133,11 +139,13 @@ python3 example_io_app.py --domain_id 1 --verbosity 2
    ```
    your_app_name/
    ├── your_app_name.py
-   ├── requirements.txt (optional)
+   ├── run.sh              # Copy from example_io_app/run.sh and update APP_SCRIPT
    └── README.md
    ```
 
-3. **Template**: Copy from `example_io_app/example_io_app.py`
+3. **Template**: Copy `run.sh` and main script from `example_io_app/`
+
+4. **Update run.sh**: Change the `APP_SCRIPT` variable to your app's filename
 
 - **Directory Names:** Use lowercase with underscores (e.g., `sensor_fusion`, `navigation_control`)
 - **Main Files:** Use `{app_name}.py` (e.g., `example_io_app.py`, `sensor_fusion.py`)
@@ -217,16 +225,16 @@ The application uses QoS profiles from `../../dds/qos/DDS_QOS_PROFILES.xml`:
 - **CMake 3.12+** for automatic code generation
 - **RTI Connext Python API** (automatically installed by install script)
 
-## Current Setup Status
+## Setup Notes
 
-✅ **Virtual Environment**: `connext_dds_env` is configured and ready  
-✅ **RTI Installation**: Compatible with RTI Connext DDS 7.3.0  
-✅ **Generated Bindings**: Python DDS types generated from IDL  
-✅ **Verified Working**: Application tested and fully functional  
+**Note**: Each app's `run.sh` script handles all setup automatically:
+- Auto-detects NDDSHOME from `~/rti_connext_dds-*`
+- Validates license file existence
+- Activates/creates the shared virtual environment
+- Installs dependencies if missing
+- Triggers Python binding generation if needed
 
-**Note**: The `install.sh` script handles all setup automatically, including RTI API installation and DDS code generation.
-
-**⚠️ Important**: If you cloned this repository, ensure you have the git submodules by cloning with `--recurse-submodules` or running:
+**⚠️ Important**: If you cloned this repository, ensure you have the git submodules:
 ```bash
 git submodule update --init --recursive
 ```
@@ -242,90 +250,50 @@ git submodule update --init --recursive
 
 ### Virtual Environment Management
 
+The virtual environment is shared across all Python apps and tools, located at the repository root:
+
 ```bash
 # Activate virtual environment (Linux/macOS)
-cd /home/rti/connext_starter_kit/apps/python
+cd /home/rti/connext_starter_kit
 source connext_dds_env/bin/activate
 
 # Deactivate virtual environment
 deactivate
 ```
 
+> **Note**: The `run.sh` scripts handle virtual environment activation automatically.
+
 ### RTI Python API Installation
 
 **📚 Official Installation Guide**: [RTI Connext DDS Installation Guide - Python Packages](https://community.rti.com/static/documentation/connext-dds/current/doc/manuals/connext_dds_professional/installation_guide/installing.html#installing-python-c-or-ada-packages)
 
-**Installation Options:**
-
-1. **Manual installation (Recommended):**
-   ```bash
-   # Set NDDSHOME environment variable first
-   export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
-   
-   # Activate virtual environment
-   source connext_dds_env/bin/activate
-   
-   # Install RTI Python API
-   pip install rti.connext==7.3.0
-   ```
-
-2. **Using requirements.txt:**
-   ```bash
-   # Install all dependencies including RTI Connext Python API
-   pip install -r requirements.txt
-   ```
-
-3. **Using install script (requires NDDSHOME to be set):**
-   ```bash
-   # Set NDDSHOME first, then run install script
-   export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
-   ./install.sh
-   ```
-
-### Generated Python Modules
-The following are automatically created via CMake:
-- `../../dds/python/codegen/ExampleTypes.py` (example_types module)
-- `../../dds/python/codegen/Definitions.py` (Topic definitions and QoS constants)
-
-## Installation and Usage
-
-### Prerequisites Setup
-
-Before running the application, you need to set up the environment:
+The RTI Python API is installed automatically by `run.sh` or `install.sh`. For manual installation:
 
 ```bash
-# 1. Set RTI environment variable (required)
-export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
-
-# 2. Navigate to python apps directory
-cd /home/rti/connext_starter_kit/apps/python
-
-# 3. Activate virtual environment
+# Activate virtual environment
 source connext_dds_env/bin/activate
 
-# 4. Install RTI Python API and generate DDS bindings (first time only)
-pip install rti.connext==7.3.0
-cd ../../dds/python && rm -rf build && mkdir build && cd build && cmake .. && make -j4
+# Install from requirements.txt (includes RTI API)
+pip install -r requirements.txt
 ```
+
+### Generated Python Modules
+The following are automatically created via CMake (from top-level build):
+- `dds/build/python_gen/` - Generated Python DDS types
+
+## Running Applications
 
 ### Quick Start: Testing example_io_app
 
-**🚀 Fastest way to test the current application:**
+**🚀 Fastest way to test:**
 
 ```bash
-# Navigate to python apps directory and set up environment
-cd /home/rti/connext_starter_kit/apps/python
-source connext_dds_env/bin/activate
-export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
-
-# If first time setup, run install script
-./install.sh
-
-# Navigate to application and run it
-cd example_io_app
-python3 example_io_app.py --help
-python3 example_io_app.py --domain_id 1 --verbosity 2
+cd apps/python/example_io_app
+./run.sh --help
+./run.sh --domain_id 1 --verbosity 2
 ```
+
+The `run.sh` script handles all setup automatically (NDDSHOME detection, license validation, venv activation, PYTHONPATH).
 
 ## Application Behavior
 
@@ -360,22 +328,22 @@ The application supports configurable DDS logging verbosity:
 
 #### Usage Examples
 ```bash
-# From apps/python/ directory (where rti_license.dat is located):
+# From apps/python/example_io_app/ directory:
 
 # Run with default settings (domain 1, verbosity 1)
-python example_io_app/example_io_app.py
+./run.sh
 
 # Run on domain 5 with minimal logging
-python example_io_app/example_io_app.py --domain_id 5 --verbosity 0
+./run.sh --domain_id 5 --verbosity 0
 
 # Run with maximum DDS debugging
-python example_io_app/example_io_app.py --domain_id 1 --verbosity 5
+./run.sh --domain_id 1 --verbosity 5
 
 # Run with custom QoS file
-python example_io_app/example_io_app.py --qos_file /path/to/custom/qos.xml
+./run.sh --qos_file /path/to/custom/qos.xml
 
 # Show help
-python3 example_io_app.py --help
+./run.sh --help
 ```
 
 ### Distributed Logger Integration
@@ -535,71 +503,67 @@ python3 example_io_app.py --domain_id 1 --verbosity 2
 ### Common Issues
 
 #### **Environment Setup Issues**
-1. **Virtual environment not activated**
+1. **NDDSHOME not found**
+   ```
+   ERROR: Could not find RTI Connext DDS installation.
+   ```
+   **Solution**: Either set `NDDSHOME` environment variable or ensure RTI Connext DDS is installed at `~/rti_connext_dds-*`:
    ```bash
-   # Solution: Always activate before running
-   cd /home/rti/connext_starter_kit/apps/python
-   source connext_dds_env/bin/activate
-   # Verify with:
-   which python  # Should point to connext_dds_env/bin/python
+   export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
    ```
 
-2. **NDDSHOME not set**
+2. **License file not found**
+   ```
+   ERROR: RTI license file not found.
+   ```
+   **Solution**: Either set `RTI_LICENSE_FILE` or place license at `$NDDSHOME/rti_license.dat`:
    ```bash
-   # Solution: Set environment variable before running install script
-   export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
+   export RTI_LICENSE_FILE=/path/to/rti_license.dat
    ```
 
 #### **Installation Issues**
 1. **Import Error: No module named 'rti.connextdds'**
    ```bash
    # Solution: Run the install script
+   cd apps/python
    ./install.sh
    ```
 
-2. **CMake cache errors**
+2. **Python bindings not found**
    ```bash
-   # Solution: Clean and regenerate DDS bindings
-   cd ../../dds/python && rm -rf build && mkdir build && cd build && cmake .. && make -j4
+   # Solution: Build from repository root
+   cd connext_starter_kit
+   mkdir -p build && cd build
+   cmake .. && cmake --build .
    ```
 
 #### **Runtime Issues**
-1. **DDS Environment**: Ensure RTI Connext DDS environment is properly configured
-2. **Generated Files Missing**: Regenerate DDS Python bindings
+1. **Generated files missing**: Run cmake build from repository root
+2. **Virtual environment issues**: Delete `connext_dds_env/` and run install.sh again
 
 ### Debugging
-- Enable verbose logging by setting verbosity level to 5
+- Enable verbose logging: `./run.sh --verbosity 5`
 - Check QoS profile loading messages
 - Monitor subscriber ready messages
-- Review detailed data printouts from processing functions
 
 ## Related Files
 - **C++ Companion**: `../cxx11/example_io_app/example_io_app.cxx` - C++ application with similar functionality
 - **C++ Headers**: `../cxx11/example_io_app/application.hpp` - C++ DDS application architecture
-- **IDL Definitions**: `../../dds/datamodel/ExampleTypes.idl` - DDS data type definitions
-- **QoS Configuration**: `../../dds/qos/DDS_QOS_PROFILES.xml` - Shared QoS profiles for both C++ and Python applications
+- **IDL Definitions**: `../../dds/datamodel/idl/` - DDS data type definitions
+- **QoS Configuration**: `../../dds/qos/DDS_QOS_PROFILES.xml` - Shared QoS profiles
 
 ## Summary
 
-This Python folder contains a single, clean implementation:
-
-- **📁 One Application**: `example_io_app` - fully functional DDS application
-- **📄 Correct Data Types**: Uses only `example_types` from ExampleTypes.idl (Position, Command, Button, Config)  
-- **🔧 Ready Setup**: Virtual environment configured with all dependencies
-- **✅ Tested & Working**: All functionality verified and documented
-- **🚀 Simple Usage**: Run `./install.sh` once, then use `python3 example_io_app.py`
+Each Python application has a `run.sh` script that handles all setup automatically:
 
 **Key Commands:**
 ```bash
-# Setup (run once)
-cd /home/rti/connext_starter_kit/apps/python
-source connext_dds_env/bin/activate
-export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
-./install.sh
+# Build DDS bindings (from repository root, run once)
+mkdir -p build && cd build && cmake .. && cmake --build .
 
-# Run application
-cd example_io_app  
-python3 example_io_app.py --domain_id 1 --verbosity 2
+# Run an application (handles all setup automatically)
+cd apps/python/example_io_app
+./run.sh --domain_id 1 --verbosity 2
 ```
 
 ## License

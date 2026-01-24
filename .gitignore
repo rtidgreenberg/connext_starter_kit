@@ -43,3 +43,5 @@ services/converted/
 apps/cxx11/burst_large_data_app/build/
 
 build/
+
+connext_dds_env/

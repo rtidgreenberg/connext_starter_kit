@@ -2,6 +2,24 @@
 
 Python application demonstrating high-performance transfer of large data (multi-megabyte images) using RTI Connext DDS with shared memory transport.
 
+## Quick Start
+
+1. **Get an RTI license** - Visit https://www.rti.com/get-connext
+
+2. **Check your email** - You'll receive an automated email with `rti_license.dat` within minutes
+
+3. **Set the license environment variable:**
+   ```bash
+   export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
+   ```
+
+4. **Run the application:**
+   ```bash
+   ./run.sh --domain_id 1
+   ```
+
+---
+
 ## Overview
 
 This application publishes and subscribes to Image data (~900 KB per sample) using the `LARGE_DATA_PARTICIPANT` and `LARGE_DATA_SHMEM` QoS profiles optimized for large data transfers.
@@ -20,34 +38,10 @@ This application publishes and subscribes to Image data (~900 KB per sample) usi
 - Python 3.6+
 - Virtual environment configured (see [apps/python/README.md](../README.md))
 
-## Building
-
-The Python application uses generated DDS types from the top-level build directory. Ensure types are generated:
+## Usage
 
 ```bash
-cd connext_starter_kit/build
-cmake .. && make -j4
-```
-
-## Running
-
-### Activate Virtual Environment
-
-```bash
-cd /home/rti/connext_starter_kit/apps/python
-source connext_dds_env/bin/activate
-```
-
-### Run Application
-
-```bash
-cd large_data_app
-python large_data_app.py
-```
-
-**Command-line Options**:
-```bash
-python large_data_app.py -d 1 -q ../../../dds/qos/DDS_QOS_PROFILES.xml -v 2
+./run.sh [OPTIONS]
 
 Options:
   -d, --domain_id    Domain ID (default: 1)

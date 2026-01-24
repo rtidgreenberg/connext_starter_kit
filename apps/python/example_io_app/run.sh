@@ -1,14 +1,14 @@
 #!/bin/bash
-# Run script for RTI Spy Tool
+# Run script for Example I/O Application (Python)
 # Handles environment setup and executes the application
 
 set -e  # Exit on any error
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
-echo "=== RTI Spy Tool ==="
+echo "=== Example I/O Application (Python) ==="
 echo
 
 # --- NDDSHOME Auto-Detection ---
@@ -48,6 +48,10 @@ elif [ -f "$NDDSHOME/rti_license.dat" ]; then
     export RTI_LICENSE_FILE="$NDDSHOME/rti_license.dat"
     echo "✓ Using license from NDDSHOME: $RTI_LICENSE_FILE"
     LICENSE_FOUND=true
+elif [ -f "$SCRIPT_DIR/rti_license.dat" ]; then
+    export RTI_LICENSE_FILE="$SCRIPT_DIR/rti_license.dat"
+    echo "✓ Using license from app directory: $RTI_LICENSE_FILE"
+    LICENSE_FOUND=true
 fi
 
 if [ "$LICENSE_FOUND" = false ]; then
@@ -67,26 +71,16 @@ fi
 echo
 VENV_DIR="$REPO_ROOT/connext_dds_env"
 if [ ! -d "$VENV_DIR" ]; then
-    echo "Virtual environment not found at: $VENV_DIR"
-    echo "Running install.sh to set up the environment..."
-    echo
+    echo "Virtual environment not found. Running install script..."
+    echo ""
     
-    if [ -x "$SCRIPT_DIR/install.sh" ]; then
-        "$SCRIPT_DIR/install.sh"
-    else
-        echo "ERROR: install.sh not found or not executable"
-        echo "Please run: chmod +x $SCRIPT_DIR/install.sh"
-        exit 1
-    fi
+    "$REPO_ROOT/apps/python/install.sh"
     
     if [ ! -d "$VENV_DIR" ]; then
-        echo "ERROR: Installation failed. Virtual environment was not created."
+        echo "ERROR: Failed to create virtual environment."
+        echo "Please check install script output for errors."
         exit 1
     fi
-    
-    echo
-    echo "Installation complete. Starting RTI Spy..."
-    echo
 fi
 
 echo "Activating virtual environment..."
@@ -94,16 +88,28 @@ source "$VENV_DIR/bin/activate" 2>/dev/null || true
 export PATH="$VENV_DIR/bin:$PATH"
 echo "✓ Virtual environment activated"
 
-# --- Check for required dependencies ---
-if ! python -c "import textual" 2>/dev/null; then
+# --- Check for Python Bindings ---
+echo
+BINDINGS_FILE="$REPO_ROOT/dds/build/python_gen/ExampleTypes.py"
+if [ ! -f "$BINDINGS_FILE" ]; then
+    echo "Python bindings not found. Running install script..."
     echo ""
-    echo "Required dependencies not found. Running install script..."
-    echo ""
-    "$SCRIPT_DIR/install.sh"
+    
+    "$REPO_ROOT/apps/python/install.sh"
+    
+    if [ ! -f "$BINDINGS_FILE" ]; then
+        echo "ERROR: Failed to generate Python bindings."
+        echo "Please check install script output for errors."
+        exit 1
+    fi
+else
+    echo "✓ Python bindings found"
 fi
 
 # --- Run Application ---
 echo
-echo "Starting RTI Spy..."
-echo "-------------------"
-python "$SCRIPT_DIR/rtispy.py" "$@"
+echo "Starting Example I/O Application..."
+echo "-----------------------------------"
+export PYTHONPATH="$REPO_ROOT/dds/build:$PYTHONPATH"
+cd "$SCRIPT_DIR"
+python example_io_app.py "$@"

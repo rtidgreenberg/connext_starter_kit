@@ -85,9 +85,10 @@ cmake --build .
 If you need custom data types beyond existing ones:
 
 ```bash
-cd ../../dds/datamodel/
-# Edit or create new .idl files
+cd <repo_root>/dds/datamodel/
 ```
+
+Edit or Create new IDL files.
 
 **Available Example Data Types:**
 - `Button` - Button input events

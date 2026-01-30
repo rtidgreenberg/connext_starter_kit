@@ -8,7 +8,7 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     message(FATAL_ERROR 
         "The DDS types library cannot be built standalone.\n"
         "Please build from the top-level directory:\n"
-        "  cd /home/rti/connext_starter_kit\n"
+        "  cd <path-to-connext_starter_kit>\n"
         "  mkdir -p build && cd build\n"
         "  cmake .. -DCONNEXTDDS_ARCH=x64Linux4gcc7.3.0\n"
         "  cmake --build ."
@@ -233,8 +233,6 @@ if(BUILD_CXX_TYPES_LIBRARY AND GENERATE_CXX11_TYPES)
     
     # Set library properties
     set_target_properties(dds_typesupport PROPERTIES
-        VERSION ${PROJECT_VERSION}
-        SOVERSION 1
         OUTPUT_NAME "dds_typesupport"
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib"
         ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib"

@@ -9,7 +9,7 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     message(FATAL_ERROR 
         "The command_override app cannot be built standalone.\n"
         "Please build from the top-level directory:\n"
-        "  cd /home/rti/connext_starter_kit\n"
+        "  cd <path-to-connext_starter_kit>\n"
         "  mkdir -p build && cd build\n"
         "  cmake .. -DCONNEXTDDS_ARCH=x64Linux4gcc7.3.0\n"
         "  cmake --build ."
@@ -34,19 +34,11 @@ find_package(RTIConnextDDS
         distributed_logger
 )
 
-# Set up directories
-set(DDS_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../dds/build")
+# Set up directories - use CMAKE_BINARY_DIR for build outputs
+set(DDS_BUILD_DIR "${CMAKE_BINARY_DIR}/dds")
 set(DDS_LIB_BUILD_DIR "${DDS_BUILD_DIR}/lib")
 set(DDS_CODEGEN_DIR "${DDS_BUILD_DIR}/cxx11_gen")
 set(DDS_UTILS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../dds/utils/cxx11")
-
-# Find the shared libraries
-find_library(DDS_TYPESUPPORT_LIB 
-    NAMES dds_typesupport
-    PATHS ${DDS_LIB_BUILD_DIR}
-    NO_DEFAULT_PATH
-    REQUIRED
-)
 
 # Create the executable
 add_executable(command_override
@@ -63,10 +55,10 @@ target_include_directories(command_override
         ${RTIConnextDDS_INCLUDE_DIRS}
 )
 
-# Link with libraries
+# Link with libraries - use dds_typesupport target directly
 target_link_libraries(command_override
     PRIVATE
-        ${DDS_TYPESUPPORT_LIB}
+        dds_typesupport
         RTIConnextDDS::cpp2_api
         RTIConnextDDS::distributed_logger_cpp2
         RTIConnextDDS::metp  # Required for ZeroCopy types used by other apps in library
@@ -97,7 +89,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 
 # Print information
-message(STATUS "DDS shared library: ${DDS_TYPESUPPORT_LIB}")
+message(STATUS "DDS shared library: dds_typesupport (CMake target)")
 message(STATUS "DDS codegen headers: ${DDS_CODEGEN_DIR}")
 message(STATUS "DDS utils headers: ${DDS_UTILS_DIR}")
 

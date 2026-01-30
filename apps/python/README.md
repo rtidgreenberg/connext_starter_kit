@@ -254,7 +254,7 @@ The virtual environment is shared across all Python apps and tools, located at t
 
 ```bash
 # Activate virtual environment (Linux/macOS)
-cd /home/rti/connext_starter_kit
+cd <path-to-connext_starter_kit>
 source connext_dds_env/bin/activate
 
 # Deactivate virtual environment
@@ -435,10 +435,10 @@ This Python application is designed to work with the C++ example_io_app applicat
 #### Testing Both Applications Together
 ```bash
 # Terminal 1 (C++ Application on Domain 5)
-cd /home/rti/connext_starter_kit/apps/cxx11/example_io_app/build && ./example_io_app -d 5 -v 1
+cd <path-to-connext_starter_kit>/build/apps/cxx11/example_io_app && ./example_io_app -d 5 -v 1
 
 # Terminal 2 (Python Application on Domain 5)  
-cd /home/rti/connext_starter_kit/apps/python
+cd <path-to-connext_starter_kit>/apps/python
 source connext_dds_env/bin/activate
 export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
 cd example_io_app
@@ -459,7 +459,7 @@ Test the application step-by-step:
 
 ```bash
 # 1. Set up environment
-cd /home/rti/connext_starter_kit/apps/python
+cd <path-to-connext_starter_kit>/apps/python
 source connext_dds_env/bin/activate
 export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
 
@@ -481,11 +481,11 @@ Test with the C++ application for full communication:
 
 ```bash
 # Terminal 1: Start C++ application
-cd /home/rti/connext_starter_kit/apps/cxx11/example_io_app
+cd <path-to-connext_starter_kit>/apps/cxx11/example_io_app
 build/example_io_app -d 1 -v 1
 
 # Terminal 2: Start Python application  
-cd /home/rti/connext_starter_kit/apps/python
+cd <path-to-connext_starter_kit>/apps/python
 source connext_dds_env/bin/activate
 export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
 cd example_io_app

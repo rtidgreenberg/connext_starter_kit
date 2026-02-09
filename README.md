@@ -4,7 +4,7 @@ Cross-language DDS system/application templates to accelerate development.
 
 ## Prerequisites
 
-- **RTI Connext DDS 7.3.0+** installed and licensed
+- **RTI Connext DDS 7.3.0+** [installed and licensed](https://community.rti.com/static/documentation/connext-dds/current/doc/manuals/connext_dds_professional/installation_guide/index.html)
 - **C++14 compiler** (GCC 7.3.0+ or equivalent) for C++ apps
 - **Python 3.8+** with virtual environment support for Python apps
 - **CMake 3.12+** for build configuration

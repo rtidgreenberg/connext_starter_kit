@@ -41,7 +41,7 @@ using namespace rti::all;
 using namespace rti::dist_logger;
 
 constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
-const std::string APP_NAME = "Example CXX IO APP";
+const std::string APP_NAME = "Example CXX IO FOXGLOVE";
 
 
 void process_command_data(dds::sub::DataReader<example_types::Command> reader)

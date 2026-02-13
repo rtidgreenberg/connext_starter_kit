@@ -12,7 +12,10 @@ cd "$PROJECT_ROOT" || exit 1
 BINARY="./build/apps/cxx11/command_override/command_override"
 if [ ! -f "$BINARY" ]; then
     echo "Binary not found. Building project..."
-    cd ./build && cmake --build . || exit 1
+    mkdir -p ./build
+    cd ./build
+    cmake .. || exit 1
+    cmake --build . || exit 1
     cd ..
 fi
 

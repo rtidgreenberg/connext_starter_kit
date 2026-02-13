@@ -77,7 +77,7 @@ fi
 
 # --- Generate Python Bindings if Missing ---
 echo
-BINDINGS_FILE="$REPO_ROOT/dds/build/python_gen/ExampleTypes.py"
+BINDINGS_FILE="$REPO_ROOT/build/dds/python_gen/ExampleTypes.py"
 if [ ! -f "$BINDINGS_FILE" ]; then
     echo "Python bindings not found. Running top-level cmake build..."
     echo ""

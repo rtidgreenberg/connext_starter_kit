@@ -86,7 +86,7 @@ echo "✓ Virtual environment activated"
 
 # --- Check for Python Bindings ---
 echo
-BINDINGS_FILE="$REPO_ROOT/dds/build/python_gen/ExampleTypes.py"
+BINDINGS_FILE="$REPO_ROOT/build/dds/python_gen/ExampleTypes.py"
 if [ ! -f "$BINDINGS_FILE" ]; then
     echo "Python bindings not found. Running install script..."
     echo ""
@@ -106,6 +106,6 @@ fi
 echo
 echo "Starting Downsampled Reader Application..."
 echo "------------------------------------------"
-export PYTHONPATH="$REPO_ROOT/dds/build:$PYTHONPATH"
+export PYTHONPATH="$REPO_ROOT/build/dds:$PYTHONPATH"
 cd "$SCRIPT_DIR"
-python downsampled_reader.py "$@"
+python3 downsampled_reader.py "$@"

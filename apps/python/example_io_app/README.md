@@ -41,8 +41,8 @@ Python implementation demonstrating minimal DDS middleware setup with RTI Connex
 
 ## Application Behavior
 
-**Publishers (3 Writers)**:
-- Command, Button, Config messages published every 2 seconds
+**Publishers (2 Writers)**:
+- Command, Button messages published every 2 seconds
 
 **Subscriber (1 Reader)**:
 - Position messages with async processing
@@ -58,8 +58,6 @@ Options:
   -q, --qos_file <path>    QoS XML path (default: ../../../dds/qos/DDS_QOS_PROFILES.xml)
   -h, --help              Show help
 ```
-[CONFIG_PUBLISHER] Published Config - Parameter: update_rate
-DL Info: : Published Config - parameter:update_rate, value:1.0
 [MAIN] ExampleIOApp processing loop - iteration 0
 DL Info: : Example IO processing loop - iteration: 0
 
@@ -89,11 +87,10 @@ PUBLISHER_SLEEP_INTERVAL = 2        # Publishing interval (seconds)
 MAIN_TASK_SLEEP_INTERVAL = 5        # Status update interval (seconds)
 DEFAULT_APP_NAME = "Example Python IO App"
 DEFAULT_COMMAND_DESTINATION = "target_system"
-DEFAULT_CONFIG_DESTINATION = "config_target"
 ```
 
 ### Task Coordination
-- **Publisher Task**: Publishes Command, Button, and Config messages every 2 seconds
+- **Publisher Task**: Publishes Command and Button messages every 2 seconds
 - **Subscriber Task**: Asynchronously processes incoming Position data
 - **Main Task**: Provides periodic status updates every 5 seconds
 - **All tasks run concurrently** using `asyncio.gather()` for proper coordination
@@ -101,7 +98,7 @@ DEFAULT_CONFIG_DESTINATION = "config_target"
 ## Integration with C++ Application
 
 Designed for cross-language communication with the C++ Example I/O application:
-- **Python → C++**: Command, Button, Config messages published by Python, subscribed by C++
+- **Python → C++**: Command, Button messages published by Python, subscribed by C++
 - **C++ → Python**: Position messages published by C++, subscribed by Python
 - **Identical Data Types**: Both use the same IDL-generated types (ExampleTypes)
 - **Shared QoS Profiles**: Both applications use the same XML QoS configuration

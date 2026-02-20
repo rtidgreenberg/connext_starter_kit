@@ -31,7 +31,6 @@ PUBLISHER_SLEEP_INTERVAL = 2  # seconds for command/button/config publishing
 MAIN_TASK_SLEEP_INTERVAL = 5  # seconds
 DEFAULT_APP_NAME = "Example Python IO App"
 DEFAULT_COMMAND_DESTINATION = "target_system"
-DEFAULT_CONFIG_DESTINATION = "config_target"
 
 async def process_position_data(reader):
     """Process incoming Position data"""
@@ -95,7 +94,6 @@ class ExampleIOApp:
         )
 
         button_topic = dds.Topic(participant, topics.BUTTON_TOPIC, example_types.Button)
-        config_topic = dds.Topic(participant, topics.CONFIG_TOPIC, example_types.Config)
         position_topic = dds.Topic(
             participant, topics.POSITION_TOPIC, example_types.Position
         )
@@ -125,16 +123,9 @@ class ExampleIOApp:
             participant.implicit_publisher, button_topic, button_writer_qos
         )
 
-        config_writer_qos = qos_provider.set_topic_datawriter_qos(
-            qos_profiles.ASSIGNER, topics.CONFIG_TOPIC
-        )
-        config_writer = dds.DataWriter(
-            participant.implicit_publisher, config_topic, config_writer_qos
-        )
-
         print("[SUBSCRIBER] RTI Asyncio reader configured for Position data...")
         print(
-            "[PUBLISHER] RTI Asyncio writers configured for Command, Button, and Config data..."
+            "[PUBLISHER] RTI Asyncio writers configured for Command and Button data..."
         )
 
         # Publisher coroutine for Command, Button, Config
@@ -142,7 +133,6 @@ class ExampleIOApp:
 
             command_count = 0
             button_count = 0
-            config_count = 0
 
             while True:
                 try:
@@ -185,25 +175,8 @@ class ExampleIOApp:
                         f"Published Button - id:{button_sample.button_id}, state:{button_sample.button_state}, count:{button_count}"
                     )
 
-                    # Publish Config message
-                    config_sample = example_types.Config()
-                    config_sample.destination_id = DEFAULT_CONFIG_DESTINATION
-                    config_sample.parameter_name = "update_rate"
-                    config_sample.parameter_value = "1.0"
-                    config_sample.numeric_value = 1.0
-                    config_sample.enabled = True
-
-                    config_writer.write(config_sample)
-                    print(
-                        f"[CONFIG_PUBLISHER] Published Config - Parameter: {config_sample.parameter_name}"
-                    )
-                    distlog.Logger.info(
-                        f"Published Config - parameter:{config_sample.parameter_name}, value:{config_sample.parameter_value}"
-                    )
-
                     command_count += 1
                     button_count += 1
-                    config_count += 1
 
                     await asyncio.sleep(PUBLISHER_SLEEP_INTERVAL)
 

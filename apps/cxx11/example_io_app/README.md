@@ -24,7 +24,7 @@ Reference DDS application demonstrating DDSReaderSetup, DDSWriterSetup, and DDSP
 
 ## Application Behavior
 
-- **Subscribers**: Command, Button, Config readers (AsyncWaitSet with `qos_profiles::ASSIGNER`)
+- **Subscribers**: Command, Button readers (AsyncWaitSet with `qos_profiles::ASSIGNER`)
 - **Publisher**: Position data (GPS coordinates: 37.7749, -122.4194, 15m altitude) every 500ms
 - **Distributed Logging**: Info/error messages viewable in RTI Admin Console
 
@@ -34,7 +34,6 @@ Reference DDS application demonstrating DDSReaderSetup, DDSWriterSetup, and DDSP
 |------|-----------|-------|------------|-------------|
 | **Reader** | `example_types::Command` | `Command` | AsyncWaitSet | Command messages for control |
 | **Reader** | `example_types::Button` | `Button` | AsyncWaitSet | Button input events |
-| **Reader** | `example_types::Config` | `Config` | AsyncWaitSet | Configuration updates |
 | **Writer** | `example_types::Position` | `Position` | 500ms intervals | GPS location data |
 
 All interfaces use `qos_profiles::ASSIGNER` profile for runtime XML-based QoS re-assignment.

@@ -153,11 +153,11 @@ Defined in `dds/qos/DDS_QOS_PROFILES.xml`:
 - **Use Case**: Button presses, alerts, aperiodic critical events
 - **Pattern**: Strictly reliable communication with liveliness detection
 
-**MetadataQoS:**
+**ParameterQoS:**
 - **Reliability**: RELIABLE
 - **Durability**: TRANSIENT_LOCAL (late-joiners receive last value)
 - **History**: KEEP_LAST 1
-- **Use Case**: Configuration data that late-joiners need
+- **Use Case**: ROS2-style parameter management and configuration
 - **Pattern**: State pattern - last value always available
 
 **StatusQoS:**
@@ -195,7 +195,6 @@ Defined in `dds/qos/DDS_QOS_PROFILES.xml`:
 - **Assignments**:
   - `LargeData*` → LargeDataSHMEMQoS
   - `Position*` → StatusQoS
-  - `Config*` → MetadataQoS
   - `Button*` → EventQoS
   - `Command*` → EventQoS
 - **Benefit**: Change QoS without recompilation
@@ -206,7 +205,7 @@ Defined in `dds/qos/DDS_QOS_PROFILES.xml`:
 |---------------------|---------------------|------------|
 | Aperiodic critical events (button press) | EventQoS | KEEP_ALL ensures no events lost |
 | Periodic sensor data (Position) | StatusQoS | BEST_EFFORT for low latency, Deadline for monitoring |
-| Configuration/settings | MetadataQoS | TRANSIENT_LOCAL for late-joiners |
+| Configuration/settings/parameters | ParameterQoS | TRANSIENT_LOCAL for late-joiners |
 | Large data (>65KB), low latency | LargeDataSHMEMQoS | SHMEM-only, BEST_EFFORT |
 | Large data with zero-copy | LargeDataSHMEM_ZCQoS | Zero-copy + application ack for consistency |
 | Multi-source commands with priority | CommandStrength*QoS | EXCLUSIVE ownership for arbitration |

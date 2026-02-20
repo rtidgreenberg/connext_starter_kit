@@ -456,13 +456,13 @@
     </qos_profile>
 
 
-    <qos_profile name="MetadataQoS" base_name="BuiltinQosLib::Generic.Common">
+    <qos_profile name="ParameterQoS" base_name="BuiltinQosLib::Generic.Common">
 
       <!-- 
         USE CASE:
-        DataWriter will keep in its queue the last value that was published for 
-        each sample instance. Late-joining DataReaders will get that value when 
-        they join the system. 
+        ROS2-style parameter management. DataWriter will keep in its queue the 
+        last value that was published for each sample instance. Late-joining 
+        DataReaders will get that value when they join the system. 
         -->
 
       <!-- Having snippets here makes it easier to understand what QoS is applied -->
@@ -480,7 +480,7 @@
           see which QoS Profile is being used
           -->        
         <publication_name>
-          <name>MetaDataWriter</name>
+          <name>ParameterWriter</name>
         </publication_name>
 
       </datawriter_qos>
@@ -492,7 +492,7 @@
           see which QoS Profile is being used
           -->
         <subscription_name>
-          <name>MetaDataReader</name>
+          <name>ParameterReader</name>
         </subscription_name>
 
       </datareader_qos>
@@ -810,14 +810,17 @@
       <datawriter_qos topic_filter="Position*" base_name="StatusQoS" />
       <datareader_qos topic_filter="Position*" base_name="StatusQoS" />
 
-      <datawriter_qos topic_filter="Config*" base_name="MetadataQoS" />
-      <datareader_qos topic_filter="Config*" base_name="MetadataQoS" />
-
       <datawriter_qos topic_filter="Button*" base_name="EventQoS" />
       <datareader_qos topic_filter="Button*" base_name="EventQoS" />
 
       <datawriter_qos topic_filter="Command*" base_name="EventQoS" />
       <datareader_qos topic_filter="Command*" base_name="EventQoS" />
+
+      <datawriter_qos topic_filter="Parameter*" base_name="ParameterQoS" />
+      <datareader_qos topic_filter="Parameter*" base_name="ParameterQoS" />
+
+      <datawriter_qos topic_filter="SetParameters*" base_name="ParameterQoS" />
+      <datareader_qos topic_filter="SetParameters*" base_name="ParameterQoS" />
 
     </qos_profile>
   </qos_library>

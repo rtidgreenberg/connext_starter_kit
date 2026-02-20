@@ -52,17 +52,6 @@ module example_types {
     };
     
     /**
-     * Config - Basic configuration structure
-     */
-    struct Config {
-        @key string<MAX_ID_LENGTH> destination_id;      // Configuration identifier
-        string<MAX_NAME_LENGTH> parameter_name;    // Parameter name
-        string<MAX_VALUE_LENGTH> parameter_value; // Parameter value
-        double numeric_value;                       // Numeric parameter value
-        boolean enabled;                           // Enable/disable flag
-    };
-    
-    /**
      * Position - Current location reporting structure
      */
     struct Position {
@@ -133,6 +122,153 @@ module example_types {
     struct FinalFlatPointCloud {
         @key unsigned long point_cloud_id;        // Point cloud identifier
         octet data[MAX_POINT_CLOUD_SIZE];         // Fixed-size image data array
+    };
+
+    // =========================================================================
+    // ROS2-style Parameters Support
+    // =========================================================================
+    
+    // Maximum sizes for parameter arrays
+    const unsigned long MAX_PARAMETER_NAME_LENGTH = 256;
+    const unsigned long MAX_PARAMETER_STRING_VALUE_LENGTH = 256;
+    const unsigned long MAX_PARAMETER_ARRAY_SIZE = 64;
+    const unsigned long MAX_PARAMETERS_PER_MESSAGE = 64;
+    
+    /**
+     * ParameterType - Enum defining all supported parameter value types
+     * Similar to ROS2 rcl_interfaces/msg/ParameterType
+     */
+    enum ParameterType {
+        PARAMETER_NOT_SET = 0,
+        PARAMETER_BOOL,
+        PARAMETER_INTEGER,
+        PARAMETER_DOUBLE,
+        PARAMETER_STRING,
+        PARAMETER_BYTE_ARRAY,
+        PARAMETER_BOOL_ARRAY,
+        PARAMETER_INTEGER_ARRAY,
+        PARAMETER_DOUBLE_ARRAY,
+        PARAMETER_STRING_ARRAY
+    };
+    
+    /**
+     * ParameterValue - Union holding the actual parameter value
+     * Similar to ROS2 rcl_interfaces/msg/ParameterValue
+     */
+    @nested
+    union ParameterValue switch (ParameterType) {
+        case PARAMETER_BOOL:
+            boolean bool_value;
+        case PARAMETER_INTEGER:
+            long long integer_value;
+        case PARAMETER_DOUBLE:
+            double double_value;
+        case PARAMETER_STRING:
+            string<MAX_PARAMETER_STRING_VALUE_LENGTH> string_value;
+        case PARAMETER_BYTE_ARRAY:
+            sequence<octet, MAX_PARAMETER_ARRAY_SIZE> byte_array_value;
+        case PARAMETER_BOOL_ARRAY:
+            sequence<boolean, MAX_PARAMETER_ARRAY_SIZE> bool_array_value;
+        case PARAMETER_INTEGER_ARRAY:
+            sequence<long long, MAX_PARAMETER_ARRAY_SIZE> integer_array_value;
+        case PARAMETER_DOUBLE_ARRAY:
+            sequence<double, MAX_PARAMETER_ARRAY_SIZE> double_array_value;
+        case PARAMETER_STRING_ARRAY:
+            sequence<string<MAX_PARAMETER_STRING_VALUE_LENGTH>, MAX_PARAMETER_ARRAY_SIZE> string_array_value;
+        default:
+            boolean not_set;  // Placeholder for PARAMETER_NOT_SET
+    };
+    
+    /**
+     * Parameter - Single parameter with name and value
+     * Similar to ROS2 rcl_interfaces/msg/Parameter
+     */
+    @nested
+    struct Parameter {
+        string<MAX_PARAMETER_NAME_LENGTH> name;    // Parameter name (e.g., "robot.max_velocity")
+        ParameterValue value;                       // Parameter value (union)
+    };
+    
+    /**
+     * ParameterEvent - Event published when parameters change
+     * Similar to ROS2 rcl_interfaces/msg/ParameterEvent
+     */
+    struct ParameterEvent {
+        @key string<MAX_ID_LENGTH> node_id;                            // Node/component identifier
+        unsigned long long timestamp_ns;                                // Event timestamp in nanoseconds
+        sequence<Parameter, MAX_PARAMETERS_PER_MESSAGE> new_parameters;     // Newly added parameters
+        sequence<Parameter, MAX_PARAMETERS_PER_MESSAGE> changed_parameters; // Modified parameters
+        sequence<Parameter, MAX_PARAMETERS_PER_MESSAGE> deleted_parameters; // Removed parameters
+    };
+    
+    /**
+     * SetParametersRequest - Request to set parameters on a node
+     * For use with request/reply pattern
+     */
+    struct SetParametersRequest {
+        @key string<MAX_ID_LENGTH> node_id;                            // Target node identifier
+        uint64 request_id;                                             // Unique request ID for correlation
+        sequence<Parameter, MAX_PARAMETERS_PER_MESSAGE> parameters;    // Parameters to set
+    };
+    
+    /**
+     * SetParametersResult - Result for a single parameter set operation
+     */
+    @nested
+    struct SetParameterResult {
+        boolean successful;                                             // Whether the set was successful
+        string<MAX_MESSAGE_LENGTH> reason;                              // Reason for failure (if any)
+    };
+    
+    /**
+     * SetParametersResponse - Response from setting parameters
+     * For use with request/reply pattern
+     */
+    struct SetParametersResponse {
+        @key string<MAX_ID_LENGTH> node_id;                            // Node identifier
+        uint64 request_id;                                             // Matches request_id from request
+        sequence<SetParameterResult, MAX_PARAMETERS_PER_MESSAGE> results; // Results for each parameter
+    };
+
+    /**
+     * GetParametersRequest - Request to get current parameter values from a node
+     * For use with request/reply pattern
+     */
+    struct GetParametersRequest {
+        @key string<MAX_ID_LENGTH> node_id;                            // Target node identifier
+        uint64 request_id;                                             // Unique request ID for correlation
+        sequence<string<MAX_NAME_LENGTH>, MAX_PARAMETERS_PER_MESSAGE> names; // Parameter names to retrieve
+    };
+
+    /**
+     * GetParametersResponse - Response with current parameter values
+     * For use with request/reply pattern
+     */
+    struct GetParametersResponse {
+        @key string<MAX_ID_LENGTH> node_id;                            // Node identifier
+        uint64 request_id;                                             // Matches request_id from request
+        sequence<Parameter, MAX_PARAMETERS_PER_MESSAGE> parameters;    // Retrieved parameters
+    };
+
+    /**
+     * ListParametersRequest - Request to list available parameters on a node
+     * For use with request/reply pattern
+     */
+    struct ListParametersRequest {
+        @key string<MAX_ID_LENGTH> node_id;                            // Target node identifier
+        uint64 request_id;                                             // Unique request ID for correlation
+        sequence<string<MAX_NAME_LENGTH>, 16> prefixes;                // Filter by prefix (empty = all)
+        uint32 depth;                                                  // Max depth (0 = unlimited)
+    };
+
+    /**
+     * ListParametersResponse - Response with parameter names
+     * For use with request/reply pattern
+     */
+    struct ListParametersResponse {
+        @key string<MAX_ID_LENGTH> node_id;                            // Node identifier
+        uint64 request_id;                                             // Matches request_id from request
+        sequence<string<MAX_NAME_LENGTH>, MAX_PARAMETERS_PER_MESSAGE> names; // Parameter names
     };
 
     

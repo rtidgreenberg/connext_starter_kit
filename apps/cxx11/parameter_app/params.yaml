@@ -1,0 +1,31 @@
+# Example parameters file for parameter_app
+# These parameters will be loaded and published/requested over DDS
+
+parameters:
+  - name: "robot.max_velocity"
+    type: "double"
+    value: 1.5
+
+  - name: "robot.max_acceleration"
+    type: "double"
+    value: 0.5
+
+  - name: "robot.name"
+    type: "string"
+    value: "my_robot"
+
+  - name: "robot.enabled"
+    type: "bool"
+    value: true
+
+  - name: "robot.wheel_count"
+    type: "integer"
+    value: 4
+
+  - name: "sensor.update_rate_hz"
+    type: "integer"
+    value: 100
+
+  - name: "sensor.frame_id"
+    type: "string"
+    value: "base_link"

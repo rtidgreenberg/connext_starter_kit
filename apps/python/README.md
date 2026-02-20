@@ -61,7 +61,7 @@ connext_dds_env/            # Shared virtual environment (at repository root)
 ### example_io_app
 
 - **Subscribes to:** Position messages
-- **Publishes:** Command, Button, Config messages
+- **Publishes:** Command, Button messages
 - **Features:**
   - RTI asyncio framework integration
   - qos_profiles.ASSIGNER profile usage
@@ -175,7 +175,6 @@ The `example_io_app` follows these organizational patterns:
 ### **Core DDS Functionality**
 - **Command Publisher**: Publishes `example_types.Command` data with command types and destinations
 - **Button Publisher**: Publishes `example_types.Button` data with button states and press counts
-- **Config Publisher**: Publishes `example_types.Config` data with parameter configurations
 - **Position Subscriber**: Asynchronously receives and processes `example_types.Position` data
 - **RTI Distributed Logger**: Integrated distributed logging for remote monitoring and debugging - external visibility of logs over DDS with infrastructure services or your own apps
 - **Command-Line Interface**: Full argument parsing with domain ID and verbosity control
@@ -190,14 +189,13 @@ The `example_io_app` follows these organizational patterns:
 ## Architecture
 
 ### Data Flow Design
-- **Publishers**: Send Command, Button, and Config data on their respective topics
+- **Publishers**: Send Command and Button data on their respective topics
 - **Subscriber**: Receives Position data from remote publishers
 - **Cross-Application Communication**: Designed to work with C++ example_io_app application
 
 ### Message Types
 - **Command Publisher**: `example_types.Command` - System commands with destinations and priorities
 - **Button Publisher**: `example_types.Button` - Button press events with state tracking
-- **Config Publisher**: `example_types.Config` - Configuration parameters with values
 - **Position Subscriber**: `example_types.Position` - Geographic position data with timestamps
 
 ### Configuration Management
@@ -361,7 +359,6 @@ The application includes RTI Distributed Logger functionality for comprehensive 
 The application publishes three types of data every 2 seconds:
 - **Command Publisher**: Publishes command messages with incrementing IDs
 - **Button Publisher**: Publishes button press events with state tracking
-- **Config Publisher**: Publishes configuration parameters
 
 ### Subscriber Task
 - **Position Subscriber**: Asynchronously processes incoming Position data
@@ -378,11 +375,10 @@ DomainParticipant created with QoS profile: DPLibrary::DefaultParticipant
 DOMAIN ID: 1
 RTI Distributed Logger configured for domain 1 with application kind: Example Python IO App-DistLogger
 [SUBSCRIBER] RTI Asyncio reader configured for Position data...
-[PUBLISHER] RTI Asyncio writers configured for Command, Button, and Config data...
+[PUBLISHER] RTI Asyncio writers configured for Command and Button data...
 [MAIN] Starting RTI asyncio tasks...
 [COMMAND_PUBLISHER] Published Command - ID: cmd_0000
 [BUTTON_PUBLISHER] Published Button - ID: btn_1, Count: 0
-[CONFIG_PUBLISHER] Published Config - Parameter: update_rate
 [MAIN] ExampleIOApp processing loop - iteration 0
 
 # When Position data arrives:
@@ -398,7 +394,7 @@ RTI Distributed Logger configured for domain 1 with application kind: Example Py
 
 ### Asyncio Pattern
 The application uses Python's asyncio library with `asyncio.gather()` to run concurrent tasks:
-- **Publisher task**: Publishes Command, Button, and Config data at regular intervals
+- **Publisher task**: Publishes Command and Button data at regular intervals
 - **Position subscriber task**: Asynchronously processes incoming Position data from external sources  
 - **Main application task**: Provides periodic status updates and lifecycle management
 
@@ -493,9 +489,9 @@ python3 example_io_app.py --domain_id 1 --verbosity 2
 ```
 
 **Expected Results:**
-- Python app publishes Command/Button/Config messages every 2 seconds
+- Python app publishes Command/Button messages every 2 seconds
 - Python app receives and displays Position messages from C++ app
-- C++ app receives and displays Command/Button/Config messages from Python app
+- C++ app receives and displays Command/Button messages from Python app
 - Both apps show distributed logger messages
 
 ## Troubleshooting

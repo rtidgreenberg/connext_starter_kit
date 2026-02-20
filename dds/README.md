@@ -53,9 +53,6 @@ Core data structures demonstrating common DDS patterns.
 - `source_id` (key), `button_id` (key), `button_state`, `press_count`, `last_press_timestamp_sec`, `hold_duration_sec`
 - States: PRESSED, RELEASED, HELD, DOUBLE_CLICK
 
-**Config** - Configuration Parameters
-- `destination_id` (key), `parameter_name`, `parameter_value`, `numeric_value`, `enabled`
-
 **State** - System Status
 - `source_id` (key), `state_value`, `error_message`
 - States: INIT, RUNNING, ERROR, RESTARTING, SHUTTING_DOWN
@@ -82,7 +79,7 @@ Centralizes DDS configuration constants organized into three modules: `qos_profi
 - `TEST_DOMAIN_ID = 100`
 
 **Module: topics** - Topic Names:
-- `COMMAND_TOPIC`, `CONFIG_TOPIC`, `POSITION_TOPIC`, `STATE_TOPIC`, `BUTTON_TOPIC`, `IMAGE_TOPIC`, `FINAL_FLAT_IMAGE_TOPIC`
+- `COMMAND_TOPIC`, `POSITION_TOPIC`, `STATE_TOPIC`, `BUTTON_TOPIC`, `IMAGE_TOPIC`, `FINAL_FLAT_IMAGE_TOPIC`
 
 Benefits: Centralized configuration, namespace safety (avoids conflicts with DDS library), type safety, cross-language consistency.
 
@@ -150,7 +147,7 @@ Located in `qos/DDS_QOS_PROFILES.xml`.
 ### DataWriter/DataReader Profiles
 - **AssignerQoS** - Topic-based QoS assignment
 - **EventQoS** - Event-driven communication
-- **MetadataQoS** - Metadata and configuration
+- **ParameterQoS** - ROS2-style parameter management
 - **StatusQoS** - Status and health monitoring
 - **CommandStrength10QoS/20QoS/30QoS** - Command override with ownership strength
 - **LargeDataSHMEMQoS** - Large data with shared memory

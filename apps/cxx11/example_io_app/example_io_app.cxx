@@ -94,26 +94,6 @@ void process_button_data(dds::sub::DataReader<example_types::Button> reader)
     }
 } 
 
-void process_config_data(dds::sub::DataReader<example_types::Config> reader)
-{
-    auto samples = reader.take();
-    for (const auto& sample : samples)
-    {
-      // Check if message is not DDS metadata
-      if (sample.info().valid())
-      {
-
-        // Do something with data message
-        std::ostringstream oss;
-        oss << sample.data();
-        rti::config::Logger::instance().debug(("[CONFIG] " + oss.str()).c_str());
-
-        // overloaded -> operator to use RTI extension
-        rti::config::Logger::instance().debug(("[CONFIG] Topic '" + std::string(reader->topic_name()) + "' received").c_str());
-      }
-    }
-}
-
 void on_position_publication_matched(dds::pub::DataWriter<example_types::Position> writer)
 {
     auto status = writer->publication_matched_status();
@@ -146,11 +126,6 @@ void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
         topics::BUTTON_TOPIC,
         qos_profiles::ASSIGNER);
 
-    auto config_reader = std::make_shared<DDSReaderSetup<example_types::Config>>(
-        participant_setup,
-        topics::CONFIG_TOPIC,
-        qos_profiles::ASSIGNER);
-
     // Setup Writer Interfaces
     auto position_writer = std::make_shared<DDSWriterSetup<example_types::Position>>(
         participant_setup,
@@ -161,13 +136,12 @@ void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
     command_reader->set_data_available_handler(process_command_data);
     command_reader->set_liveliness_changed_handler(on_command_liveliness_changed);
     button_reader->set_data_available_handler(process_button_data);
-    config_reader->set_data_available_handler(process_config_data);
 
     // Set publication matched callback for writer
     position_writer->set_publication_matched_handler(on_position_publication_matched);
 
     rti_logger.notice("Example I/O app is running. Press Ctrl+C to stop.");
-    rti_logger.notice("Subscribing to Command, Button, and Config messages...");
+    rti_logger.notice("Subscribing to Command and Button messages...");
     rti_logger.notice("Publishing Position messages...");
 
 

@@ -67,6 +67,7 @@ add_subdirectory(apps/cxx11/dynamic_partition_qos)
 add_subdirectory(apps/cxx11/example_io_app)
 add_subdirectory(apps/cxx11/fixed_image_flat_zc)
 add_subdirectory(apps/cxx11/large_data_app)
+add_subdirectory(apps/cxx11/parameter_app)
 
 # ============================================================================
 # Build Summary
@@ -82,4 +83,5 @@ message(STATUS "  - dynamic_partition_qos")
 message(STATUS "  - example_io_app")
 message(STATUS "  - fixed_image_flat_zc")
 message(STATUS "  - large_data_app")
+message(STATUS "  - parameter_app")
 message(STATUS "========================================================================")

@@ -16,7 +16,7 @@ module qos_profiles {
     // Data Pattern Profiles
     const string ASSIGNER = "DataPatternsLibrary::AssignerQoS";
     const string EVENT = "DataPatternsLibrary::EventQoS";
-    const string METADATA = "DataPatternsLibrary::MetadataQoS";
+    const string PARAMETER = "DataPatternsLibrary::ParameterQoS";
     const string STATUS = "DataPatternsLibrary::StatusQoS";
     
     // Command Override Profiles (with ownership strength)
@@ -45,12 +45,20 @@ module topics {
 
     // Example Type Topics
     const string COMMAND_TOPIC = "Command";
-    const string CONFIG_TOPIC = "Config";
     const string POSITION_TOPIC = "Position";
     const string STATE_TOPIC = "State";
     const string BUTTON_TOPIC = "Button";
     const string IMAGE_TOPIC = "Image";
     const string FINAL_FLAT_IMAGE_TOPIC = "FinalFlatImage";
     const string POINT_CLOUD_TOPIC = "PointCloud";
+    
+    // ROS2-style Parameter Topics
+    const string PARAMETER_EVENTS_TOPIC = "ParameterEvents";
+    const string SET_PARAMETERS_REQUEST_TOPIC = "SetParametersRequest";
+    const string SET_PARAMETERS_RESPONSE_TOPIC = "SetParametersResponse";
+    const string GET_PARAMETERS_REQUEST_TOPIC = "GetParametersRequest";
+    const string GET_PARAMETERS_RESPONSE_TOPIC = "GetParametersResponse";
+    const string LIST_PARAMETERS_REQUEST_TOPIC = "ListParametersRequest";
+    const string LIST_PARAMETERS_RESPONSE_TOPIC = "ListParametersResponse";
 
 };

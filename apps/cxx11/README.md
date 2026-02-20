@@ -202,9 +202,9 @@ auto button_reader = std::make_shared<DDSReaderSetup<example_types::Button>>(
 );
 
 // Writer example
-auto config_writer = std::make_shared<DDSWriterSetup<example_types::Config>>(
+auto position_writer = std::make_shared<DDSWriterSetup<example_types::Position>>(
     dds_participant,
-    topics::CONFIG_TOPIC,
+    topics::POSITION_TOPIC,
     qos_profiles::ASSIGNER
 );
 ```

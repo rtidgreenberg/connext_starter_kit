@@ -79,7 +79,7 @@ public:
     GStreamerVideoPublisher(
         std::shared_ptr<DDSWriterSetup<::foxglove::CompressedVideo>> writer_setup,
         int width, int height, int fps)
-        : writer_(writer_setup->writer())
+        : writer_setup_(std::move(writer_setup))
         , width_(width)
         , height_(height)
         , fps_(fps)
@@ -98,9 +98,11 @@ public:
             ",height=" + std::to_string(height) + 
             ",framerate=" + std::to_string(fps) + "/1 ! "
             "videoconvert ! "
-            "x264enc tune=zerolatency speed-preset=ultrafast key-int-max=" + std::to_string(fps) + " ! "
-            "video/x-h264,stream-format=byte-stream,profile=baseline ! "
-            "h264parse ! "
+            // foxglove::CompressedVideo(h264) expects Annex-B, 1 frame per message,
+            // no B-frames, and SPS/PPS present on keyframes.
+            "x264enc tune=zerolatency speed-preset=ultrafast bframes=0 key-int-max=" + std::to_string(fps) + " ! "
+            "h264parse config-interval=-1 ! "
+            "video/x-h264,stream-format=byte-stream,alignment=au,profile=baseline ! "
             "appsink name=sink emit-signals=true sync=false";
         
         std::cout << "Creating GStreamer pipeline: " << pipeline_str << std::endl;
@@ -238,7 +240,7 @@ private:
             data.data(encoded_data);
             
             // Write to DDS
-            writer_.write(data);
+            writer_setup_->writer().write(data);
             
             std::cout << "Published frame " << frame_count_ 
                       << " (" << map.size << " bytes)" << std::endl;
@@ -256,7 +258,7 @@ private:
         return GST_FLOW_OK;
     }
     
-    dds::pub::DataWriter<::foxglove::CompressedVideo> writer_;
+    std::shared_ptr<DDSWriterSetup<::foxglove::CompressedVideo>> writer_setup_;
     int width_;
     int height_;
     int fps_;
@@ -280,13 +282,14 @@ void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
     // callbacks for DDS events (data_available, subscription_matched,
     // liveliness_changed, etc.)
 
-    // Setup Reader Interface with LARGE_DATA_SHMEM QoS
+        // NOTE: LARGE_DATA_SHMEM pins transport to SHMEM-only (remote bridges won't receive samples).
+        // Use LARGE_DATA_SHMEM QoS here so UDP transport remains available.
     auto video_reader = std::make_shared<DDSReaderSetup<::foxglove::CompressedVideo>>(
             participant_setup,
             topics::IMAGE_TOPIC,
             qos_profiles::LARGE_DATA_SHMEM);
 
-    // Setup Writer Interface with LARGE_DATA_SHMEM QoS
+        // Setup Writer Interface with LARGE_DATA_SHMEM QoS
     auto video_writer = std::make_shared<DDSWriterSetup<::foxglove::CompressedVideo>>(
             participant_setup,
             topics::IMAGE_TOPIC,
@@ -343,7 +346,7 @@ int main(int argc, char *argv[])
                 arguments.domain_id,
                 ASYNC_WAITSET_THREADPOOL_SIZE,
                 arguments.qos_file_path,
-                qos_profiles::LARGE_DATA_PARTICIPANT,
+            qos_profiles::DEFAULT_PARTICIPANT,
                 APP_NAME);
 
         // Setup Distributed Logger Singleton

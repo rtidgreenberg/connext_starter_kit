@@ -89,13 +89,15 @@ void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
     // callbacks for DDS events (data_available, subscription_matched,
     // liveliness_changed, etc.)
 
-    // Setup Reader Interface with LARGE_DATA_SHMEM QoS
+        // NOTE: LARGE_DATA_SHMEM pins transport to SHMEM-only. RTI Recording Service
+        // (and many bridges) run with default SHMEM settings, which can mismatch and
+        // result in no data flow. LARGE_DATA_SHMEM QoS keeps UDP available.
     auto point_reader = std::make_shared<DDSReaderSetup<::foxglove::PointCloud>>(
             participant_setup,
             topics::POINT_CLOUD_TOPIC,
             qos_profiles::LARGE_DATA_SHMEM);
 
-    // Setup Writer Interface with LARGE_DATA_SHMEM QoS
+        // Setup Writer Interface with LARGE_DATA_SHMEM QoS
     auto point_writer = std::make_shared<DDSWriterSetup<::foxglove::PointCloud>>(
             participant_setup,
             topics::POINT_CLOUD_TOPIC,
@@ -112,9 +114,9 @@ void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
     rti_logger.notice(
             "Large Data app is running. Press Ctrl+C to stop.");
     rti_logger.notice(
-            "Subscribing to Image messages with LARGE_DATA_SHMEM QoS...");
+            "Subscribing to PointCloud messages with LARGE_DATA_SHMEM QoS...");
     rti_logger.notice(
-            "Publishing Image messages with LARGE_DATA_SHMEM QoS...");
+            "Publishing PointCloud messages with LARGE_DATA_SHMEM QoS...");
 
 // Build a static world -> lidar identity transform (published once per frame
     // to keep the frame tree alive during recording)
@@ -281,7 +283,7 @@ int main(int argc, char *argv[])
                 arguments.domain_id,
                 ASYNC_WAITSET_THREADPOOL_SIZE,
                 arguments.qos_file_path,
-                qos_profiles::LARGE_DATA_PARTICIPANT,
+            qos_profiles::DEFAULT_PARTICIPANT,
                 APP_NAME);
 
         // Setup Distributed Logger Singleton

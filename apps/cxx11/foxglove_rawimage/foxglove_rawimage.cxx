@@ -166,8 +166,8 @@ void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
         // Latency contingent on loop rate
         // process_image_data(image_reader->reader());
 
-        // Sleep for 1 second (1 Hz publishing rate)
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        // Sleep for 10 millseconds
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
     rti_logger.notice(
@@ -202,7 +202,7 @@ int main(int argc, char *argv[])
                 arguments.domain_id,
                 ASYNC_WAITSET_THREADPOOL_SIZE,
                 arguments.qos_file_path,
-                qos_profiles::LARGE_DATA_PARTICIPANT,
+                qos_profiles::DEFAULT_PARTICIPANT,
                 APP_NAME);
 
         // Setup Distributed Logger Singleton

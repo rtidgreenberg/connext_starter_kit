@@ -43,7 +43,7 @@ using namespace rti::all;
 using namespace rti::dist_logger;
 
 constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
-const std::string APP_NAME = "Large Data CXX FOXGLOVE";
+const std::string APP_NAME = "FoxgloveGstreamer";
 
 // Image dimensions for large data transfer
 constexpr uint32_t IMAGE_WIDTH = 640;

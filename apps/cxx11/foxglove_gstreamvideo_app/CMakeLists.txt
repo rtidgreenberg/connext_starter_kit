@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.12)
 
-project(ExampleIOApplication VERSION 1.0.0 LANGUAGES CXX)
+project(FoxgloveGstreamer VERSION 1.0.0 LANGUAGES CXX)
 
 # ============================================================================
 # Ensure this is not being built standalone

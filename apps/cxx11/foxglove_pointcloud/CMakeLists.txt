@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.12)
 
-project(LargeDataFoxgloveApplication VERSION 1.0.0 LANGUAGES CXX)
+project(FoxglovePointcloud VERSION 1.0.0 LANGUAGES CXX)
 
 # ============================================================================
 # Ensure this is not being built standalone

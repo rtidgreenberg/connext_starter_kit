@@ -42,7 +42,7 @@ using namespace rti::all;
 using namespace rti::dist_logger;
 
 constexpr int ASYNC_WAITSET_THREADPOOL_SIZE = 5;
-const std::string APP_NAME = "Example CXX IO FOXGLOVE";
+const std::string APP_NAME = "Foxglove GeoJson";
 
 
 void process_command_data(dds::sub::DataReader<example_types::Command> reader)
@@ -129,7 +129,7 @@ void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
 {
     auto& rti_logger = rti::config::Logger::instance();
 
-    rti_logger.notice(("Example I/O application starting on domain " + std::to_string(participant_setup->participant().domain_id())).c_str());
+    rti_logger.notice(("Foxglove GeoJson application starting on domain " + std::to_string(participant_setup->participant().domain_id())).c_str());
 
     // DDSReaderSetup and DDSWriterSetup are example wrapper classes for your convenience that simplify
     // DDS reader/writer creation and event handling. They manage DataReader/DataWriter lifecycle, attach

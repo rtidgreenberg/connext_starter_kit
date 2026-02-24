@@ -17,7 +17,7 @@ if [ ! -f "$BINARY" ]; then
 fi
 
 # QoS profiles file
-QOS_FILE="${PROJECT_ROOT}/dds/qos/GSTREAM_DDS_QOS_PROFILES.xml"
+QOS_FILE="${PROJECT_ROOT}/dds/qos/DDS_QOS_PROFILES.xml"
 
 # Print execution details
 echo "========================================"

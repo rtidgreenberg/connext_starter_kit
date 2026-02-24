@@ -68,7 +68,7 @@ add_subdirectory(apps/cxx11/example_io_app)
 add_subdirectory(apps/cxx11/fixed_image_flat_zc)
 add_subdirectory(apps/cxx11/large_data_app)
 add_subdirectory(apps/cxx11/foxglove_geojson)
-add_subdirectory(apps/cxx11/foxglove_large_data)
+add_subdirectory(apps/cxx11/foxglove_rawimage)
 add_subdirectory(apps/cxx11/foxglove_gstreamvideo_app)
 
 # ============================================================================

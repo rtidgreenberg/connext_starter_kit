@@ -7,7 +7,7 @@ project(LargeDataFoxgloveApplication VERSION 1.0.0 LANGUAGES CXX)
 # ============================================================================
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     message(FATAL_ERROR 
-        "The large_data_foxglove cannot be built standalone.\n"
+        "The foxglove_rawimage cannot be built standalone.\n"
         "Please build from the top-level directory:\n"
         "  cd <path-to-connext_starter_kit>\n"
         "  mkdir -p build && cd build\n"
@@ -41,13 +41,13 @@ set(DDS_CODEGEN_DIR "${DDS_BUILD_DIR}/cxx11_gen")
 set(DDS_UTILS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../dds/utils/cxx11")
 
 # Create the executable
-add_executable(large_data_foxglove
-    large_data_foxglove.cxx
+add_executable(foxglove_rawimage
+    foxglove_rawimage.cxx
     application.hpp
 )
 
 # Include directories
-target_include_directories(large_data_foxglove 
+target_include_directories(foxglove_rawimage 
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${DDS_CODEGEN_DIR}
@@ -56,7 +56,7 @@ target_include_directories(large_data_foxglove
 )
 
 # Link with libraries - use dds_typesupport target directly
-target_link_libraries(large_data_foxglove
+target_link_libraries(foxglove_rawimage
     PRIVATE
         dds_typesupport
         RTIConnextDDS::cpp2_api
@@ -69,7 +69,7 @@ target_link_libraries(large_data_foxglove
 )
 
 # Set compiler definitions
-target_compile_definitions(large_data_foxglove
+target_compile_definitions(foxglove_rawimage
     PRIVATE
         RTI_UNIX
         RTI_LINUX
@@ -78,7 +78,7 @@ target_compile_definitions(large_data_foxglove
 
 # Set additional compiler flags
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(large_data_foxglove PRIVATE
+    target_compile_options(foxglove_rawimage PRIVATE
         -m64
         -Wall
         -Wextra
@@ -94,12 +94,12 @@ message(STATUS "DDS codegen headers: ${DDS_CODEGEN_DIR}")
 message(STATUS "DDS utils headers: ${DDS_UTILS_DIR}")
 
 # Set the runtime path to find the shared library
-set_target_properties(large_data_foxglove PROPERTIES
+set_target_properties(foxglove_rawimage PROPERTIES
     INSTALL_RPATH "${DDS_LIB_BUILD_DIR}"
     BUILD_WITH_INSTALL_RPATH TRUE
 )
 
 # Install the executable if desired
-install(TARGETS large_data_foxglove
+install(TARGETS foxglove_rawimage
     RUNTIME DESTINATION bin
 )

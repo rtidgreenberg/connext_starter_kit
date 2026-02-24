@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run script for large_data_app
+# Run script for foxglove_rawimage
 # Executes the binary from the top-level build directory
 
 # Get the directory where this script is located
@@ -9,7 +9,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 cd "$PROJECT_ROOT" || exit 1
 
 # Check if binary exists, build if needed
-BINARY="./build/apps/cxx11/large_data_app/large_data_app"
+BINARY="./build/apps/cxx11/foxglove_rawimage/foxglove_rawimage"
 if [ ! -f "$BINARY" ]; then
     echo "Binary not found. Building project..."
     cd ./build && cmake --build . || exit 1
@@ -21,7 +21,7 @@ QOS_FILE="${PROJECT_ROOT}/dds/qos/DDS_QOS_PROFILES.xml"
 
 # Print execution details
 echo "========================================"
-echo "Running: large_data_app"
+echo "Running: foxglove_rawimage"
 echo "========================================"
 echo "Executable: ${BINARY}"
 echo "QoS File:   ${QOS_FILE}"

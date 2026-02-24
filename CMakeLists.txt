@@ -70,6 +70,7 @@ add_subdirectory(apps/cxx11/large_data_app)
 add_subdirectory(apps/cxx11/foxglove_geojson)
 add_subdirectory(apps/cxx11/foxglove_rawimage)
 add_subdirectory(apps/cxx11/foxglove_gstreamvideo_app)
+add_subdirectory(apps/cxx11/foxglove_pointcloud)
 
 # ============================================================================
 # Build Summary

@@ -65,10 +65,11 @@ add_subdirectory(apps/cxx11/burst_large_data_app)
 add_subdirectory(apps/cxx11/command_override)
 add_subdirectory(apps/cxx11/dynamic_partition_qos)
 add_subdirectory(apps/cxx11/example_io_app)
-add_subdirectory(apps/cxx11/example_io_foxglove)
-add_subdirectory(apps/cxx11/large_data_foxglove)
 add_subdirectory(apps/cxx11/fixed_image_flat_zc)
 add_subdirectory(apps/cxx11/large_data_app)
+add_subdirectory(apps/cxx11/foxglove_geojson)
+add_subdirectory(apps/cxx11/foxglove_large_data)
+add_subdirectory(apps/cxx11/foxglove_gstreamvideo_app)
 
 # ============================================================================
 # Build Summary

@@ -806,18 +806,21 @@
 
       <datawriter_qos topic_filter="LargeData*" base_name="LargeDataSHMEMQoS" />
       <datareader_qos topic_filter="LargeData*" base_name="LargeDataSHMEMQoS" />
-
+      
       <datawriter_qos topic_filter="Position*" base_name="StatusQoS" />
       <datareader_qos topic_filter="Position*" base_name="StatusQoS" />
-
+      
       <datawriter_qos topic_filter="Config*" base_name="MetadataQoS" />
       <datareader_qos topic_filter="Config*" base_name="MetadataQoS" />
-
+      
       <datawriter_qos topic_filter="Button*" base_name="EventQoS" />
       <datareader_qos topic_filter="Button*" base_name="EventQoS" />
-
+      
       <datawriter_qos topic_filter="Command*" base_name="EventQoS" />
       <datareader_qos topic_filter="Command*" base_name="EventQoS" />
+      
+      <datawriter_qos topic_filter="GeoJSON" base_name="LargeDataSHMEMQoS" />
+      <datareader_qos topic_filter="GeoJSON" base_name="LargeDataSHMEMQoS" />
 
     </qos_profile>
   </qos_library>

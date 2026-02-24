@@ -22,6 +22,7 @@
 #include <rti/core/cond/AsyncWaitSet.hpp>
 #include <rti/distlogger/DistLogger.hpp>
 #include <rti/config/Logger.hpp>
+#include "GeoJSON.hpp"
 
 //
 // For more information about the headers and namespaces, see:
@@ -154,7 +155,7 @@ void run(std::shared_ptr<DDSParticipantSetup> participant_setup)
     // Setup Writer Interfaces
     auto position_writer = std::make_shared<DDSWriterSetup<::foxglove::GeoJSON>>(
         participant_setup,
-        topics::POSITION_TOPIC,
+        topics::GEOJSON_TOPIC,
         qos_profiles::ASSIGNER);
 
     // Enable Asynchronous Event-Driven processing for readers

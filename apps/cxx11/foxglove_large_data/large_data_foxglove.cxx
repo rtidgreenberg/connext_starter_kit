@@ -34,6 +34,7 @@
 #include "DDSParticipantSetup.hpp"
 #include "DDSReaderSetup.hpp"
 #include "DDSWriterSetup.hpp"
+#include "RawImage.hpp"
 
 // For example legibility.
 using namespace rti::all;

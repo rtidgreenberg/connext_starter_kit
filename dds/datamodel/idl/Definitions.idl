@@ -52,5 +52,6 @@ module topics {
     const string IMAGE_TOPIC = "Image";
     const string FINAL_FLAT_IMAGE_TOPIC = "FinalFlatImage";
     const string POINT_CLOUD_TOPIC = "PointCloud";
+    const string GEOJSON_TOPIC = "GeoJSON";
 
 };

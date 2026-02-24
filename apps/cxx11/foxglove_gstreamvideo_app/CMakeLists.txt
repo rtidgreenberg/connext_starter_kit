@@ -7,7 +7,7 @@ project(ExampleIOApplication VERSION 1.0.0 LANGUAGES CXX)
 # ============================================================================
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     message(FATAL_ERROR 
-        "The example_foxglove cannot be built standalone.\n"
+        "The foxglove_gstreamVideo_app cannot be built standalone.\n"
         "Please build from the top-level directory:\n"
         "  cd <path-to-connext_starter_kit>\n"
         "  mkdir -p build && cd build\n"
@@ -34,6 +34,13 @@ find_package(RTIConnextDDS
         distributed_logger
 )
 
+# Find GStreamer using pkg-config
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET
+    gstreamer-1.0
+    gstreamer-app-1.0
+)
+
 # Set up directories - use CMAKE_BINARY_DIR for build outputs
 set(DDS_BUILD_DIR "${CMAKE_BINARY_DIR}/dds")
 set(DDS_LIB_BUILD_DIR "${DDS_BUILD_DIR}/lib")
@@ -41,13 +48,13 @@ set(DDS_CODEGEN_DIR "${DDS_BUILD_DIR}/cxx11_gen")
 set(DDS_UTILS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../dds/utils/cxx11")
 
 # Create the executable
-add_executable(example_foxglove
-    example_foxglove.cxx
+add_executable(foxglove_gstreamvideo_app
+    foxglove_gstreamvideo_app.cxx
     application.hpp
 )
 
 # Include directories
-target_include_directories(example_foxglove 
+target_include_directories(foxglove_gstreamvideo_app 
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${DDS_CODEGEN_DIR}
@@ -56,7 +63,7 @@ target_include_directories(example_foxglove
 )
 
 # Link with libraries - use dds_typesupport target directly
-target_link_libraries(example_foxglove
+target_link_libraries(foxglove_gstreamvideo_app
     PRIVATE
         dds_typesupport
         RTIConnextDDS::cpp2_api
@@ -68,8 +75,12 @@ target_link_libraries(example_foxglove
         rt
 )
 
+# GStreamer (headers + libs)
+target_include_directories(foxglove_gstreamvideo_app PRIVATE ${GSTREAMER_INCLUDE_DIRS})
+target_link_libraries(foxglove_gstreamvideo_app PRIVATE PkgConfig::GSTREAMER)
+
 # Set compiler definitions
-target_compile_definitions(example_foxglove
+target_compile_definitions(foxglove_gstreamvideo_app
     PRIVATE
         RTI_UNIX
         RTI_LINUX
@@ -78,7 +89,7 @@ target_compile_definitions(example_foxglove
 
 # Set additional compiler flags
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(example_foxglove PRIVATE
+    target_compile_options(foxglove_gstreamvideo_app PRIVATE
         -m64
         -Wall
         -Wextra
@@ -94,12 +105,12 @@ message(STATUS "DDS codegen headers: ${DDS_CODEGEN_DIR}")
 message(STATUS "DDS utils headers: ${DDS_UTILS_DIR}")
 
 # Set the runtime path to find the shared library
-set_target_properties(example_foxglove PROPERTIES
+set_target_properties(foxglove_gstreamvideo_app PROPERTIES
     INSTALL_RPATH "${DDS_LIB_BUILD_DIR}"
     BUILD_WITH_INSTALL_RPATH TRUE
 )
 
 # Install the executable if desired
-install(TARGETS example_foxglove
+install(TARGETS foxglove_gstreamvideo_app
     RUNTIME DESTINATION bin
 )

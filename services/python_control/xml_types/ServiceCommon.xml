@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dds xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="file:////home/rti/rti_connext_dds-7.3.1/bin/../resource/app/app_support/rtiddsgen/schema/rti_dds_profiles.xsd">
+<types>
+<module name="RTI" autoid="hash" data_representation="xcdr2">
+  <module name="Service">
+    <const name="BOUNDED_STRING_LENGTH_MAX" type="int32" value="255"/>
+    <typedef name="BoundedString" stringMaxLength="RTI::Service::BOUNDED_STRING_LENGTH_MAX" type="string"/>
+    <const name="FILE_PATH_MAX_LENGTH" type="int32" value="1024"/>
+    <typedef name="FilePath" stringMaxLength="RTI::Service::FILE_PATH_MAX_LENGTH" type="string"/>
+    <const name="RESOURCE_IDENTIFIER_LENGTH_MAX" type="int32" value="2048"/>
+    <typedef name="ResourceId" stringMaxLength="RTI::Service::RESOURCE_IDENTIFIER_LENGTH_MAX" type="string"/>
+    <typedef name="XmlString" stringMaxLength="255" type="string"/>
+    <enum name="EntityStateKind">
+      <enumerator name="INVALID"/>
+      <enumerator name="ENABLED"/>
+      <enumerator name="DISABLED"/>
+      <enumerator name="STARTED"/>
+      <enumerator name="STOPPED"/>
+      <enumerator name="RUNNING"/>
+      <enumerator name="PAUSED"/>
+    </enum> 
+    <struct name= "EntityState">
+      <member name="state" type="nonBasic"  nonBasicTypeName= "RTI::Service::EntityStateKind"/>
+    </struct>
+    <const name="BUILTIN_TOPIC_KEY_VALUE_LENGTH" type="int32" value="4"/>
+    <struct name= "BuiltinTopicKey" extensibility= "final" nested="true">
+      <member name="value" type="uint32" arrayDimensions="(RTI::Service::BUILTIN_TOPIC_KEY_VALUE_LENGTH)"/>
+    </struct>
+    <module name="Monitoring">
+      <const name="RESOURCE_GUID_VALUE_LENGTH" type="int32" value="16"/>
+      <struct name= "ResourceGuid" extensibility= "final">
+        <member name="value" type="byte" arrayDimensions="(RTI::Service::Monitoring::RESOURCE_GUID_VALUE_LENGTH)"/>
+      </struct>
+      <struct name= "KeyedResource" extensibility= "mutable">
+        <member name="object_guid" type="nonBasic"  nonBasicTypeName= "RTI::Service::Monitoring::ResourceGuid" key="true"/>
+        <member name="owner_guid" type="nonBasic"  nonBasicTypeName= "RTI::Service::Monitoring::ResourceGuid"/>
+      </struct>
+      <struct name= "StatisticMetrics" nested="true">
+        <member name="period_ms" type="uint64"/>
+        <member name="count" type="int64"/>
+        <member name="mean" type="float32"/>
+        <member name="minimum" type="float32"/>
+        <member name="maximum" type="float32"/>
+        <member name="std_dev" type="float32"/>
+      </struct>
+      <struct name= "StatisticVariable" nested="true">
+        <member name="publication_period_metrics" type="nonBasic"  nonBasicTypeName= "RTI::Service::Monitoring::StatisticMetrics"/>
+      </struct>
+      <struct name= "CountStatus" extensibility= "mutable" nested="true">
+        <member name="total_count" type="int64"/>
+        <member name="current_count" type="int64"/>
+        <member name="current_count_peak" type="int64"/>
+      </struct>
+      <struct name= "ProcessConfig" nested="true">
+        <member name="id" type="uint64"/>
+      </struct>
+      <struct name= "ProcessPeriodic" extensibility= "mutable" nested="true">
+        <member name="cpu_usage_percentage" type="nonBasic"  nonBasicTypeName= "RTI::Service::Monitoring::StatisticVariable" optional="true"/>
+        <member name="physical_memory_kb" type="nonBasic"  nonBasicTypeName= "RTI::Service::Monitoring::StatisticVariable" optional="true"/>
+        <member name="total_memory_kb" type="nonBasic"  nonBasicTypeName= "RTI::Service::Monitoring::StatisticVariable" optional="true"/>
+        <member name="uptime_sec" type="int32"/>
+      </struct>
+      <struct name= "ThreadPeriodic" extensibility= "mutable" nested="true">
+        <member name="id" type="uint64"/>
+        <member name="cpu_usage_percentage" type="nonBasic"  nonBasicTypeName= "RTI::Service::Monitoring::StatisticVariable" optional="true"/>
+      </struct>
+      <struct name= "ThreadPoolPeriodic" extensibility= "mutable" nested="true">
+        <member name="threads" sequenceMaxLength="100" type="nonBasic"  nonBasicTypeName= "RTI::Service::Monitoring::ThreadPeriodic" optional="true"/>
+      </struct>
+      <struct name= "HostPeriodic" nested="true">
+        <member name="cpu_usage_percentage" type="nonBasic"  nonBasicTypeName= "RTI::Service::Monitoring::StatisticVariable" optional="true"/>
+        <member name="free_memory_kb" type="nonBasic"  nonBasicTypeName= "RTI::Service::Monitoring::StatisticVariable" optional="true"/>
+        <member name="free_swap_memory_kb" type="nonBasic"  nonBasicTypeName= "RTI::Service::Monitoring::StatisticVariable" optional="true"/>
+        <member name="uptime_sec" type="int32"/>
+      </struct>
+      <struct name= "HostConfig" nested="true">
+        <member name="name" type="nonBasic"  nonBasicTypeName= "RTI::Service::BoundedString"/>
+        <member name="id" type="uint32"/>
+        <member name="total_memory_kb" type="int64"/>
+        <member name="total_swap_memory_kb" type="int64"/>
+        <member name="target" type="nonBasic"  nonBasicTypeName= "RTI::Service::BoundedString"/>
+      </struct>
+      <struct name= "NetworkPerformance" nested="true">
+        <member name="samples_per_sec" type="nonBasic"  nonBasicTypeName= "RTI::Service::Monitoring::StatisticVariable" optional="true"/>
+        <member name="bytes_per_sec" type="nonBasic"  nonBasicTypeName= "RTI::Service::Monitoring::StatisticVariable" optional="true"/>
+        <member name="latency_millisec" type="nonBasic"  nonBasicTypeName= "RTI::Service::Monitoring::StatisticVariable" optional="true"/>
+      </struct>
+      <struct name= "EntityConfig" extensibility= "mutable" nested="true">
+        <member name="resource_id" type="nonBasic"  nonBasicTypeName= "RTI::Service::ResourceId"/>
+        <member name="configuration" type="nonBasic"  nonBasicTypeName= "RTI::Service::XmlString"/>
+      </struct>
+      <struct name= "EntityEvent" extensibility= "mutable" nested="true">
+        <member name="state" type="nonBasic"  nonBasicTypeName= "RTI::Service::EntityStateKind"/>
+      </struct>
+      <enum name="DistributionTopicKind">
+        <enumerator name="CONFIG"/>
+        <enumerator name="EVENT"/>
+        <enumerator name="PERIODIC"/>
+      </enum> 
+      <enum name="ResourceKindIndex" extensibility= "mutable">
+        <enumerator name="DDS_INDEX" value="1"/>
+        <enumerator name="ROUTING_INDEX" value="10000"/>
+        <enumerator name="RECORDING_INDEX" value="20000"/>
+        <enumerator name="CDS_INDEX" value="30000"/>
+      </enum> 
+      <enum name="ResourceKind" extensibility= "mutable">
+        <enumerator name="UNKNOWN"/>
+        <enumerator name="ROUTING_SERVICE" value="(RTI::Service::Monitoring::ROUTING_INDEX)"/>
+        <enumerator name="ROUTING_DOMAIN_ROUTE"/>
+        <enumerator name="ROUTING_SESSION"/>
+        <enumerator name="ROUTING_AUTO_ROUTE"/>
+        <enumerator name="ROUTING_ROUTE"/>
+        <enumerator name="ROUTING_INPUT"/>
+        <enumerator name="ROUTING_OUTPUT"/>
+        <enumerator name="RECORDING_SERVICE" value="(RTI::Service::Monitoring::RECORDING_INDEX)"/>
+        <enumerator name="RECORDING_SESSION"/>
+        <enumerator name="RECORDING_TOPIC_GROUP"/>
+        <enumerator name="RECORDING_TOPIC"/>
+        <enumerator name="CDS_SERVICE" value="(RTI::Service::Monitoring::CDS_INDEX)"/>
+        <enumerator name="CDS_FORWARDER"/>
+        <enumerator name="CDS_DATABASE"/>
+        <enumerator name="CDS_RECEIVER"/>
+        <enumerator name="CDS_SENDER"/>
+      </enum> 
+      <const name="CONFIG_TOPIC_NAME" type="string" value="&quot;rti/service/monitoring/config&quot;"/>
+      <const name="EVENT_TOPIC_NAME" type="string" value="&quot;rti/service/monitoring/event&quot;"/>
+      <const name="PERIODIC_TOPIC_NAME" type="string" value="&quot;rti/service/monitoring/periodic&quot;"/>
+      <const name="CONFIG_REGISTERED_TYPE_NAME" type="string" value="&quot;RTI::Service::Monitoring::Config&quot;"/>
+      <const name="EVENT_REGISTERED_TYPE_NAME" type="string" value="&quot;RTI::Service::Monitoring::Event&quot;"/>
+      <const name="PERIODIC_REGISTERED_TYPE_NAME" type="string" value="&quot;RTI::Service::Monitoring::Periodic&quot;"/>
+    </module>
+  </module>
+</module>
+</types>
+</dds>

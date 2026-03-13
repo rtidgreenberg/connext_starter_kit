@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dds xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="file:////home/rti/rti_connext_dds-7.3.1/bin/../resource/app/app_support/rtiddsgen/schema/rti_dds_profiles.xsd">
+<types>
+<include file="ServiceCommon.xml"/>
+<module name="RTI" autoid="hash" data_representation="xcdr2">
+  <module name="Service">
+    <module name="Admin">
+      <const name="COMMAND_REQUEST_TOPIC_NAME" type="string" value="&quot;rti/service/admin/command_request&quot;"/>
+      <const name="COMMAND_REPLY_TOPIC_NAME" type="string" value="&quot;rti/service/admin/command_reply&quot;"/>
+      <const name="NAME_LENGTH_MAX" type="int32" value="(RTI::Service::BOUNDED_STRING_LENGTH_MAX)"/>
+      <typedef name="EntityName" type="nonBasic"  nonBasicTypeName= "RTI::Service::BoundedString"/>
+      <const name="RESOURCE_IDENTIFIER_LENGTH_MAX" type="int32" value="(RTI::Service::RESOURCE_IDENTIFIER_LENGTH_MAX)"/>
+      <typedef name="ResourceIdentifier" type="nonBasic"  nonBasicTypeName= "RTI::Service::ResourceId"/>
+      <typedef name="StringBody" stringMaxLength="255" type="string"/>
+      <typedef name="OctetBody" sequenceMaxLength="100" type="byte"/>
+      <enum name="CommandActionKind">
+        <enumerator name="CREATE_ACTION"/>
+        <enumerator name="GET_ACTION"/>
+        <enumerator name="UPDATE_ACTION"/>
+        <enumerator name="DELETE_ACTION"/>
+      </enum> 
+      <enum name="CommandReplyRetcode">
+        <enumerator name="OK_RETCODE"/>
+        <enumerator name="ERROR_RETCODE"/>
+      </enum> 
+      <struct name= "CommandRequest">
+        <member name="instance_id" type="int32" key="true"/>
+        <member name="application_name" stringMaxLength="RTI::Service::BOUNDED_STRING_LENGTH_MAX" type="string" optional="true"/>
+        <member name="action" type="nonBasic"  nonBasicTypeName= "RTI::Service::Admin::CommandActionKind"/>
+        <member name="resource_identifier" type="nonBasic"  nonBasicTypeName= "RTI::Service::Admin::ResourceIdentifier"/>
+        <member name="string_body" type="nonBasic"  nonBasicTypeName= "RTI::Service::Admin::StringBody"/>
+        <member name="octet_body" type="nonBasic"  nonBasicTypeName= "RTI::Service::Admin::OctetBody"/>
+      </struct>
+      <struct name= "CommandReply">
+        <member name="retcode" type="nonBasic"  nonBasicTypeName= "RTI::Service::Admin::CommandReplyRetcode"/>
+        <member name="native_retcode" type="int32"/>
+        <member name="string_body" type="nonBasic"  nonBasicTypeName= "RTI::Service::Admin::StringBody"/>
+        <member name="octet_body" type="nonBasic"  nonBasicTypeName= "RTI::Service::Admin::OctetBody"/>
+      </struct>
+    </module>
+  </module>
+</module>
+</types>
+</dds>

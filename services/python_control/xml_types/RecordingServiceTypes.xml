@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dds xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="file:////home/rti/rti_connext_dds-7.3.1/bin/../resource/app/app_support/rtiddsgen/schema/rti_dds_profiles.xsd">
+<types>
+<module name="RTI">
+  <module name="RecordingService">
+    <const name="DATA_TAG_MAX_STRING_SIZE" type="int32" value="256"/>
+    <struct name= "DataTagParams">
+      <member name="timestamp_offset" type="float32"/>
+      <member name="tag_name" stringMaxLength="RTI::RecordingService::DATA_TAG_MAX_STRING_SIZE" type="string"/>
+      <member name="tag_description" stringMaxLength="255" type="string"/>
+    </struct>
+    <enum name="BreakpointFormat">
+      <enumerator name="TIMESTAMP" value="0"/>
+      <enumerator name="TAG_NAME"/>
+    </enum> 
+    <union name="BreakpointUnion" nested="true">
+<discriminator type="nonBasic" nonBasicTypeName="RTI::RecordingService::BreakpointFormat"/>
+<case>
+      <caseDiscriminator value="(RTI::RecordingService::TIMESTAMP)"/>
+<member name="timestamp_nanos" type="int64"/>
+</case>
+<case>
+      <caseDiscriminator value="(RTI::RecordingService::TAG_NAME)"/>
+<member name="tag_name" stringMaxLength="RTI::RecordingService::DATA_TAG_MAX_STRING_SIZE" type="string"/>
+</case>
+    </union>
+    <struct name= "BreakpointParams">
+      <member name="label" stringMaxLength="RTI::RecordingService::DATA_TAG_MAX_STRING_SIZE" type="string" optional="true"/>
+      <member name="value" type="nonBasic"  nonBasicTypeName= "RTI::RecordingService::BreakpointUnion"/>
+    </struct>
+    <enum name="ContinueFormat">
+      <enumerator name="OFFSET" value="0"/>
+      <enumerator name="SLICE"/>
+    </enum> 
+    <union name="ContinueUnion" nested="true">
+<discriminator type="nonBasic" nonBasicTypeName="RTI::RecordingService::ContinueFormat"/>
+<case>
+      <caseDiscriminator value="(RTI::RecordingService::OFFSET)"/>
+<member name="offset" type="int64"/>
+</case>
+<case>
+      <caseDiscriminator value="(RTI::RecordingService::SLICE)"/>
+<member name="slices" type="int64"/>
+</case>
+    </union>
+    <struct name= "ContinueParams">
+      <member name="value" type="nonBasic"  nonBasicTypeName= "RTI::RecordingService::ContinueUnion"/>
+    </struct>
+    <enum name="TimerState">
+      <enumerator name="WORKING" value="0"/>
+      <enumerator name="PAUSED"/>
+      <enumerator name="BREAKPOINT"/>
+    </enum> 
+    <struct name= "DebugStatus">
+      <member name="status" type="nonBasic"  nonBasicTypeName= "RTI::RecordingService::TimerState"/>
+    </struct>
+    <struct name= "TimestampHolder">
+      <member name="timestamp_nanos" type="int64"/>
+    </struct>
+  </module>
+</module>
+</types>
+</dds>

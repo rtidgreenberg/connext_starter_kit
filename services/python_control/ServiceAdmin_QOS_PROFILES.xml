@@ -1,0 +1,164 @@
+<?xml version="1.0"?>
+<!--
+  QoS Profiles for Recording Service Remote Administration
+
+  These profiles match the QoS used by an RTI Recording Service instance
+  with remote administration enabled. Both the requester (this app) and
+  the service replier must use compatible QoS to communicate.
+
+  Based on the C++ example:
+  https://github.com/rticommunity/rticonnextdds-examples/tree/master/examples/recording_service/service_admin/c%2B%2B11
+
+  Key settings:
+  - Reliable communication with KEEP_ALL history
+  - TRANSIENT_LOCAL durability for late-joiner support
+  - pool_buffer_max_size set for unbounded type support
+-->
+<dds xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+     xsi:noNamespaceSchemaLocation="http://community.rti.com/schema/7.3.0/rti_dds_qos_profiles.xsd">
+
+    <qos_library name="ServiceAdministrationProfiles">
+
+        <!-- Base profile: strict reliable with KEEP_ALL history -->
+        <qos_profile name="ServiceAdminBaseProfile">
+            <datawriter_qos>
+                <reliability>
+                    <kind>RELIABLE_RELIABILITY_QOS</kind>
+                    <max_blocking_time>
+                        <sec>10</sec>
+                        <nanosec>0</nanosec>
+                    </max_blocking_time>
+                </reliability>
+                <history>
+                    <kind>KEEP_ALL_HISTORY_QOS</kind>
+                </history>
+                <protocol>
+                    <rtps_reliable_writer>
+                        <max_heartbeat_retries>LENGTH_UNLIMITED</max_heartbeat_retries>
+                        <heartbeats_per_max_samples>2</heartbeats_per_max_samples>
+                        <heartbeat_period>
+                            <sec>0</sec>
+                            <nanosec>100000000</nanosec>
+                        </heartbeat_period>
+                        <fast_heartbeat_period>
+                            <sec>0</sec>
+                            <nanosec>10000000</nanosec>
+                        </fast_heartbeat_period>
+                        <late_joiner_heartbeat_period>
+                            <sec>0</sec>
+                            <nanosec>10000000</nanosec>
+                        </late_joiner_heartbeat_period>
+                        <max_nack_response_delay>
+                            <sec>0</sec>
+                            <nanosec>0</nanosec>
+                        </max_nack_response_delay>
+                        <min_nack_response_delay>
+                            <sec>0</sec>
+                            <nanosec>0</nanosec>
+                        </min_nack_response_delay>
+                        <max_send_window_size>32</max_send_window_size>
+                        <min_send_window_size>32</min_send_window_size>
+                    </rtps_reliable_writer>
+                </protocol>
+                <writer_resource_limits>
+                    <max_remote_reader_filters>LENGTH_UNLIMITED</max_remote_reader_filters>
+                </writer_resource_limits>
+            </datawriter_qos>
+
+            <datareader_qos>
+                <reliability>
+                    <kind>RELIABLE_RELIABILITY_QOS</kind>
+                    <max_blocking_time>
+                        <sec>10</sec>
+                        <nanosec>0</nanosec>
+                    </max_blocking_time>
+                </reliability>
+                <history>
+                    <kind>KEEP_ALL_HISTORY_QOS</kind>
+                </history>
+                <protocol>
+                    <rtps_reliable_reader>
+                        <max_heartbeat_response_delay>
+                            <sec>0</sec>
+                            <nanosec>0</nanosec>
+                        </max_heartbeat_response_delay>
+                        <min_heartbeat_response_delay>
+                            <sec>0</sec>
+                            <nanosec>0</nanosec>
+                        </min_heartbeat_response_delay>
+                    </rtps_reliable_reader>
+                </protocol>
+            </datareader_qos>
+        </qos_profile>
+
+        <!-- Requester profile: adds TRANSIENT_LOCAL durability and
+             unbounded type support via pool_buffer_max_size -->
+        <qos_profile name="ServiceAdminRequesterProfile"
+                     base_name="ServiceAdminBaseProfile">
+            <datawriter_qos>
+                <durability>
+                    <kind>TRANSIENT_LOCAL_DURABILITY_QOS</kind>
+                </durability>
+                <property>
+                    <value>
+                        <element>
+                            <name>dds.data_writer.history.memory_manager.fast_pool.pool_buffer_max_size</name>
+                            <value>16384</value>
+                        </element>
+                    </value>
+                </property>
+            </datawriter_qos>
+            <datareader_qos>
+                <durability>
+                    <kind>TRANSIENT_LOCAL_DURABILITY_QOS</kind>
+                </durability>
+                <reader_resource_limits>
+                    <dynamically_allocate_fragmented_samples>true</dynamically_allocate_fragmented_samples>
+                </reader_resource_limits>
+                <property>
+                    <value>
+                        <element>
+                            <name>dds.data_reader.history.memory_manager.fast_pool.pool_buffer_max_size</name>
+                            <value>16384</value>
+                        </element>
+                    </value>
+                </property>
+            </datareader_qos>
+        </qos_profile>
+
+        <!-- Replier profile (used by Recording Service) -->
+        <qos_profile name="ServiceAdminReplierProfile"
+                     base_name="ServiceAdminBaseProfile">
+            <datawriter_qos>
+                <durability>
+                    <kind>TRANSIENT_LOCAL_DURABILITY_QOS</kind>
+                </durability>
+                <property>
+                    <value>
+                        <element>
+                            <name>dds.data_writer.history.memory_manager.fast_pool.pool_buffer_max_size</name>
+                            <value>16384</value>
+                        </element>
+                    </value>
+                </property>
+            </datawriter_qos>
+            <datareader_qos>
+                <durability>
+                    <kind>TRANSIENT_LOCAL_DURABILITY_QOS</kind>
+                </durability>
+                <reader_resource_limits>
+                    <dynamically_allocate_fragmented_samples>true</dynamically_allocate_fragmented_samples>
+                </reader_resource_limits>
+                <property>
+                    <value>
+                        <element>
+                            <name>dds.data_reader.history.memory_manager.fast_pool.pool_buffer_max_size</name>
+                            <value>16384</value>
+                        </element>
+                    </value>
+                </property>
+            </datareader_qos>
+        </qos_profile>
+
+    </qos_library>
+</dds>

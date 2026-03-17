@@ -1,11 +1,11 @@
 # DDS Process Builder — Architecture
 
-Five-phase system for designing and building RTI Connext DDS applications: **Init → Design System → Build Baseline → Design Process → Build Process.** Invoked as `@rti_dev` in VS Code Copilot Chat.
+Five-phase system for designing and building RTI Connext DDS applications: **Init → Design System → Build Baseline → Design Process → Build Process.** Invoked as `/rti_dev` in VS Code Copilot Chat.
 
 
 ## High-Level Overview
 
-The DDS Process Builder is a guided, agent-driven workflow for designing and implementing RTI Connext DDS applications. It runs as `@rti_dev` inside VS Code Copilot Chat and walks the user through every decision — from selecting a framework to publishing data on the wire.
+The DDS Process Builder is a guided, agent-driven workflow for designing and implementing RTI Connext DDS applications. It runs as `/rti_dev` inside VS Code Copilot Chat and walks the user through every decision — from selecting a framework to publishing data on the wire.
 
 ### What it does
 
@@ -30,8 +30,8 @@ The workflow is split into **five phases** that execute in order. The first thre
 - **Three decision scopes**: Project-level decisions are locked. System-level decisions are versioned and trigger sweeps. Process-level decisions are freely editable per process.
 - **IDL-first type design**: Types are defined as actual IDL and written to `.idl` files during design — not embedded in YAML. During implementation, `rtiddsgen` generates code directly from these files.
 - **Scripts for determinism**: Six shell scripts handle all mechanical steps (scaffold, rtiddsgen, QoS assembly, test generation, build, test execution). They are idempotent and produce identical output for identical input.
-- **Sub-agents for expertise**: Four specialized prompt files handle type definition, pattern/QoS selection, code generation, and test generation. Each is loaded on demand by the orchestrator.
-- **MCP for knowledge**: Three MCP servers provide RTI documentation, starter kit examples, and community type libraries. Sub-agents query these before making recommendations.
+- **Sub-prompts for expertise**: Four specialized prompt files handle type definition, pattern/QoS selection, code generation, and test generation. Each is loaded on demand by the orchestrator.
+- **MCP for knowledge**: Three MCP servers provide RTI documentation, starter kit examples, and community type libraries. Sub-prompts query these before making recommendations.
 - **Design ↔ Implementation loop**: The user can design one process and implement it immediately, batch-design several and implement all at once, or iterate between design and implementation until tests pass.
 
 ---
@@ -45,7 +45,7 @@ The workflow is split into **five phases** that execute in order. The first thre
 - [Phase 0: Project Initialization](#phase-0-project-initialization)
 - [Phase 1: System Design](#phase-1-system-design)
 - [Phase 2: System Implementation](#phase-2-system-implementation)
-- [@rti_dev Agent](#rti_dev-agent)
+- [/rti_dev Prompt](#rti_dev-prompt)
 - [Phase 3: Process Design](#phase-3-process-design)
   - [Planning Loop](#planning-loop)
   - [Step 1: Process Identity](#step-1-process-identity)
@@ -60,10 +60,10 @@ The workflow is split into **five phases** that execute in order. The first thre
 - [System Patterns Catalog](#system-patterns-catalog)
 - [Data Patterns Reference](#data-patterns-reference)
 - [Decision Points](#decision-points)
-- [Sub-Agent Architecture](#sub-agent-architecture)
+- [Sub-Prompt Architecture](#sub-prompt-architecture)
 - [Repository Structure](#repository-structure)
 - [Iterative Workflow](#iterative-workflow)
-- [Agent File Reference](#agent-file-reference)
+- [Prompt File Reference](#prompt-file-reference)
 
 ---
 
@@ -71,7 +71,7 @@ The workflow is split into **five phases** that execute in order. The first thre
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                            @rti_dev                                    │
+│                            /rti_dev                                    │
 │                                                                        │
 │  PHASE 0: PROJECT INIT (one-time, irreversible)                        │
 │  ┌──────────────────────────────────────────────────────────────────┐  │
@@ -135,15 +135,15 @@ The workflow is split into **five phases** that execute in order. The first thre
 
 **Process Design** is interactive — the user defines I/O one at a time, picks patterns and QoS, specifies tests, and can loop back. The output is a `PROCESS_DESIGN.yaml`.
 
-**Process Implementation** is automated — `@rti_dev` reads the design and generates everything: IDL, QoS XML, app code, tests. Then builds and runs.
+**Process Implementation** is automated — `/rti_dev` reads the design and generates everything: IDL, QoS XML, app code, tests. Then builds and runs.
 
-One `@rti_dev` agent handles all phases. The user is never locked into a phase.
+One `/rti_dev` prompt handles all phases. The user is never locked into a phase.
 
 ---
 
 ## Rules
 
-All rules that govern the system. Sub-agents, implementation scripts, and the orchestrator all follow these rules. This is the canonical reference — if a rule appears here but contradicts something elsewhere, this section wins.
+All rules that govern the system. Sub-prompts, implementation scripts, and the orchestrator all follow these rules. This is the canonical reference — if a rule appears here but contradicts something elsewhere, this section wins.
 
 A concise version of these rules is also loaded via `.github/copilot-instructions.md` on every invocation.
 
@@ -256,8 +256,8 @@ A concise version of these rules is also loaded via `.github/copilot-instruction
 | ID | Rule | Severity |
 |----|------|----------|
 | MCP-1 | Before defining any type: (1) query `github-types-repo`, (2) query `rti-docs-rag`, (3) scan workspace IDL, (4) scan other process YAMLs | **MUST** |
-| MCP-2 | `@rti_dev` does NOT query MCP directly — loads the appropriate sub-agent which contains MCP instructions | **MUST** |
-| MCP-3 | The user NEVER needs to know sub-agents exist — `@rti_dev` is the only visible agent | **NEVER** expose |
+| MCP-2 | `/rti_dev` does NOT query MCP directly — loads the appropriate sub-prompt which contains MCP instructions | **MUST** |
+| MCP-3 | The user NEVER needs to know sub-prompts exist — `/rti_dev` is the only visible prompt | **NEVER** expose |
 
 ### Auto-Resolve Rules (Pattern Selection)
 
@@ -279,10 +279,10 @@ A concise version of these rules is also loaded via `.github/copilot-instruction
 
 **One-time, irreversible.** These choices determine the entire project file structure, build system, code templates, and wrapper classes. Once scaffolded, changing them requires regenerating the entire project.
 
-This runs on first `@rti_dev` invocation when no `planning/project.yaml` exists.
+This runs on first `/rti_dev` invocation when no `planning/project.yaml` exists.
 
 ```
-@rti_dev — Welcome! Let's initialize your DDS project.
+/rti_dev — Welcome! Let's initialize your DDS project.
 
 ⚠ These choices are PERMANENT. They determine the project's
   file structure, build system, and code templates. Changing
@@ -316,7 +316,7 @@ This creates `planning/project.yaml`:
 ```yaml
 # planning/project.yaml
 # LOCKED — changing requires full project regeneration.
-# Created on first @rti_dev invocation.
+# Created on first /rti_dev invocation.
 
 project:
   framework: wrapper_class        # wrapper_class | xml_app_creation
@@ -343,7 +343,7 @@ project:
 
 **Re-entry guard:**
 
-If the user says `@rti_dev project init` after the project is already initialized:
+If the user says `/rti_dev project init` after the project is already initialized:
 
 ```
 ⚠ Project is already initialized:
@@ -367,7 +367,7 @@ System-level decisions that apply to all processes. These are **modifiable** —
 This runs after Phase 0 completes (first invocation) or when the user selects "System Design" from the main menu.
 
 ```
-@rti_dev — System Design
+/rti_dev — System Design
 
   Project: Wrapper Class, Modern C++ (CMake) [locked]
 
@@ -416,7 +416,7 @@ system:
 
 - **First invocation**: Phase 1 runs immediately after Phase 0. The user must complete it before proceeding.
 - **Subsequent invocations**: System config is loaded silently. The main menu shows "System: Wrapper Class, Modern C++ | Failover (Hot Standby), Health Monitoring | domain 0" in the state summary.
-- **Changing later**: `@rti_dev system design` or "System Design" from menu re-opens this phase. The version is incremented and a sweep runs (see below).
+- **Changing later**: `/rti_dev system design` or "System Design" from menu re-opens this phase. The version is incremented and a sweep runs (see below).
 
 ### System Config Versioning
 
@@ -551,24 +551,24 @@ scripts/assemble_qos.sh --system \
 
 ---
 
-## @rti_dev Agent
+## /rti_dev Prompt
 
-`@rti_dev` is a VS Code custom chat agent defined in `.github/agents/rti_dev.md`. It is the single entry point for all DDS development.
+`/rti_dev` is a VS Code custom prompt defined in `.github/prompts/rti_dev.prompt.md`. It is the single entry point for all DDS development.
 
 ### Invoking
 
 ```
-@rti_dev                          → scans state, shows Level 1 menu
-@rti_dev design                   → jumps straight to Level 2a (process picker)
-@rti_dev design gps_tracker       → jumps to modify sub-menu for gps_tracker
-@rti_dev new process              → jumps straight to Step 1 (new process)
-@rti_dev add an input for GPS     → adds I/O to current/specified design
-@rti_dev implement                → jumps to Level 2b (implement picker)
-@rti_dev implement all            → implements all ready designs
-@rti_dev show design              → prints current PROCESS_DESIGN.yaml
+/rti_dev                          → scans state, shows Level 1 menu
+/rti_dev design                   → jumps straight to Level 2a (process picker)
+/rti_dev design gps_tracker       → jumps to modify sub-menu for gps_tracker
+/rti_dev new process              → jumps straight to Step 1 (new process)
+/rti_dev add an input for GPS     → adds I/O to current/specified design
+/rti_dev implement                → jumps to Level 2b (implement picker)
+/rti_dev implement all            → implements all ready designs
+/rti_dev show design              → prints current PROCESS_DESIGN.yaml
 ```
 
-The user can jump to any level directly, or just type `@rti_dev` to get the guided interactive menu.
+The user can jump to any level directly, or just type `/rti_dev` to get the guided interactive menu.
 
 ### What It Does on Every Invocation
 
@@ -611,7 +611,7 @@ The menu uses a **two-level interaction**. First, the agent shows the state summ
 Always presented first. Options adapt to state:
 
 ```
-@rti_dev — DDS Process Builder
+/rti_dev — DDS Process Builder
 
 Project: Wrapper Class | Modern C++ (CMake) [locked]
 System: Failover (Hot Standby), Health Monitoring | domain 0 | v2
@@ -633,7 +633,7 @@ If there are no designs yet, only "Design Mode" is shown (Implement is grayed ou
 
 "System Design" re-enters Phase 1. If system patterns change, the version increments and a sweep runs across all existing process designs.
 
-Note: Project Init (framework/API) is not shown in the menu — it's locked. The user can force re-init with `@rti_dev project init` (with a destructive warning).
+Note: Project Init (framework/API) is not shown in the menu — it's locked. The user can force re-init with `/rti_dev project init` (with a destructive warning).
 
 #### Level 2a: Design Mode → Process Picker
 
@@ -703,7 +703,7 @@ Implement — which process?
 #### Full Interaction Flow Example
 
 ```
-User: @rti_dev
+User: /rti_dev
 
   [Level 1]
   Agent shows state + top-level menu
@@ -894,7 +894,7 @@ Data type for "PositionTopic"?
 
 **Option 1 — Define New Type**:
 
-The datamodel sub-agent walks through the full type definition:
+The datamodel sub-prompt walks through the full type definition:
 
 ```
 Define the type for PositionTopic:
@@ -1156,7 +1156,7 @@ This is the **single source of truth** — the complete specification of one DDS
 
 ```yaml
 # planning/processes/gps_tracker.yaml
-# Generated by @rti_dev Phase 3: Process Design
+# Generated by /rti_dev Phase 3: Process Design
 # Last modified: 2026-03-17T14:30:00Z
 # Project config: planning/project.yaml (Wrapper Class, Modern C++)
 # System config: planning/system_config.yaml (v1, Failover + Health Monitoring)
@@ -1353,7 +1353,7 @@ Step 3: ASSEMBLE QoS XML
   Exit codes: 0 = success, 1 = missing template, 2 = merge conflict
 
 Step 4: GENERATE APPLICATION CODE
-  (Agent-driven — uses builder.prompt.md sub-agent)
+  (Agent-driven — uses builder.prompt.md sub-prompt)
   This step is NOT fully scripted because app logic varies per process.
   The agent reads the design YAML and generates code using blueprints/ as reference.
   See builder.prompt.md for the generation rules.
@@ -1925,19 +1925,18 @@ All decisions during planning, listed with auto-resolve rules:
 
 This section defines the **template repo** — the workflow infrastructure artifacts that ship in the repository. Everything listed here is checked in and maintained as reusable tooling. Generated output (planning configs, application code, IDL, tests, build artifacts) is produced by executing the workflow and is NOT part of the template.
 
-### Agent Infrastructure
+### Prompt Infrastructure
 
 ```
 .github/
-├── agents/
-│   └── rti_dev.md                        # @rti_dev — orchestrator agent definition
-├── copilot-instructions.md               # Workspace-level rules, points to @rti_dev
+├── copilot-instructions.md               # Workspace-level rules, points to /rti_dev
 └── prompts/
-    ├── build_cxx.prompt.md               # Sub-agent: C++ build rules
-    ├── datamodel.prompt.md               # Sub-agent: type definitions, IDL design
-    ├── patterns.prompt.md                # Sub-agent: data pattern + QoS selection
-    ├── builder.prompt.md                 # Sub-agent: code gen, scaffold, CMake
-    └── tester.prompt.md                  # Sub-agent: test gen, pytest
+    ├── rti_dev.prompt.md                 # /rti_dev — orchestrator prompt definition
+    ├── build_cxx.prompt.md               # Sub-prompt: C++ build rules
+    ├── datamodel.prompt.md               # Sub-prompt: type definitions, IDL design
+    ├── patterns.prompt.md                # Sub-prompt: data pattern + QoS selection
+    ├── builder.prompt.md                 # Sub-prompt: code gen, scaffold, CMake
+    └── tester.prompt.md                  # Sub-prompt: test gen, pytest
 ```
 
 ### MCP Configuration
@@ -2035,7 +2034,7 @@ These directories should be in `.gitignore` for the template repo, or committed 
 ### Typical Session: First Process (Fresh Workspace)
 
 ```
-@rti_dev
+/rti_dev
 
 State: No project initialized. Fresh workspace.
 
@@ -2092,7 +2091,7 @@ User: 1 (Add New)
 ### Adding a Second Process (Incremental)
 
 ```
-@rti_dev
+/rti_dev
 
 Project: Wrapper Class | Modern C++ [locked]
 System: Failover (Hot Standby), Health Monitoring | domain 0 | v1
@@ -2135,7 +2134,7 @@ User: 2 (Add New)
 The user can stay in planning mode to design several processes before implementing any of them:
 
 ```
-@rti_dev
+/rti_dev
 
 State: Fresh workspace.
 User: 1 (Design Mode) → 1 (➕ Add New)
@@ -2200,7 +2199,7 @@ User: 4 (Implement ALL)
 After implementing processes, the user can always go back to design mode to add I/O, modify types, or add entirely new processes:
 
 ```
-@rti_dev
+/rti_dev
 
 State: ✓ gps_tracker implemented
        ✓ command_controller implemented
@@ -2265,7 +2264,7 @@ User: 3 (Implement ALL)
 The user can also skip the menus with a direct request:
 
 ```
-@rti_dev modify gps_tracker — add a HealthStatus output at 1Hz
+/rti_dev modify gps_tracker — add a HealthStatus output at 1Hz
 
 → Agent loads planning/processes/gps_tracker.yaml
 → Jumps straight to Step 2 (I/O):
@@ -2288,7 +2287,7 @@ User: 1 (Implement Now)
 ### Fixing a Test Failure
 
 ```
-@rti_dev
+/rti_dev
 
 State: ✓ gps_tracker: implemented, tests pass
        ⚠ command_controller: implemented, 1 TEST FAILING
@@ -2339,23 +2338,23 @@ User: 1 (Fix QoS)
 
 ---
 
-## Sub-Agent Architecture
+## Sub-Prompt Architecture
 
-`@rti_dev` is the only agent the user talks to. But when the user's action requires specialized knowledge (type definitions, pattern/QoS selection, code generation, testing), `@rti_dev` loads a **sub-agent prompt file** — a focused instruction set with specific MCP tool bindings.
+`/rti_dev` is the only agent the user talks to. But when the user's action requires specialized knowledge (type definitions, pattern/QoS selection, code generation, testing), `/rti_dev` loads a **sub-prompt prompt file** — a focused instruction set with specific MCP tool bindings.
 
-### Why Sub-Agents
+### Why Sub-Prompts
 
-| Without sub-agents | With sub-agents |
+| Without sub-prompts | With sub-prompts |
 |-------------------|-----------------|
 | One massive instruction file (~500 lines) | Orchestrator ~150 lines + 4 focused modules ~100 lines each |
 | Agent may lose focus on IDL rules when generating code | Each module has only the rules it needs |
 | All MCP tools listed generically | Each module knows exactly which MCP to query and when |
 | Pattern selection mixed with type syntax | Separated: type syntax in one, pattern logic in another |
 
-### The Sub-Agents
+### The Sub-Prompts
 
 ```
-@rti_dev (orchestrator)
+/rti_dev (orchestrator)
   │
   ├── 📐 datamodel.prompt.md    — type definitions, IDL syntax, field annotations
   │     MCP: rti-docs-rag (IDL syntax), github-types-repo (reference types)
@@ -2372,20 +2371,20 @@ User: 1 (Fix QoS)
   └── 📚 DDS_PROCESS_BUILDER.md — full reference (this doc), loaded as context
 ```
 
-### When Each Sub-Agent Is Triggered
+### When Each Sub-Prompt Is Triggered
 
 ```
-User invokes @rti_dev
+User invokes /rti_dev
   │
   ├─ Level 1 → Level 2a → "Add New Process"
-  │   └─ Step 1 (Process Identity)     → @rti_dev handles directly (no sub-agent)
+  │   └─ Step 1 (Process Identity)     → /rti_dev handles directly (no sub-prompt)
   │   └─ Step 2 (Define I/O)
   │       ├─ Step 2b "Data type gate"   → loads datamodel.prompt.md (Define New)
   │       │                                or scans existing types (Select Existing)
   │       ├─ Step 2c "Pattern & QoS"    → loads patterns.prompt.md
-  │       └─ "Set callbacks"            → @rti_dev handles directly
+  │       └─ "Set callbacks"            → /rti_dev handles directly
   │   └─ Step 3 (Tests)                → loads tester.prompt.md
-  │   └─ Step 4 (Review)               → @rti_dev handles directly
+  │   └─ Step 4 (Review)               → /rti_dev handles directly
   │
   ├─ Level 1 → Level 2b → "Implement"
   │   └─ Steps 1-3 (scaffold, IDL, rtiddsgen)  → loads builder.prompt.md
@@ -2394,20 +2393,20 @@ User invokes @rti_dev
   │   └─ Steps 6-8 (tests, build, run)         → loads tester.prompt.md
   │
   ├─ Level 2a → Modify sub-menu
-  │   └─ "Add Input/Output"            → datamodel + patterns sub-agents
-  │   └─ "Modify I/O"                  → patterns sub-agent
-  │   └─ "Modify Process Settings"      → @rti_dev handles directly
-  │   └─ "Modify Tests"                → tester sub-agent
+  │   └─ "Add Input/Output"            → datamodel + patterns sub-prompts
+  │   └─ "Modify I/O"                  → patterns sub-prompt
+  │   └─ "Modify Process Settings"      → /rti_dev handles directly
+  │   └─ "Modify Tests"                → tester sub-prompt
 ```
 
-### Sub-Agent Prompt Files
+### Sub-Prompt Files
 
-Each sub-agent is a `.github/prompts/*.prompt.md` file. The `@rti_dev` agent loads them contextually — the user never needs to know they exist.
+Each sub-prompt is a `.github/prompts/*.prompt.md` file. The `/rti_dev` agent loads them contextually — the user never needs to know they exist.
 
 #### `.github/prompts/datamodel.prompt.md`
 
 ```markdown
-# Data Modeling Sub-Agent
+# Data Modeling Sub-Prompt
 
 You are defining DDS data types in IDL. You are invoked as a **mandatory gate** for every I/O:
 the user must either define a new type or select an existing one before the I/O can proceed.
@@ -2489,7 +2488,7 @@ For each type, present:
 
 ## On Completion
 
-Return the following to @rti_dev:
+Return the following to /rti_dev:
 - Complete type definition in **IDL syntax** (with module wrapper)
 - Module name
 - List of types defined (struct names, enum names)
@@ -2497,7 +2496,7 @@ Return the following to @rti_dev:
 - Whether this is a new type or reuse of existing
 - Source of reuse if applicable (which process/file)
 
-@rti_dev then **writes the IDL directly to `dds/datamodel/idl/<module>.idl`**
+/rti_dev then **writes the IDL directly to `dds/datamodel/idl/<module>.idl`**
 during design (Phase 3 Step 2b). The PROCESS_DESIGN.yaml records a file
 path reference in `idl_files:`, not the IDL content itself.
 During implementation, `rtiddsgen` generates code from those `.idl` files
@@ -2507,7 +2506,7 @@ for the selected API (C++11, Python, etc.).
 #### `.github/prompts/patterns.prompt.md`
 
 ```markdown
-# Pattern & QoS Sub-Agent
+# Pattern & QoS Sub-Prompt
 
 You are selecting data patterns and QoS profiles for DDS topics.
 
@@ -2578,7 +2577,7 @@ Auto-resolve: `@final @language_binding(FLAT_DATA)` → LargeData.2
 
 ## On Completion
 
-Return to @rti_dev:
+Return to /rti_dev:
 - pattern: event|status|command|parameter|large_data
 - pattern_option: 1|2|3
 - qos_profile: "DataPatternsLibrary::XXX"
@@ -2589,7 +2588,7 @@ Return to @rti_dev:
 #### `.github/prompts/builder.prompt.md`
 
 ```markdown
-# Builder Sub-Agent
+# Builder Sub-Prompt
 
 You generate DDS application code and project scaffolding.
 
@@ -2731,7 +2730,7 @@ Use the pattern from existing apps:
 
 ## On Completion
 
-Return to @rti_dev:
+Return to /rti_dev:
 - List of files created/modified
 - Build command to use
 - Confirm logic/infrastructure separation is correct
@@ -2741,7 +2740,7 @@ Return to @rti_dev:
 #### `.github/prompts/tester.prompt.md`
 
 ```markdown
-# Tester Sub-Agent
+# Tester Sub-Prompt
 
 You generate and run DDS integration tests using pytest.
 
@@ -2796,25 +2795,25 @@ For each I/O in the design, propose:
 
 ## On Completion
 
-Return to @rti_dev:
+Return to /rti_dev:
 - List of test files generated
 - pytest command to run them
 - Expected pass/fail status
 ```
 
-### How @rti_dev Loads Sub-Agents
+### How /rti_dev Loads Sub-Prompts
 
-In the `@rti_dev` agent file, the instructions reference sub-agents like this:
+In the `/rti_dev` prompt file, the instructions reference sub-prompts like this:
 
 ```
 ### Step 2: Define I/O
 
 For each I/O the user describes, walk through the **mandatory 3-step sub-loop**:
 
-1. **Step 2a — Topic name & direction** — @rti_dev handles directly.
+1. **Step 2a — Topic name & direction** — /rti_dev handles directly.
 
 2. **Step 2b — Data type (mandatory gate)** — Load `.github/prompts/datamodel.prompt.md`
-   and follow its instructions. The sub-agent will:
+   and follow its instructions. The sub-prompt will:
    - Present the "Define New / Select Existing" choice
    - If Define New: walk through type name, module, fields, annotations, IDL preview
    - If Select Existing: scan workspace IDL + other process designs, present numbered list
@@ -2831,14 +2830,14 @@ For each I/O the user describes, walk through the **mandatory 3-step sub-loop**:
 4. **Callbacks and rate** — Set automatically from the selected pattern.
 ```
 
-### Interaction Example with Sub-Agents
+### Interaction Example with Sub-Prompts
 
 ```
-User: @rti_dev → Design Mode → ➕ Add New → "gps_tracker"
-→ Step 1: name, domain ID, transports, system pattern opt-in (handled by @rti_dev directly)
+User: /rti_dev → Design Mode → ➕ Add New → "gps_tracker"
+→ Step 1: name, domain ID, transports, system pattern opt-in (handled by /rti_dev directly)
 → Step 2: "It subscribes to Commands and publishes Position at 2Hz"
 
-  @rti_dev parses: 2 I/O items — 1 input (Command), 1 output (Position)
+  /rti_dev parses: 2 I/O items — 1 input (Command), 1 output (Position)
 
   ── Starting I/O #1: input "CommandTopic" ──
 
@@ -2933,7 +2932,7 @@ User: @rti_dev → Design Mode → ➕ Add New → "gps_tracker"
 
   ── I/O #2 complete ──
 
-  ── back to @rti_dev ──
+  ── back to /rti_dev ──
 
   Agent: "2 I/O defined. Add more?
           [Add Input / Add Output / Done with I/O]"
@@ -2943,16 +2942,16 @@ User: @rti_dev → Design Mode → ➕ Add New → "gps_tracker"
 
   ── tester.prompt.md activated ──
   Agent proposes tests based on I/O...
-  ── back to @rti_dev ──
+  ── back to /rti_dev ──
 
-→ Step 4: Review (handled by @rti_dev)
+→ Step 4: Review (handled by /rti_dev)
 ```
 
 ---
 
-## Agent File Reference
+## Prompt File Reference
 
-### `.github/agents/rti_dev.md`
+### `.github/prompts/rti_dev.prompt.md`
 
 ````markdown
 ---
@@ -2965,7 +2964,7 @@ tools: ["file_search", "read_file", "list_dir", "grep_search",
         "multi_replace_string_in_file"]
 ---
 
-# @rti_dev — DDS Process Builder
+# /rti_dev — DDS Process Builder
 
 You are a DDS process builder. You help users design and implement
 RTI Connext DDS applications through five phases:
@@ -3124,7 +3123,7 @@ After implementation, return to main menu.
 
 ## Handling Direct Requests
 
-If user says "@rti_dev add a Button input to gps_tracker":
+If user says "/rti_dev add a Button input to gps_tracker":
 1. Load gps_tracker.yaml
 2. Go directly to Step 2 (I/O)
 3. Add the Button input
@@ -3133,10 +3132,10 @@ If user says "@rti_dev add a Button input to gps_tracker":
 
 ## MCP Tools
 
-MCP tools are scoped to sub-agents. @rti_dev does not query MCP directly —
-it loads the appropriate sub-agent prompt, which contains the MCP instructions.
+MCP tools are scoped to sub-prompts. /rti_dev does not query MCP directly —
+it loads the appropriate sub-prompt prompt, which contains the MCP instructions.
 
-| Sub-Agent | MCP Tool | What It Queries |
+| Sub-Prompt | MCP Tool | What It Queries |
 |-----------|----------|----------------|
 | datamodel | `rti-docs-rag` | IDL syntax, annotations, bounded types |
 | datamodel | `github-types-repo` | Reference IDL templates per pattern |
@@ -3151,7 +3150,7 @@ it loads the appropriate sub-agent prompt, which contains the MCP instructions.
 ```markdown
 # Connext DDS Development
 
-Type `@rti_dev` in Copilot Chat to plan and build DDS processes.
+Type `/rti_dev` in Copilot Chat to plan and build DDS processes.
 
 The builder guides you through five phases:
 0. **Project Init** — framework + API (locked, one-time)

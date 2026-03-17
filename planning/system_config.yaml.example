@@ -1,0 +1,120 @@
+# planning/system_config.yaml
+# ============================================================================
+# SYSTEM CONFIGURATION — Created by /rti_dev Phase 1 (System Design)
+# ============================================================================
+#
+# System-wide DDS configuration — applies to ALL processes in this project.
+# Framework and API choices are in project.yaml (locked).
+#
+# VERSIONED — Every change increments `version`. Each process design tracks
+# which version it was designed against via `system_config_version`. When a
+# mismatch is detected, /rti_dev offers to sweep existing processes:
+#   - Adding a pattern    → offer opt-in to existing processes (non-breaking)
+#   - Changing an approach → warning: affected processes need re-implementation
+#   - Removing a pattern  → warning: removes I/O from participating processes
+#
+# This file is checked by /rti_dev on every invocation.
+# If it does not exist → Phase 1 runs (domain ID + system patterns).
+# If it exists → load silently, show summary in menu header.
+# ============================================================================
+
+system:
+  version: 1                        # Incremented on every change to this file.
+                                    # Process designs reference this as system_config_version.
+
+  domain_id: 0                      # Default domain ID for all processes (0-232).
+                                    # Individual processes can override via domain_id field.
+
+  participant_profile: "DPLibrary::DefaultParticipant"
+                                    # Base participant QoS profile from DDS_QOS_PROFILES.xml.
+                                    # All processes inherit this unless overridden.
+
+  # ── System Patterns ──────────────────────────────────────────────────────
+  #
+  # Architectural behaviors that apply system-wide. Each pattern defines:
+  #   - pattern:  the behavior name (matches System Patterns Catalog)
+  #   - option:   the approach/implementation strategy (selected once, applies everywhere)
+  #
+  # When a process opts in (Phase 3, Step 1d), it gets:
+  #   - Auto-generated types (from system_patterns.idl)
+  #   - Auto-generated I/O (inputs/outputs added to process design)
+  #   - Auto-generated application logic markers
+  #   - Auto-generated QoS profiles
+  #   - Auto-generated tests
+  #
+  # Processes only choose a ROLE (e.g., PRIMARY / STANDBY), never the approach.
+  # ──────────────────────────────────────────────────────────────────────────
+
+  system_patterns:
+
+    - pattern: failover
+      option: hot_standby            # hot_standby | cold_standby | active_active
+                                     #
+                                     # hot_standby:
+                                     #   Standby runs continuously, subscribes to all data.
+                                     #   Primary publishes heartbeat. Standby takes over on
+                                     #   heartbeat loss via EXCLUSIVE ownership.
+                                     #   Switchover time: <1s. Standby has warm state.
+                                     #
+                                     # cold_standby:
+                                     #   Standby process launched only on primary failure.
+                                     #   External monitor detects failure and starts standby.
+                                     #   Switchover time: 5-10s. Resource-constrained.
+                                     #
+                                     # active_active:
+                                     #   Both processes run and publish. Readers use EXCLUSIVE
+                                     #   ownership + strength. Primary stops → reader auto-switches.
+                                     #   Zero-downtime, reader-side failover.
+
+    - pattern: health_monitoring
+      option: app_heartbeat          # dds_liveliness | app_heartbeat | watchdog_restart
+                                     #
+                                     # dds_liveliness:
+                                     #   Built-in DDS liveliness QoS (MANUAL_BY_TOPIC).
+                                     #   Simple presence detection. No custom types needed.
+                                     #
+                                     # app_heartbeat:
+                                     #   Custom heartbeat topic with health metrics
+                                     #   (CPU, memory, uptime). Richer than DDS liveliness.
+                                     #   Requires: HealthStatus type, HealthMonitorQoS profile.
+                                     #
+                                     # watchdog_restart:
+                                     #   Heartbeat + external watchdog monitor that restarts
+                                     #   failed processes. Self-healing system.
+
+  # ── Available Patterns (not selected — for reference) ────────────────────
+  #
+  # - pattern: leader_election
+  #   option: ownership_based        # ownership_based | consensus_based
+  #
+  # - pattern: request_reply
+  #   option: standard               # standard (5-topic set)
+  #
+  # - pattern: redundant_publisher
+  #   option: exclusive_ownership    # exclusive_ownership
+  # ──────────────────────────────────────────────────────────────────────────
+
+  created: "2026-03-17T10:05:00Z"
+  last_modified: "2026-03-17T10:05:00Z"
+
+# ============================================================================
+# SYSTEM PATTERNS CATALOG — Quick Reference
+# ============================================================================
+#
+# | Pattern              | Options                                         |
+# |----------------------|-------------------------------------------------|
+# | failover             | hot_standby, cold_standby, active_active        |
+# | health_monitoring    | dds_liveliness, app_heartbeat, watchdog_restart |
+# | leader_election      | ownership_based, consensus_based                |
+# | request_reply        | standard                                        |
+# | redundant_publisher  | exclusive_ownership                             |
+#
+# VERSIONING BEHAVIOR
+# ============================================================================
+#
+# | Change Type     | Impact          | Agent Behavior                      |
+# |-----------------|-----------------|-------------------------------------|
+# | Add pattern     | Non-breaking    | Offer opt-in to existing processes  |
+# | Change approach | Breaking        | Warn: N processes need re-implement |
+# | Remove pattern  | Breaking        | Warn: removes I/O from processes    |
+# ============================================================================

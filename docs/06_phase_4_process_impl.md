@@ -24,16 +24,17 @@ Step 1: SCAFFOLD PROJECT (agent reads manifest)
     - Reads manifest.yaml for the selected framework
     - Reads project.yaml for api, framework
     - For each entry in manifest.files[]:
-        1. Reads the template file from source path
+        1. Reads the template file from the `template` path
         2. Substitutes {{VARIABLES}} from PROCESS_DESIGN.yaml + project.yaml
-        3. Writes the output to target_root/target path
+        3. Creates the output file at the `destination` path
     - Executes build_integration actions (e.g., adds process to top-level CMakeLists.txt)
     - If wrapper_class: verifies wrapper headers exist in dds/utils/cxx11/ 
     - Idempotent: skips if scaffold already exists (unless user requests --force)
 
   Example manifest entry → execution:
     manifest says:
-      target: "CMakeLists.txt"
+      filename: "CMakeLists.txt"
+      destination: "apps/cxx11/gps_tracker/CMakeLists.txt"
       template: "system_templates/wrapper_class/scaffold/CMakeLists.txt.template"
     agent does:
       1. read_file("system_templates/wrapper_class/scaffold/CMakeLists.txt.template")

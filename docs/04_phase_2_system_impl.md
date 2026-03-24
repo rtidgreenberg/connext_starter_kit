@@ -61,13 +61,15 @@ verify_existing:
     description: "Top-level build file"
 
 generate:
-  - target: "dds/datamodel/idl/system_patterns.idl"
+  - filename: "system_patterns.idl"
+    destination: "dds/datamodel/idl/system_patterns.idl"
     source: template
     template: "system_templates/system_patterns/system_patterns.idl.template"
     condition: "system_config.system_patterns is not empty"
     description: "IDL types for selected system patterns (heartbeat, health, etc.)"
 
-  - target: "dds/qos/SystemPatternsQoS.xml"
+  - filename: "SystemPatternsQoS.xml"
+    destination: "dds/qos/SystemPatternsQoS.xml"
     source: assemble
     fragments_from: "system_templates/qos_templates/"
     condition: "system_config.system_patterns is not empty"

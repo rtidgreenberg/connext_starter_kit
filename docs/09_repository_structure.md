@@ -51,39 +51,46 @@ system_templates/
 
 framework: wrapper_class
 api: modern_cpp
-target_root: "apps/cxx11/{{PROCESS_NAME}}"
 
 files:
-  - target: "CMakeLists.txt"
+  - filename: "CMakeLists.txt"
+    destination: "apps/cxx11/{{PROCESS_NAME}}/CMakeLists.txt"
     source: template
     template: "system_templates/wrapper_class/scaffold/CMakeLists.txt.template"
 
-  - target: "main.cxx"
+  - filename: "main.cxx"
+    destination: "apps/cxx11/{{PROCESS_NAME}}/main.cxx"
     source: template
     template: "system_templates/wrapper_class/scaffold/app_main.cxx.template"
 
-  - target: "{{PROCESS_NAME}}_logic.hpp"
+  - filename: "{{PROCESS_NAME}}_logic.hpp"
+    destination: "apps/cxx11/{{PROCESS_NAME}}/{{PROCESS_NAME}}_logic.hpp"
     source: template
     template: "system_templates/wrapper_class/scaffold/process_logic.hpp.template"
 
-  - target: "{{PROCESS_NAME}}_logic.cxx"
+  - filename: "{{PROCESS_NAME}}_logic.cxx"
+    destination: "apps/cxx11/{{PROCESS_NAME}}/{{PROCESS_NAME}}_logic.cxx"
     source: template
     template: "system_templates/wrapper_class/scaffold/process_logic.cxx.template"
 
-  - target: "application.hpp"
+  - filename: "application.hpp"
+    destination: "apps/cxx11/{{PROCESS_NAME}}/application.hpp"
     source: template
     template: "system_templates/wrapper_class/scaffold/application.hpp.template"
 
-  - target: "run.sh"
+  - filename: "run.sh"
+    destination: "apps/cxx11/{{PROCESS_NAME}}/run.sh"
     source: template
     template: "system_templates/wrapper_class/scaffold/run.sh.template"
     executable: true
 
 shared_files:
-  - target: "dds/datamodel/idl/{{IDL_MODULE}}.idl"
+  - filename: "{{IDL_MODULE}}.idl"
+    destination: "dds/datamodel/idl/{{IDL_MODULE}}.idl"
     source: authored                       # written during Phase 3, not from template
 
-  - target: "dds/qos/DDS_QOS_PROFILES.xml"
+  - filename: "DDS_QOS_PROFILES.xml"
+    destination: "dds/qos/DDS_QOS_PROFILES.xml"
     source: assemble                       # merged from qos_templates/ fragments
     fragments:
       - "system_templates/qos_templates/{{PATTERN}}_qos.xml.fragment"

@@ -52,23 +52,57 @@ Phased build plan for the DDS Process Builder — from empty template slots to a
 
 ---
 
+## Phase R0: Schema Fixes (Dry-Run Blockers)
+
+**Goal:** Fix design-level gaps discovered during use-case dry runs ([docs/14](docs/14_use_case_dry_run.md)). These are schema and documentation changes that must land before any implementation phase — they alter the contract that manifests, prompts, and blueprints build against.
+
+**Depends on:** Nothing (start here, blocks R1/R6/R7)
+
+**Source:** [Use-Case Dry Runs & Gap Analysis](docs/14_use_case_dry_run.md) — Gap IDs referenced below.
+
+### Tasks
+
+| # | Task | Artifact | Description | Dry-Run Gap |
+|---|------|----------|-------------|-------------|
+| R0.1 | Add `participant_qos_profile` to PROCESS_DESIGN schema | `docs/05_phase_3_process_design.md` | Add optional field `process.participant_qos_profile` (string). When absent, auto-derive from transport + largest data size: SHMEM + data > 64 KB → `DPLibrary::LargeDataSHMEMParticipant`; SHMEM + FlatData → same; UDP + large data → `LargeDataUDPParticipant`; otherwise → `DefaultParticipant`. Add derivation rule to `docs/08_decision_points.md`. Update both `.yaml.example` files in `planning/processes/`. | R3-4 (HIGH) |
+| R0.2 | Add per-process `language` field for multi-language projects | `docs/05_phase_3_process_design.md` | Add optional field `process.language` (enum: `modern_cpp`, `python`, `java`, `c`). Required when `project.api` is `modern_cpp_python`. When `project.api` is single-language, inherited and omitted. Update schema, examples, and `docs/02_phase_0_project_init.md` derived-fields table. | F0-1 (HIGH) |
+| R0.3 | Add `qos_modifiers` / `downsample_hz` to I/O schema | `docs/05_phase_3_process_design.md` | Add optional field `downsample_hz` on input entries (shorthand for TIME_BASED_FILTER `minimum_separation`). Alternatively, add `qos_modifiers: [{type: time_based_filter, minimum_separation_ms: N}]` list. This enables "Large Data at 1 Hz from a 10 Hz publisher" without a new QoS profile. Update pattern auto-resolve rules in `docs/07_patterns_reference.md` to detect when a subscriber rate differs from the publisher rate. | F3-3 (HIGH), F3-4 |
+| R0.4 | Add manifest routing table (framework × api) | `docs/09_repository_structure.md` | Document which manifest file is selected for each `(framework, api)` combination: `(wrapper_class, modern_cpp)` → `wrapper_class/manifest.yaml`; `(wrapper_class, python)` → `python/manifest.yaml`; `(xml_app_creation, modern_cpp)` → `xml_app_creation/manifest.yaml`; etc. The orchestrator uses this routing table in Phase 4 Step 1. | R0-2 (MEDIUM) |
+| R0.5 | Document Python import path rules | `docs/01_rules.md` | Add new rules PYTHON-1 through PYTHON-3: (1) `sys.path.insert` convention for locating generated types, (2) import statement mapping: IDL file `ExampleTypes.idl` with module `example_types` → `from python_gen.ExampleTypes import example_types`, (3) build-time vs pre-built path resolution (`dds/datamodel/` vs `build/dds/python_gen/`). | R4-3 (MEDIUM) |
+| R0.6 | Document FlatData cross-language constraints | `docs/07_patterns_reference.md` | Add "Language Constraints" section to Large Data pattern: (1) Zero-Copy (Option 2) is C++ only; Python/Java fall back to Option 1 (SHMEM). (2) Python subscribers to FlatData topics use standard SHMEM QoS — DDS handles XCDR2 deserialization transparently. (3) Annotate auto-resolve rule: if selected type has `@language_binding(FLAT_DATA)` and process language is Python → force option 1, warn user. | F3-2 (HIGH), F3-5 |
+| R0.7 | Clarify QoS fragment vs monolithic strategy | `docs/04_phase_2_system_impl.md`, `docs/09_repository_structure.md` | Document that `DDS_QOS_PROFILES.xml` is the source of truth. QoS fragments in `qos_templates/` serve as agent reference material (the building blocks that comprise the monolith). Phase 4 Step 3 (QoS Assembly) becomes "verify the needed profile exists in QoS XML; if not, warn user." Fragments are not assembled at runtime — they exist for documentation, indexing by MCP, and for users who want to understand individual pattern QoS. | R4-5 (LOW) |
+
+### Deliverables
+- Updated schema docs (docs/01, 02, 04, 05, 07, 08, 09)
+- Updated planning YAML examples
+- All downstream phases (R1, R4, R6, R7) build against the corrected schema
+
+### Validation
+- `participant_qos_profile` auto-derive rule produces correct profile for all 3 Large Data pattern options
+- `gps_tracker.yaml.example` and `command_controller.yaml.example` pass schema validation with new fields
+- Python import rules are consistent with existing `apps/python/large_data_app/large_data_app.py`
+- FlatData constraint triggers correctly: FlatData type + Python → auto-downgrade to Option 1 with warning
+
+---
+
 ## Phase R1: Planning Artifacts & Manifest Files
 
 **Goal:** Manifest-driven scaffold is the core mechanic. Create the manifest YAML files that tell the agent what to create, where to source it, and where to write it. Validate that the planning YAML examples match the current architecture docs.
 
-**Depends on:** Nothing (start here)
+**Depends on:** R0 (schemas must be finalized before manifests encode them)
 
 ### Tasks
 
 | # | Task | Artifact | Description |
 |---|------|----------|-------------|
-| R1.1 | Create wrapper class manifest | `system_templates/wrapper_class/manifest.yaml` | Map each scaffold template → `filename`, `destination`, `source`, `template` path. Include `build_integration` for top-level CMakeLists. Follow schema from [docs/09](docs/09_repository_structure.md). |
+| R1.1 | Create wrapper class manifest | `system_templates/wrapper_class/manifest.yaml` | Map each scaffold template → `filename`, `destination`, `source`, `template` path. Include `build_integration` for top-level CMakeLists. Declare `framework: wrapper_class, api: modern_cpp` per R0.4 routing table. Follow schema from [docs/09](docs/09_repository_structure.md). |
 | R1.2 | Create XML app creation manifest | `system_templates/xml_app_creation/manifest.yaml` | Same structure for XML App Creation scaffold files. Include XML library files. |
 | R1.3 | Create Python manifest | `system_templates/python/manifest.yaml` | Same structure for Python scaffold. `pip` build integration instead of CMake. |
 | R1.4 | Create system manifest | `system_templates/system_manifest.yaml` | Phase 2 baseline: directories to create, files to verify, system IDL/QoS to generate. Follow schema from [docs/04](docs/04_phase_2_system_impl.md). |
 | R1.5 | Create reference manifest | `system_templates/reference_manifest.yaml` | Phase 0 bootstrap: maps empty template slots (blueprints, qos_templates, system_patterns) to GitHub source repos. |
 | R1.6 | Validate planning YAMLs | `planning/*.yaml.example` | Verify `project.yaml.example` and `system_config.yaml.example` match current schemas in [docs/02](docs/02_phase_0_project_init.md) and [docs/03](docs/03_phase_1_system_design.md). Update if needed. |
-| R1.7 | Validate process design YAMLs | `planning/processes/*.yaml.example` | Verify `gps_tracker.yaml.example` and `command_controller.yaml.example` match current PROCESS_DESIGN.yaml schema in [docs/05](docs/05_phase_3_process_design.md). Update if needed. |
+| R1.7 | Validate process design YAMLs | `planning/processes/*.yaml.example` | Verify `gps_tracker.yaml.example` and `command_controller.yaml.example` match current PROCESS_DESIGN.yaml schema in [docs/05](docs/05_phase_3_process_design.md). Must include new fields from R0: `participant_qos_profile`, `language` (if multi-lang), `downsample_hz` (on at least one example input). Update if needed. |
+| R1.8 | Add manifest routing logic | In each `manifest.yaml` | Each manifest must declare its `framework` + `api` applicability so the agent can select the correct manifest per the routing table from R0.4. E.g., `python/manifest.yaml` declares `framework: wrapper_class, api: python`. |
 
 ### Deliverables
 - 5 manifest YAML files
@@ -164,10 +198,14 @@ Phased build plan for the DDS Process Builder — from empty template slots to a
 | R4.8 | Parameter pattern — Python | `system_templates/blueprints/parameter/python/` | `parameter_server.py.template`, `parameter_client.py.template` |
 | R4.9 | Large Data pattern — C++11 | `system_templates/blueprints/large_data/cxx11/` | `reader_callback.cxx.template` (large payload handler), `writer_burst.cxx.template` (pre-allocated burst), `README.md` |
 | R4.10 | Large Data pattern — Python | `system_templates/blueprints/large_data/python/` | `reader_callback.py.template`, `writer_burst.py.template` |
+| R4.11 | Large Data Zero-Copy — C++11 | `system_templates/blueprints/large_data_zc/cxx11/` | `reader_flat.cxx.template` (FlatData sample handling), `writer_flat.cxx.template` (get_loan + builder pattern + finish + write), `README.md` explaining FlatData API differences. Extract from `apps/cxx11/fixed_image_flat_zc/`. **C++ only** — no Python equivalent (see R0.6). |
+| R4.12 | Large Data Downsampled — Python | `system_templates/blueprints/large_data_downsampled/python/` | `reader_downsampled.py.template` (async reader with TIME_BASED_FILTER QoS applied). Extract from `apps/python/downsampled_reader/`. Shows `downsample_hz` (R0.3) in action. |
+| R4.13 | Large Data Downsampled — C++11 | `system_templates/blueprints/large_data_downsampled/cxx11/` | `reader_downsampled.cxx.template` (TIME_BASED_FILTER via QoS on reader). |
 
 ### Deliverables
-- 10 blueprint directories populated (~25 template files + 5 READMEs)
+- 13 blueprint directories populated (~33 template files + 7 READMEs)
 - Each template uses `{{VARIABLE}}` tokens matching manifest schema
+- FlatData blueprint uses builder/loan API, not standard write()
 
 ### Validation
 - C++ templates compile conceptually against wrapper headers in `dds/utils/cxx11/`
@@ -217,8 +255,8 @@ Phased build plan for the DDS Process Builder — from empty template slots to a
 | # | Task | Artifact | Description |
 |---|------|----------|-------------|
 | R6.1 | Create datamodel sub-prompt | `.github/prompts/datamodel.prompt.md` | Type definition specialist. Mandatory type gate (Define New / Select Existing), field-by-field walkthrough, IDL preview. MCP tools: `ask_connext_question`, `search_type_library`. Full spec in [docs/11](docs/11_sub_prompts.md) § datamodel. |
-| R6.2 | Create patterns sub-prompt | `.github/prompts/patterns.prompt.md` | Pattern & QoS specialist. Auto-resolve rules, pattern catalog with numbered options, QoS profile mapping, callback assignment. MCP tools: `ask_connext_question`, `search_reference_code`. Full spec in [docs/11](docs/11_sub_prompts.md) § patterns. |
-| R6.3 | Create builder sub-prompt | `.github/prompts/builder.prompt.md` | Code generation specialist. Clean architecture enforcement (main.cxx vs logic layer), anti-pattern rules, framework-specific generation, CMake integration. MCP tool: `search_reference_code`. Full spec in [docs/11](docs/11_sub_prompts.md) § builder. |
+| R6.2 | Create patterns sub-prompt | `.github/prompts/patterns.prompt.md` | Pattern & QoS specialist. Auto-resolve rules, pattern catalog with numbered options, QoS profile mapping, callback assignment. **Must include:** (1) IDL annotation detection: scan type for `@language_binding(FLAT_DATA)` / `@transfer_mode(SHMEM_REF)` to auto-select Large Data option 2 (ZC), (2) cross-language constraint from R0.6: FlatData + Python → force option 1 with warning, (3) `participant_qos_profile` auto-derivation (transport + max data size), (4) `downsample_hz` detection: if subscriber rate < publisher rate → apply TIME_BASED_FILTER modifier. MCP tools: `ask_connext_question`, `search_reference_code`. Full spec in [docs/11](docs/11_sub_prompts.md) § patterns. |
+| R6.3 | Create builder sub-prompt | `.github/prompts/builder.prompt.md` | Code generation specialist. Clean architecture enforcement (main.cxx vs logic layer), anti-pattern rules, framework-specific generation, CMake integration. **Must include:** (1) Python import generation rules from R0.5 (IDL module → `from python_gen.X import y`), (2) FlatData detection: if type has `@language_binding(FLAT_DATA)` → use `large_data_zc` blueprint + builder/loan API instead of standard write, (3) `participant_qos_profile` selection from R0.1 auto-derive rules, (4) `downsample_hz` → TIME_BASED_FILTER code injection on reader QoS. MCP tool: `search_reference_code`. Full spec in [docs/11](docs/11_sub_prompts.md) § builder. |
 | R6.4 | Create tester sub-prompt | `.github/prompts/tester.prompt.md` | Test generation specialist. Auto-proposal per I/O pattern, pytest fixture usage, integration test subprocess pattern, domain isolation. MCP tool: `search_reference_code`. Full spec in [docs/11](docs/11_sub_prompts.md) § tester. |
 
 ### Deliverables
@@ -277,16 +315,24 @@ Phased build plan for the DDS Process Builder — from empty template slots to a
 | R8.5 | System design change + sweep | Go back to System Design, add Leader Election. Verify version increments, sweep flags existing processes, re-implementation works. |
 | R8.6 | Batch design + implement all | Design 2 processes without implementing. Then "Implement ALL". Verify sequential execution, both pass. |
 | R8.7 | Fix broken tests | Intentionally break a test. Return to design, fix, re-implement. Verify the iterate loop works. |
+| R8.8 | **Dry-run UC1: Python large data SHMEM** | Walk through the full use case from [docs/14](docs/14_use_case_dry_run.md) UC1: Wrapper Class + Python API → no system patterns → design `large_data_camera` with Image type (Select Existing) → Large Data Option 1 (SHMEM) → verify `participant_qos_profile` auto-derived to `LargeDataSHMEMParticipant` → implement → verify Python imports follow R0.5 rules → verify generated code matches `apps/python/large_data_app/` quality → build and run. |
+| R8.9 | **Dry-run UC2: C++ zero-copy + Python viewer** | Walk through [docs/14](docs/14_use_case_dry_run.md) UC2: Wrapper Class + `modern_cpp_python` API → design `image_publisher` (C++, FlatData zero-copy at 10 Hz) + `image_viewer` (Python, downsampled at 1 Hz from same topic) → verify FlatData constraint auto-downgrades Python to Option 1 → verify `downsample_hz: 1` produces TIME_BASED_FILTER QoS → verify FlatData blueprint used for C++ (builder/loan pattern) → implement both → cross-language pub/sub works. |
+| R8.10 | **DDSWriterSetup FlatData support** | Verify whether `DDSWriterSetup<T>` supports FlatData `get_loan()` / builder pattern. If not, either: (a) add `get_loan()` method to `DDSWriterSetup`, or (b) add `DDSFlatDataWriterSetup<T>` variant in `dds/utils/cxx11/`, or (c) document that FlatData apps bypass the wrapper and use raw DDS API. The builder prompt (R6.3) must know which path to take. |
 
 ### Deliverables
 - Working end-to-end workflow
 - Bug fixes from integration testing
 - Verified Phase 0→1→2→3→4 pipeline
+- Both README use cases from [docs/14](docs/14_use_case_dry_run.md) pass end-to-end
+- FlatData wrapper class decision documented and implemented (R8.10)
 
 ### Validation
-- All 7 test scenarios complete without manual intervention (beyond user choices)
+- All 10 test scenarios complete without manual intervention (beyond user choices)
 - Generated code compiles and runs
 - Generated tests pass
+- R8.8: Python large data app publishes/receives 900 KB images over SHMEM
+- R8.9: C++ FlatData publisher + Python downsampled subscriber interoperate
+- R8.10: FlatData code generation path confirmed and documented
 
 ---
 
@@ -418,20 +464,23 @@ Phased build plan for the DDS Process Builder — from empty template slots to a
 ## Execution Order & Dependencies
 
 ```
-R1: Manifests ─────────────────┐
-R2: QoS Fragments ─────────┐  │
-R5: Test Infrastructure ──┐ │  │
-                          │ │  │
-R3: System Patterns ◄─────┼─┘  │  (R3 depends on R2)
-R4: Blueprints ◄──────────┼────┘  (R4 depends on R1)
+R0: Schema Fixes ─────────────────┐  (blocks R1, R6, R7)
+                                  │
+                                  ▼
+R1: Manifests ─────────────────┐  │
+R2: QoS Fragments ─────────┐  │  │
+R5: Test Infrastructure ──┐ │  │  │
+                          │ │  │  │
+R3: System Patterns ◄─────┼─┘  │  │  (R3 depends on R2)
+R4: Blueprints ◄──────────┼────┘  │  (R4 depends on R1, R0)
+                          │       │
+R6: Sub-Prompts ◄─────────┼───────┘  (R6 depends on R2, R4, R0)
                           │
-R6: Sub-Prompts ◄─────────┼──────  (R6 depends on R2, R4)
-                          │
-R7: Orchestrator ◄────────┼──────  (R7 depends on R6, R1)
+R7: Orchestrator ◄────────┼──────  (R7 depends on R6, R1, R0)
                           │
 R8: Integration Test ◄────┴──────  (R8 depends on everything above)
                           │
-R9: MCP Server Core ◄─────┘       (R9 depends on R8 — need working workflow)
+R9: MCP Server Core ◄─────┘       (R9 depends on R8)
                           │
 R10: MCP Validation Tools ◄──     (R10 depends on R9)
                           │
@@ -441,7 +490,8 @@ R12: Bootstrap & Self-Host ◄──   (R12 depends on R11)
 ```
 
 **Parallelism:**
-- **R1 + R2 + R5** can all start immediately (no dependencies)
+- **R0** runs first (schema fixes, doc updates only — fast)
+- **R1 + R2 + R5** can all start immediately after R0
 - **R3 + R4** can run in parallel after R2/R1 respectively
 - **R6 → R7 → R8** are sequential
 - **R9 → R10 → R11 → R12** are sequential (MCP build-out)
@@ -452,19 +502,20 @@ R12: Bootstrap & Self-Host ◄──   (R12 depends on R11)
 
 | Phase | New Files | Est. Lines | Focus |
 |-------|-----------|------------|-------|
-| R1: Manifests | 5 manifests + validation | ~400 | Configuration |
+| R0: Schema Fixes | 0 new files (doc edits only) | ~200 edits | Schema & doc corrections |
+| R1: Manifests | 5 manifests + validation | ~450 | Configuration |
 | R2: QoS Fragments | 12 XML fragments | ~600 | QoS policies |
 | R3: System Patterns | ~16 files (IDL + snippets + READMEs) | ~500 | System patterns |
-| R4: Blueprints | ~25 templates + 5 READMEs | ~800 | Code templates |
+| R4: Blueprints | ~33 templates + 7 READMEs | ~1100 | Code templates |
 | R5: Test Infrastructure | 7 files (helpers + templates) | ~400 | Testing |
-| R6: Sub-Prompts | 4 prompt files | ~800 | Agent expertise |
+| R6: Sub-Prompts | 4 prompt files | ~1000 | Agent expertise |
 | R7: Orchestrator | 2 prompt files (rewrite) | ~500 | Agent orchestration |
 | R8: Integration Test | 0 new files (testing pass) | — | Verification |
 | R9: MCP Server Core | ~10 files (server + tools + indexer + config) | ~1500 | MCP server |
 | R10: MCP Validation | 4 tool files + tests | ~600 | Validation tools |
 | R11: Migrate to MCP | 6 tool files + prompt updates | ~1200 | Tool migration |
 | R12: Bootstrap | 3 files (tools + tests) | ~400 | Self-hosting |
-| **Total** | **~95 files** | **~7,700 lines** | |
+| **Total** | **~105 files** | **~8,450 lines** | |
 
 ---
 
@@ -472,9 +523,10 @@ R12: Bootstrap & Self-Host ◄──   (R12 depends on R11)
 
 | Milestone | After Phase | What Works |
 |-----------|-------------|------------|
-| **M1: Templates Ready** | R4 | All template slots populated. Agent can manually read templates and generate code. |
-| **M2: Prompts Complete** | R7 | `/rti_dev` orchestrates the full 5-phase workflow with sub-prompt dispatch. |
-| **M3: End-to-End Verified** | R8 | Complete workflow tested: init → design → implement → test. |
+| **M0: Schemas Corrected** | R0 | `participant_qos_profile`, per-process `language`, `downsample_hz`, FlatData constraints, Python import rules — all documented. Downstream phases build against a stable, validated contract. |
+| **M1: Templates Ready** | R4 | All template slots populated including FlatData ZC and downsampled blueprints. Agent can manually read templates and generate code. |
+| **M2: Prompts Complete** | R7 | `/rti_dev` orchestrates the full 5-phase workflow with sub-prompt dispatch. Prompts encode FlatData detection, cross-language constraints, participant QoS derivation. |
+| **M3: End-to-End Verified** | R8 | Both dry-run use cases pass: Python SHMEM large data + C++ zero-copy with Python downsampled viewer. |
 | **M4: MCP Knowledge** | R9 | Sub-prompts query MCP for documentation, reference code, and type libraries. |
 | **M5: MCP Validation** | R10 | Automated validation of IDL, QoS conflicts, and process designs. |
 | **M6: MCP Operations** | R11 | Scaffold, build, test operations run via MCP tools. Agent focuses on creative work only. |

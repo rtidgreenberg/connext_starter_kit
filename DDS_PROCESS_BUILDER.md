@@ -123,3 +123,4 @@ Each section of the architecture is documented in its own file for easier naviga
 | 11 | [Sub-Prompt Architecture](docs/11_sub_prompts.md) | 4 sub-prompts (datamodel, patterns, builder, tester), MCP tools, trigger flow |
 | 12 | [Orchestrator & Prompt Reference](docs/12_orchestrator_prompt.md) | Five Phases table, `/rti_dev` prompt, interactive menu, embedded prompt definitions |
 | 13 | [Implementation Roadmap](docs/13_implementation_roadmap.md) | 12-phase build plan — from template slots to MCP-backed workflow, with per-task deliverables |
+| 14 | [Use-Case Dry Runs & Gap Analysis](docs/14_use_case_dry_run.md) | End-to-end walkthrough of two README use cases against the proposed workflow, with identified gaps |

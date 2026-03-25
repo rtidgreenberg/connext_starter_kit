@@ -1,4 +1,4 @@
-# Connext Autonomy Templates
+# Connext Starter Kit
 
 Cross-language DDS system/application templates to accelerate development.
 

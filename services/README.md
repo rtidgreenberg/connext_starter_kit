@@ -10,6 +10,7 @@ Configuration files for RTI Recording, Replay, and Converter Services - capture,
 - [I want to convert my recorded data to CSV for post-processing](#i-want-to-convert-my-recorded-data-to-csv-for-post-processing)
 - [I want to replay my recorded data](#i-want-to-replay-my-recorded-data)
 - [I want to replay converted JSON data](#i-want-to-replay-converted-json-data)
+- [I want to control Recording Service with a GUI](#i-want-to-control-recording-service-with-a-gui)
 
 ---
 
@@ -177,6 +178,41 @@ cd services
 
 ---
 
+## I want to control Recording Service with a GUI
+
+**Objective**: Launch, monitor, pause/resume, shut down, and tag Recording Service from a tkinter desktop GUI — with live DDS monitoring data (state, CPU, memory, uptime, database, topics).
+
+**Running**:
+```bash
+cd services/recording_service_gui
+./run_gui.sh
+```
+
+See [recording_service_gui/README.md](recording_service_gui/README.md) for prerequisites, setup, and usage details.
+
+---
+
+## Tests
+
+End-to-end tests for the services start scripts live in `test/`:
+
+```bash
+cd services
+
+# Run services E2E tests (7 tests: record → convert CSV → replay)
+python3 test/run_all_tests.py -v
+
+# Run a specific test standalone
+python3 test/test_e2e_services.py -v
+```
+
+See [test/README.md](test/README.md) for details on the test pipeline.
+
+GUI-specific tests (unit, widget, integration, E2E tags) live in
+[recording_service_gui/test/](recording_service_gui/test/README.md).
+
+---
+
 ## Configuration Files
 
 | File | Purpose |
@@ -204,6 +240,10 @@ cd services
 
 ```
 services/
+├── test/
+│   ├── run_all_tests.py            # Services test suite runner
+│   ├── test_e2e_services.py        # E2E: record → convert → replay
+│   └── README.md
 ├── log_dir/
 │   └── xcdr/                   # Recorded XCDR data (deploy mode)
 │   └── <timestamped dirs>/     # Recorded JSON data (debug mode)
@@ -217,7 +257,8 @@ services/
 ├── start_record.sh
 ├── start_record_external_types.sh
 ├── start_convert.sh
-└── start_replay.sh
+├── start_replay.sh
+└── recording_service_gui/      # GUI, CLI, monitoring, and GUI tests
 ```
 
 ## Resources

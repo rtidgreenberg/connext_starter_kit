@@ -12,27 +12,39 @@
                 <name>DOMAIN_ID</name>
                 <value>1</value>
             </element>
+            <element>
+                <name>ADMIN_DOMAIN_ID</name>
+                <value>1</value>
+            </element>
         </value>
     </configuration_variables>
 
+    <!-- QoS profiles for Remote Administration are loaded from the
+         centralized dds/qos/DDS_QOS_PROFILES.xml via the -cfgFile
+         semicolon-separated list (set by start scripts and the GUI launcher). -->
+
     <recording_service name="deploy">
 
-
-    <!-- 
-      REMOTE ADMINISTRATION and LOGGING
-      This section is used for remote control of the service, 
-      can start/stop/pause etc. 
-    -->
-
-    <!-- <administration>
-            <distributed_logger>
-                <enabled>false</enabled>
-            </distributed_logger>
-            <enabled>false</enabled>
+        <!-- 
+          REMOTE ADMINISTRATION
+          Enables remote control of the service (start/stop/pause/tag).
+          Use recording_service_gui scripts or the GUI to send commands.
+          Domain ID for admin can be overridden: export ADMIN_DOMAIN_ID=X
+        -->
+        <administration>
+            <domain_id>$(ADMIN_DOMAIN_ID)</domain_id>
+            <datareader_qos base_name="ServiceAdministrationProfiles::ServiceAdminReplierProfile" />
+            <datawriter_qos base_name="ServiceAdministrationProfiles::ServiceAdminReplierProfile" />
         </administration>
 
+        <!-- MONITORING
+             Publishes status, events, and periodic metrics on DDS topics:
+               rti/service/monitoring/config
+               rti/service/monitoring/event
+               rti/service/monitoring/periodic
+        -->
         <monitoring>
-          <enabled>false</enabled>
+            <domain_id>$(ADMIN_DOMAIN_ID)</domain_id>
             <status_publication_period>
                 <sec>1</sec>
                 <nanosec>0</nanosec>
@@ -41,7 +53,7 @@
                 <sec>0</sec>
                 <nanosec>500000000</nanosec>
             </statistics_sampling_period>
-        </monitoring> -->
+        </monitoring>
 
     <!-- Storage settings -->
         <storage>
@@ -89,6 +101,25 @@
         the recorded data to exceed that limit so it will overwrite the older data. 
         This will create 2 files and alternate recording over both files by incrementing/ resetting the
     index -->
+
+    <!-- Remote Administration and Monitoring (same as deploy config) -->
+    <administration>
+        <domain_id>$(ADMIN_DOMAIN_ID)</domain_id>
+        <datareader_qos base_name="ServiceAdministrationProfiles::ServiceAdminReplierProfile" />
+        <datawriter_qos base_name="ServiceAdministrationProfiles::ServiceAdminReplierProfile" />
+    </administration>
+
+    <monitoring>
+        <domain_id>$(ADMIN_DOMAIN_ID)</domain_id>
+        <status_publication_period>
+            <sec>1</sec>
+            <nanosec>0</nanosec>
+        </status_publication_period>
+        <statistics_sampling_period>
+            <sec>0</sec>
+            <nanosec>500000000</nanosec>
+        </statistics_sampling_period>
+    </monitoring>
 
     <!--  Top-level storage settings -->
     <storage>

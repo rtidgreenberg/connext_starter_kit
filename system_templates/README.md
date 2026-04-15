@@ -1,6 +1,6 @@
 # System Templates
 
-This directory contains all parameterized templates used by the `/rti_dev` DDS Process Builder
+This directory contains all parameterized templates used by the `/rti_dev` RTI Rapid Prototyping
 to generate DDS applications during Phases 2-4 of the workflow.
 
 ## Directory Structure
@@ -21,16 +21,18 @@ system_templates/
 │   ├── parameter/
 │   └── large_data/
 └── system_patterns/         # Shared IDL + logic for architectural patterns
-    ├── failover/
-    ├── health_monitoring/
-    ├── leader_election/
-    ├── request_reply/
-    └── redundant_publisher/
+    ├── failover/            # I/O-generating: IDL, snippets, README
+    ├── health_monitoring/   # I/O-generating: IDL, snippets, README
+    ├── leader_election/     # I/O-generating: IDL, snippets, README
+    ├── request_reply/       # I/O-generating: IDL, snippets, README
+    ├── parameter_service/   # I/O-generating: uses DDSParameterSetup wrappers
+    ├── command_arbitration/ # QoS-modifying: README only (role→strength mapping)
+    └── sensor_redundancy/   # QoS-modifying: README only (role→strength mapping)
 ```
 
 ## Template Substitution
 
-All templates use `{{VARIABLE}}` syntax for substitution. The DDS Process Builder
+All templates use `{{VARIABLE}}` syntax for substitution. The RTI Rapid Prototyping
 replaces these tokens during code generation based on:
 
 - **`planning/project.yaml`** — API choice, project name, domain ID

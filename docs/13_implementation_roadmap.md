@@ -1,6 +1,6 @@
 # Implementation Roadmap
 
-Phased build plan for the DDS Process Builder — from empty template slots to a fully operational `/rti_dev` workflow backed by an internal MCP server. Each phase produces testable deliverables. Phases are ordered by dependency; independent phases can run in parallel.
+Phased build plan for the RTI Rapid Prototyping — from empty template slots to a fully operational `/rti_dev` workflow backed by an internal MCP server. Each phase produces testable deliverables. Phases are ordered by dependency; independent phases can run in parallel.
 
 ---
 
@@ -10,7 +10,7 @@ Phased build plan for the DDS Process Builder — from empty template slots to a
 
 | Artifact | Path | Notes |
 |----------|------|-------|
-| Architecture docs | `DDS_PROCESS_BUILDER.md` + `docs/01-12` | 12 split docs + summary |
+| Architecture docs | `RTI_RAPID_PROTOTYPING.md` + `docs/01-12` | 12 split docs + summary |
 | Orchestrator prompt | `.github/prompts/rti_dev.prompt.md` | Basic — state detection + framework selector, needs full rewrite |
 | Framework selector prompt | `.github/prompts/framework_selector.prompt.md` | Exists |
 | Wrapper classes prompt | `.github/prompts/wrapper_classes.prompt.md` | Exists |
@@ -30,7 +30,7 @@ Phased build plan for the DDS Process Builder — from empty template slots to a
 |----------|------|-------|
 | Blueprint dirs | `system_templates/blueprints/{event,status,command,parameter,large_data}/{cxx11,python}/` | Template code files |
 | QoS templates dir | `system_templates/qos_templates/` | Per-pattern QoS XML fragments |
-| System pattern dirs | `system_templates/system_patterns/{failover,health_monitoring,leader_election,redundant_publisher,request_reply}/` | IDL templates, QoS fragments, logic snippets |
+| System pattern dirs | `system_templates/system_patterns/{failover,health_monitoring,leader_election,request_reply,parameter_service,command_arbitration,sensor_redundancy}/` | IDL templates, QoS fragments, logic snippets (I/O-generating patterns); QoS rules + README (QoS-modifying patterns) |
 
 ### Exists and Populated (scaffold templates)
 
@@ -152,7 +152,10 @@ Phased build plan for the DDS Process Builder — from empty template slots to a
 
 ## Phase R3: System Patterns IDL & Implementation Templates
 
-**Goal:** Populate the empty `system_patterns/` directories. Each system pattern needs: an IDL template (type definitions), a logic snippet (how a process implements the pattern), and references to the QoS fragment from R2.
+**Goal:** Populate the empty `system_patterns/` directories. System patterns fall into two categories:
+
+- **I/O-generating patterns** (Failover, Health Monitoring, Leader Election, Request-Reply): need IDL templates, logic snippets, and QoS fragment references.
+- **QoS-modifying patterns** (Command Arbitration, Sensor Redundancy): need only a README documenting QoS rules and role-to-strength mapping. They modify user-defined I/O rather than generating new topics.
 
 **Depends on:** R2 (references QoS profile names)
 
@@ -160,21 +163,26 @@ Phased build plan for the DDS Process Builder — from empty template slots to a
 
 | # | Task | Artifact(s) | Description |
 |---|------|-------------|-------------|
-| R3.1 | Create system patterns IDL template | `system_templates/system_patterns/system_patterns.idl.template` | Combined IDL with all system pattern types: `ProcessRole` enum, `HeartbeatStatus`, `HealthStatus`, `LeaderBid`, `ServiceRequest`/`ServiceReply`. Gated by `{{PATTERN_*}}` conditionals. |
+| R3.1 | Create system patterns IDL template | `system_templates/system_patterns/system_patterns.idl.template` | Combined IDL with all I/O-generating pattern types: `ProcessRole` enum, `HeartbeatStatus`, `HealthStatus`, `LeaderBid`, `ServiceRequest`/`ServiceReply`, `ParameterType`/`ParameterValue`/`Parameter`/`ParameterEvent`/`SetParametersRequest`/`SetParametersResponse`/`GetParametersRequest`/`GetParametersResponse`. Gated by `{{PATTERN_*}}` conditionals. Does NOT include Command Arbitration or Sensor Redundancy (they don't add types). |
 | R3.2 | Create failover pattern files | `system_templates/system_patterns/failover/` | `heartbeat_writer.cxx.snippet` (PRIMARY publishes heartbeat), `heartbeat_reader.cxx.snippet` (STANDBY monitors liveliness), `README.md` (pattern description, QoS rationale, opt-in behavior). |
 | R3.3 | Create health monitoring files | `system_templates/system_patterns/health_monitoring/` | `health_publisher.cxx.snippet` (publish ProcessHealth at 1Hz), `health_subscriber.cxx.snippet` (monitor all processes), `README.md`. |
 | R3.4 | Create leader election files | `system_templates/system_patterns/leader_election/` | `leader_bid_writer.cxx.snippet`, `leader_monitor.cxx.snippet`, `README.md`. |
 | R3.5 | Create request-reply files | `system_templates/system_patterns/request_reply/` | `service_server.cxx.snippet`, `service_client.cxx.snippet`, `README.md`. |
-| R3.6 | Create redundant publisher files | `system_templates/system_patterns/redundant_publisher/` | `redundant_writer.cxx.snippet` (EXCLUSIVE ownership with configurable strength), `README.md`. |
+| R3.6 | Create command arbitration files | `system_templates/system_patterns/command_arbitration/` | `README.md` only — documents QoS-modifying behavior: role→strength mapping (`command_primary`=100, `command_secondary`=50), EXCLUSIVE ownership rules, auto-applied QoS profiles (`CommandPrimaryQoS`, `CommandSecondaryQoS`), integration test template. No IDL or code snippets needed. |
+| R3.7 | Create sensor redundancy files | `system_templates/system_patterns/sensor_redundancy/` | `README.md` only — documents QoS-modifying behavior: role→strength mapping (`sensor_primary`=100, `sensor_secondary`=50), EXCLUSIVE ownership on status outputs, auto-applied QoS profiles (`StatusPrimaryQoS`, `StatusSecondaryQoS`), integration test template. No IDL or code snippets needed. |
+| R3.8 | Create parameter service files | `system_templates/system_patterns/parameter_service/` | `parameter_server.cxx.snippet` (DDSServerParameterSetup wrapper), `parameter_client.cxx.snippet` (DDSClientParameterSetup wrapper), `README.md` (7-topic set, server/client roles, integration with existing DDSParameterSetup wrappers in `dds/utils/cxx11/`). I/O-generating pattern. |
 
 ### Deliverables
-- 1 combined system IDL template
-- 5 pattern directories populated with snippets + READMEs (~15 files)
+- 1 combined system IDL template (I/O-generating patterns only)
+- 5 I/O-generating pattern directories with snippets + READMEs (~16 files)
+- 2 QoS-modifying pattern directories with README only (~2 files)
+- Total: 7 pattern directories, ~18 files
 
 ### Validation
 - IDL template compiles with `rtiddsgen -ppDisable` when all conditionals are enabled
 - Each snippet references correct QoS profile names from R2
 - README describes when/how the pattern is opt-in per [docs/07](docs/07_patterns_reference.md)
+- QoS-modifying pattern READMEs document role→strength→profile mapping
 
 ---
 
@@ -281,13 +289,16 @@ Phased build plan for the DDS Process Builder — from empty template slots to a
 | # | Task | Artifact | Description |
 |---|------|----------|-------------|
 | R7.1 | Rewrite rti_dev.prompt.md | `.github/prompts/rti_dev.prompt.md` | Full orchestrator: state detection scan, Phase 0 routing (framework + API + bootstrap), Phase 1 routing (system design), Phase 2 automation (system implementation via manifest), Level 1 menu (Design / Implement / System Design / Done), Level 2a (process picker + modify sub-menu), Level 2b (implement picker), sub-prompt dispatch, direct request handling. Follow spec in [docs/12](docs/12_orchestrator_prompt.md). |
-| R7.2 | Update copilot-instructions.md | `.github/copilot-instructions.md` | Update to describe all 5 phases. Point to `/rti_dev`. Reference `DDS_PROCESS_BUILDER.md` and `docs/` for details. |
+| R7.2 | Update copilot-instructions.md | `.github/copilot-instructions.md` | Update to describe all 5 phases. Point to `/rti_dev`. Reference `RTI_RAPID_PROTOTYPING.md` and `docs/` for details. |
 | R7.3 | Wire sub-prompt loading | In `rti_dev.prompt.md` | Add explicit instructions for when to load each sub-prompt file (Step 2b → datamodel, Step 2c → patterns, Phase 4 Step 4 → builder, Phase 4 Step 5/7 → tester). |
 | R7.4 | Add direct request parsing | In `rti_dev.prompt.md` | Handle natural language shortcuts: "/rti_dev add a Button input to gps_tracker" → load YAML → jump to Step 2 → add I/O → offer re-implement. |
+| R7.5 | Add phase review & knowledge capture step | In `rti_dev.prompt.md` + `.github/prompts/phase_review.prompt.md` | At the end of every implementation phase (after Phase 4 completes for a process or batch), the orchestrator automatically triggers a review step. The review: (1) scans `/memories/session/` for design decisions, API observations, workarounds, and QoS reasoning captured during implementation, (2) flags concerns from memory + generated code (QoS tuning, tradeoffs, cross-language issues, fragile assumptions), (3) writes a structured review entry to `knowledge/reviews/<process_name>_<timestamp>.md` with sections: Design Decisions, Concerns, Discoveries, Workarounds, (4) stages `knowledge/` + all generated files and commits with message `[rti_dev] Phase 4 complete: <process_name> — review captured`, (5) pushes to current branch. **During implementation**, the agent writes observations to session memory in real time — the review step harvests these notes rather than reconstructing reasoning after the fact. The `phase_review.prompt.md` sub-prompt defines the review template and categorization rules. This is a **mandatory, automatic** step — not user-triggered. |
 
 ### Deliverables
 - Complete orchestrator prompt (~300-400 lines)
 - Updated copilot-instructions.md
+- `phase_review.prompt.md` sub-prompt for review template & rules
+- `knowledge/` directory structure (`knowledge/reviews/`, `knowledge/.gitkeep`)
 
 ### Validation
 - `/rti_dev` on fresh workspace → detects no project.yaml → starts Phase 0
@@ -295,6 +306,8 @@ Phased build plan for the DDS Process Builder — from empty template slots to a
 - `/rti_dev` with both configs → shows Level 1 menu with correct state summary
 - `/rti_dev design` → jumps to Level 2a
 - `/rti_dev implement` → jumps to Level 2b
+- After any process implementation completes → review entry auto-created in `knowledge/reviews/`
+- Review commit appears in git log with `[rti_dev]` prefix
 
 ---
 
@@ -308,9 +321,9 @@ Phased build plan for the DDS Process Builder — from empty template slots to a
 
 | # | Task | Description |
 |---|------|-------------|
-| R8.1 | Fresh workspace test | Invoke `/rti_dev` on clean workspace. Walk through Phase 0 (pick Wrapper Class + C++11) → Phase 1 (domain 0, failover + health monitoring) → Phase 2 (verify baseline generated). |
+| R8.1 | Fresh workspace test | Invoke `/rti_dev` on clean workspace. Walk through Phase 0 (pick Wrapper Class + C++11) → Phase 1 (domain 0, failover + health monitoring) → Phase 2 (verify baseline generated). Verify `knowledge/` directory created. |
 | R8.2 | Single process design test | Design `gps_tracker`: 1 input (CommandTopic, Command pattern), 1 output (PositionTopic, Status at 2Hz). Verify PROCESS_DESIGN.yaml matches schema. Verify IDL written to `dds/datamodel/idl/gps_types.idl`. |
-| R8.3 | Single process implementation test | Implement `gps_tracker`. Verify: scaffold created at correct `destination` paths, rtiddsgen runs, QoS assembled, app code has clean architecture (main.cxx vs logic), tests generated, build succeeds, tests run. |
+| R8.3 | Single process implementation test | Implement `gps_tracker`. Verify: scaffold created at correct `destination` paths, rtiddsgen runs, QoS assembled, app code has clean architecture (main.cxx vs logic), tests generated, build succeeds, tests run. **Verify phase review auto-triggers:** `knowledge/reviews/gps_tracker_<ts>.md` created, git commit with `[rti_dev]` prefix, push succeeds. |
 | R8.4 | Second process with type reuse | Design `command_controller` that reuses `gps_types::Command`. Verify type gate correctly offers "Select Existing". Implement and verify shared type support. |
 | R8.5 | System design change + sweep | Go back to System Design, add Leader Election. Verify version increments, sweep flags existing processes, re-implementation works. |
 | R8.6 | Batch design + implement all | Design 2 processes without implementing. Then "Implement ALL". Verify sequential execution, both pass. |
@@ -333,6 +346,7 @@ Phased build plan for the DDS Process Builder — from empty template slots to a
 - R8.8: Python large data app publishes/receives 900 KB images over SHMEM
 - R8.9: C++ FlatData publisher + Python downsampled subscriber interoperate
 - R8.10: FlatData code generation path confirmed and documented
+- Phase review auto-triggers after every implementation, producing `knowledge/reviews/` entries and auto-commits
 
 ---
 
@@ -509,7 +523,7 @@ R12: Bootstrap & Self-Host ◄──   (R12 depends on R11)
 | R4: Blueprints | ~33 templates + 7 READMEs | ~1100 | Code templates |
 | R5: Test Infrastructure | 7 files (helpers + templates) | ~400 | Testing |
 | R6: Sub-Prompts | 4 prompt files | ~1000 | Agent expertise |
-| R7: Orchestrator | 2 prompt files (rewrite) | ~500 | Agent orchestration |
+| R7: Orchestrator | 3 prompt files (rewrite + phase_review) | ~600 | Agent orchestration + phase review |
 | R8: Integration Test | 0 new files (testing pass) | — | Verification |
 | R9: MCP Server Core | ~10 files (server + tools + indexer + config) | ~1500 | MCP server |
 | R10: MCP Validation | 4 tool files + tests | ~600 | Validation tools |
@@ -525,7 +539,7 @@ R12: Bootstrap & Self-Host ◄──   (R12 depends on R11)
 |-----------|-------------|------------|
 | **M0: Schemas Corrected** | R0 | `participant_qos_profile`, per-process `language`, `downsample_hz`, FlatData constraints, Python import rules — all documented. Downstream phases build against a stable, validated contract. |
 | **M1: Templates Ready** | R4 | All template slots populated including FlatData ZC and downsampled blueprints. Agent can manually read templates and generate code. |
-| **M2: Prompts Complete** | R7 | `/rti_dev` orchestrates the full 5-phase workflow with sub-prompt dispatch. Prompts encode FlatData detection, cross-language constraints, participant QoS derivation. |
+| **M2: Prompts Complete** | R7 | `/rti_dev` orchestrates the full 5-phase workflow with sub-prompt dispatch. Prompts encode FlatData detection, cross-language constraints, participant QoS derivation. Phase review auto-captures concerns and commits after every implementation. |
 | **M3: End-to-End Verified** | R8 | Both dry-run use cases pass: Python SHMEM large data + C++ zero-copy with Python downsampled viewer. |
 | **M4: MCP Knowledge** | R9 | Sub-prompts query MCP for documentation, reference code, and type libraries. |
 | **M5: MCP Validation** | R10 | Automated validation of IDL, QoS conflicts, and process designs. |

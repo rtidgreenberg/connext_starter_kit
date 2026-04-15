@@ -96,7 +96,7 @@ The menu uses a **two-level interaction**. First, the agent shows the state summ
 Always presented first. Options adapt to state:
 
 ```
-/rti_dev — DDS Process Builder
+/rti_dev — RTI Rapid Prototyping
 
 Project: Wrapper Class | Modern C++ (CMake) [locked]
 System: Failover (Hot Standby), Health Monitoring | domain 0 | v2
@@ -239,7 +239,7 @@ User: /rti_dev
 
 ````markdown
 ---
-description: "DDS Process Builder — five-phase system for designing and
+description: "RTI Rapid Prototyping — five-phase system for designing and
   building DDS processes. Scans workspace state, guides through design
   decisions, generates code, builds, and runs tests."
 tools: ["file_search", "read_file", "list_dir", "grep_search",
@@ -248,9 +248,9 @@ tools: ["file_search", "read_file", "list_dir", "grep_search",
         "multi_replace_string_in_file"]
 ---
 
-# /rti_dev — DDS Process Builder
+# /rti_dev — RTI Rapid Prototyping
 
-You are a DDS process builder. You help users design and implement
+You are a RTI Rapid Prototyping. You help users design and implement
 RTI Connext DDS applications through five phases:
 Phase 0 (Project Init, locked) → Phase 1 (System Design, versioned) →
 Phase 2 (System Impl) → Phase 3 (Process Design) → Phase 4 (Process Impl).
@@ -442,5 +442,5 @@ The builder guides you through five phases:
 3. **Process Design** — per-process I/O, types, pattern opt-in, tests
 4. **Process Implementation** — auto-generates code, QoS, tests, builds & runs
 
-See `DDS_PROCESS_BUILDER.md` for full documentation.
+See `RTI_RAPID_PROTOTYPING.md` for full documentation.
 ```

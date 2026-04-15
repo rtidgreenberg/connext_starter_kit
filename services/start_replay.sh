@@ -24,6 +24,11 @@ xml="./replay_service_config.xml"
 
 config="xcdr"
 
+# QoS XML file — centralized profiles (available if replay config references them)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+qos_file="$REPO_ROOT/dds/qos/DDS_QOS_PROFILES.xml"
+
 ################################################################################
 #                                 VERBOSITY                                    #
 ################################################################################
@@ -49,6 +54,7 @@ verbosity=ERROR:ERROR
 echo "
 ---------------------------REPLAY SERVICE CONFIGS: -----------------------------
 XML FILES used:  $xml
+QoS FILE:        $qos_file
 Logging Verbosity: $verbosity
 CONFIG = $config
 
@@ -57,4 +63,4 @@ CONFIG = $config
 
 
 # Run Replay Service
-$NDDSHOME/bin/rtireplayservice -cfgName $config -verbosity $verbosity  -cfgFile $xml
+$NDDSHOME/bin/rtireplayservice -cfgName $config -verbosity $verbosity  -cfgFile "$xml;$qos_file"

@@ -44,6 +44,29 @@ system_templates/
 
 **Example `wrapper_class/manifest.yaml`:**
 
+### Manifest Routing Table (Framework × API)
+
+The orchestrator selects the correct manifest file based on the `(framework, api)` combination from `project.yaml`. For multi-language projects (`modern_cpp_python`), the per-process `language` field from `PROCESS_DESIGN.yaml` determines which manifest is used for each process.
+
+| Framework | API / Language | Manifest File | App Directory | Build System |
+|-----------|---------------|---------------|---------------|-------------|
+| `wrapper_class` | `modern_cpp` | `system_templates/wrapper_class/manifest.yaml` | `apps/cxx11/` | CMake |
+| `wrapper_class` | `python` | `system_templates/python/manifest.yaml` | `apps/python/` | pip |
+| `wrapper_class` | `modern_cpp_python` + `language: modern_cpp` | `system_templates/wrapper_class/manifest.yaml` | `apps/cxx11/` | CMake |
+| `wrapper_class` | `modern_cpp_python` + `language: python` | `system_templates/python/manifest.yaml` | `apps/python/` | pip |
+| `xml_app_creation` | `modern_cpp` | `system_templates/xml_app_creation/manifest.yaml` | `apps/cxx11/` | CMake |
+| `xml_app_creation` | `python` | N/A — XML App Creation is C++ only | — | — |
+
+**Selection logic (Phase 4, Step 1):**
+1. Read `project.yaml` → get `framework` and `api`.
+2. If `api` is multi-language (`modern_cpp_python`), read `PROCESS_DESIGN.yaml` → get `process.language`.
+3. Look up the routing table → select the manifest file.
+4. Read that manifest → scaffold the process.
+
+Each manifest declares its own `framework` and `api` fields for self-identification (see example below).
+
+**Example manifest YAML:**
+
 ```yaml
 # system_templates/wrapper_class/manifest.yaml
 # The agent reads this to scaffold a new process directory.
@@ -91,8 +114,9 @@ shared_files:
 
   - filename: "DDS_QOS_PROFILES.xml"
     destination: "dds/qos/DDS_QOS_PROFILES.xml"
-    source: assemble                       # merged from qos_templates/ fragments
-    fragments:
+    source: verify                         # verify profile exists in monolithic XML;
+                                           # DDS_QOS_PROFILES.xml is the source of truth
+    fragments:                             # reference fragments for agent context
       - "system_templates/qos_templates/{{PATTERN}}_qos.xml.fragment"
 
 build_integration:
@@ -146,7 +170,11 @@ system_templates/
 ├── python/                               # Framework: Python scaffold
 │   └── scaffold/
 │
-├── qos_templates/                        # Per-pattern QoS XML fragments
+├── qos_templates/                        # Per-pattern QoS XML fragments (REFERENCE ONLY)
+│   │                                     # dds/qos/DDS_QOS_PROFILES.xml is the source of truth.
+│   │                                     # Fragments document individual pattern QoS settings
+│   │                                     # for agent indexing, documentation, and MCP RAG queries.
+│   │                                     # They are NOT assembled at runtime.
 │   ├── event_qos.xml
 │   ├── status_qos.xml
 │   ├── command_qos.xml
@@ -165,7 +193,7 @@ system_templates/
 ## Architecture Documentation
 
 ```
-DDS_PROCESS_BUILDER.md                    # Top-level summary + table of contents
+RTI_RAPID_PROTOTYPING.md                    # Top-level summary + table of contents
 docs/
 ├── 01_rules.md                           # All rules (IDL, naming, architecture, workflow)
 ├── 02_phase_0_project_init.md            # Phase 0: Project Initialization

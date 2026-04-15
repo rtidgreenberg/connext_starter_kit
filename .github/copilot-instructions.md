@@ -1,6 +1,6 @@
 # Copilot Workspace Instructions
 
-When the user types "@rti_dev" or asks about DDS process building, follow the instructions in `.github/prompts/rti_dev.prompt.md`.
+When the user types "@rti_dev" or asks about RTI Rapid Prototyping, follow the instructions in `.github/prompts/rti_dev.prompt.md`.
 
 On startup or when asked to initialize:
 1. Check if `planning/project.yaml` exists

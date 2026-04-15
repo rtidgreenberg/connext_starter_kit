@@ -90,8 +90,28 @@ system:
   # - pattern: request_reply
   #   option: standard               # standard (5-topic set)
   #
-  # - pattern: redundant_publisher
-  #   option: exclusive_ownership    # exclusive_ownership
+  # - pattern: parameter_service
+  #   option: standard               # standard | persistent
+  #                                  # Roles: parameter_server | parameter_client
+  #                                  # I/O-generating: auto-adds 7-topic parameter
+  #                                  # set (Events, Get/Set/List request+response).
+  #                                  # Uses DDSServerParameterSetup / DDSClientParameterSetup
+  #                                  # wrapper classes.
+  #
+  # - pattern: command_arbitration
+  #   option: priority_based         # priority_based | dynamic_priority
+  #                                  # Roles: command_primary (strength 100) |
+  #                                  #        command_secondary (strength 50)
+  #                                  # Modifies QoS on command outputs — does NOT
+  #                                  # generate new topics. Requires Command pattern
+  #                                  # on user-defined I/O.
+  #
+  # - pattern: sensor_redundancy
+  #   option: exclusive_failover     # exclusive_failover | best_quality_selection
+  #                                  # Roles: sensor_primary (strength 100) |
+  #                                  #        sensor_secondary (strength 50)
+  #                                  # Modifies QoS on status/sensor outputs — does NOT
+  #                                  # generate new topics. Provides reader-side failover.
   # ──────────────────────────────────────────────────────────────────────────
 
   created: "2026-03-17T10:05:00Z"
@@ -101,13 +121,15 @@ system:
 # SYSTEM PATTERNS CATALOG — Quick Reference
 # ============================================================================
 #
-# | Pattern              | Options                                         |
-# |----------------------|-------------------------------------------------|
-# | failover             | hot_standby, cold_standby, active_active        |
-# | health_monitoring    | dds_liveliness, app_heartbeat, watchdog_restart |
-# | leader_election      | ownership_based, consensus_based                |
-# | request_reply        | standard                                        |
-# | redundant_publisher  | exclusive_ownership                             |
+# | Pattern              | Options                                         | Type             |
+# |----------------------|-------------------------------------------------|------------------|
+# | failover             | hot_standby, cold_standby, active_active        | I/O-generating   |
+# | health_monitoring    | dds_liveliness, app_heartbeat, watchdog_restart | I/O-generating   |
+# | leader_election      | ownership_based, consensus_based                | I/O-generating   |
+# | request_reply        | standard                                        | I/O-generating   |
+# | parameter_service    | standard, persistent                            | I/O-generating   |
+# | command_arbitration  | priority_based, dynamic_priority                | QoS-modifying    |
+# | sensor_redundancy    | exclusive_failover, best_quality_selection      | QoS-modifying    |
 #
 # VERSIONING BEHAVIOR
 # ============================================================================

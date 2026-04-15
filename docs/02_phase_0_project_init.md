@@ -64,6 +64,8 @@ project:
 | C | `C` | `cmake` | `gtest` | `apps/c` |
 | Modern C++ + Python | `C++11` + `python` | `cmake+pip` | `gtest+pytest` | `apps/cxx11` + `apps/python` |
 
+**Multi-language projects (`modern_cpp_python`):** When the API is `modern_cpp_python`, each process must declare its `language` field (`modern_cpp` or `python`) in `PROCESS_DESIGN.yaml`. See [Phase 3: Process Design](05_phase_3_process_design.md) for details. This determines which scaffold template, rtiddsgen language flag, build system, and app directory are used per-process.
+
 ## Step 2: Bootstrap Reference Content
 
 After the user confirms framework + API, the agent runs a one-time bootstrap to populate empty `system_templates/` slots with reference content. This ensures blueprints, QoS fragments, and system pattern examples are available locally before any process is designed.

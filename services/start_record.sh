@@ -41,6 +41,12 @@ fi
 # These can be used throughout the configuration file with $(VARIABLE_NAME) syntax
 # export DOMAIN_ID=5
 
+# QoS XML file — centralized profiles used by Recording Service
+# (ServiceAdministrationProfiles, etc.)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+qos_file="$REPO_ROOT/dds/qos/DDS_QOS_PROFILES.xml"
+
 ################################################################################
 #                                 VERBOSITY                                    #
 ################################################################################
@@ -64,14 +70,15 @@ verbosity=ERROR:ERROR
 ################################################################################
 
 echo "
-------------------------CONVERTER SERVICE CONFIGS: -----------------------------
+------------------------RECORDING SERVICE CONFIGS: -----------------------------
 XML FILES used:  $xml
+QoS FILE:        $qos_file
 Logging Verbosity: $verbosity
 CONFIG = $config
 
-------------------------CONVERTER SERVICE CONFIGS: -----------------------------
+------------------------RECORDING SERVICE CONFIGS: -----------------------------
 "
 
 
 # Run Record Service
-$NDDSHOME/bin/rtirecordingservice -cfgName $config -verbosity $verbosity  -cfgFile $xml
+$NDDSHOME/bin/rtirecordingservice -cfgName $config -verbosity $verbosity  -cfgFile "$xml;$qos_file"

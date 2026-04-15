@@ -60,6 +60,10 @@ A concise version of these rules is also loaded via `.github/copilot-instruction
 | WF-11 | System pattern approach is system-wide — NEVER mix approaches across processes | **NEVER** |
 | WF-12 | `system_config_version` mismatch triggers sweep — agent MUST offer opt-in for new patterns | **MUST** |
 | WF-13 | System patterns are selected at system level (Phase 1), opted-in per process (Phase 3 Step 1d) | **MUST** |
+| WF-14 | Multi-process data patterns (EXCLUSIVE ownership, strength-based arbitration) MUST be declared as system patterns — NEVER configured per-I/O | **MUST** |
+| WF-15 | Command pattern option 2 (multi-source EXCLUSIVE) requires the Command Arbitration system pattern. Agent MUST NOT offer multi-source command as a standalone per-I/O choice. | **MUST NOT** |
+| WF-16 | Sensor/status outputs with EXCLUSIVE ownership for redundancy require the Sensor Redundancy system pattern. | **MUST** |
+| WF-17 | Parameter pattern (data pattern) requires the Parameter Service system pattern to be declared at the system level. The 7-topic set and wrapper classes are system infrastructure. Agent MUST NOT offer parameter server/client as a standalone per-I/O choice. | **MUST NOT** |
 
 ## Schema Validation Rules
 
@@ -72,9 +76,10 @@ A concise version of these rules is also loaded via `.github/copilot-instruction
 | SCHEMA-5 | `*.qos_profile` | Required. Must resolve to a profile in generated QoS XML. |
 | SCHEMA-6 | `idl_files` | Required if process introduces new types. List of `.idl` file paths created during design. |
 | SCHEMA-7 | `tests.unit` | Required. At least one unit test per I/O. |
-| SCHEMA-8 | `*.auto_generated_by` | Do not remove — tags system pattern I/O. |
+| SCHEMA-8 | `*.auto_generated_by` | Do not remove — tags system pattern I/O (I/O-generating patterns). |
 | SCHEMA-9 | `process.system_config_version` | Required. Must match or be checked against current system config version. |
 | SCHEMA-10 | `process.system_patterns[].role` | Required for opted-in patterns. Approach inherited from system config. |
+| SCHEMA-11 | `*.auto_applied_by` | Do not remove — tags I/O whose QoS was modified by a QoS-modifying system pattern (Command Arbitration, Sensor Redundancy). |
 
 ## Implementation Rules
 
@@ -97,6 +102,14 @@ A concise version of these rules is also loaded via `.github/copilot-instruction
 | CODE-4 | Always call `participant.finalize()` before exit |
 | CODE-5 | CMake minimum version: 3.11 |
 | CODE-6 | Source files in CMakeLists.txt: `main.cxx`, `<process_name>_logic.cxx` |
+
+## Python Import Path Rules
+
+| ID | Rule | Example |
+|----|------|---------|
+| PYTHON-1 | Use `sys.path.insert(0, ...)` to add the `dds/datamodel/` directory to the Python path. The path is relative to the script location: `os.path.join(os.path.dirname(__file__), "..", "..", "..", "dds", "datamodel")` (adjusts to the app's nesting level under `apps/python/<process>/`). | `sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "dds", "datamodel"))` |
+| PYTHON-2 | Import IDL-generated types using the `python_gen/` subdirectory convention: IDL file `ExampleTypes.idl` with module `example_types` → `from python_gen.ExampleTypes import example_types`. The Python package name matches the `.idl` filename (PascalCase), and the module import matches the IDL module name (snake_case). | `from python_gen.ExampleTypes import example_types` |
+| PYTHON-3 | rtiddsgen Python output goes to `dds/datamodel/python_gen/` (via `-d dds/datamodel/python_gen/` flag). For build-time generated code, the path is `dds/datamodel/python_gen/<IdlFileName>/`. Pre-existing IDL in `dds/datamodel/idl/` is the source; `python_gen/` is the generated output directory at the same level as `idl/`. | `rtiddsgen -language python -d dds/datamodel/python_gen/ dds/datamodel/idl/gps_types.idl` |
 
 ## Test Rules
 
@@ -125,9 +138,12 @@ A concise version of these rules is also loaded via `.github/copilot-instruction
 | Type name contains "Button", "Alert", "Event" | Event | 1 (Standard) |
 | Type name contains "Position", "State", "Health", "Telemetry" | Status | 1 (Standard) |
 | Declared `rate_hz` in description | Status | Confirms periodic |
+| Subscriber `downsample_hz` < publisher `rate_hz` | Status | 2 (Downsampled) |
 | Type name contains "Command" | Command | 1 (Single-source) |
-| User mentions "priority" or "override" | Command | 2 (Multi-source) |
-| Type name contains "Parameter", "Config", "Setting" | Parameter | 1 (Standard) |
+| User mentions "priority" or "override" + Command Arbitration system pattern active | Command | 2 (Multi-source, role-based strength) |
+| User mentions "priority" or "override" WITHOUT Command Arbitration system pattern | — | Agent warns: enable Command Arbitration in System Design first |
+| Type name contains "Parameter", "Config", "Setting" + Parameter Service system pattern active | Parameter | 1 (Standard, via system pattern) |
+| Type name contains "Parameter", "Config", "Setting" WITHOUT Parameter Service system pattern | — | Agent warns: enable Parameter Service in System Design first |
 | Type has `@final @language_binding(FLAT_DATA)` | Large Data | 2 (Zero-Copy) |
 | Type has `sequence<octet>` with max > 65535 | Large Data | 1 (SHMEM) |
 | User mentions "network" or "UDP" | Large Data | 3 (UDP) |

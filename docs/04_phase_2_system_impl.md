@@ -9,6 +9,17 @@ Generates the **system baseline** — shared artifacts that all processes build 
 
 **What it generates:**
 
+### QoS Strategy: Monolithic Source of Truth + Reference Fragments
+
+`dds/qos/DDS_QOS_PROFILES.xml` is the **single source of truth** for all QoS profiles. It ships pre-built and complete — containing all data pattern profiles (`DataPatternsLibrary::*`) and participant profiles (`DPLibrary::*`).
+
+QoS fragments in `system_templates/qos_templates/` are **reference material only** — they document the individual building blocks that comprise the monolithic XML. They exist for:
+1. **Agent indexing**: the patterns sub-prompt reads fragments to understand individual QoS settings.
+2. **Documentation**: users who want to understand what a specific pattern's QoS contains.
+3. **MCP knowledge layer**: fragments are indexed by the internal MCP server for RAG queries.
+
+**Fragments are NOT assembled at runtime.** Phase 4 Step 3 (QoS Assembly) becomes: "Verify the needed QoS profile exists in `DDS_QOS_PROFILES.xml`; if not, warn the user." System pattern QoS (e.g., `SystemPatternsLibrary::HeartbeatQoS`) is the one exception — it may be generated into a separate `SystemPatternsQoS.xml` file during Phase 2 if system patterns are selected.
+
 ```
 dds/
   datamodel/idl/
@@ -70,10 +81,10 @@ generate:
 
   - filename: "SystemPatternsQoS.xml"
     destination: "dds/qos/SystemPatternsQoS.xml"
-    source: assemble
-    fragments_from: "system_templates/qos_templates/"
+    source: generate
+    reference_fragments: "system_templates/qos_templates/"
     condition: "system_config.system_patterns is not empty"
-    description: "QoS profiles for selected system patterns"
+    description: "QoS profiles for selected system patterns (exception to monolithic rule — system patterns are generated, not pre-built)"
 
 commands:
   - step: "Run rtiddsgen on system-level types"
@@ -96,7 +107,7 @@ Agent reads system_manifest.yaml
   │   │         Substitute {{PATTERNS}} based on system_config
   │   │         Write dds/datamodel/idl/system_patterns.idl
   │   │
-  │   ├── YES → Assemble SystemPatternsQoS.xml from fragments
+  │   ├── YES → Generate SystemPatternsQoS.xml (using reference fragments for context)
   │   │
   │   └── YES → Run: rtiddsgen -language C++11 -replace ... system_patterns.idl
   │

@@ -61,16 +61,32 @@ How does this process communicate?
 Only patterns declared in `system_config.yaml` are offered — the user does NOT see the full catalog. The approach (e.g., Hot Standby) is already decided at the system level.
 
 ```
-Your system uses: Failover (Hot Standby), Health Monitoring (App Heartbeat)
+Your system uses: Failover (Hot Standby), Health Monitoring (App Heartbeat),
+                  Command Arbitration (Priority-Based), Sensor Redundancy (Exclusive Failover),
+                  Parameter Service (Standard)
 
 Does this process participate?
-  [ ] Failover        → Role: PRIMARY / STANDBY
-  [ ] Health Monitoring → publishes HealthStatus from this node
+  [ ] Failover              → Role: PRIMARY / STANDBY
+  [ ] Health Monitoring     → publishes HealthStatus from this node
+  [ ] Parameter Service     → Role: PARAMETER_SERVER / PARAMETER_CLIENT
+  [ ] Command Arbitration   → Role: COMMAND_PRIMARY / COMMAND_SECONDARY
+  [ ] Sensor Redundancy     → Role: SENSOR_PRIMARY / SENSOR_SECONDARY
 ```
 
 If no system patterns are configured, this step is skipped entirely.
 
-When the user opts in to a system pattern, the agent **auto-generates the required I/O, types, and application logic** for that pattern using the approach from system config. The user then reviews and can modify. See [System Patterns Catalog](07_patterns_reference.md#system-patterns-catalog) for what each pattern adds.
+**Two types of system patterns:**
+
+| Type | Patterns | What happens at opt-in |
+|------|----------|----------------------|
+| **I/O-generating** | Failover, Health Monitoring, Leader Election, Request-Reply, Parameter Service | Auto-generates new types, topics, I/O entries, and application logic. User reviews. |
+| **QoS-modifying** | Command Arbitration, Sensor Redundancy | Does NOT add new I/O. Instead, modifies the QoS policy of user-defined I/O in Step 2. Role determines ownership strength. |
+
+When the user opts in to an **I/O-generating** pattern, the agent auto-generates the required I/O, types, and application logic for that pattern using the approach from system config. The user then reviews and can modify. See [System Patterns Catalog](07_patterns_reference.md#system-patterns-catalog) for what each pattern adds.
+
+When the user opts in to a **QoS-modifying** pattern, the agent records the role and applies it later during Step 2c (Pattern & QoS resolution):
+- **Command Arbitration**: When the user adds a command output → agent auto-applies EXCLUSIVE ownership with role-based strength (primary=100, secondary=50). The user sees: "Command Arbitration is active. Your command outputs will use EXCLUSIVE ownership with strength 100 (command_primary role)."
+- **Sensor Redundancy**: When the user adds a status/sensor output → agent auto-applies EXCLUSIVE ownership with role-based strength. The user sees: "Sensor Redundancy is active. Your sensor outputs will use EXCLUSIVE ownership with strength 100 (sensor_primary role)."
 
 After Step 1, the design has:
 
@@ -86,11 +102,30 @@ process:
       role: primary             # role assigned per-process (primary / standby)
     - pattern: health_monitoring
       role: publisher           # this node publishes health data
+    - pattern: command_arbitration
+      role: command_primary     # command_primary (strength 100) / command_secondary (strength 50)
+    - pattern: sensor_redundancy
+      role: sensor_primary      # sensor_primary (strength 100) / sensor_secondary (strength 50)
 ```
 
 Framework and API are inherited from `planning/project.yaml` — not stored per-process.
 System pattern **approaches** are inherited from `planning/system_config.yaml` — only **roles** are per-process.
 Transports are per-process because different processes may run on different hosts.
+
+**Language override (multi-language projects only):**
+
+When `project.api` is `modern_cpp_python`, the agent asks which language this process uses:
+
+```
+Which language for this process?
+
+  1. Modern C++ (C++11)
+  2. Python
+
+  (Required because your project supports both C++ and Python)
+```
+
+For single-language projects (e.g., `modern_cpp` or `python`), this step is skipped — the language is inherited from `project.api`.
 
 If system patterns were opted into, the agent immediately generates the required I/O entries (types, topics, patterns, QoS, callbacks) and presents them: "These I/O were auto-added by the Failover pattern. Review and confirm."
 
@@ -256,6 +291,8 @@ What data pattern for the Position output?
 | **QoS profile** | Derived from pattern selection |
 | **Rate (outputs)** | Asked if status/periodic pattern |
 | **Callbacks** | Auto-set based on pattern |
+| **downsample_hz (inputs)** | Asked if subscriber rate differs from publisher rate. Sets `TIME_BASED_FILTER` `minimum_separation` = 1/downsample_hz. |
+| **qos_modifiers (inputs/outputs)** | Optional list of QoS overrides beyond the base profile. E.g., `[{type: time_based_filter, minimum_separation_ms: 1000}]` |
 
 ---
 
@@ -418,6 +455,11 @@ process:
   domain_id: null                 # null = inherit from system_config (0)
   transports: [SHMEM, UDP]        # per-process transport selection
   system_config_version: 1        # tracks which system config version this was designed against
+  participant_qos_profile: null    # optional — auto-derived when null (see derivation rules below)
+                                   # explicit override: "DPLibrary::LargeDataSHMEMParticipant", etc.
+  language: null                   # optional — required ONLY when project.api is multi-language
+                                   # (e.g., modern_cpp_python). Values: modern_cpp | python | java | c
+                                   # When project.api is single-language, this is omitted (inherited).
   system_patterns:                # opted-in system-level behaviors (role is per-process, approach from system config)
     - pattern: failover
       role: primary               # primary | standby (approach: hot_standby inherited from system config)
@@ -441,6 +483,11 @@ inputs:
     callbacks:
       - data_available
       - liveliness_changed
+    downsample_hz: null           # optional — set to receive at reduced rate
+                                   # e.g., downsample_hz: 1 on a 10 Hz topic
+                                   # auto-adds TIME_BASED_FILTER QoS modifier
+    qos_modifiers: []             # optional — per-I/O QoS overrides
+                                   # e.g., [{type: time_based_filter, minimum_separation_ms: 1000}]
 
 # What this process publishes
 outputs:
@@ -509,6 +556,23 @@ decisions:
     timestamp: "2026-03-17T14:30:15Z"
 ```
 
+### Participant QoS Profile Auto-Derivation Rules
+
+When `process.participant_qos_profile` is null (the default), the agent derives the correct profile during Phase 4 Step 1 based on the process's transport selection and the largest data size across all I/O:
+
+| Transport | Largest Data Size | FlatData Annotations? | Auto-Derived Profile |
+|-----------|-------------------|----------------------|---------------------|
+| SHMEM (any combo) | > 64 KB | No | `DPLibrary::LargeDataSHMEMParticipant` |
+| SHMEM (any combo) | > 64 KB | Yes (`@language_binding(FLAT_DATA)`) | `DPLibrary::LargeDataSHMEMParticipant` |
+| UDP (any combo) | > 64 KB | N/A | `DPLibrary::LargeDataUdpParticipant` |
+| Any | ≤ 64 KB | N/A | `DPLibrary::DefaultParticipant` |
+
+**Rules:**
+1. "Largest data size" is the maximum serialized size of any type used across all inputs and outputs in that process.
+2. If both SHMEM and UDP are in `transports` and data is large, SHMEM profile takes precedence (SHMEM is the primary transport for large data; UDP serves as a fallback).
+3. If the user sets an explicit `participant_qos_profile`, it overrides auto-derivation — no validation is performed.
+4. The derived or explicit profile is recorded in the `decisions:` section for traceability.
+
 ### Schema Rules
 
 | Field | Required | Validation |
@@ -517,11 +581,15 @@ decisions:
 | `process.domain_id` | No | null = inherit from system_config; or 0-232 |
 | `process.transports` | Yes | At least one of: SHMEM, UDP, TCP |
 | `process.system_config_version` | Yes | Integer >= 1; must match or be reconciled with current system config |
+| `process.participant_qos_profile` | No | null = auto-derived from transport + largest data size (see derivation rules). String profile name to override. |
+| `process.language` | Conditional | Required when `project.api` is multi-language (e.g., `modern_cpp_python`). One of: `modern_cpp`, `python`, `java`, `c`. Omitted for single-language projects (inherited from `project.api`). |
 | `process.system_patterns` | No | Each must reference a pattern from system_config + a valid role |
 | `idl_files` | Yes (if new types) | List of `.idl` file paths created during design. Files must exist in workspace. |
 | `inputs[]` or `outputs[]` | At least one | Process must have at least one I/O |
 | `*.pattern` | Yes | One of: `event`, `status`, `command`, `parameter`, `large_data` |
 | `*.qos_profile` | Yes | Must resolve to a profile in generated QoS XML |
+| `*.downsample_hz` | No | Inputs only. Positive number. Auto-generates `TIME_BASED_FILTER` with `minimum_separation` = 1/downsample_hz. |
+| `*.qos_modifiers` | No | List of per-I/O QoS overrides. Each entry: `{type: <modifier_type>, ...params}`. Supported types: `time_based_filter`. |
 | `tests.unit` | Yes | At least one unit test per I/O |
 | `tests.integration` | Recommended | At least one end-to-end test |
 | `*.auto_generated_by` | No | Tag for I/O added by system patterns (do not remove) |

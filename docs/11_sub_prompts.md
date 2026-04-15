@@ -30,7 +30,7 @@
   └── 🧪 tester.prompt.md       — test generation, pytest, DDS test utilities
   │     MCP: rti-connext-mcp → search_reference_code (test patterns)
   │
-  └── 📚 DDS_PROCESS_BUILDER.md — full reference (this doc), loaded as context
+  └── 📚 RTI_RAPID_PROTOTYPING.md — full reference (this doc), loaded as context
 ```
 
 ### Internal MCP Server Tools

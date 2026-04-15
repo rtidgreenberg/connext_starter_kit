@@ -8,26 +8,30 @@
       <include file="../dds/build/xml_gen/ExampleTypes.xml"/>
     </types>
 
+    <!-- QoS profiles for Remote Administration are loaded from the
+         centralized dds/qos/DDS_QOS_PROFILES.xml via the -qosFile
+         command-line argument (set by start_record_external_types.sh). -->
+
     <recording_service name="xcdr">
 
-    <!-- <administration>
-            <distributed_logger>
-                <enabled>false</enabled>
-            </distributed_logger>
-            <enabled>false</enabled>
-        </administration>
+    <!-- Remote Administration and Monitoring -->
+    <administration>
+        <domain_id>1</domain_id>
+        <datareader_qos base_name="ServiceAdministrationProfiles::ServiceAdminReplierProfile" />
+        <datawriter_qos base_name="ServiceAdministrationProfiles::ServiceAdminReplierProfile" />
+    </administration>
 
-        <monitoring>
-          <enabled>false</enabled>
-            <status_publication_period>
-                <sec>1</sec>
-                <nanosec>0</nanosec>
-            </status_publication_period>
-            <statistics_sampling_period>
-                <sec>0</sec>
-                <nanosec>500000000</nanosec>
-            </statistics_sampling_period>
-        </monitoring> -->
+    <monitoring>
+        <domain_id>1</domain_id>
+        <status_publication_period>
+            <sec>1</sec>
+            <nanosec>0</nanosec>
+        </status_publication_period>
+        <statistics_sampling_period>
+            <sec>0</sec>
+            <nanosec>500000000</nanosec>
+        </statistics_sampling_period>
+    </monitoring>
 
     <!-- Storage settings -->
         <storage>

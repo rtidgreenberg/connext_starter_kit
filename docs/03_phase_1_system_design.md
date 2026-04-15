@@ -19,7 +19,9 @@ This runs after Phase 0 completes (first invocation) or when the user selects "S
      [ ] Health Monitoring     — heartbeat publishing + liveliness detection
      [ ] Leader Election       — dynamic primary selection among peers
      [ ] Request-Reply         — synchronous request/response pairs
-     [ ] Redundant Publisher   — multiple writers, reader picks best
+     [ ] Parameter Service     — runtime config server/client (get/set/list params)
+     [ ] Command Arbitration   — multi-source commands with priority (primary/secondary)
+     [ ] Sensor Redundancy     — redundant sensor sources with failover (primary/secondary)
 
      Default: none
 

@@ -14,7 +14,7 @@ All decisions during planning, listed with auto-resolve rules:
 | ID | Phase | Prompt | Options | Default | Auto-Resolve |
 |----|-------|--------|---------|---------|-------------|
 | `system.domain_id` | 1 | Default domain ID? | 0-232 | 0 | — |
-| `system.system_pattern` | 1 | System-level behaviors? | None / Failover / Health / Leader / ReqReply / Redundant | None | User mentions "failover", "standby" → Failover |
+| `system.system_pattern` | 1 | System-level behaviors? | None / Failover / Health / Leader / ReqReply / ParamService / CmdArbitration / SensorRedundancy | None | User mentions "failover", "standby" → Failover; "command priority", "multi-source command" → Command Arbitration; "redundant sensor", "sensor failover" → Sensor Redundancy; "parameter", "runtime config", "get/set" → Parameter Service |
 | `system.system_pattern_option` | 1 | Which approach per pattern? | Varies per pattern | Option 1 | — (always ask, multiple valid approaches) |
 
 **Process-level decisions** (per process, stored in `PROCESS_DESIGN.yaml`):
@@ -24,8 +24,9 @@ All decisions during planning, listed with auto-resolve rules:
 | `plan.domain_id` | 1b | Override domain ID? | null (inherit) / 0-232 | null | — (inherit unless specified) |
 | `plan.transports` | 1c | Which transports? | SHMEM+UDP / SHMEM / UDP / TCP / Custom | SHMEM+UDP | User says "network" or "remote" → UDP; "same host" → SHMEM |
 | `plan.system_pattern_optin` | 1d | Participate in system pattern? | Yes / No per pattern | No | — (always ask for each available pattern) |
-| `plan.system_pattern_role` | 1d | What role for this process? | Varies per pattern (PRIMARY/STANDBY, publisher/monitor) | — | — (always ask) |
-| `plan.system_pattern_io` | 1d | Accept auto-generated I/O? | Accept / Modify / Remove | Accept | — (always show for review) |
+| `plan.system_pattern_role` | 1d | What role for this process? | Varies per pattern (PRIMARY/STANDBY, publisher/monitor, command_primary/secondary, sensor_primary/secondary, parameter_server/parameter_client) | — | — (always ask) |
+| `plan.system_pattern_io` | 1d | Accept auto-generated I/O? | Accept / Modify / Remove | Accept | — (shown for I/O-generating patterns only; QoS-modifying patterns apply at Step 2c) |
+| `plan.participant_qos_profile` | 4 (impl) | Which participant QoS profile? | Auto-derive / Explicit profile name | Auto-derive | SHMEM + data > 64 KB → `LargeDataSHMEMParticipant`; SHMEM + FlatData → same; UDP + large data → `LargeDataUdpParticipant`; otherwise → `DefaultParticipant` |
 | `plan.pattern.<topic>` | 2 | Pattern for topic? | Event/Status/Command/Parameter/LargeData | Inferred from type | See auto-resolve per pattern |
 | `plan.pattern_option.<topic>` | 2 | Which option within pattern? | Varies per pattern | Option 1 | See auto-resolve per pattern |
 | `plan.tests` | 3 | Accept proposed tests? | Accept / Add / Remove / Modify | Accept | — (always ask) |

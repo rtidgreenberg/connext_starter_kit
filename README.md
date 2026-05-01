@@ -61,8 +61,16 @@ Cross-language DDS system/application templates to accelerate development.
 - [I want to implement priority-based message control](apps/cxx11/command_override/README.md)
 - [I want to transfer large data efficiently with shared memory](apps/cxx11/large_data_app/README.md)
 - [I want maximum performance with zero-copy transfer](apps/cxx11/fixed_image_flat_zc/README.md)
+- [I want to send high-rate burst traffic over LAN](apps/cxx11/burst_large_data_app/README.md)
 - [I want to downsample high-frequency data for GUIs](apps/python/downsampled_reader/README.md)
 - [I want to isolate test environments with partitions](apps/cxx11/dynamic_partition_qos/README.md)
+- [I want ROS2-style parameter management over DDS](apps/cxx11/parameter_app/README.md)
+
+### 📡 Foxglove Visualization
+- [I want to publish GeoJSON map data to Foxglove](apps/cxx11/foxglove_geojson/README.md)
+- [I want to stream raw images to Foxglove](apps/cxx11/foxglove_rawimage/README.md)
+- [I want to stream H.264 video to Foxglove via GStreamer](apps/cxx11/foxglove_gstreamvideo_app/README.md)
+- [I want to visualize 3D point clouds in Foxglove](apps/cxx11/foxglove_pointcloud/README.md)
 
 ### 📊 Data Recording and Analysis
 - [I want to record DDS topics for debugging](services/README.md#i-want-to-record-a-selective-group-of-topics)

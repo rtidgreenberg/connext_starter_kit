@@ -19,8 +19,20 @@ dds/
 ├── README.md               # This file
 ├── datamodel/              # IDL definitions
 │   └── idl/                # Source IDL files
-│       ├── ExampleTypes.idl    # Data structures
-│       └── Definitions.idl     # Configuration constants (QoS, domains, topics)
+│       ├── ExampleTypes.idl    # Application data structures
+│       ├── Definitions.idl     # Configuration constants (QoS, domains, topics)
+│       ├── CompressedVideo.idl # Foxglove compressed video type
+│       ├── FrameTransform.idl  # Foxglove frame transform type
+│       ├── FrameTransforms.idl # Foxglove frame transforms type
+│       ├── GeoJSON.idl         # Foxglove GeoJSON type
+│       ├── NumericType.idl     # Foxglove numeric type
+│       ├── PackedElementField.idl # Foxglove packed element field
+│       ├── PointCloud.idl      # Foxglove point cloud type
+│       ├── Pose.idl            # Foxglove pose type
+│       ├── Quaternion.idl      # Foxglove quaternion type
+│       ├── RawImage.idl        # Foxglove raw image type
+│       ├── Time.idl            # Foxglove timestamp type
+│       └── Vector3.idl         # Foxglove 3D vector type
 ├── qos/                    # Quality of Service configurations
 │   └── DDS_QOS_PROFILES.xml
 └── utils/                  # Utility classes
@@ -64,13 +76,39 @@ Core data structures demonstrating common DDS patterns.
 - `@final @language_binding(FLAT_DATA)` with `@transfer_mode(SHMEM_REF)`
 - Zero-copy 3 MB payload for high-throughput applications
 
+**FinalFlatPointCloud** - High-Performance Point Cloud
+- `@final @language_binding(FLAT_DATA)` with `@transfer_mode(SHMEM_REF)`
+- Zero-copy 500 KB payload
+
+**Config** - Configuration Parameters
+- `destination_id` (key), `parameter_name`, `parameter_value`, `numeric_value`, `enabled`
+
+**Parameter Types** - ROS2-Style Parameter Management
+- `Parameter`, `ParameterEvent`, `SetParametersRequest/Response`, `GetParametersRequest/Response`, `ListParametersRequest/Response`
+
+### Foxglove OMG IDL Types
+
+Foxglove-compatible types based on [Foxglove Schemas](https://github.com/foxglove/foxglove-sdk/tree/main/schemas/omgidl/foxglove), compatible with builtin Foxglove Studio panels (3D, video, image, map):
+
+- **CompressedVideo** - H.264/compressed video frames
+- **RawImage** - Uncompressed image data (rgb8, etc.)
+- **PointCloud** - 3D point cloud with packed fields
+- **GeoJSON** - Geographic feature data for map panels
+- **FrameTransform / FrameTransforms** - Coordinate frame transforms
+- **Pose** - Position + orientation
+- **Quaternion** - Rotation representation
+- **Vector3** - 3D vector
+- **Time** - Timestamp
+- **NumericType** - Numeric data type descriptor
+- **PackedElementField** - Point cloud field descriptor
+
 ### Definitions.idl
 
 Centralizes DDS configuration constants organized into three modules: `qos_profiles`, `domains`, and `topics`.
 
 **Module: qos_profiles** - QoS Profile Names:
 - Domain Participant: `DEFAULT_PARTICIPANT`, `LARGE_DATA_PARTICIPANT`
-- Data Patterns: `ASSIGNER`, `EVENT`, `METADATA`, `STATUS`
+- Data Patterns: `ASSIGNER`, `EVENT`, `METADATA`, `PARAMETER`, `STATUS`
 - Command Override: `COMMAND_STRENGTH_10`, `COMMAND_STRENGTH_20`, `COMMAND_STRENGTH_30`
 - Large Data: `LARGE_DATA_SHMEM`, `LARGE_DATA_SHMEM_ZC`
 
@@ -80,6 +118,8 @@ Centralizes DDS configuration constants organized into three modules: `qos_profi
 
 **Module: topics** - Topic Names:
 - `COMMAND_TOPIC`, `POSITION_TOPIC`, `STATE_TOPIC`, `BUTTON_TOPIC`, `IMAGE_TOPIC`, `FINAL_FLAT_IMAGE_TOPIC`
+- `POINT_CLOUD_TOPIC`, `CONFIG_TOPIC`, `GEOJSON_TOPIC`, `TRANSFORM_TOPIC`
+- Parameter topics: `PARAMETER_EVENTS_TOPIC`, `SET_PARAMETERS_REQUEST_TOPIC`, `SET_PARAMETERS_RESPONSE_TOPIC`, `GET_PARAMETERS_REQUEST_TOPIC`, `GET_PARAMETERS_RESPONSE_TOPIC`, `LIST_PARAMETERS_REQUEST_TOPIC`, `LIST_PARAMETERS_RESPONSE_TOPIC`
 
 Benefits: Centralized configuration, namespace safety (avoids conflicts with DDS library), type safety, cross-language consistency.
 
@@ -147,11 +187,13 @@ Located in `qos/DDS_QOS_PROFILES.xml`.
 ### DataWriter/DataReader Profiles
 - **AssignerQoS** - Topic-based QoS assignment
 - **EventQoS** - Event-driven communication
+- **MetadataQoS** - Configuration/metadata communication
 - **ParameterQoS** - ROS2-style parameter management
 - **StatusQoS** - Status and health monitoring
 - **CommandStrength10QoS/20QoS/30QoS** - Command override with ownership strength
 - **LargeDataSHMEMQoS** - Large data with shared memory
 - **LargeDataSHMEM_ZCQoS** - Zero-copy transfer mode
+- **BurstLargeDataUdpQoS** - High-rate burst traffic over UDP
 
 Profile names are centralized in `Definitions.idl` (qos_profiles module) for cross-language consistency.
 

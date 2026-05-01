@@ -23,7 +23,7 @@ seconds.
 The publisher will print some statistics once the data is sent and fully
 acknowledged by the subscriber.
 
-The subscriber will print a message every 100 samples. I will also print a
+The subscriber will print a message every 100 samples. It will also print a
 warning if data is ever lost.
 
 ## Building
@@ -71,7 +71,6 @@ Or directly from the build directory:
 cd /path/to/connext_starter_kit/build
 ./apps/cxx11/burst_large_data_app/burst_publisher
 ./apps/cxx11/burst_large_data_app/burst_subscriber
-```
 ```
 
 ### Publisher

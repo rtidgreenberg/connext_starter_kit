@@ -63,7 +63,7 @@ cd ..
 
 Options:
   -d, --domain <int>    Domain ID (default: 1)
-  -v, --verbosity <int> RTI verbosity 0-3 (default: 1)
+  -v, --verbosity <int> RTI verbosity 0-5 (default: 1)
   -q, --qos-file <str>  QoS XML path (default: dds/qos/DDS_QOS_PROFILES.xml)
   -h, --help           Show help
 ```

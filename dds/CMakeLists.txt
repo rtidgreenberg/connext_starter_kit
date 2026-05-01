@@ -93,6 +93,7 @@ foreach(IDL_FILE ${TYPE_SUPPORT_IDL_FILES})
     # ------------------------------------------------------------------------
     if(GENERATE_CXX11_TYPES)
         connextdds_rtiddsgen_run(
+            UNBOUNDED
             LANG "C++11"
             OUTPUT_DIRECTORY ${CXX11_OUTPUT_DIR}
             IDL_FILE ${IDL_FILE}
@@ -153,6 +154,7 @@ if(GENERATE_DEFINITIONS AND EXISTS ${DEFINITIONS_IDL})
     # C++11 Header Generation (header-only, no library compilation)
     if(GENERATE_CXX11_TYPES)
         connextdds_rtiddsgen_run(
+            UNBOUNDED
             LANG "C++11"
             OUTPUT_DIRECTORY ${CXX11_OUTPUT_DIR}
             IDL_FILE ${DEFINITIONS_IDL}

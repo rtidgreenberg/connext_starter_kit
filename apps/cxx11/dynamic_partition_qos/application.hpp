@@ -140,7 +140,7 @@ namespace application {
             "                               run on.  \n"
             "                               Default: 1\n"\
             "    -v, --verbosity    <int>   How much debugging output to show.\n"\
-            "                               Range: 0-3 \n"
+            "                               Range: 0-5 \n"
             "                               Default: 1\n"
             "    -q, --qos-file     <str>   Path to QoS profile XML file.\n"\
             "                               Default: dds/qos/DDS_QOS_PROFILES.xml"

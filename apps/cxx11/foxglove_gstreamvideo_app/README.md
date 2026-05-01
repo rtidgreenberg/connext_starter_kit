@@ -22,6 +22,17 @@ Type used is taken from [Foxglove Schemas](https://github.com/foxglove/foxglove-
 
 You can modify these types by including **keys and extra members** and Foxglove will still be able to interpret data to display in builtin panels.
 
+## Prerequisites
+
+GStreamer development libraries must be installed:
+
+```bash
+sudo apt install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+    gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
+```
+
+If GStreamer is not found, this app is automatically skipped during build.
+
 ## Build
 
 Build from the repository root (this also generates the DDS types library):

@@ -36,10 +36,15 @@ find_package(RTIConnextDDS
 
 # Find GStreamer using pkg-config
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET
+pkg_check_modules(GSTREAMER IMPORTED_TARGET
     gstreamer-1.0
     gstreamer-app-1.0
 )
+
+if(NOT GSTREAMER_FOUND)
+    message(WARNING "GStreamer not found - skipping foxglove_gstreamvideo_app build")
+    return()
+endif()
 
 # Set up directories - use CMAKE_BINARY_DIR for build outputs
 set(DDS_BUILD_DIR "${CMAKE_BINARY_DIR}/dds")

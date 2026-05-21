@@ -264,7 +264,7 @@ services/
 ## Resources
 
 - [RTI Recording Service Manual (7.3.0)](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/manuals/connext_dds_professional/services/recording_service/)
-- [RTI Recording Service Manual (7.3.1)](https://community.rti.com/static/documentation/connext-dds/7.3.1/doc/manuals/connext_dds_professional/services/recording_service/index.html)
+- [RTI Recording Service Manual (7.6.0)](https://community.rti.com/static/documentation/connext-dds/7.6.0/doc/manuals/connext_dds_professional/services/recording_service/index.html)
 - [RTI Replay Service Manual](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/manuals/connext_dds_professional/services/replay_service/)
 - [RTI Converter Service Manual](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/manuals/connext_dds_professional/services/converter_service/)
 

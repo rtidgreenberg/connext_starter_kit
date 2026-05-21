@@ -28,7 +28,7 @@ Flow:
 Prerequisites:
   - $NDDSHOME set (rtirecordingservice, rtireplayservice, rticonverter)
   - Centralized QoS profiles at dds/qos/DDS_QOS_PROFILES.xml
-  - Virtual environment with rti.connext >= 7.3.1
+    - Virtual environment with rti.connext == 7.6.0
 
 Run standalone:
     cd services

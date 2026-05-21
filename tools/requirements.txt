@@ -1,4 +1,4 @@
 # RTI Spy Tool Dependencies
-rti.connext>=7.3.1
+rti.connext==7.6.0
 textual
 textual-dev

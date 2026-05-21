@@ -1,16 +1,16 @@
-# Dear PyGui RTI Services App Architecture
+# RS GUI v2 RTI Services App Architecture
 
 Companion planning documents:
-[DEARPYGUI_IMPLEMENTATION_PLAN.md](DEARPYGUI_IMPLEMENTATION_PLAN.md) breaks this
+[RS_GUI_V2_IMPLEMENTATION_PLAN.md](RS_GUI_V2_IMPLEMENTATION_PLAN.md) breaks this
 architecture into phased milestones, PR-sized tasks, and validation gates.
-[DEARPYGUI_WIREFRAME_PLAN.md](DEARPYGUI_WIREFRAME_PLAN.md) defines the mock
-wireframes and approval gate required before Dear PyGui UI implementation.
+[RS_GUI_V2_WIREFRAME_PLAN.md](RS_GUI_V2_WIREFRAME_PLAN.md) defines the mock
+wireframes and approval gate required before rs_gui_v2 UI implementation.
 
 ## Purpose
 
 This document sketches the next architecture step for the Recording Service GUI
-work: a Dear PyGui application for operating RTI infrastructure services and
-inspecting DDS data.
+work: rs_gui_v2, a Dear PyGui-based application for operating RTI infrastructure
+services and inspecting DDS data.
 
 The current tkinter GUI remains the compact DDS reference implementation. This
 document is the target architecture for a broader operator tool that supports:
@@ -25,7 +25,7 @@ document is the target architecture for a broader operator tool that supports:
 
 ## Design Principle
 
-Dear PyGui should be the view layer, not the DDS layer.
+rs_gui_v2 should use Dear PyGui as the view layer, not the DDS layer.
 
 DDS entities, service requesters, monitoring readers, topic subscriptions, type
 registries, and persistence should live in an application core that has no Dear
@@ -77,7 +77,7 @@ services/rs_gui_v2/
   +-- test_discovery_catalog.py
   +-- test_field_extractors.py
   +-- test_plotting_buffers.py
-  +-- test_e2e_dearpygui_services.py
+  +-- test_e2e_rs_gui_v2_services.py
 ```
 
 The package names above are a target direction. The first implementation can
@@ -100,7 +100,7 @@ Owns low-level Connext entities and process-wide DDS setup:
 - request/reply clients
 - orderly shutdown
 
-Only this layer should directly create DDS entities. A good v1 target is one
+Only this layer should directly create DDS entities. A good initial target is one
 participant per domain for the application runtime, with shared subscribers and
 readers underneath it. Avoid creating a participant per tab or per plot.
 
@@ -342,9 +342,9 @@ Rules:
 - Add field metadata extraction from DynamicData types.
 - Add tests for topic filtering and field path generation.
 
-### Phase 3: Dear PyGui Shell
+### Phase 3: RS GUI v2 Shell
 
-- Create a minimal Dear PyGui app with Record, Replay, Convert, Topics, and
+- Create a minimal rs_gui_v2 app with Record, Replay, Convert, Topics, and
   Plots tabs.
 - Wire it to mocked app-core snapshots before DDS integration.
 - Add a single real Recording Service status panel through the service facade.
@@ -384,7 +384,7 @@ Rules:
 
 ## Recommendation
 
-The best path forward is to create the Dear PyGui app as a new shell over a
+The best path forward is to create rs_gui_v2 as a new shell over a
 service-oriented DDS app core. Start by extracting interfaces and state models
 from the proven Recording Service controller and monitor, then add discovery,
 DynamicData subscriptions, plotting, and workspace persistence before expanding

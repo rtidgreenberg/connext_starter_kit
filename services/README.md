@@ -259,7 +259,7 @@ services/
 ├── start_convert.sh
 ├── start_replay.sh
 ├── rs_gui_v1/                  # Current tkinter GUI, CLI, monitoring, and tests
-└── rs_gui_v2/                  # Dear PyGui architecture, implementation, and wireframe plans
+└── rs_gui_v2/                  # v2 architecture, implementation, and wireframe plans
 ```
 
 ## Resources

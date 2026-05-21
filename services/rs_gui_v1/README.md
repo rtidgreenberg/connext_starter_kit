@@ -9,13 +9,13 @@ Based on the [C++ service admin example](https://github.com/rticommunity/rticonn
 Architecture notes:
 - [GUI_ARCHITECTURE.md](GUI_ARCHITECTURE.md) describes the current tkinter
    Recording Service reference GUI.
-- [../rs_gui_v2/DEARPYGUI_APP_ARCHITECTURE.md](../rs_gui_v2/DEARPYGUI_APP_ARCHITECTURE.md) sketches the
-   target Dear PyGui application architecture for recording, replay, conversion,
+- [../rs_gui_v2/RS_GUI_V2_ARCHITECTURE.md](../rs_gui_v2/RS_GUI_V2_ARCHITECTURE.md) sketches the
+   target rs_gui_v2 application architecture for recording, replay, conversion,
    topic browsing, plotting, and persisted workspaces.
-- [../rs_gui_v2/DEARPYGUI_IMPLEMENTATION_PLAN.md](../rs_gui_v2/DEARPYGUI_IMPLEMENTATION_PLAN.md) breaks
+- [../rs_gui_v2/RS_GUI_V2_IMPLEMENTATION_PLAN.md](../rs_gui_v2/RS_GUI_V2_IMPLEMENTATION_PLAN.md) breaks
    that architecture into phased implementation milestones and validation gates.
-- [../rs_gui_v2/DEARPYGUI_WIREFRAME_PLAN.md](../rs_gui_v2/DEARPYGUI_WIREFRAME_PLAN.md) defines the mock
-   wireframes and approval gate required before Dear PyGui UI implementation.
+- [../rs_gui_v2/RS_GUI_V2_WIREFRAME_PLAN.md](../rs_gui_v2/RS_GUI_V2_WIREFRAME_PLAN.md) defines the mock
+   wireframes and approval gate required before rs_gui_v2 UI implementation.
 
 ## How it Works
 

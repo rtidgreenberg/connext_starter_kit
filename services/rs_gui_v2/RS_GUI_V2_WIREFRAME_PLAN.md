@@ -1,8 +1,8 @@
-# Dear PyGui Wireframe Approval Plan
+# RS GUI v2 Wireframe Approval Plan
 
 ## Purpose
 
-Before implementing the Dear PyGui interface, we will create mock wireframes for
+Before implementing the rs_gui_v2 interface, we will create mock wireframes for
 review and approval. The wireframes should validate the operator workflow,
 screen layout, command feedback, data exploration model, and persistence flow
 without committing to widget code too early.
@@ -81,7 +81,7 @@ Must show:
 Approval questions:
 
 - Should replay be configured inline or through a wizard-like flow?
-- What replay timing controls are needed in v1?
+- What replay timing controls are needed in the MVP?
 - How should replay-to-plot be represented without coupling the tabs?
 
 ### 4. Convert Tab
@@ -99,7 +99,7 @@ Must show:
 
 Approval questions:
 
-- Is Converter Service treated as a running service or as a batch job in v1?
+- Is Converter Service treated as a running service or as a batch job in the MVP?
 - Which output formats and presets matter first?
 - Where should conversion logs and output browsing live?
 
@@ -141,7 +141,7 @@ Must show:
 Approval questions:
 
 - Should plots be built in the Topics tab, Plots tab, or both?
-- What is the minimum useful plot configuration for v1?
+- What is the minimum useful plot configuration for the MVP?
 - How should high-rate topics communicate dropped/decimated samples?
 
 ### 7. Workspace and Restore Flow
@@ -170,7 +170,7 @@ questions:
 
 - The top-level navigation model is approved.
 - Record tab command feedback is approved.
-- Replay and Convert workflows are approved at a v1 scope level.
+- Replay and Convert workflows are approved at an MVP scope level.
 - Topic discovery, sample inspection, and plotting handoff are approved.
 - Workspace save/restore behavior is approved.
 - Error, empty, loading, and degraded states are represented.
@@ -184,5 +184,5 @@ Use the fastest format that lets us review the workflow clearly:
 - Optional clickable prototype later if the layout becomes ambiguous.
 
 The first pass should be low-fidelity and text-heavy enough to revise quickly.
-After approval, we can build Dear PyGui screens against mocked app-core state
+After approval, we can build rs_gui_v2 screens against mocked app-core state
 before connecting live DDS.

@@ -1,10 +1,10 @@
-# Dear PyGui RTI Services App Implementation Plan
+# RS GUI v2 Implementation Plan
 
 ## Confidence Assessment
 
 We have enough confidence to begin implementation, with one important boundary:
 the first work should productize the DDS app core before building feature-heavy
-Dear PyGui screens.
+rs_gui_v2 screens.
 
 The current code already proves the hardest first DDS pieces:
 
@@ -22,11 +22,12 @@ front-loads those risks.
 
 ## Implementation Rules
 
-- Keep the current tkinter GUI working as the reference implementation until the
-  Dear PyGui app has its own vertical slice.
-- Create and approve mock wireframes before implementing Dear PyGui screens.
+- Keep the current tkinter GUI working as the reference implementation until
+  rs_gui_v2 has its own vertical slice.
+- Create and approve mock wireframes before implementing rs_gui_v2 screens.
 - Build and test the app core in headless mode before wiring rich UI behavior.
-- Do not let Dear PyGui own DDS entities or mutate widgets from DDS callbacks.
+- Do not let the UI layer or Dear PyGui own DDS entities or mutate widgets from
+  DDS callbacks.
 - Model admin command acknowledgment separately from observed service state.
 - Use bounded queues, bounded sample caches, and plot decimation from the first
   DynamicData subscription work.
@@ -61,7 +62,7 @@ DDS notes:
 Suggested first PRs:
 
 1. Add `app_core/runtime.py`, `app_core/events.py`, `app_core/state.py`.
-2. Add `dearpygui_app.py` or equivalent shell entry point.
+2. Add `rs_gui_v2_app.py` or equivalent shell entry point.
 3. Add headless lifecycle tests.
 
 ## Milestone B: Service Admin and Monitoring Facades
@@ -171,8 +172,8 @@ Suggested PRs:
 
 ## Milestone E: UI Wireframes and Approval
 
-Goal: Approve the operator workflow and screen structure before writing Dear
-PyGui UI code.
+Goal: Approve the operator workflow and screen structure before writing
+rs_gui_v2 UI code.
 
 Deliverables:
 
@@ -183,13 +184,13 @@ Deliverables:
 - topic lifecycle representation: discovered, type available, reader created,
   matched, receiving, unresolved, ambiguous.
 - approval notes captured in
-  [DEARPYGUI_WIREFRAME_PLAN.md](DEARPYGUI_WIREFRAME_PLAN.md).
+  [RS_GUI_V2_WIREFRAME_PLAN.md](RS_GUI_V2_WIREFRAME_PLAN.md).
 
 Acceptance gates:
 
 - Top-level navigation model is approved.
 - Record tab command feedback and monitoring layout are approved.
-- Replay and Convert v1 workflow scope is approved.
+- Replay and Convert MVP workflow scope is approved.
 - Topics to Plots handoff is approved.
 - Workspace save/restore behavior is approved.
 
@@ -205,15 +206,15 @@ Suggested PRs:
 
 1. Add low-fidelity Markdown wireframes for each major view.
 2. Review and revise wireframes with operator feedback.
-3. Freeze the approved v1 UI scope before Dear PyGui widget implementation.
+3. Freeze the approved MVP UI scope before rs_gui_v2 widget implementation.
 
-## Milestone F: Dear PyGui Shell and Record Tab MVP
+## Milestone F: RS GUI v2 Shell and Record Tab MVP
 
 Goal: Deliver the first useful operator workflow while proving the UI bridge.
 
 Deliverables:
 
-- Dear PyGui scheduler that drains app-core events on the UI thread.
+- UI scheduler that drains app-core events on the Dear PyGui thread.
 - status bar and event log panel.
 - Record tab with service status, command buttons, tag controls, command history,
   and observed-state display.
@@ -237,7 +238,7 @@ DDS notes:
 
 Suggested PRs:
 
-1. Add Dear PyGui shell and scheduler.
+1. Add rs_gui_v2 shell and scheduler.
 2. Add Record tab backed by mocked app-state snapshots.
 3. Wire Record tab to the real service facade.
 
@@ -445,7 +446,7 @@ Sprint 3:
 Sprint 4:
 
 - Milestone F and Milestone G.
-- Outcome: Dear PyGui Record tab vertical slice plus topic browsing and sample
+- Outcome: rs_gui_v2 Record tab vertical slice plus topic browsing and sample
   inspection.
 
 Sprint 5:

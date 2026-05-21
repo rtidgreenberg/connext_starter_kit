@@ -1,9 +1,9 @@
 # Recording Service GUI — Architecture & Implementation Plan
 
 > This document describes the current tkinter-based Recording Service reference
-> GUI. The forward-looking Dear PyGui architecture for a broader Record, Replay,
+> GUI. The forward-looking rs_gui_v2 architecture for a broader Record, Replay,
 > Convert, Topics, and Plots application is in
-> [../rs_gui_v2/DEARPYGUI_APP_ARCHITECTURE.md](../rs_gui_v2/DEARPYGUI_APP_ARCHITECTURE.md).
+> [../rs_gui_v2/RS_GUI_V2_ARCHITECTURE.md](../rs_gui_v2/RS_GUI_V2_ARCHITECTURE.md).
 
 ## 1. Purpose
 

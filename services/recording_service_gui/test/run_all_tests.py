@@ -13,14 +13,14 @@
 Run all Recording Service GUI Python tests.
 
 Usage:
-    python3 test/run_all_tests.py          # run all tests
-    python3 test/run_all_tests.py -v       # verbose
+    ../../connext_dds_env/bin/python test/run_all_tests.py          # run all tests
+    ../../connext_dds_env/bin/python test/run_all_tests.py -v       # verbose
 
 Individual test files can also be run directly:
-    python3 test/test_monitoring.py -v
-    python3 test/test_gui.py -v
-    python3 test/test_control.py -v
-    python3 test/test_e2e_tags.py -v
+    ../../connext_dds_env/bin/python test/test_monitoring.py -v
+    ../../connext_dds_env/bin/python test/test_gui.py -v
+    ../../connext_dds_env/bin/python test/test_control.py -v
+    ../../connext_dds_env/bin/python test/test_e2e_tags.py -v
 
 Services-level E2E tests (start scripts) live in services/test/.
 """
@@ -32,6 +32,21 @@ import unittest
 # Ensure the parent directory (recording_service_gui/) is on the path for imports
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PARENT_DIR = os.path.dirname(SCRIPT_DIR)
+REPO_ROOT = os.path.normpath(os.path.join(PARENT_DIR, "..", ".."))
+VENV_PYTHON = os.path.join(REPO_ROOT, "connext_dds_env", "bin", "python")
+
+
+def _reexec_with_repo_venv():
+    if not os.path.isfile(VENV_PYTHON):
+        return
+    if os.path.realpath(sys.executable) == os.path.realpath(VENV_PYTHON):
+        return
+    os.environ["PYTHONNOUSERSITE"] = "1"
+    os.execv(VENV_PYTHON, [VENV_PYTHON] + sys.argv)
+
+
+_reexec_with_repo_venv()
+
 if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 

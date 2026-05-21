@@ -13,17 +13,20 @@ subscriber, and remote admin controller.
 cd services/recording_service_gui
 
 # Run the GUI test suite (94 tests, includes E2E tags)
-python3 test/run_all_tests.py -v
+../../connext_dds_env/bin/python test/run_all_tests.py -v
 
 # Run an individual test file
-python3 test/test_monitoring.py -v
-python3 test/test_gui.py -v
-python3 test/test_control.py -v
-python3 test/test_e2e_tags.py -v
+../../connext_dds_env/bin/python test/test_monitoring.py -v
+../../connext_dds_env/bin/python test/test_gui.py -v
+../../connext_dds_env/bin/python test/test_control.py -v
+../../connext_dds_env/bin/python test/test_e2e_tags.py -v
 
 # Run with pytest (skip DDS integration tests)
-python3 -m pytest test/ -v -k "not Integration"
+../../connext_dds_env/bin/python -m pytest test/ -v -k "not Integration"
 ```
+
+`test/run_all_tests.py` will re-exec itself with `../../connext_dds_env/bin/python`
+if it is started with a different interpreter.
 
 > **Note:** Integration tests require `rti.connextdds`, generated type files
 > (`setup.sh`), and a display for tkinter. They are automatically skipped when
@@ -104,7 +107,7 @@ Fully automated end-to-end test that verifies the complete tag workflow:
 
 ```bash
 # Run the E2E test standalone
-python3 test/test_e2e_tags.py -v
+../../connext_dds_env/bin/python test/test_e2e_tags.py -v
 ```
 
 Skipped automatically when `rtirecordingservice`, XML type files, or

@@ -25,7 +25,7 @@ See test/README.md for additional details and the equivalent manual procedure.
 Prerequisites:
   - $NDDSHOME set (rtirecordingservice, rtirecordingservice_list_tags)
   - Generated XML type files (run setup.sh)
-  - Virtual environment with rti.connext >= 7.3.1
+    - Virtual environment with rti.connext == 7.6.0
 
 Run standalone:
     cd services/recording_service_gui
@@ -54,13 +54,10 @@ REPO_ROOT = os.path.normpath(os.path.join(PARENT_DIR, "..", ".."))
 if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
-NDDSHOME = os.environ.get("NDDSHOME", "")
-if not NDDSHOME:
-    # Auto-detect like run_gui.sh does
-    import glob
-    candidates = sorted(glob.glob(os.path.expanduser("~/rti_connext_dds-*")))
-    if candidates:
-        NDDSHOME = candidates[-1]
+from recording_service_environment import detect_nddshome, ensure_rti_license
+
+NDDSHOME = detect_nddshome()
+ensure_rti_license(NDDSHOME)
 
 RECORDER_BIN = os.path.join(NDDSHOME, "bin", "rtirecordingservice")
 LIST_TAGS_BIN = os.path.join(NDDSHOME, "bin", "rtirecordingservice_list_tags")

@@ -9,8 +9,8 @@ generated XML contains symbolic caseDiscriminator references that the
 C-level XCDR interpreter cannot resolve.
 
 Prerequisites:
-  - RTI Connext DDS 7.3.1 installed at $NDDSHOME
-  - rti.connext 7.3.1 Python package installed
+    - RTI Connext DDS 7.6.0 installed at $NDDSHOME
+    - rti.connext 7.6.0 Python package installed
   - Recording Service running on the same domain (default 0):
 
       rtirecordingservice \\

@@ -4,7 +4,7 @@
 
 This is an **RTI DDS API reference example** showing how to:
 
-1. **Subscribe** to Recording Service monitoring topics using DDS listeners
+1. **Subscribe** to Recording Service monitoring topics using `rti.asyncio`
 2. **Control** a Recording Service via DDS remote administration (Request/Reply)
 3. **Display** live DDS data in a simple tkinter GUI
 
@@ -22,7 +22,7 @@ first time.
 | Subscribe to 3 monitoring topics on startup | Timeout detection / "Service Not Detected" |
 | Display monitoring data as it arrives | Debouncing, reconnect logic |
 | Remote control: Pause / Resume / Shutdown / Tag | Modifying `recording_service_control.py` |
-| Clean DDS listener → Queue → tkinter pattern | Frameworks, abstraction layers |
+| Clean asyncio reader → Queue → tkinter pattern | Frameworks, abstraction layers |
 
 ---
 
@@ -31,13 +31,12 @@ first time.
 ```
 services/recording_service_gui/
 ├── recording_service_gui.py        # tkinter GUI + helpers + main()
-├── recording_service_monitor.py    # DDS monitoring subscriber (listener-based)
+├── recording_service_monitor.py    # DDS monitoring subscriber (rti.asyncio)
 ├── recording_service_control.py    # DDS remote admin CLI + class
 ├── run_gui.sh                      # Environment setup + GUI launcher
 ├── run.sh                          # Convenience wrapper for headless CLI
-├── setup.sh                        # IDL → XML (admin) + Python (monitoring) generation
-├── xml_types/                      # Generated XML type files (admin)
-├── python_types/                   # Generated Python type modules (monitoring)
+├── setup.sh                        # IDL → XML generation and normalization
+├── xml_types/                      # Generated XML type files (admin + monitoring)
 ├── test/                           # All tests and E2E assets
 │   ├── test_gui.py                 #   Tests for GUI (pure logic + widget + DDS integration)
 │   ├── test_monitoring.py          #   Tests for monitoring subscriber
@@ -60,23 +59,23 @@ dds/qos/
 
 This file contains **all DDS API usage for monitoring**. It is the primary
 reference example for:
-- Importing generated Python type modules (requires rti.connext >= 7.3.1)
-- Creating typed `Topic` and `DataReader` objects
-- Using `dds.NoOpDataReaderListener` for event-driven data reception
-- Reading typed samples with discriminated unions
+- Loading XML DynamicData types produced by setup.sh
+- Creating DynamicData `Topic` and `DataReader` objects
+- Using `rti.asyncio` reader loops for event-driven data reception
+- Reading DynamicData samples with discriminated unions
 
 ```python
 """
 recording_service_monitor.py — DDS Recording Service Monitor
 
 Subscribes to the three RTI Recording Service monitoring topics using
-generated Python type modules and DDS DataReaderListeners.
+XML DynamicData and rti.asyncio reader loops.
 
 DDS API Patterns Demonstrated:
-  - Typed Topic / DataReader with generated Python IDL types
+  - DynamicData Topic / DataReader with XML-loaded DynamicTypes
   - QosProvider for QoS profile selection
   - DomainParticipant, Subscriber, Topic, DataReader creation
-  - DataReaderListener with on_data_available callback
+  - reader.take_async() tasks backed by WaitSet dispatch
   - Typed field access on received samples
 """
 ```
@@ -85,20 +84,22 @@ DDS API Patterns Demonstrated:
 
 ```
 RecordingServiceMonitor
-├── __init__(domain_id, python_types_dir, qos_file, on_update)
-│   ├── Import generated Python type modules (rti.connext >= 7.3.1)
+├── __init__(domain_id, xml_types_dir, qos_file, on_update)
+│   ├── Start private monitor thread and asyncio loop
+│   ├── Load XML DynamicTypes
 │   ├── Create DomainParticipant
-│   ├── Create 3 typed DataReaders (config, event, periodic)
-│   ├── Attach DataReaderListener to each reader
-│   └── Listeners call on_update(dict) with parsed data
+│   ├── Create 3 DynamicData DataReaders (config, event, periodic)
+│   └── Start one reader.take_async() task per reader
 │
-├── on_data_available(reader_kind, reader)
-│   ├── reader.take()
-│   ├── Parse typed sample based on reader_kind
+├── _reader_loop(reader_kind, reader)
+│   ├── await reader.take_async()
+│   ├── Parse DynamicData sample based on reader_kind
 │   └── Emit update dict via callback
 │
 └── close()
-    └── participant.close()
+  ├── cancel reader tasks
+  ├── close RTI asyncio dispatcher
+  └── close participant
 ```
 
 **Enum types used (from generated Python modules):**
@@ -147,16 +148,16 @@ MONITORING_PERIODIC_TOPIC = "rti/service/monitoring/periodic"
 {"kind": "error", "error": "..."}
 ```
 
-**DDS thread → tkinter thread bridge:**
+**Monitor thread → tkinter thread bridge:**
 
-The `on_update` callback is invoked on a DDS listener thread. The GUI passes
-a function that does `queue.put(update)`. The tkinter main thread drains the
-queue with a `root.after()` timer. This is the minimal correct pattern for
-thread-safe GUI updates from DDS.
+The `on_update` callback is invoked on the monitor's private asyncio thread.
+The GUI passes a function that does `queue.put(update)`. The tkinter main thread
+drains the queue with a `root.after()` timer. This is the minimal correct
+pattern for thread-safe GUI updates from DDS.
 
 ```
-DDS Listener Thread          Queue            tkinter Main Thread
-  on_data_available() ──→ queue.put() ──→ root.after() drains → update widgets
+Monitor Asyncio Thread       Queue            tkinter Main Thread
+  reader.take_async() ──→ queue.put() ──→ root.after() drains → update widgets
 ```
 
 ### 4.2 `recording_service_gui.py` — tkinter GUI
@@ -223,8 +224,8 @@ from recording_service_control import RecordingServiceController
 │ recording_service_     │  │ recording_service_       │
 │ monitor.py             │  │ control.py               │
 │                        │  │                          │
-│ DDS Listeners          │  │ DDS Request/Reply        │
-│ Typed Python API       │  │ DynamicData              │
+│ rti.asyncio readers    │  │ DDS Request/Reply        │
+│ DynamicData            │  │ DynamicData              │
 │ QosProvider            │  │ QosProvider              │
 └────────────────────────┘  └──────────────────────────┘
        │                      │
@@ -372,7 +373,7 @@ Layer 2: Widget Tests (tkinter, mock DDS)
 
 ### Phase 1: Create `recording_service_monitor.py`
 - New file with DDS constants + `RecordingServiceMonitor` class
-- Listener-based: create readers, attach listeners, emit parsed dicts
+- Asyncio-based: create readers, start `take_async()` tasks, emit parsed dicts
 - Tests in `test_monitoring.py`
 - Validate: `python3 test_monitoring.py`
 

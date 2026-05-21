@@ -1,6 +1,5 @@
 # Generated type files (recreated by setup.sh)
 xml_types/
-python_types/
 
 # Runtime artifacts
 log_dir/

@@ -1,42 +1,28 @@
-"""Headless application core for rs_gui_v2."""
+"""Service-facing models and facades owned by rs_gui_v2."""
 
-from .events import AppCommand, AppEvent, CommandResult, CommandStatus, LifecyclePhase
-from .runtime import AppRuntime, RuntimeConfig
-from .services import (
+from .admin import ServiceAdminClient, ServiceAdminFacade
+from .fakes import FakeServiceAdminClient, FakeServiceMonitoringClient
+from .models import (
     AdminReadiness,
     AdminReadinessStatus,
-    FakeServiceAdminClient,
-    FakeServiceMonitoringClient,
     MonitoringSnapshot,
     MonitoringSnapshotKind,
-    ServiceAdminClient,
-    ServiceAdminFacade,
     ServiceCommand,
     ServiceCommandOutcome,
     ServiceCommandRequest,
     ServiceInstanceRef,
     ServiceKind,
-    ServiceMonitoringClient,
-    ServiceMonitoringFacade,
     ServiceStateSnapshot,
 )
-from .state import AppState
+from .monitoring import ServiceMonitoringClient, ServiceMonitoringFacade
 
 __all__ = [
     "AdminReadiness",
     "AdminReadinessStatus",
-    "AppCommand",
-    "AppEvent",
-    "AppRuntime",
-    "AppState",
-    "CommandResult",
-    "CommandStatus",
     "FakeServiceAdminClient",
     "FakeServiceMonitoringClient",
-    "LifecyclePhase",
     "MonitoringSnapshot",
     "MonitoringSnapshotKind",
-    "RuntimeConfig",
     "ServiceAdminClient",
     "ServiceAdminFacade",
     "ServiceCommand",

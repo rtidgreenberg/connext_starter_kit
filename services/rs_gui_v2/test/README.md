@@ -13,9 +13,15 @@ Current layers:
 
 - `test_events_and_state.py`: immutable command, event, result, and state DTOs
 - `test_headless_entrypoint.py`: headless app entry point startup/shutdown
+- `test_import_boundaries.py`: no app-core imports from DDS, UI libraries, or
+  `rs_gui_v1` implementation modules
 - `test_runtime_lifecycle.py`: runtime lifecycle, bounded queues, and task
   supervision
+- `test_services_facades.py`: service admin and monitoring facades backed by
+  deterministic fake clients
+- `test_services_models.py`: service references, readiness, command outcomes,
+  monitoring snapshots, and service-state snapshots
 
-Future layers will add service facades, DDS discovery, DynamicData
+Future layers will add v2-owned DDS adapters, discovery, DynamicData
 subscriptions, workspace persistence, and GUI tests after the wireframe approval
 gate.

@@ -81,9 +81,10 @@ services/rs_gui_v2/
 ```
 
 The package names above are a target direction. The first implementation can
-grow out of the existing `recording_service_control.py`,
-`recording_service_monitor.py`, and `recording_service_environment.py` modules
-without moving everything at once.
+reuse protocol lessons from the current Recording Service GUI, but rs_gui_v2
+must not depend on rs_gui_v1 implementation modules. If a helper becomes useful
+to both applications, extract it into a neutral shared package with its own tests
+instead of coupling one GUI version to the other.
 
 ## Layer Responsibilities
 

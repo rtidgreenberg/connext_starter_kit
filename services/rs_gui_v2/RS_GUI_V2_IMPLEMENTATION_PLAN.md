@@ -24,6 +24,13 @@ front-loads those risks.
 
 - Keep the current tkinter GUI working as the reference implementation until
   rs_gui_v2 has its own vertical slice.
+- Keep rs_gui_v2 independent from rs_gui_v1. rs_gui_v2 must not import,
+  instantiate, subclass, shell out to, or depend on rs_gui_v1 implementation
+  modules. Use rs_gui_v1 only as an external behavior reference and regression
+  baseline.
+- If logic needs to be shared between the two applications, extract it into a
+  neutral shared module with its own tests instead of making either GUI depend
+  on the other.
 - Create and approve mock wireframes before implementing rs_gui_v2 screens.
 - Build and test the app core in headless mode before wiring rich UI behavior.
 - Do not let the UI layer or Dear PyGui own DDS entities or mutate widgets from
@@ -45,7 +52,7 @@ Deliverables:
 - runtime lifecycle object for startup, background tasks, and shutdown.
 - app command queue and app event queue.
 - headless entry point for tests.
-- dependency adapters around existing environment and XTypes helpers.
+- v2-owned dependency adapters around Connext environment and XTypes helpers.
 
 Acceptance gates:
 
@@ -74,10 +81,21 @@ Initial implementation status:
 - Deferred environment/XTypes adapters to Milestone B so Milestone A remains
   DDS-free.
 
+Milestone B initial implementation status:
+
+- Added v2-owned service DTOs for service references, admin readiness, command
+  requests/outcomes, monitoring snapshots, and service-state snapshots.
+- Added DDS-free `ServiceAdminFacade` and `ServiceMonitoringFacade` protocols.
+- Added deterministic fake admin and monitoring clients for headless tests.
+- Added import-boundary tests proving the headless app core does not import DDS,
+  Dear PyGui, tkinter, or rs_gui_v1 implementation modules.
+- Deferred real RTI Service Admin and monitoring adapters to the next Milestone B
+  slice so this foundation remains transport-independent.
+
 ## Milestone B: Service Admin and Monitoring Facades
 
-Goal: Wrap the existing Recording Service controller and monitor in stable,
-product-facing interfaces.
+Goal: Build rs_gui_v2-owned Recording Service admin and monitoring adapters with
+stable, product-facing interfaces.
 
 Deliverables:
 
@@ -86,6 +104,7 @@ Deliverables:
 - `ServiceMonitoringFacade` that normalizes config, event, and periodic samples.
 - shared resource path builders.
 - service state model with requested, acknowledged, and observed states.
+- import-boundary tests proving service adapters do not depend on rs_gui_v1.
 
 Acceptance gates:
 
@@ -93,7 +112,9 @@ Acceptance gates:
 - Tests distinguish service unavailable, discovery timeout, command rejected,
   and command acknowledged.
 - Monitoring updates are normalized without GUI dependencies.
-- Existing direct controller and monitor tests still pass.
+- Existing rs_gui_v1 controller and monitor tests still pass as an external
+  regression baseline.
+- rs_gui_v2 service adapters have no imports from `services/rs_gui_v1`.
 
 DDS notes:
 
@@ -104,9 +125,14 @@ DDS notes:
 
 Suggested PRs:
 
-1. Add `app_core/services/admin.py` wrapping `recording_service_control.py`.
-2. Add `app_core/services/monitoring.py` wrapping `recording_service_monitor.py`.
-3. Add service facade tests using the existing live fixtures.
+1. Add `app_core/services/models.py` with service refs, readiness, command
+  results, and monitoring snapshots.
+2. Add `app_core/services/admin.py` as a v2-owned RTI Service Admin client.
+3. Add `app_core/services/monitoring.py` as a v2-owned infrastructure service
+  monitoring client.
+4. Add fake service adapters for deterministic headless tests.
+5. Add live service facade tests that compare against the existing service
+  fixtures without importing rs_gui_v1 implementation modules.
 
 ## Milestone C: Discovery and Type Catalog
 
@@ -477,9 +503,10 @@ existing tkinter path:
 2. Add `app_core/events.py` with command and event DTOs.
 3. Add `app_core/state.py` with a minimal immutable app-state snapshot.
 4. Add tests that start and stop the runtime without DDS.
-5. Add a second test that wires the existing Connext environment validation into
-   the runtime but does not create a GUI.
+5. Add a second test that wires v2-owned Connext environment validation into the
+  runtime but does not create a GUI.
 
-That gives us a small, reversible foundation. The next PR can wrap the existing
-Recording Service controller behind `ServiceAdminFacade` and immediately reuse
-the live E2E fixtures.
+That gives us a small, reversible foundation. The next PR can add v2-owned
+Recording Service admin models, fake adapters, and a `ServiceAdminFacade` shape,
+then validate behavior against live service fixtures without importing rs_gui_v1
+implementation modules.

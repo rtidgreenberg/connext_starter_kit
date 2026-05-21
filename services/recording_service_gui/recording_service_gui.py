@@ -39,6 +39,15 @@ from queue import Queue, Empty
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
+from recording_service_environment import (
+    detect_nddshome,
+    ensure_connext_python,
+    ensure_rti_license,
+    license_setup_message,
+)
+
+ensure_connext_python()
+
 
 # ---------------------------------------------------------------------------
 # Dark mode colour palette (VS Code–inspired)
@@ -79,8 +88,10 @@ POLL_INTERVAL_MS = 500  # Queue drain interval
 
 # State constants (mirrors recording_service_monitor but avoids importing DDS)
 STATE_INVALID = 0
+STATE_STARTED = 3
 STATE_RUNNING = 5
 STATE_PAUSED = 6
+ACTIVE_SERVICE_STATES = {STATE_STARTED, STATE_RUNNING}
 
 STATE_NAMES = {
     0: "INVALID",
@@ -93,6 +104,7 @@ STATE_NAMES = {
 }
 
 STATE_COLORS = {
+    STATE_STARTED: FG_GREEN,
     STATE_RUNNING: FG_GREEN,
     STATE_PAUSED: FG_ORANGE,
 }
@@ -101,17 +113,6 @@ STATE_COLORS = {
 # ---------------------------------------------------------------------------
 # Pure helper functions (no tkinter, no DDS — easily testable)
 # ---------------------------------------------------------------------------
-
-def detect_nddshome() -> str:
-    """Auto-detect NDDSHOME from environment or ~/rti_connext_dds-*."""
-    env = os.environ.get("NDDSHOME")
-    if env and os.path.isdir(env):
-        return env
-    candidates = sorted(glob.glob(os.path.expanduser("~/rti_connext_dds-*")))
-    if candidates:
-        return candidates[-1]
-    return ""
-
 
 def parse_config_names(config_file: str) -> list:
     """
@@ -288,7 +289,7 @@ class RecordingServiceGUI:
     an RTI Recording Service.
 
     Architecture:
-      - Monitoring: RecordingServiceMonitor (DDS listeners → queue → after())
+    - Monitoring: RecordingServiceMonitor (asyncio reader → queue → after())
       - Control: RecordingServiceController (DDS Request/Reply, async)
       - No DDS imports here — all DDS interaction happens through those two
         modules.
@@ -313,7 +314,6 @@ class RecordingServiceGUI:
         # Paths
         self._script_dir = os.path.dirname(os.path.abspath(__file__))
         self._xml_types_dir = os.path.join(self._script_dir, "xml_types")
-        self._python_types_dir = os.path.join(self._script_dir, "python_types")
         self._qos_file = os.path.normpath(os.path.join(
             self._script_dir, "..", "..", "dds", "qos",
             "DDS_QOS_PROFILES.xml"))
@@ -321,6 +321,7 @@ class RecordingServiceGUI:
 
         # State
         self._nddshome = nddshome or detect_nddshome()
+        ensure_rti_license(self._nddshome)
         self._controller = None
         self._monitoring = None
         self._monitoring_domain_id = None
@@ -328,7 +329,9 @@ class RecordingServiceGUI:
         self._service_detected = False
         self._tag_history = []
         self._known_topics = set()
-        self._executor = ThreadPoolExecutor(max_workers=2)
+        self._executor = ThreadPoolExecutor(max_workers=1)
+        self._command_queue = Queue()
+        self._command_in_progress = False
         self._result_queue = Queue()
         self._monitor_queue = Queue()
         self._result_after_id = None
@@ -624,7 +627,7 @@ class RecordingServiceGUI:
         self._launch_btn.config(
             state="normal" if not detected else "disabled")
         self._pause_btn.config(
-            state="normal" if self._service_state == STATE_RUNNING else "disabled")
+            state="normal" if self._service_state in ACTIVE_SERVICE_STATES else "disabled")
         self._resume_btn.config(
             state="normal" if self._service_state == STATE_PAUSED else "disabled")
         self._shutdown_btn.config(
@@ -725,16 +728,40 @@ class RecordingServiceGUI:
             return False
 
     def _run_command_async(self, func, description: str):
-        """Run a controller command in a background thread."""
+        """Queue a controller command for serialized background execution."""
+        self._command_queue.put((func, description))
+        if self._command_in_progress:
+            self.append_log(f"Queued command: {description}...")
+        self._dispatch_next_command()
+
+    def _dispatch_next_command(self):
+        """Start the next queued controller command if the worker is idle."""
+        if self._closed or self._command_in_progress:
+            return
+
+        try:
+            func, description = self._command_queue.get_nowait()
+        except Empty:
+            return
+
+        self._command_in_progress = True
+
         def worker():
             try:
                 result = func()
                 self._result_queue.put(("cmd_ok", description, result))
             except Exception as e:
                 self._result_queue.put(("cmd_err", description, str(e)))
+            finally:
+                self._result_queue.put(("cmd_done", description))
 
         self.append_log(f"Sending command: {description}...")
-        self._executor.submit(worker)
+        try:
+            self._executor.submit(worker)
+        except Exception as e:
+            self._command_in_progress = False
+            self._result_queue.put(("cmd_err", description, str(e)))
+            self._result_queue.put(("cmd_done", description))
 
     def _on_pause(self):
         if not self._ensure_controller():
@@ -773,11 +800,11 @@ class RecordingServiceGUI:
         self._tag_desc_var.set("")
 
     # ===================================================================
-    # Monitoring — DDS listener → queue → tkinter
+    # Monitoring — asyncio reader thread → queue → tkinter
     # ===================================================================
 
     def _on_monitor_update(self, update: dict):
-        """Callback from RecordingServiceMonitor (runs on DDS thread)."""
+        """Callback from RecordingServiceMonitor (runs on monitor thread)."""
         self._monitor_queue.put(update)
 
     def _ensure_monitoring_started(self, force_restart: bool = False):
@@ -792,9 +819,10 @@ class RecordingServiceGUI:
 
         try:
             from recording_service_monitor import RecordingServiceMonitor
+            ensure_rti_license(self._nddshome_var.get())
             self._monitoring = RecordingServiceMonitor(
                 domain_id=target_domain,
-                python_types_dir=self._python_types_dir,
+                xml_types_dir=self._xml_types_dir,
                 qos_file=self._qos_file,
                 on_update=self._on_monitor_update,
             )
@@ -803,7 +831,9 @@ class RecordingServiceGUI:
         except Exception as e:
             self._monitoring = None
             self._monitoring_domain_id = None
-            self.append_log(f"ERROR starting monitoring: {e}")
+            self.append_log(
+                f"ERROR starting monitoring: {e}. "
+                f"{license_setup_message(self._nddshome_var.get())}")
 
     def _stop_monitoring(self, log: bool = True):
         """Close the DDS monitoring subscription."""
@@ -925,11 +955,19 @@ class RecordingServiceGUI:
                         self.append_log(
                             f"{desc}: {status}"
                             + (f" - {body}" if body else ""))
+                        if retcode == 0:
+                            if desc == "Pause":
+                                self.set_service_state(STATE_PAUSED)
+                            elif desc == "Resume":
+                                self.set_service_state(STATE_RUNNING)
                     else:
                         self.append_log(f"{desc}: No reply received")
                 elif kind == "cmd_err":
                     _, desc, error = msg
                     self.append_log(f"{desc} ERROR: {error}")
+                elif kind == "cmd_done":
+                    self._command_in_progress = False
+                    self._dispatch_next_command()
         except Empty:
             pass
 

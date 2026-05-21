@@ -47,10 +47,23 @@ from recording_service_control import (
     DEFAULT_DOMAIN_ID,
     DEFAULT_SERVICE_NAME,
     DEFAULT_REPLY_TIMEOUT_SEC,
+    ENTITY_STATE_RUNNING,
+    ENTITY_STATE_PAUSED,
     _action_name,
+    _serialize_entity_state,
     RecordingServiceController,
     main,
 )
+
+
+class FakeStatus:
+    def __init__(self, current_count=0, current_count_change=0,
+                 total_count=0, total_count_change=0, last_policy_id=0):
+        self.current_count = current_count
+        self.current_count_change = current_count_change
+        self.total_count = total_count
+        self.total_count_change = total_count_change
+        self.last_policy_id = last_policy_id
 
 
 # ===================================================================
@@ -179,29 +192,143 @@ class TestCLIParsing(unittest.TestCase):
 class TestResourcePaths(unittest.TestCase):
     """Test that command methods build correct resource identifiers."""
 
-    def test_start_resource(self):
-        """start() should use UPDATE on /recording_services/<name>/state."""
+    def _controller_with_discovery_status(self, writer_match_count,
+                                          reader_match_count):
+        ctrl = object.__new__(RecordingServiceController)
+        ctrl._domain_id = 42
+        ctrl._service_name = "test_svc"
+        ctrl._qos_file = "/tmp/DDS_QOS_PROFILES.xml"
+
+        writer = MagicMock()
+        writer.publication_matched_status = FakeStatus(
+            current_count=writer_match_count, total_count=writer_match_count)
+        writer.offered_incompatible_qos_status = FakeStatus(
+            total_count=1, last_policy_id=7)
+
+        reader = MagicMock()
+        reader.subscription_matched_status = FakeStatus(
+            current_count=reader_match_count, total_count=reader_match_count)
+        reader.requested_incompatible_qos_status = FakeStatus(
+            total_count=2, last_policy_id=11)
+
+        ctrl._requester = MagicMock()
+        ctrl._requester.request_datawriter = writer
+        ctrl._requester.reply_datareader = reader
+        return ctrl
+
+    def test_request_writer_timeout_includes_discovery_diagnostics(self):
+        """Writer-side discovery timeouts include actionable DDS status."""
+        ctrl = self._controller_with_discovery_status(
+            writer_match_count=0, reader_match_count=0)
+
+        with patch("recording_service_control.time.time",
+                   side_effect=[0, 999]):
+            with self.assertRaises(TimeoutError) as ctx:
+                ctrl._wait_for_match()
+
+        msg = str(ctx.exception)
+        self.assertIn("request writer", msg)
+        self.assertIn("admin_domain_id: 42", msg)
+        self.assertIn("service_name: test_svc", msg)
+        self.assertIn(COMMAND_REQUEST_TOPIC_NAME, msg)
+        self.assertIn("current_count=0", msg)
+        self.assertIn("offered incompatible QoS", msg)
+        self.assertIn("last_policy_id=7", msg)
+        self.assertIn("admin domain ID mismatch", msg)
+
+    def test_reply_reader_timeout_includes_discovery_diagnostics(self):
+        """Reader-side discovery timeouts include matched and QoS status."""
+        ctrl = self._controller_with_discovery_status(
+            writer_match_count=1, reader_match_count=0)
+
+        with patch("recording_service_control.time.time",
+                   side_effect=[0, 999]):
+            with self.assertRaises(TimeoutError) as ctx:
+                ctrl._wait_for_match()
+
+        msg = str(ctx.exception)
+        self.assertIn("reply reader", msg)
+        self.assertIn(COMMAND_REPLY_TOPIC_NAME, msg)
+        self.assertIn("request writer publication matched: current_count=1", msg)
+        self.assertIn("reply reader requested incompatible QoS", msg)
+        self.assertIn("last_policy_id=11", msg)
+
+    def test_send_command_targets_application_name(self):
+        """CommandRequest includes application_name for service targeting."""
         ctrl = object.__new__(RecordingServiceController)
         ctrl._service_name = "test_svc"
+        ctrl._request_type = MagicMock()
+        ctrl._wait_for_match = MagicMock()
+        ctrl._requester = MagicMock()
+        ctrl._requester.send_request.return_value = "request-id"
+        ctrl._requester.wait_for_replies.return_value = True
+        ctrl._requester.take_replies.return_value = []
+        cmd = MagicMock()
+
+        with patch("recording_service_control.dds.DynamicData",
+                   return_value=cmd):
+            ctrl._send_command(ACTION_UPDATE, "/resource", "body")
+
+        cmd.__setitem__.assert_any_call("application_name", "test_svc")
+        ctrl._requester.send_request.assert_called_once_with(cmd)
+
+    def test_start_resource_uses_entity_state_octets(self):
+        """start() should send serialized RUNNING state in octet_body."""
+        ctrl = object.__new__(RecordingServiceController)
+        ctrl._service_name = "test_svc"
+        ctrl._entity_state_type = "EntityStateType"
         ctrl._send_command = MagicMock(return_value={"retcode": 0})
 
-        ctrl._send_state_command("running")
+        with patch("recording_service_control._serialize_entity_state",
+                   return_value=[1, 2, 3]) as serialize:
+            ctrl.start()
 
+        serialize.assert_called_once_with(
+            "EntityStateType", ENTITY_STATE_RUNNING)
         ctrl._send_command.assert_called_once_with(
             ACTION_UPDATE,
             "/recording_services/test_svc/state",
-            "running",
+            "",
+            octet_body=[1, 2, 3],
         )
 
-    def test_pause_resource(self):
-        """pause() should send 'paused' state."""
+    def test_pause_resource_uses_entity_state_octets(self):
+        """pause() should send serialized PAUSED state in octet_body."""
         ctrl = object.__new__(RecordingServiceController)
         ctrl._service_name = "test_svc"
-        ctrl._send_state_command = MagicMock()
+        ctrl._entity_state_type = "EntityStateType"
+        ctrl._send_command = MagicMock(return_value={"retcode": 0})
 
-        ctrl.pause()
+        with patch("recording_service_control._serialize_entity_state",
+                   return_value=[4, 5, 6]) as serialize:
+            ctrl.pause()
 
-        ctrl._send_state_command.assert_called_once_with("paused")
+        serialize.assert_called_once_with(
+            "EntityStateType", ENTITY_STATE_PAUSED)
+        ctrl._send_command.assert_called_once_with(
+            ACTION_UPDATE,
+            "/recording_services/test_svc/state",
+            "",
+            octet_body=[4, 5, 6],
+        )
+
+    def test_entity_state_serialization(self):
+        """EntityState octet_body is produced by DynamicData serialization."""
+        state_data = MagicMock()
+        state_data.to_cdr_buffer.return_value = b"\x00\x01\x02"
+
+        with patch("recording_service_control.dds.DynamicData",
+                   return_value=state_data) as dynamic_data:
+            octets = _serialize_entity_state(
+                "EntityStateType", ENTITY_STATE_PAUSED)
+
+        dynamic_data.assert_called_once_with("EntityStateType")
+        state_data.__setitem__.assert_called_once_with(
+            "state", ENTITY_STATE_PAUSED)
+        self.assertEqual(
+            octets,
+            [0, 1, 2],
+        )
 
     def test_shutdown_resource(self):
         """shutdown() should use DELETE on /recording_services/<name>."""

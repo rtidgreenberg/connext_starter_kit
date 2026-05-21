@@ -517,6 +517,17 @@ class TestWidgets(unittest.TestCase):
         self.gui._poll_results()
         self.root.update()
         self.assertIn("Pause: OK", self.gui._log_text.get("1.0", "end"))
+        self.assertEqual(self.gui._service_state, STATE_PAUSED)
+
+    def test_poll_results_resume_updates_local_state(self):
+        """Successful Resume command updates GUI state optimistically."""
+        self.gui._service_state = STATE_PAUSED
+        self.gui._result_queue.put(
+            ("cmd_ok", "Resume", {"retcode": 0, "string_body": ""}))
+        self.gui._poll_results()
+        self.root.update()
+        self.assertIn("Resume: OK", self.gui._log_text.get("1.0", "end"))
+        self.assertEqual(self.gui._service_state, STATE_RUNNING)
 
     def test_poll_results_cmd_err(self):
         """Failed command results are logged."""
@@ -525,6 +536,36 @@ class TestWidgets(unittest.TestCase):
         self.root.update()
         self.assertIn("Resume ERROR: timeout",
                       self.gui._log_text.get("1.0", "end"))
+
+    def test_admin_commands_are_queued(self):
+        """Only one queued admin command is submitted at a time."""
+        submitted = []
+        self.gui._executor.shutdown(wait=False)
+        self.gui._executor = MagicMock()
+        self.gui._executor.submit.side_effect = lambda worker: submitted.append(worker)
+
+        first = MagicMock(return_value={"retcode": 0, "string_body": ""})
+        second = MagicMock(return_value={"retcode": 0, "string_body": ""})
+
+        self.gui._run_command_async(first, "First")
+        self.gui._run_command_async(second, "Second")
+
+        self.assertEqual(len(submitted), 1)
+        self.assertTrue(self.gui._command_in_progress)
+        second.assert_not_called()
+
+        submitted[0]()
+        self.gui._poll_results()
+
+        self.assertEqual(len(submitted), 2)
+        first.assert_called_once_with()
+        second.assert_not_called()
+
+        submitted[1]()
+        self.gui._poll_results()
+
+        second.assert_called_once_with()
+        self.assertFalse(self.gui._command_in_progress)
 
 
 # ===================================================================

@@ -51,6 +51,15 @@ import sys
 import time
 import argparse
 
+from recording_service_environment import (
+    ensure_connext_python,
+    ensure_rti_license,
+    license_setup_message,
+    validate_generated_types,
+)
+
+ensure_connext_python()
+
 import rti.connextdds as dds
 import rti.request as request
 
@@ -70,6 +79,10 @@ ACTION_DELETE = 3
 # CommandReplyRetcode enum values
 RETCODE_OK = 0
 RETCODE_ERROR = 1
+
+# EntityStateKind enum values from ServiceCommon.idl
+ENTITY_STATE_RUNNING = 5
+ENTITY_STATE_PAUSED = 6
 
 # Defaults
 DEFAULT_DOMAIN_ID = 0
@@ -115,8 +128,9 @@ class RecordingServiceController:
 
         # Validate paths
         admin_xml = os.path.join(xml_types_dir, "ServiceAdmin.xml")
+        common_xml = os.path.join(xml_types_dir, "ServiceCommon.xml")
         rec_xml = os.path.join(xml_types_dir, "RecordingServiceTypes.xml")
-        for path in [admin_xml, rec_xml, qos_file]:
+        for path in [admin_xml, common_xml, rec_xml, qos_file]:
             if not os.path.isfile(path):
                 raise FileNotFoundError(
                     f"Required file not found: {path}\n"
@@ -125,6 +139,10 @@ class RecordingServiceController:
 
         self._domain_id = domain_id
         self._service_name = service_name
+        self._qos_file = qos_file
+        nddshome = os.environ.get("NDDSHOME")
+        ensure_rti_license(nddshome)
+        validate_generated_types(xml_types_dir, nddshome)
 
         # ── Load DynamicTypes from XML ──────────────────────────────────
         admin_provider = dds.QosProvider(admin_xml)
@@ -140,6 +158,11 @@ class RecordingServiceController:
             "RTI::RecordingService::DataTagParams"
         )
 
+        common_provider = dds.QosProvider(common_xml)
+        self._entity_state_type = common_provider.type(
+            "RTI::Service::EntityState"
+        )
+
         # ── Load QoS ────────────────────────────────────────────────────
         qos_provider = dds.QosProvider(qos_file)
         writer_qos = qos_provider.datawriter_qos_from_profile(
@@ -150,7 +173,12 @@ class RecordingServiceController:
         )
 
         # ── Create DomainParticipant and Requester ──────────────────────
-        self._participant = dds.DomainParticipant(domain_id)
+        try:
+            self._participant = dds.DomainParticipant(domain_id)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to create DDS DomainParticipant on domain {domain_id}. "
+                f"{license_setup_message(nddshome)}") from exc
 
         self._requester = request.Requester(
             request_type=self._request_type,
@@ -160,6 +188,10 @@ class RecordingServiceController:
             reply_topic=COMMAND_REPLY_TOPIC_NAME,
             datawriter_qos=writer_qos,
             datareader_qos=reader_qos,
+            # Recording Service admin does not expose Requester/Replier
+            # enhanced service-discovery metadata; RTI examples disable this
+            # guard and use raw DDS endpoint matching instead.
+            require_matching_service_on_send_request=False,
         )
 
         print(f"[RecordingServiceController] Initialized on domain {domain_id}")
@@ -171,11 +203,11 @@ class RecordingServiceController:
 
     def start(self):
         """Resume / start the Recording Service."""
-        return self._send_state_command("running")
+        return self._send_state_command(ENTITY_STATE_RUNNING)
 
     def pause(self):
         """Pause the Recording Service."""
-        return self._send_state_command("paused")
+        return self._send_state_command(ENTITY_STATE_PAUSED)
 
     def shutdown(self):
         """Shut down the Recording Service (DELETE command)."""
@@ -205,8 +237,7 @@ class RecordingServiceController:
         tag_data["tag_description"] = tag_description
         cdr_buffer = tag_data.to_cdr_buffer()
 
-        # Convert CharSeq to list of ints for the octet_body field
-        octet_body = [ord(c) if isinstance(c, str) else c for c in cdr_buffer]
+        octet_body = _cdr_buffer_to_octets(cdr_buffer)
 
         return self._send_command(
             ACTION_UPDATE, resource, "", octet_body=octet_body
@@ -216,10 +247,13 @@ class RecordingServiceController:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _send_state_command(self, state: str):
+    def _send_state_command(self, state_value: int):
         """Send an UPDATE command to change the service state."""
         resource = f"/recording_services/{self._service_name}/state"
-        return self._send_command(ACTION_UPDATE, resource, state)
+        octet_body = _serialize_entity_state(
+            self._entity_state_type, state_value)
+        return self._send_command(
+            ACTION_UPDATE, resource, "", octet_body=octet_body)
 
     def _send_command(self, action: int, resource: str, string_body: str,
                       octet_body: list = None):
@@ -240,6 +274,8 @@ class RecordingServiceController:
         # Build the request
         cmd = dds.DynamicData(self._request_type)
         cmd["instance_id"] = 0
+        if self._service_name:
+            cmd["application_name"] = self._service_name
         cmd["action"] = action
         cmd["resource_identifier"] = resource
         cmd["string_body"] = string_body
@@ -309,23 +345,72 @@ class RecordingServiceController:
         # Wait for publication match (writer → service reader)
         while writer.publication_matched_status.current_count < 1:
             if time.time() > deadline:
-                raise TimeoutError(
-                    "Timed out waiting for request writer to match "
-                    "a Recording Service subscriber. Is the service "
-                    "running with remote administration enabled?"
-                )
+                raise TimeoutError(self._discovery_timeout_message(
+                    "request writer to match a Recording Service subscriber"))
             time.sleep(DISCOVERY_POLL_MS / 1000.0)
 
         # Wait for subscription match (reader ← service writer)
         while reader.subscription_matched_status.current_count < 1:
             if time.time() > deadline:
-                raise TimeoutError(
-                    "Timed out waiting for reply reader to match "
-                    "a Recording Service publisher."
-                )
+                raise TimeoutError(self._discovery_timeout_message(
+                    "reply reader to match a Recording Service publisher"))
             time.sleep(DISCOVERY_POLL_MS / 1000.0)
 
         print("[Discovery] Matched with Recording Service")
+
+    def _discovery_timeout_message(self, waiting_for: str) -> str:
+        """Build a discovery timeout message with DDS status details."""
+        lines = [
+            f"Timed out waiting for {waiting_for} after "
+            f"{DISCOVERY_WAIT_SEC}s.",
+            "",
+            self._format_discovery_diagnostics(),
+            "",
+            "Likely causes:",
+            "  - admin domain ID mismatch",
+            "  - Recording Service is not running or remote administration "
+            "is disabled",
+            "  - requester/service QoS profiles are incompatible or missing",
+            "  - ServiceAdmin types or topic names do not match",
+            "  - target service name does not match the Recording Service "
+            "configuration",
+        ]
+        return "\n".join(lines)
+
+    def _format_discovery_diagnostics(self) -> str:
+        """Return a snapshot of admin Requester discovery-related status."""
+        writer = self._requester.request_datawriter
+        reader = self._requester.reply_datareader
+
+        lines = [
+            "DDS admin discovery diagnostics:",
+            f"  admin_domain_id: {self._domain_id}",
+            f"  service_name: {self._service_name}",
+            f"  request_topic: {COMMAND_REQUEST_TOPIC_NAME}",
+            f"  reply_topic: {COMMAND_REPLY_TOPIC_NAME}",
+            f"  qos_file: {self._qos_file}",
+            "  request writer publication matched: "
+            + _format_status_fields(
+                _safe_attr(writer, "publication_matched_status"),
+                ("current_count", "current_count_change", "total_count"),
+            ),
+            "  reply reader subscription matched: "
+            + _format_status_fields(
+                _safe_attr(reader, "subscription_matched_status"),
+                ("current_count", "current_count_change", "total_count"),
+            ),
+            "  request writer offered incompatible QoS: "
+            + _format_status_fields(
+                _safe_attr(writer, "offered_incompatible_qos_status"),
+                ("total_count", "total_count_change", "last_policy_id"),
+            ),
+            "  reply reader requested incompatible QoS: "
+            + _format_status_fields(
+                _safe_attr(reader, "requested_incompatible_qos_status"),
+                ("total_count", "total_count_change", "last_policy_id"),
+            ),
+        ]
+        return "\n".join(lines)
 
     def close(self):
         """Clean up DDS resources."""
@@ -353,6 +438,41 @@ def _action_name(action: int) -> str:
         ACTION_DELETE: "DELETE",
     }
     return names.get(action, f"UNKNOWN({action})")
+
+
+def _cdr_buffer_to_octets(cdr_buffer) -> list:
+    """Convert a Connext CDR buffer object to sequence<octet> values."""
+    return [ord(value) if isinstance(value, str) else value
+            for value in cdr_buffer]
+
+
+def _serialize_entity_state(entity_state_type, state_value: int) -> list:
+    """Serialize EntityState as the admin state command octet_body."""
+    state_data = dds.DynamicData(entity_state_type)
+    state_data["state"] = state_value
+    return _cdr_buffer_to_octets(state_data.to_cdr_buffer())
+
+
+def _safe_attr(obj, name: str, default="unavailable"):
+    """Read an attribute without letting diagnostic formatting fail."""
+    try:
+        return getattr(obj, name)
+    except Exception:
+        return default
+
+
+def _format_status_fields(status, fields: tuple) -> str:
+    """Format selected DDS status counters for discovery diagnostics."""
+    if status == "unavailable":
+        return "unavailable"
+    parts = []
+    for field in fields:
+        value = _safe_attr(status, field)
+        if value != "unavailable":
+            parts.append(f"{field}={value}")
+    if not parts:
+        return "unavailable"
+    return ", ".join(parts)
 
 
 # ---------------------------------------------------------------------------

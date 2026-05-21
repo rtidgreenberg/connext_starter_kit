@@ -60,7 +60,7 @@
 
 | # | Item | Issue | Severity |
 |---|------|-------|----------|
-| 24 | `python_types/` directory | Contains generated Python type files (`RecordingServiceMonitoring.py`, `ServiceCommon.py`, etc.) that are never imported — the project uses XML types via `xml_types/` instead. Leftover from an earlier approach | **Cleanup** |
+| 24 | `python_types/` directory | Removed from setup/runtime usage — the project uses XML types via `xml_types/` instead | **Resolved** |
 | 25 | `log_dir/xcdr/` directory | Recording Service output directory — runtime artifact, should be in `.gitignore` | **Cleanup** |
 | 26 | `test/test_recording/` directory | Recording Service SQLite output — runtime artifact, should be in `.gitignore` | **Cleanup** |
 | 27 | `archive/` directory | 7 archived files. These serve as history but could be removed if version control provides that | **Optional cleanup** |
@@ -72,8 +72,69 @@
 | # | Location | Issue | Severity |
 |---|----------|-------|----------|
 | 28 | `services/README.md` | No mention of `recording_service_gui/` at all — the parent README covers recording/replay/convert but doesn't link to the Python GUI/control tool | **Missing** |
-| 29 | `recording_service_gui/` | No `.gitignore` for `xml_types/`, `python_types/`, `log_dir/`, `test/test_recording/`, `__pycache__/` | **Improvement** |
+| 29 | `recording_service_gui/` | No `.gitignore` for `xml_types/`, `log_dir/`, `test/test_recording/`, `__pycache__/` | **Improvement** |
 | 30 | `run_gui.sh` | Phase 3 of the architecture plan (create `run_gui.sh` launcher) was never completed — there's no GUI launcher script | **Not implemented** |
+
+---
+
+## 7. Connext Version Decision Record
+
+**Current requirement:** RTI Connext DDS 7.6.0 with matching
+`rti.connext==7.6.0` Python bindings in `connext_dds_env`.
+
+This section tracks the known differences between the original 7.3 target and
+the current 7.6 requirement. Keep operational README content focused on current
+usage; use this section for historical comparisons and rationale.
+
+### 7.3.x limitations observed or confirmed
+
+| Area | 7.3.x behavior / limitation | Impact on this GUI |
+|------|-----------------------------|--------------------|
+| Python nested unions | RTI issue PY-182: incorrect deserialization of nested unions with an unknown discriminator. Fixed in 7.4 and therefore included in 7.6. | Recording Service monitoring data uses nested union structures. Unknown discriminator handling can drop, misread, or fail to expose monitoring samples correctly. |
+| Monitoring type path | Generated Python monitoring type modules were not reliable enough for the built-in Recording Service monitoring writers. | The monitor uses XML-loaded DynamicData types instead of generated Python type modules. |
+| Version mixing | Running host tools/services from one Connext install while importing a different `rti.connext` package from user site or another environment produced misleading results. | The launcher and environment helper now enforce a matching Connext install and Python package version. |
+| Request/Reply helper API | 7.3-era Requester behavior differs from 7.6 and did not provide a reliable high-level service-discovery path for built-in Recording Service ServiceAdmin. | The controller uses fixed ServiceAdmin topics, raw DDS endpoint matching, correlated replies, and bounded reply timeouts. |
+
+### 7.6 capabilities the current implementation depends on
+
+| Area | 7.6 behavior used | Rationale |
+|------|-------------------|-----------|
+| PY-182 fix included | 7.6 includes the 7.4 Python fix for nested unions with unknown discriminators. | Required for robust Recording Service monitoring data handling. |
+| XTypes compliance mask | `rti.connextdds.compliance` provides `get_xtypes_mask()` / `set_xtypes_mask()` and `XTypesMask` bits. | The monitor configures `ACCEPT_UNKNOWN_DISCRIMINATOR_BIT` and clears `SELECT_DEFAULT_DISCRIMINATOR_BIT` so DynamicData readers accept unknown union discriminators without selecting a default branch. |
+| Generated XML artifacts | `setup.sh` generates admin and monitoring XML from `$NDDSHOME/resource/idl`, then stamps `xml_types/` with the source install and version. | Keeps XML DynamicTypes aligned with the Recording Service and Python binding version being used; runtime rejects stale XML after switching Connext installs. |
+| PyPI package availability | `rti.connext==7.6.0` is available for the repository Python 3.8 virtual environment. | Allows reproducible installation into `connext_dds_env` without relying on user-site packages. |
+| Validated runtime target | Unit, GUI, controller, live monitoring, and tag E2E tests have passed with Connext 7.6.0. | 7.6 is the current verified baseline; 7.3 is not considered supported for this GUI/controller. |
+
+### Decision
+
+Do not relax the GUI/controller requirement below Connext 7.6.0 unless the
+following are revalidated on the proposed target version:
+
+- XML DynamicData monitoring receives config, event, and periodic samples.
+- Nested union samples with unknown discriminators are accepted and parsed.
+- `rti.connext` package version matches the host Connext install.
+- Controller commands receive correlated `OK` replies from Recording Service
+  ServiceAdmin.
+- Live GUI monitoring and tag E2E tests pass.
+
+---
+
+## 8. Connext AI Follow-up Review — May 21, 2026
+
+Scope: active Python scripts in `recording_service_gui/`, with emphasis on
+Recording Service admin commands and monitoring integration.
+
+| ID | Severity | Finding | Status | Next Step |
+|----|----------|---------|--------|-----------|
+| C1 | Critical | `start()` and `pause()` send lowercase state strings in `string_body`; Connext AI says documented Recording Service state updates should serialize state updates as CDR in `octet_body`. | Resolved | State commands now send empty `string_body` and RTI-serialized `EntityState` DynamicData octets; covered by controller unit tests and live pause/resume E2E. |
+| C2 | High | `_send_command()` waits for only one reply and returns the last valid sample from that batch; reply sequences may require waiting for a final reply. | Resolved | `related_request_id` already scopes waits/takes to the request, and Connext AI confirmed current Recording Service admin commands are expected to return one final reply. Keep a final-reply loop only for future generic multi-reply operations. |
+| C3 | High | `CommandRequest.application_name` is optional and currently unset; Connext AI warns unset requests can target all matching services. | Resolved | `_send_command()` now sets `application_name` from the configured service name before `send_request()`; covered by controller unit test. |
+| C4 | Medium | GUI commands share one `Requester` from a two-worker executor; concurrent admin operations could cross-talk unless strictly correlated or serialized. | Resolved | GUI admin commands now enter an explicit FIFO queue backed by a single worker, so only one controller request/reply exchange runs at a time; covered by GUI unit test. |
+| C5 | Low | Discovery/QoS failures are hard to diagnose from current controller errors. | Resolved | Discovery timeouts now include domain/service/topic context, match counters, incompatible-QoS status when available, and likely-cause hints; covered by controller unit tests. |
+| C6 | Medium | No live E2E test sends `pause`/`start` and verifies Recording Service state transitions. | Resolved | GUI E2E now invokes live Pause/Resume controls, verifies OK replies drive PAUSED/RUNNING GUI state and button changes, and documents that service monitoring may remain STARTED. |
+
+Monitor-specific follow-up from the same review is tracked as M12 in
+`CONNEXT_MONITOR_REVIEW_FINDINGS.md`: the XTypes compliance mask is process-wide.
 
 ---
 

@@ -25,9 +25,8 @@ This verifies the integration between:
 
 Prerequisites:
   - $NDDSHOME set (rtirecordingservice)
-  - Generated Python type files (setup.sh)
   - Generated XML type files (setup.sh)
-  - Virtual environment with rti.connext >= 7.3.1
+    - Virtual environment with rti.connext == 7.6.0
   - tkinter display (headless OK with Xvfb)
 
 Run standalone:
@@ -56,19 +55,17 @@ REPO_ROOT = os.path.normpath(os.path.join(PARENT_DIR, "..", ".."))
 if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
-NDDSHOME = os.environ.get("NDDSHOME", "")
-if not NDDSHOME:
-    import glob as _glob
-    candidates = sorted(_glob.glob(os.path.expanduser("~/rti_connext_dds-*")))
-    if candidates:
-        NDDSHOME = candidates[-1]
+from recording_service_environment import detect_nddshome, ensure_rti_license
+
+NDDSHOME = detect_nddshome()
+ensure_rti_license(NDDSHOME)
 
 RECORDER_BIN = os.path.join(NDDSHOME, "bin", "rtirecordingservice")
 SERVICES_DIR = os.path.dirname(PARENT_DIR)  # services/
 RECORDER_CONFIG = os.path.join(SERVICES_DIR, "recording_service_config.xml")
 QOS_FILE = os.path.normpath(
     os.path.join(REPO_ROOT, "dds", "qos", "DDS_QOS_PROFILES.xml"))
-PYTHON_TYPES_DIR = os.path.join(PARENT_DIR, "python_types")
+XML_TYPES_DIR = os.path.join(PARENT_DIR, "xml_types")
 
 # Use domain 0 for test isolation (override config variables via -D flags)
 TEST_DOMAIN = 0
@@ -93,8 +90,8 @@ def _skip_reason():
         return f"recording_service_config.xml not found: {RECORDER_CONFIG}"
     if not os.path.isfile(QOS_FILE):
         return f"DDS_QOS_PROFILES.xml not found: {QOS_FILE}"
-    if not os.path.isdir(PYTHON_TYPES_DIR):
-        return f"python_types/ not found (run setup.sh): {PYTHON_TYPES_DIR}"
+    if not os.path.isfile(os.path.join(XML_TYPES_DIR, "ServiceMonitoring.xml")):
+        return f"xml_types/ not generated (run setup.sh): {XML_TYPES_DIR}"
     try:
         import rti.connextdds  # noqa: F401
     except ImportError:
@@ -140,6 +137,30 @@ def _pump_tk(root, duration_sec, step_ms=POLL_STEP_MS):
         except Exception:
             break
         time.sleep(step_ms / 1000.0)
+
+
+def _wait_for_gui_state(root, gui, expected_states, description,
+                        timeout_sec=10):
+    """Pump tkinter until the GUI-visible service state reaches a target."""
+    from recording_service_gui import STATE_NAMES
+
+    expected_states = set(expected_states)
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        _pump_tk(root, 0.2)
+        if gui._service_state in expected_states:
+            state_name = STATE_NAMES.get(gui._service_state, "?")
+            print(f"[GUI E2E] {description}: {state_name}")
+            return
+
+    state_name = STATE_NAMES.get(gui._service_state, "?")
+    expected_names = ", ".join(
+        STATE_NAMES.get(state, str(state)) for state in sorted(expected_states))
+    log_tail = gui._log_text.get("1.0", "end").strip()[-800:]
+    raise AssertionError(
+        f"Timed out waiting for {description}; expected one of "
+        f"{expected_names}, got {gui._service_state} ({state_name}). "
+        f"Recent GUI log:\n{log_tail}")
 
 
 @unittest.skipIf(_skip_reason(), _skip_reason() or "")
@@ -274,7 +295,7 @@ class TestE2EGUIMonitoring(unittest.TestCase):
         print(f"[GUI E2E] Service detected: {gui._service_detected}")
 
     def test_3_state_label_updated(self):
-        """GUI state label shows RUNNING after monitoring updates."""
+        """GUI state label shows an active service after monitoring updates."""
         gui = self.__class__._gui
         root = self.__class__._root
 
@@ -284,16 +305,15 @@ class TestE2EGUIMonitoring(unittest.TestCase):
         state_text = gui._state_label.cget("text")
         print(f"[GUI E2E] State label: '{state_text}'")
 
-        # Recording Service should report RUNNING state
-        from recording_service_gui import STATE_RUNNING, STATE_NAMES
-        self.assertEqual(
-            gui._service_state, STATE_RUNNING,
-            f"Expected service state RUNNING ({STATE_RUNNING}), "
-            f"got {gui._service_state} "
+        from recording_service_gui import ACTIVE_SERVICE_STATES, STATE_NAMES
+        self.assertIn(
+            gui._service_state, ACTIVE_SERVICE_STATES,
+            f"Expected active service state, got {gui._service_state} "
             f"({STATE_NAMES.get(gui._service_state, '?')})")
 
-        self.assertIn("RUNNING", state_text.upper(),
-                       f"State label doesn't show RUNNING: '{state_text}'")
+        self.assertIn(state_text.upper(), {"STARTED", "RUNNING"},
+                      f"State label doesn't show an active state: "
+                      f"'{state_text}'")
 
     def test_4_service_name_label_updated(self):
         """GUI shows the service name from config monitoring."""
@@ -364,7 +384,39 @@ class TestE2EGUIMonitoring(unittest.TestCase):
             str(gui._launch_btn.cget("state")), "disabled",
             "Launch button should be disabled when service is detected")
 
-    def test_7_log_panel_has_entries(self):
+    def test_7_pause_resume_controls_update_state(self):
+        """Pause and resume through GUI controls and observe GUI state."""
+        gui = self.__class__._gui
+        root = self.__class__._root
+
+        from recording_service_gui import (
+            ACTIVE_SERVICE_STATES,
+            STATE_PAUSED,
+        )
+
+        _wait_for_gui_state(
+            root, gui, ACTIVE_SERVICE_STATES, "initial active state")
+
+        self.assertEqual(
+            str(gui._pause_btn.cget("state")), "normal",
+            "Pause button should be enabled before pause command")
+
+        gui._pause_btn.invoke()
+        _wait_for_gui_state(root, gui, {STATE_PAUSED}, "paused state")
+
+        self.assertEqual(gui._state_label.cget("text"), "PAUSED")
+        self.assertEqual(str(gui._pause_btn.cget("state")), "disabled")
+        self.assertEqual(str(gui._resume_btn.cget("state")), "normal")
+
+        gui._resume_btn.invoke()
+        _wait_for_gui_state(
+            root, gui, ACTIVE_SERVICE_STATES, "resumed active state")
+
+        self.assertIn(gui._state_label.cget("text"), {"STARTED", "RUNNING"})
+        self.assertEqual(str(gui._pause_btn.cget("state")), "normal")
+        self.assertEqual(str(gui._resume_btn.cget("state")), "disabled")
+
+    def test_8_log_panel_has_entries(self):
         """Log panel contains monitoring-related entries."""
         gui = self.__class__._gui
         root = self.__class__._root

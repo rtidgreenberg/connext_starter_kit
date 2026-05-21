@@ -430,7 +430,7 @@ You generate and run DDS integration tests using pytest.
 ## MCP Tools — Use These First
 
 1. Query internal MCP `search_reference_code` for existing test patterns
-   (check `services/recording_service_gui/test/` for pytest examples)
+  (check `services/rs_gui_v1/test/` for pytest examples)
 2. Check `tests/conftest.py` for existing fixtures
 
 ## Test Generation Rules

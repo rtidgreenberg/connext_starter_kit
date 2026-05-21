@@ -3,7 +3,7 @@
 > This document describes the current tkinter-based Recording Service reference
 > GUI. The forward-looking Dear PyGui architecture for a broader Record, Replay,
 > Convert, Topics, and Plots application is in
-> [rs_gui_v2/DEARPYGUI_APP_ARCHITECTURE.md](rs_gui_v2/DEARPYGUI_APP_ARCHITECTURE.md).
+> [../rs_gui_v2/DEARPYGUI_APP_ARCHITECTURE.md](../rs_gui_v2/DEARPYGUI_APP_ARCHITECTURE.md).
 
 ## 1. Purpose
 
@@ -34,7 +34,7 @@ first time.
 ## 3. File Structure
 
 ```
-services/recording_service_gui/
+services/rs_gui_v1/
 ├── recording_service_gui.py        # tkinter GUI + helpers + main()
 ├── recording_service_monitor.py    # DDS monitoring subscriber (rti.asyncio)
 ├── recording_service_control.py    # DDS remote admin CLI + class

@@ -9,12 +9,12 @@ Based on the [C++ service admin example](https://github.com/rticommunity/rticonn
 Architecture notes:
 - [GUI_ARCHITECTURE.md](GUI_ARCHITECTURE.md) describes the current tkinter
    Recording Service reference GUI.
-- [rs_gui_v2/DEARPYGUI_APP_ARCHITECTURE.md](rs_gui_v2/DEARPYGUI_APP_ARCHITECTURE.md) sketches the
+- [../rs_gui_v2/DEARPYGUI_APP_ARCHITECTURE.md](../rs_gui_v2/DEARPYGUI_APP_ARCHITECTURE.md) sketches the
    target Dear PyGui application architecture for recording, replay, conversion,
    topic browsing, plotting, and persisted workspaces.
-- [rs_gui_v2/DEARPYGUI_IMPLEMENTATION_PLAN.md](rs_gui_v2/DEARPYGUI_IMPLEMENTATION_PLAN.md) breaks
+- [../rs_gui_v2/DEARPYGUI_IMPLEMENTATION_PLAN.md](../rs_gui_v2/DEARPYGUI_IMPLEMENTATION_PLAN.md) breaks
    that architecture into phased implementation milestones and validation gates.
-- [rs_gui_v2/DEARPYGUI_WIREFRAME_PLAN.md](rs_gui_v2/DEARPYGUI_WIREFRAME_PLAN.md) defines the mock
+- [../rs_gui_v2/DEARPYGUI_WIREFRAME_PLAN.md](../rs_gui_v2/DEARPYGUI_WIREFRAME_PLAN.md) defines the mock
    wireframes and approval gate required before Dear PyGui UI implementation.
 
 ## How it Works
@@ -121,7 +121,7 @@ and controlling a recording session — all from a single window.
 ### Quick Start
 
 ```bash
-cd services/recording_service_gui
+cd services/rs_gui_v1
 ./setup.sh       # One-time: generate and normalize XML types from IDL
 ./run_gui.sh     # Launch the GUI
 ```
@@ -231,7 +231,7 @@ Services-level E2E tests for the start scripts live in
 [`services/test/`](../test/README.md).
 
 ```bash
-cd services/recording_service_gui
+cd services/rs_gui_v1
 
 # Run the GUI test suite
 ../../connext_dds_env/bin/python test/run_all_tests.py -v
@@ -263,7 +263,7 @@ simple DDS publisher.
 ### Step 1 — Run setup
 
 ```bash
-cd services/recording_service_gui
+cd services/rs_gui_v1
 ./setup.sh
 ```
 

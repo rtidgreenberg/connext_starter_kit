@@ -10,7 +10,7 @@ subscriber, and remote admin controller.
 ## Running Tests
 
 ```bash
-cd services/recording_service_gui
+cd services/rs_gui_v1
 
 # Run the GUI test suite (94 tests, includes E2E tags)
 ../../connext_dds_env/bin/python test/run_all_tests.py -v
@@ -129,7 +129,7 @@ or demonstration purposes.
 ### Step 1 — Generate type files
 
 ```bash
-cd services/recording_service_gui
+cd services/rs_gui_v1
 ./setup.sh
 ```
 

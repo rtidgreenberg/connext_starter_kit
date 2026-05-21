@@ -28,7 +28,7 @@ Prerequisites:
     - Virtual environment with rti.connext == 7.6.0
 
 Run standalone:
-    cd services/recording_service_gui
+    cd services/rs_gui_v1
     python3 test/test_e2e_tags.py -v
 
 Or as part of the suite (skipped if prerequisites are missing):

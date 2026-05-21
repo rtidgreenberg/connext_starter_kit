@@ -4,7 +4,7 @@ Automated end-to-end tests for the services start scripts (`start_record.sh`,
 `start_convert.sh`, `start_replay.sh`).
 
 > **Tip:** GUI-specific tests (unit, widget, integration, E2E tags) live in
-> [`recording_service_gui/test/`](../recording_service_gui/test/README.md).
+> [`rs_gui_v1/test/`](../rs_gui_v1/test/README.md).
 
 ## Running Tests
 

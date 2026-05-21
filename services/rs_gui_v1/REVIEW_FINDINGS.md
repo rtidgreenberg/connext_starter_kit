@@ -1,7 +1,7 @@
 # Recording Service GUI — Project Review Findings
 
 **Date:** March 13, 2026
-**Scope:** All files under `services/recording_service_gui/`
+**Scope:** All files under `services/rs_gui_v1/`
 
 ---
 
@@ -71,8 +71,8 @@
 
 | # | Location | Issue | Severity |
 |---|----------|-------|----------|
-| 28 | `services/README.md` | No mention of `recording_service_gui/` at all — the parent README covers recording/replay/convert but doesn't link to the Python GUI/control tool | **Missing** |
-| 29 | `recording_service_gui/` | No `.gitignore` for `xml_types/`, `log_dir/`, `test/test_recording/`, `__pycache__/` | **Improvement** |
+| 28 | `services/README.md` | No mention of `rs_gui_v1/` at all — the parent README covers recording/replay/convert but doesn't link to the Python GUI/control tool | **Missing** |
+| 29 | `rs_gui_v1/` | No `.gitignore` for `xml_types/`, `log_dir/`, `test/test_recording/`, `__pycache__/` | **Improvement** |
 | 30 | `run_gui.sh` | Phase 3 of the architecture plan (create `run_gui.sh` launcher) was never completed — there's no GUI launcher script | **Not implemented** |
 
 ---
@@ -121,7 +121,7 @@ following are revalidated on the proposed target version:
 
 ## 8. Connext AI Follow-up Review — May 21, 2026
 
-Scope: active Python scripts in `recording_service_gui/`, with emphasis on
+Scope: active Python scripts in `rs_gui_v1/`, with emphasis on
 Recording Service admin commands and monitoring integration.
 
 | ID | Severity | Finding | Status | Next Step |

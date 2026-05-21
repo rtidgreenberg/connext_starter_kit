@@ -236,14 +236,14 @@ process after this policy was enabled.
 After each implementation pass, run:
 
 ```bash
-cd services/recording_service_gui
+cd services/rs_gui_v1
 PYTHONNOUSERSITE=1 ../../connext_dds_env/bin/python test/test_monitoring.py -v
 ```
 
 After union and lifecycle fixes, also run live monitoring:
 
 ```bash
-cd services/recording_service_gui
+cd services/rs_gui_v1
 PYTHONNOUSERSITE=1 ../../connext_dds_env/bin/python test/test_e2e_gui_monitoring.py -v
 ```
 

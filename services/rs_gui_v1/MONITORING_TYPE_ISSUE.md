@@ -144,7 +144,7 @@ rtirecordingservice -cfgFile "recording_service_config.xml;../dds/qos/DDS_QOS_PR
   -cfgName deploy -DDOMAIN_ID=0 -DADMIN_DOMAIN_ID=0
 
 # Terminal 2 — run reproducer
-cd services/recording_service_gui/
+cd services/rs_gui_v1/
 source ../../connext_dds_env/bin/activate
 python3 test/reproducer_monitoring_xml.py
 ```

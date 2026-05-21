@@ -142,7 +142,7 @@ reference example. The user can re-browse the config file to reload.
 ## 28. services/README.md — No Mention of GUI Tool (INCOMPLETE → FIXED)
 
 Added a new "I want to control Recording Service with a GUI" section
-with a link to `recording_service_gui/README.md`, and a corresponding
+with a link to `rs_gui_v1/README.md`, and a corresponding
 TOC entry.
 
 ## 29. Missing `.gitignore` (INCOMPLETE → FIXED)
@@ -176,18 +176,18 @@ activation, XML type file verification, and launches
 | **Total** | **30** | **27** | **3** |
 
 Files modified:
-- `recording_service_gui/README.md`
-- `recording_service_gui/GUI_ARCHITECTURE.md`
-- `recording_service_gui/recording_service_control.py`
-- `recording_service_gui/recording_service_gui.py`
-- `recording_service_gui/test/test_gui.py`
-- `recording_service_gui/test/test_control.py`
+- `rs_gui_v1/README.md`
+- `rs_gui_v1/GUI_ARCHITECTURE.md`
+- `rs_gui_v1/recording_service_control.py`
+- `rs_gui_v1/recording_service_gui.py`
+- `rs_gui_v1/test/test_gui.py`
+- `rs_gui_v1/test/test_control.py`
 - `services/README.md`
 
 Files created:
-- `recording_service_gui/.gitignore`
-- `recording_service_gui/run_gui.sh`
-- `recording_service_gui/REVIEW_FIXES_APPLIED.md` (this file)
+- `rs_gui_v1/.gitignore`
+- `rs_gui_v1/run_gui.sh`
+- `rs_gui_v1/REVIEW_FIXES_APPLIED.md` (this file)
 
 Files deleted:
-- `recording_service_gui/python_types/` (entire directory)
+- `rs_gui_v1/python_types/` (entire directory)

@@ -30,7 +30,7 @@ Prerequisites:
   - tkinter display (headless OK with Xvfb)
 
 Run standalone:
-    cd services/recording_service_gui
+    cd services/rs_gui_v1
     python3 test/test_e2e_gui_monitoring.py -v
 
 Or as part of the suite (auto-skipped if prerequisites missing):

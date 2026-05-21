@@ -116,7 +116,7 @@ def validate_generated_types(xml_types_dir: str, nddshome: str = None) -> dict:
     if not os.path.isfile(stamp_path):
         raise RuntimeError(
             f"Generated XML type metadata not found: {stamp_path}. "
-            "Run services/recording_service_gui/setup.sh with the active "
+            "Run services/rs_gui_v1/setup.sh with the active "
             "NDDSHOME to regenerate xml_types/.")
 
     metadata = read_generated_types_stamp(xml_types_dir)
@@ -127,7 +127,7 @@ def validate_generated_types(xml_types_dir: str, nddshome: str = None) -> dict:
             "Generated XML type files were created from a different Connext "
             f"install. Expected NDDSHOME {expected_home}, stamp has "
             f"{actual_home or '<missing>'}. Rerun "
-            "services/recording_service_gui/setup.sh.")
+            "services/rs_gui_v1/setup.sh.")
 
     expected_version = connext_version_from_nddshome(nddshome)
     actual_version = metadata.get("version", "")
@@ -135,7 +135,7 @@ def validate_generated_types(xml_types_dir: str, nddshome: str = None) -> dict:
         raise RuntimeError(
             "Generated XML type files were created from Connext "
             f"{actual_version}, but active NDDSHOME is {expected_version}. "
-            "Rerun services/recording_service_gui/setup.sh.")
+            "Rerun services/rs_gui_v1/setup.sh.")
 
     return metadata
 

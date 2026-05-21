@@ -184,11 +184,11 @@ cd services
 
 **Running**:
 ```bash
-cd services/recording_service_gui
+cd services/rs_gui_v1
 ./run_gui.sh
 ```
 
-See [recording_service_gui/README.md](recording_service_gui/README.md) for prerequisites, setup, and usage details.
+See [rs_gui_v1/README.md](rs_gui_v1/README.md) for prerequisites, setup, and usage details.
 
 ---
 
@@ -209,7 +209,7 @@ python3 test/test_e2e_services.py -v
 See [test/README.md](test/README.md) for details on the test pipeline.
 
 GUI-specific tests (unit, widget, integration, E2E tags) live in
-[recording_service_gui/test/](recording_service_gui/test/README.md).
+[rs_gui_v1/test/](rs_gui_v1/test/README.md).
 
 ---
 
@@ -258,7 +258,8 @@ services/
 ├── start_record_external_types.sh
 ├── start_convert.sh
 ├── start_replay.sh
-└── recording_service_gui/      # GUI, CLI, monitoring, and GUI tests
+├── rs_gui_v1/                  # Current tkinter GUI, CLI, monitoring, and tests
+└── rs_gui_v2/                  # Dear PyGui architecture, implementation, and wireframe plans
 ```
 
 ## Resources

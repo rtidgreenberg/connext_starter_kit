@@ -65,6 +65,15 @@ Suggested first PRs:
 2. Add `rs_gui_v2_app.py` or equivalent shell entry point.
 3. Add headless lifecycle tests.
 
+Initial implementation status:
+
+- Added `app_core` runtime, event, command, result, and state models.
+- Added `rs_gui_v2_app.py` with a DDS-free `--headless-check` entry point.
+- Added pure headless unit tests for lifecycle, queues, task supervision,
+  immutable DTOs, and the entry point.
+- Deferred environment/XTypes adapters to Milestone B so Milestone A remains
+  DDS-free.
+
 ## Milestone B: Service Admin and Monitoring Facades
 
 Goal: Wrap the existing Recording Service controller and monitor in stable,

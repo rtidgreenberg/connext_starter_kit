@@ -25,6 +25,8 @@ Current layers:
 - `test_gui_shell.py`: mocked Dear PyGui shell snapshots, Record-tab selector
   view models, command intents, event-log scheduling, and fake-renderer smoke
   coverage without requiring a display
+- `test_gui_session.py`: runtime-backed GUI session wiring from app-core command
+  queues through the Record controller into shell snapshots and event logs
 - `test_record_tab_controller.py`: Record tab wiring from the local process
   manager, Service Admin facade, monitoring facade, command history, duplicate
   candidate detection, and guarded termination state into GUI snapshots

@@ -600,6 +600,10 @@ Initial implementation status:
   state, tag state, shutdown fallback state, and command history into the
   existing Record-tab view model without importing DDS or owning service
   entities in Dear PyGui.
+- Added `GuiShellSession` to connect the app-core runtime queues, UI scheduler,
+  Record-tab controller, shell view provider, and Dear PyGui command sink so
+  Record button intents are queued and dispatched through app-core boundaries on
+  the next GUI frame.
 
 ## Milestone G: Topics Tab
 

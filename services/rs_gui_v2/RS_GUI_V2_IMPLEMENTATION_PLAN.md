@@ -604,6 +604,11 @@ Initial implementation status:
   Record-tab controller, shell view provider, and Dear PyGui command sink so
   Record button intents are queued and dispatched through app-core boundaries on
   the next GUI frame.
+- Added default GUI session assembly for `mock` and `headless` modes. The mock
+  mode creates a fake Recording Service process, fake admin/monitoring clients,
+  a controller-backed session, and a Dear PyGui shell provider without launching
+  real RTI services. The CLI `--mock-gui-check` and `--gui` paths now use this
+  assembled session instead of standalone mock view builders.
 
 ## Milestone G: Topics Tab
 

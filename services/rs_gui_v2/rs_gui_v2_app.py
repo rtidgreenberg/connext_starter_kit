@@ -6,7 +6,7 @@ import asyncio
 from typing import List, Optional
 
 from app_core import AppRuntime, LifecyclePhase
-from gui import build_mock_shell_view_model
+from gui import GuiShellSessionFactoryConfig, build_default_gui_shell_session
 from gui.main_window import DearPyGuiShell, DearPyGuiUnavailable
 
 
@@ -28,12 +28,12 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--mock-gui-check",
         action="store_true",
-        help="build the mocked GUI shell snapshot, then exit",
+        help="build the session-backed mock GUI shell, then exit",
     )
     parser.add_argument(
         "--gui",
         action="store_true",
-        help="run the Dear PyGui shell with mocked Record-tab data",
+        help="run the Dear PyGui shell with session-backed mock data",
     )
     return parser.parse_args(argv)
 
@@ -44,11 +44,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         lifecycle = asyncio.run(run_headless_once())
         return 0 if lifecycle == LifecyclePhase.STOPPED else 1
     if args.mock_gui_check:
-        view = build_mock_shell_view_model()
+        session = build_default_gui_shell_session(GuiShellSessionFactoryConfig())
+        view = session.next_view()
         return 0 if view.record_tab.candidates else 1
     if args.gui:
         try:
-            DearPyGuiShell().run()
+            session = build_default_gui_shell_session(GuiShellSessionFactoryConfig())
+            DearPyGuiShell(
+                view_provider=session.next_view,
+                command_sink=session.command_sink,
+            ).run()
             return 0
         except DearPyGuiUnavailable as exc:
             print(str(exc))

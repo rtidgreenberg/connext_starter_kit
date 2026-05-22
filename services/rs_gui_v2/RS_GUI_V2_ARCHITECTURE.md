@@ -160,6 +160,7 @@ Rules for new modules:
 | Topic discovery | `TopicDiscoveryFacade`, `TopicInventory`, `TopicSelectionState` | `app_core/rti_discovery.py` | publication/subscription built-in topic readers, endpoint metadata, discovery churn |
 | Type catalog | `TypeCatalog`, `TypeResolution` | `app_core/types.py`, `app_core/rti_types.py` | XML type enumeration, local type availability, `QosProvider.type()` DynamicType lookup |
 | Field catalog | `FieldCatalog`, `FieldDescriptor` | `app_core/fields.py`, `app_core/rti_fields.py` | DynamicType member traversal, scalar/collection classification, plot eligibility |
+| Workspace persistence | `WorkspaceDocument`, `WorkspacePlotDefinition` | `app_core/workspace.py` | DDS-free topic/type/field intent, versioned JSON migration |
 | Data subscription | `TopicSubscriptionRequest`, `SampleEnvelope`, `SampleCache` | `app_core/subscriptions.py`, `app_core/rti_subscriptions.py` | DynamicData topics/readers, `take`, sample info, instance state, reader shutdown |
 | Field extraction | `FieldPath`, `FieldExtraction` | `app_core/extractors.py` | DDS-free extraction from mapping/object/DynamicData-like sample values |
 | Replay visualization | normal topic subscription APIs | `app_core/rti_subscriptions.py` | replayed samples are just DDS data consumed by Topics/Plots |
@@ -320,40 +321,67 @@ Do not persist:
 
 Version the workspace schema from the first draft.
 
+Keep workspace persistence in `workspace.py` DDS-free. It can store
+`TopicSelectionState`, `TopicSubscriptionRequest`, field paths, plot definitions,
+XML type paths, and recent files. It must not store participants, readers,
+requesters, DynamicData objects, or sample buffers.
+
 Example:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
+  "name": "Robot Workspace",
   "domains": [0, 54],
-  "services": {
-    "recording": [
-      {"name": "Recorder", "admin_domain": 54, "monitoring_domain": 54}
-    ],
-    "replay": [
-      {"name": "Replay", "admin_domain": 54, "monitoring_domain": 54}
+  "topic_selections": {
+    "include_internal": false,
+    "selections": [
+      {
+        "domain_id": 0,
+        "topic_name": "Position",
+        "type_name": "Position",
+        "selected_fields": ["lat", "lon"],
+        "plot_fields": ["lat", "lon"],
+        "enabled": true
+      }
     ]
   },
   "subscriptions": [
     {
-      "domain": 0,
-      "topic": "Position",
+      "domain_id": 0,
+      "topic_name": "Position",
       "type_name": "Position",
-      "fields": ["lat", "lon"],
-      "view": "plot"
+      "selected_fields": ["lat", "lon"],
+      "max_samples": 1024
     }
   ],
   "plots": [
     {
-      "title": "Position",
+      "name": "Position",
       "history_seconds": 60,
+      "max_points": 2000,
       "series": [
-        {"domain": 0, "topic": "Position", "field": "lat"},
-        {"domain": 0, "topic": "Position", "field": "lon"}
+        {"domain_id": 0, "topic_name": "Position", "type_name": "Position", "field_path": "lat"},
+        {"domain_id": 0, "topic_name": "Position", "type_name": "Position", "field_path": "lon"}
       ]
     }
   ],
-  "recent_recordings": []
+  "xml_type_paths": ["xml_types/Position.xml"],
+  "recent_files": ["recordings/session_001"],
+  "metadata": {}
+}
+```
+
+Service launch/admin preferences can be added as a later versioned extension,
+for example:
+
+```json
+{
+  "services": {
+    "recording": [
+      {"name": "Recorder", "admin_domain": 54, "monitoring_domain": 54}
+    ]
+  }
 }
 ```
 

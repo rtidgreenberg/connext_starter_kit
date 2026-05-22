@@ -356,6 +356,13 @@ Initial implementation status:
   unresolved types, depth limits, and optional collection-content expansion.
 - Verified a real smoke builds field catalogs from generated v2 XML DynamicTypes
   and finds plottable numeric leaves without creating DDS readers.
+- Added `app_core/workspace.py` with DDS-free `WorkspaceDocument`,
+  `WorkspacePlotDefinition`, `WorkspacePlotSeries`, versioned JSON migration,
+  deterministic load/save helpers, and validation errors for malformed
+  workspace state.
+- Added headless workspace tests for JSON round trips, file save/load, v1 to v2
+  migration, unknown future fields, malformed documents, declarative-only JSON,
+  and restart-style preservation of topic, field, subscription, and plot intent.
 - Deferred plot decimation and live fixture publishers to later Milestone D
   slices.
 

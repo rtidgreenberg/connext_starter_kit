@@ -58,6 +58,16 @@ from .subscriptions import (
     TopicSubscriptionState,
 )
 from .types import TypeAvailabilityStatus, TypeCatalog, TypeResolution, TypeSource
+from .workspace import (
+    WORKSPACE_SCHEMA_VERSION,
+    WorkspaceDocument,
+    WorkspaceFormatError,
+    WorkspacePlotDefinition,
+    WorkspacePlotSeries,
+    load_workspace,
+    migrate_workspace_dict,
+    save_workspace,
+)
 
 __all__ = [
     "AdminReadiness",
@@ -116,4 +126,12 @@ __all__ = [
     "TypeCatalog",
     "TypeResolution",
     "TypeSource",
+    "load_workspace",
+    "migrate_workspace_dict",
+    "save_workspace",
+    "WORKSPACE_SCHEMA_VERSION",
+    "WorkspaceDocument",
+    "WorkspaceFormatError",
+    "WorkspacePlotDefinition",
+    "WorkspacePlotSeries",
 ]

@@ -45,6 +45,8 @@ Current layers:
   monitoring snapshots, and service-state snapshots
 - `test_subscriptions.py`: DDS-free subscription requests, sample envelopes,
   subscription state counters, and bounded sample cache behavior
+- `test_workspace.py`: DDS-free versioned workspace JSON persistence,
+  migration, validation, and declarative topic/field/plot selection round trips
 
-Future layers will add live adapter fixtures, workspace file persistence,
-plotting, and GUI tests after the wireframe approval gate.
+Future layers will add live adapter fixtures, plotting, and GUI tests after the
+wireframe approval gate.

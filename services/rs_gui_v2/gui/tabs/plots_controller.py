@@ -2,9 +2,15 @@
 
 from dataclasses import dataclass, replace
 import time
-from typing import Callable, Optional, Tuple
+from typing import Any, Callable, Mapping, Optional, Tuple
 
-from app_core import DataSessionSnapshot, PlotBufferSnapshot
+from app_core import (
+    DataSessionSnapshot,
+    PlotBufferSnapshot,
+    PlotSeriesSnapshot,
+    WorkspacePlotDefinition,
+    WorkspacePlotSeries,
+)
 
 from .plots_tab import PlotsTabViewModel, build_plots_tab_view_model
 
@@ -65,6 +71,34 @@ class PlotsTabController:
 
         self._plot_snapshots = plots_inputs_from_data_session_snapshot(snapshot)
 
+    def workspace_plot_definitions(self) -> Tuple[WorkspacePlotDefinition, ...]:
+        """Return persistable plot layout definitions without retained samples."""
+
+        return tuple(_plot_definition_from_snapshot(snapshot) for snapshot in self._plot_snapshots)
+
+    def workspace_metadata(self) -> Mapping[str, Any]:
+        """Return GUI-only Plots preferences for workspace metadata."""
+
+        return {
+            "selected_plot_name": self._config.selected_plot_name,
+            "paused": self._config.paused,
+        }
+
+    def apply_workspace_intent(
+            self,
+            plots: Tuple[WorkspacePlotDefinition, ...] = (),
+            metadata: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        """Restore declarative Plots state from a workspace document."""
+
+        metadata = dict(metadata or {})
+        self._plot_snapshots = tuple(_plot_snapshot_from_definition(plot) for plot in plots)
+        self._config = replace(
+            self._config,
+            selected_plot_name=str(metadata.get("selected_plot_name", "")),
+            paused=bool(metadata.get("paused", False)),
+        )
+
     async def refresh_view(self) -> PlotsTabViewModel:
         """Return the next Plots-tab view from the current plot snapshots."""
 
@@ -97,3 +131,40 @@ def plots_inputs_from_data_session_snapshot(
     """Extract Plots-tab plot buffer inputs from a data-session snapshot."""
 
     return tuple(snapshot.plots)
+
+
+def _plot_definition_from_snapshot(snapshot: PlotBufferSnapshot) -> WorkspacePlotDefinition:
+    return WorkspacePlotDefinition(
+        name=snapshot.name,
+        history_seconds=snapshot.history_seconds,
+        max_points=snapshot.max_points,
+        series=tuple(
+            WorkspacePlotSeries(
+                domain_id=series.domain_id,
+                topic_name=series.topic_name,
+                type_name=series.type_name,
+                field_path=series.field_path,
+                label=series.label,
+            )
+            for series in snapshot.series
+        ),
+    )
+
+
+def _plot_snapshot_from_definition(plot: WorkspacePlotDefinition) -> PlotBufferSnapshot:
+    return PlotBufferSnapshot(
+        name=plot.name,
+        history_seconds=plot.history_seconds,
+        max_points=plot.max_points,
+        series=tuple(
+            PlotSeriesSnapshot(
+                series_key=series.key,
+                label=series.label or series.field_path,
+                domain_id=series.domain_id,
+                topic_name=series.topic_name,
+                type_name=series.type_name,
+                field_path=series.field_path,
+            )
+            for series in plot.series
+        ),
+    )

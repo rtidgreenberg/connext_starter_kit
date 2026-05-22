@@ -314,6 +314,14 @@ class TopicDiscoveryFacade:
     def selections(self) -> TopicSelectionState:
         return self._selections
 
+    def set_selections(self, selections: TopicSelectionState) -> None:
+        """Replace persisted topic-selection intent without changing discovery data."""
+
+        self._selections = (
+            selections if isinstance(selections, TopicSelectionState)
+            else TopicSelectionState.from_dict(selections)
+        )
+
     async def scan(
             self,
             domain_id: int,

@@ -43,6 +43,8 @@ Current layers:
 - `test_gui_session.py`: runtime-backed GUI session wiring from app-core command
   queues through Record and Topics controllers into shell snapshots and event
   logs
+- `test_gui_workspace.py`: GUI workspace projection, save/load command routing,
+  and restoration of Topics/Plots intent using workspace-local test output
 - `test_record_tab_controller.py`: Record tab wiring from the local process
   manager, Service Admin facade, monitoring facade, command history, duplicate
   candidate detection, and guarded termination state into GUI snapshots

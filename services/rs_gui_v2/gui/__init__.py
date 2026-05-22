@@ -9,6 +9,7 @@ from .factory import (
 )
 from .scheduler import UiFrameScheduler
 from .session import GuiShellSession, GuiShellSessionConfig
+from .workspace import GuiWorkspaceController, GuiWorkspaceControllerConfig
 from .tabs import (
     PlotsTabController,
     PlotsTabControllerConfig,
@@ -55,6 +56,8 @@ __all__ = [
     "GuiShellSessionConfig",
     "GuiShellSessionFactoryConfig",
     "GuiShellSessionMode",
+    "GuiWorkspaceController",
+    "GuiWorkspaceControllerConfig",
     "PlotActionView",
     "PlotPointRow",
     "PlotRow",

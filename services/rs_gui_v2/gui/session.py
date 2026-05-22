@@ -1,7 +1,7 @@
 """Runtime-backed GUI shell session for rs_gui_v2."""
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Optional, Tuple
 
 from app_core import AppCommand, AppEvent, AppRuntime
@@ -9,6 +9,7 @@ from app_core import AppCommand, AppEvent, AppRuntime
 from .scheduler import UiFrameScheduler
 from .tabs import PlotsTabController, RecordTabController, TopicsTabController
 from .view_models import ShellViewModel
+from .workspace import GuiWorkspaceController
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class GuiShellSession:
             record_controller: RecordTabController,
             topics_controller: Optional[TopicsTabController] = None,
             plots_controller: Optional[PlotsTabController] = None,
+            workspace_controller: Optional[GuiWorkspaceController] = None,
             config: Optional[GuiShellSessionConfig] = None,
     ) -> None:
         self._runtime = runtime
@@ -44,6 +46,10 @@ class GuiShellSession:
         self._topics_controller = topics_controller
         self._plots_controller = plots_controller
         self._config = config or GuiShellSessionConfig()
+        self._workspace_controller = workspace_controller or GuiWorkspaceController(
+            topics_controller=topics_controller,
+            plots_controller=plots_controller,
+        )
 
     @property
     def runtime(self) -> AppRuntime:
@@ -60,6 +66,10 @@ class GuiShellSession:
     @property
     def plots_controller(self) -> Optional[PlotsTabController]:
         return self._plots_controller
+
+    @property
+    def workspace_controller(self) -> GuiWorkspaceController:
+        return self._workspace_controller
 
     def command_sink(self, command: AppCommand) -> bool:
         """Queue a GUI command intent for app-core processing."""
@@ -151,6 +161,18 @@ class GuiShellSession:
             if self._topics_controller is None:
                 raise ValueError(f"Unsupported GUI command type: {command.command_type}")
             return self._topics_controller.handle_command(command)
+        if command.command_type.startswith("workspace."):
+            result = self._workspace_controller.handle_command(
+                command,
+                workspace_name=self._config.workspace_name,
+            )
+            if command.command_type == "workspace.load" and result.ok:
+                name = str(result.payload.get("workspace_name", ""))
+                if name:
+                    self._config = replace(self._config, workspace_name=name, unsaved=False)
+            elif command.command_type == "workspace.save" and result.ok:
+                self._config = replace(self._config, unsaved=False)
+            return result
 
         action_id = _record_action_for_command(command.command_type)
         payload = dict(command.payload)

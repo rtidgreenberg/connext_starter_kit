@@ -173,7 +173,7 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
     async def test_unsupported_command_reports_event_failure(self):
         session, admin_client, _launch = build_session()
         session.command_sink(AppCommand(
-            command_type="workspace.save",
+            command_type="convert.start",
             command_id="unsupported",
             created_at=3.0,
         ))

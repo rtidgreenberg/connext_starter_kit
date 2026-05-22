@@ -747,6 +747,21 @@ Suggested PRs:
 2. Add save/load commands in the shell.
 3. Restore topic and plot selections through app-core reconciliation.
 
+Initial implementation status:
+
+- Added `GuiWorkspaceController` to project current GUI intent into the
+  existing DDS-free `WorkspaceDocument` schema, including topic selections,
+  active subscription requests, plot layouts, and GUI-only metadata for filters
+  and selected rows.
+- Added `workspace.save` and `workspace.load` command handling through the
+  runtime-backed shell session. Saving and loading use app-core workspace file
+  APIs and never persist DDS participants, readers, requesters, DynamicData, or
+  retained plot/sample buffers.
+- Added restore hooks for Topics and Plots controllers so loaded workspaces can
+  restore internal-topic visibility, search text, selected topic, selected
+  fields, plot fields, active subscription intent, selected plot, and empty plot
+  layout definitions.
+
 ## Milestone J: Replay Tab
 
 Goal: Add Replay Service workflows after the command/state and plotting models

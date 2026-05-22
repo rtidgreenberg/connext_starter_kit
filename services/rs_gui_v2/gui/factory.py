@@ -51,6 +51,7 @@ from .tabs import (
     TopicsTabController,
     TopicsTabControllerConfig,
 )
+from .workspace import GuiWorkspaceController
 
 
 class GuiShellSessionMode(str, Enum):
@@ -116,6 +117,7 @@ class GuiShellAssembly:
     record_controller: RecordTabController
     topics_controller: TopicsTabController
     plots_controller: PlotsTabController
+    workspace_controller: GuiWorkspaceController
     admin_client: Optional[FakeServiceAdminClient] = None
     monitoring_client: Optional[FakeServiceMonitoringClient] = None
     discovery_client: Optional[FakeTopicDiscoveryClient] = None
@@ -216,6 +218,10 @@ def build_gui_shell_assembly(
         record_controller=controller,
         topics_controller=topics_controller,
         plots_controller=plots_controller,
+        workspace_controller=GuiWorkspaceController(
+            topics_controller=topics_controller,
+            plots_controller=plots_controller,
+        ),
         config=GuiShellSessionConfig(
             workspace_name=config.workspace_name,
             unsaved=config.unsaved,
@@ -230,6 +236,7 @@ def build_gui_shell_assembly(
         record_controller=controller,
         topics_controller=topics_controller,
         plots_controller=plots_controller,
+        workspace_controller=session.workspace_controller,
         admin_client=admin_client,
         monitoring_client=monitoring_client,
         discovery_client=discovery_client,

@@ -109,6 +109,61 @@ class TopicsTabController:
 
         self._subscription_states, self._samples = topics_inputs_from_data_session_snapshot(snapshot)
 
+    def workspace_topic_selections(self) -> TopicSelectionState:
+        """Return persistable topic/field display intent for the workspace layer."""
+
+        selections = self._current_selections()
+        return TopicSelectionState(
+            selections=selections.selections,
+            include_internal=self._config.include_internal,
+        )
+
+    def workspace_subscription_requests(self) -> Tuple[TopicSubscriptionRequest, ...]:
+        """Return active subscription requests that should survive restarts."""
+
+        return tuple(
+            state.request for state in self._effective_subscription_states()
+            if state.active
+        )
+
+    def workspace_metadata(self) -> Mapping[str, Any]:
+        """Return GUI-only Topics preferences for workspace metadata."""
+
+        return {
+            "domain_id": self._config.domain_id,
+            "search_text": self._config.search_text,
+            "selected_topic_key": self._config.selected_topic_key,
+        }
+
+    def apply_workspace_intent(
+            self,
+            selections: TopicSelectionState,
+            subscriptions: Tuple[TopicSubscriptionRequest, ...] = (),
+            metadata: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        """Restore declarative Topics state from a workspace document."""
+
+        metadata = dict(metadata or {})
+        selections = selections if isinstance(selections, TopicSelectionState) else TopicSelectionState.from_dict(selections)
+        self._selection_state = selections
+        if self._discovery_facade is not None:
+            self._discovery_facade.set_selections(selections)
+        self._config = replace(
+            self._config,
+            include_internal=selections.include_internal,
+            search_text=str(metadata.get("search_text", "")),
+            selected_topic_key=str(metadata.get("selected_topic_key", "")),
+        )
+        self._subscription_overrides = {
+            request.key: TopicSubscriptionState(
+                request=request,
+                status=SubscriptionStatus.READER_CREATED,
+                message="subscription restored from workspace",
+                updated_at=self._clock(),
+            )
+            for request in subscriptions
+        }
+
     def handle_command(self, command: AppCommand) -> CommandResult:
         """Apply a queued Topics command to the controller state."""
 

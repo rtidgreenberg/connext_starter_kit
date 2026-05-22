@@ -492,6 +492,10 @@ Initial wireframe draft status:
 - Added candidate composition helpers that merge GUI launch identity, RTI
   monitoring snapshots, and DDS discovery endpoint evidence into selector-ready
   `ServiceCandidateSelection` snapshots.
+- Added a headless local process launch/control adapter that builds explicit RTI
+  Recording/Replay command lines with session-GUID `-appName` values, captures
+  owned process evidence, feeds launches into candidate selection, and keeps
+  local termination guarded behind failed graceful shutdown.
 - Marked the wireframe package as drafted for review, not yet approved.
 
 ## Milestone F.0: Headless Service Candidate and Control Identity Foundation
@@ -515,6 +519,13 @@ Implemented:
 - Candidate composition helpers build candidates from GUI launch identities,
   monitoring snapshots, and discovered endpoints, then merge matching evidence
   by application guid, participant key, launch id, or host/pid.
+- `ServiceProcessManager` launches local RTI service processes through an
+  injectable spawner, stores pid/hostname/command evidence, and exposes owned
+  launch candidates for the selector composition layer.
+- `build_service_process_command` makes the RTI command-line API explicit:
+  `-cfgName`, session-GUID `-appName`, remote administration/monitoring domain
+  ids, optional domain offset, verbosity, config file list, and extra `-D`
+  variables are modeled before any process is started.
 
 Acceptance gates:
 
@@ -528,6 +539,9 @@ Acceptance gates:
 - Candidate composition preserves the owned-process flag from GUI launches while
   enriching the selected candidate with monitoring metrics and discovery
   participant identity.
+- Local process termination is requested only through the process manager, only
+  for owned or verified-local candidates, and only after the graceful Service
+  Admin shutdown path has failed.
 
 ## Milestone F: RS GUI v2 Shell and Record Tab MVP
 

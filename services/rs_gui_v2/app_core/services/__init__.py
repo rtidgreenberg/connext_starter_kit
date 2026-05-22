@@ -31,6 +31,18 @@ from .models import (
     ServiceStateSnapshot,
 )
 from .monitoring import ServiceMonitoringClient, ServiceMonitoringFacade
+from .processes import (
+    ServiceProcessLaunch,
+    ServiceProcessLaunchRequest,
+    ServiceProcessLaunchState,
+    ServiceProcessManager,
+    ServiceProcessTerminationOutcome,
+    ServiceProcessTerminationStatus,
+    SubprocessServiceProcessSpawner,
+    build_service_process_command,
+    candidate_from_process_launch,
+    default_service_executable,
+)
 
 __all__ = [
     "AdminReadiness",
@@ -54,11 +66,21 @@ __all__ = [
     "ServiceMonitoringClient",
     "ServiceMonitoringFacade",
     "ServiceProcessCandidate",
+    "ServiceProcessLaunch",
+    "ServiceProcessLaunchRequest",
+    "ServiceProcessLaunchState",
+    "ServiceProcessManager",
+    "ServiceProcessTerminationOutcome",
+    "ServiceProcessTerminationStatus",
     "ServiceStateSnapshot",
+    "SubprocessServiceProcessSpawner",
     "build_service_candidate_selection",
+    "build_service_process_command",
     "candidate_from_control_identity",
     "candidate_from_monitoring_snapshot",
+    "candidate_from_process_launch",
     "candidates_from_discovered_endpoints",
+    "default_service_executable",
     "service_admin_target_key",
     "service_label_prefix",
 ]

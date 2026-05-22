@@ -18,6 +18,8 @@ Current layers:
   adapter modules
 - `test_rti_admin_adapter.py`: RTI Service Admin adapter encoding and outcome
   mapping using fake Connext modules
+- `test_rti_monitoring_adapter.py`: RTI service monitoring reader setup and
+  config/event/periodic snapshot normalization using fake Connext modules
 - `test_runtime_lifecycle.py`: runtime lifecycle, bounded queues, and task
   supervision
 - `test_services_facades.py`: service admin and monitoring facades backed by

@@ -24,7 +24,9 @@ fi
 
 RTIDDSGEN="$NDDSHOME/bin/rtiddsgen"
 IDL_DIR="$NDDSHOME/resource/idl"
-XML_IDL_FILES=("ServiceCommon.idl" "ServiceAdmin.idl" "RecordingServiceTypes.idl")
+XML_IDL_FILES=("ServiceCommon.idl" "ServiceAdmin.idl" "RecordingServiceTypes.idl"
+               "ServiceMonitoring.idl" "RecordingServiceMonitoring.idl"
+               "RoutingServiceMonitoring.idl")
 
 if [ ! -f "$RTIDDSGEN" ]; then
     echo "ERROR: rtiddsgen not found: $RTIDDSGEN"
@@ -43,6 +45,56 @@ echo "Generating rs_gui_v2 XML types in: $XML_OUT_DIR"
 for idl in "${XML_IDL_FILES[@]}"; do
     "$RTIDDSGEN" -convertToXML -d "$XML_OUT_DIR" -I "$IDL_DIR" "$IDL_DIR/$idl" -replace
 done
+
+literalize_monitoring_xml() {
+    local file
+    local from
+    local to
+    local replacements=(
+        "RTI::Service::BOUNDED_STRING_LENGTH_MAX|255"
+        "RTI::Service::FILE_PATH_MAX_LENGTH|1024"
+        "RTI::Service::RESOURCE_IDENTIFIER_LENGTH_MAX|2048"
+        "RTI::Service::BUILTIN_TOPIC_KEY_VALUE_LENGTH|4"
+        "RTI::Service::Monitoring::RESOURCE_GUID_VALUE_LENGTH|16"
+        "RTI::RecordingService::DATA_TAG_MAX_STRING_SIZE|256"
+        "(RTI::RecordingService::TIMESTAMP)|0"
+        "(RTI::RecordingService::TAG_NAME)|1"
+        "(RTI::RecordingService::OFFSET)|0"
+        "(RTI::RecordingService::SLICE)|1"
+        "(RTI::Service::Monitoring::ROUTING_INDEX)|10000"
+        "(RTI::Service::Monitoring::RECORDING_INDEX)|20000"
+        "(RTI::Service::Monitoring::CDS_INDEX)|30000"
+        "(RTI::Service::Monitoring::ROUTING_SERVICE)|10000"
+        "(RTI::Service::Monitoring::ROUTING_DOMAIN_ROUTE)|10001"
+        "(RTI::Service::Monitoring::ROUTING_SESSION)|10002"
+        "(RTI::Service::Monitoring::ROUTING_AUTO_ROUTE)|10003"
+        "(RTI::Service::Monitoring::ROUTING_ROUTE)|10004"
+        "(RTI::Service::Monitoring::ROUTING_INPUT)|10005"
+        "(RTI::Service::Monitoring::ROUTING_OUTPUT)|10006"
+        "(RTI::Service::Monitoring::RECORDING_SERVICE)|20000"
+        "(RTI::Service::Monitoring::RECORDING_SESSION)|20001"
+        "(RTI::Service::Monitoring::RECORDING_TOPIC_GROUP)|20002"
+        "(RTI::Service::Monitoring::RECORDING_TOPIC)|20003"
+        "(RTI::Service::Monitoring::CDS_SERVICE)|30000"
+        "(RTI::Service::Monitoring::CDS_FORWARDER)|30001"
+        "(RTI::Service::Monitoring::CDS_DATABASE)|30002"
+        "(RTI::Service::Monitoring::CDS_RECEIVER)|30003"
+        "(RTI::Service::Monitoring::CDS_SENDER)|30004"
+    )
+
+    for file in "$XML_OUT_DIR"/*.xml; do
+        [ -f "$file" ] || continue
+        for replacement in "${replacements[@]}"; do
+            from="${replacement%%|*}"
+            to="${replacement##*|}"
+            sed -i "s|$from|$to|g" "$file"
+        done
+        sed -i 's|<typedef name="XmlString" stringMaxLength="255" type="string"/>|<typedef name="XmlString" stringMaxLength="65535" type="string"/>|g' "$file"
+        sed -i 's| deprecated="true"||g' "$file"
+    done
+}
+
+literalize_monitoring_xml
 
 STAMP_FILE="$XML_OUT_DIR/.generated_from_nddshome"
 NDDSHOME_REAL="$(readlink -f "$NDDSHOME")"

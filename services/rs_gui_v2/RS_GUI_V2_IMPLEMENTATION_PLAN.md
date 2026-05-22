@@ -103,8 +103,15 @@ Milestone B initial implementation status:
   Service Admin XML DynamicData artifacts instead of depending on rs_gui_v1.
 - Added fake-Connext adapter tests for Service Admin resource paths, state and
   tag payload encoding, readiness, reply timeout, rejected replies, and cleanup.
-- Deferred RTI service monitoring, live service fixtures, and broader DDS
-  runtime setup to later Milestone B slices.
+- Added `app_core/services/rti_monitoring.py` as the v2-owned RTI service
+  monitoring adapter for config, event, and periodic monitoring topics.
+- Expanded `setup.sh` to generate and normalize v2-owned monitoring XML type
+  artifacts.
+- Added fake-Connext adapter tests for monitoring reader setup, invalid sample
+  filtering, config/event/periodic normalization, snapshot streaming, and
+  cleanup.
+- Deferred live service fixtures and broader DDS runtime setup to later
+  Milestone B slices.
 
 ## Milestone B: Service Admin and Monitoring Facades
 
@@ -134,9 +141,10 @@ Acceptance gates:
 - Pure service models, facades, and fakes have no `rti.*` imports.
 - Any DDS-backed admin or monitoring client lives in an explicitly named Connext
   adapter module and implements the DDS-free protocol.
-- Adapter tests show pause, resume, tag, shutdown, readiness, timeout, and
-  rejected-command behavior through typed outcomes. Live tests should be added
-  once v2 service fixtures are available.
+- Adapter tests show pause, resume, tag, shutdown, readiness, timeout,
+  rejected-command behavior, config/event/periodic monitoring normalization,
+  invalid sample handling, and cleanup. Live tests should be added once v2
+  service fixtures are available.
 
 DDS notes:
 

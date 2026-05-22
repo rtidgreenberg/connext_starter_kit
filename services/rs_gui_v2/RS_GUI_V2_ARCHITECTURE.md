@@ -85,6 +85,7 @@ services/rs_gui_v2/
 |   +-- rti_subscriptions.py    # Connext DynamicData reader adapter
 |   +-- extractors.py           # Field-path compilation and value extraction
 |   +-- plotting.py             # Ring buffers, decimation, series updates
+|   +-- data_session.py         # Workspace-driven sample and plot snapshots
 |   +-- services/
 |       +-- models.py           # Pure service DTOs
 |       +-- admin.py            # DDS-free admin protocol and facade
@@ -163,6 +164,8 @@ Rules for new modules:
 | Workspace persistence | `WorkspaceDocument`, `WorkspacePlotDefinition` | `app_core/workspace.py` | DDS-free topic/type/field intent, versioned JSON migration |
 | Data subscription | `TopicSubscriptionRequest`, `SampleEnvelope`, `SampleCache` | `app_core/subscriptions.py`, `app_core/rti_subscriptions.py` | DynamicData topics/readers, `take`, sample info, instance state, reader shutdown |
 | Field extraction | `FieldPath`, `FieldExtraction` | `app_core/extractors.py` | DDS-free extraction from mapping/object/DynamicData-like sample values |
+| Plot buffers | `PlotBufferSet`, `PlotSeriesBuffer`, `PlotBufferSnapshot` | `app_core/plotting.py` | DDS-free bounded history, numeric sample updates, deterministic decimation |
+| Data session | `DataSessionCoordinator`, `DataSessionSnapshot` | `app_core/data_session.py` | DDS-free orchestration of workspace intent, type resolution, subscription clients, sample caches, and plot buffers |
 | Replay visualization | normal topic subscription APIs | `app_core/rti_subscriptions.py` | replayed samples are just DDS data consumed by Topics/Plots |
 
 Each adapter should make the Connext calls visible in one place. The facade
@@ -295,7 +298,14 @@ Reference example guidance:
 - Use `FieldCatalog` metadata to drive field pickers and initial plot
   eligibility, then use `extractors.py` only for sample values that arrive from
   active subscriptions.
-- Keep backpressure visible through dropped/decimated sample counters.
+- Keep plot buffers and UI snapshots DDS-free in `plotting.py`; consume
+  `WorkspacePlotDefinition` and `SampleEnvelope` values, not readers or
+  DynamicData handles.
+- Keep workspace-to-runtime orchestration DDS-free in `data_session.py`; use
+  `TopicSubscriptionClient` implementations for transport, and publish
+  `DataSessionSnapshot` values for UI code.
+- Keep backpressure visible through dropped, skipped, and decimated sample
+  counters.
 
 ### 5. Workspace Persistence Layer
 

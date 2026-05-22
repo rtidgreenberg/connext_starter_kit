@@ -327,6 +327,9 @@ Initial implementation status:
 - Added `app_core/subscriptions.py` with DDS-free subscription requests,
   subscription states, sample metadata snapshots, sample envelopes, stable
   subscription keys, and a bounded `SampleCache` with dropped-sample counters.
+- Added `TopicSubscriptionClient` and `FakeTopicSubscriptionClient` so app-core
+  orchestration and tests can exercise subscription behavior without importing
+  Connext.
 - Added `app_core/rti_subscriptions.py` as the v2-owned Connext DynamicData
   subscription adapter. It resolves DynamicTypes through `RtiTypeRegistry`,
   creates `DynamicData.Topic` and `DynamicData.DataReader`, maps valid and
@@ -363,7 +366,24 @@ Initial implementation status:
 - Added headless workspace tests for JSON round trips, file save/load, v1 to v2
   migration, unknown future fields, malformed documents, declarative-only JSON,
   and restart-style preservation of topic, field, subscription, and plot intent.
-- Deferred plot decimation and live fixture publishers to later Milestone D
+- Added `app_core/plotting.py` with DDS-free `PlotSeriesBuffer`,
+  `PlotBufferSet`, point and snapshot DTOs, numeric sample updates from
+  `SampleEnvelope`, bounded history windows, max-point pruning, skipped sample
+  counters, dropped point counters, and deterministic last-value decimation.
+- Added headless plotting tests for numeric updates, invalid/missing/nonnumeric
+  sample skips, topic/type matching, history pruning, max-point pruning,
+  decimation, point round trips, plot-level snapshots, disabled plots, and
+  nonmatching sample behavior.
+- Added `app_core/data_session.py` with `DataSessionCoordinator`,
+  `DataSessionConfig`, `DataSessionUpdate`, and `DataSessionSnapshot` to compose
+  workspace subscriptions, topic selections, plot series, type resolution,
+  sample caches, subscription clients, and plot buffers without importing DDS or
+  GUI libraries.
+- Added headless data-session tests for workspace request derivation,
+  duplicate field merging, disabled selections, available and unresolved type
+  states, sample polling, bounded cache drops, invalid-sample accounting, plot
+  updates, snapshot serialization, stop, and close behavior.
+- Deferred live fixture publishers and GUI rendering to later Milestone D/E
   slices.
 
 ## Milestone E: UI Wireframes and Approval

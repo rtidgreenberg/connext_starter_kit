@@ -4,7 +4,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from types import MappingProxyType
-from typing import Any, Deque, Dict, Iterable, Mapping, Optional, Tuple
+from typing import Any, AsyncIterator, Deque, Dict, Iterable, List, Mapping, Optional, Protocol, Tuple
 import time
 
 
@@ -242,6 +242,25 @@ class TopicSubscriptionState:
         )
 
 
+class TopicSubscriptionClient(Protocol):
+    """Transport-specific topic subscription contract used by app-core sessions."""
+
+    async def subscribe(self, request: TopicSubscriptionRequest) -> TopicSubscriptionState:
+        """Create or reuse a subscription for the requested topic."""
+
+    async def unsubscribe(self, request: TopicSubscriptionRequest) -> TopicSubscriptionState:
+        """Stop a topic subscription if it is active."""
+
+    async def take_available(self, request: TopicSubscriptionRequest) -> Tuple[SampleEnvelope, ...]:
+        """Return currently available samples for the requested topic."""
+
+    async def samples(self, request: TopicSubscriptionRequest) -> AsyncIterator[SampleEnvelope]:
+        """Yield samples for the requested topic."""
+
+    async def close(self) -> None:
+        """Release any resources owned by the subscription client."""
+
+
 class SampleCache:
     """Bounded in-memory sample cache keyed by subscription."""
 
@@ -285,6 +304,58 @@ class SampleCache:
         self._samples.pop(subscription_key, None)
         self._limits.pop(subscription_key, None)
         self._dropped.pop(subscription_key, None)
+
+
+class FakeTopicSubscriptionClient:
+    """DDS-free subscription client with deterministic queued samples."""
+
+    def __init__(self) -> None:
+        self.states: Dict[str, TopicSubscriptionState] = {}
+        self.queued_samples: Dict[str, List[SampleEnvelope]] = defaultdict(list)
+        self.subscribed_requests: List[TopicSubscriptionRequest] = []
+        self.unsubscribed_requests: List[TopicSubscriptionRequest] = []
+        self.taken_requests: List[TopicSubscriptionRequest] = []
+        self.closed = False
+
+    async def subscribe(self, request: TopicSubscriptionRequest) -> TopicSubscriptionState:
+        state = self.states.get(request.key)
+        if state is None:
+            state = TopicSubscriptionState(
+                request=request,
+                status=SubscriptionStatus.READER_CREATED,
+                message=f"fake reader created for {request.topic_name}",
+            )
+        self.states[request.key] = state
+        self.subscribed_requests.append(request)
+        return state
+
+    async def unsubscribe(self, request: TopicSubscriptionRequest) -> TopicSubscriptionState:
+        state = self.states.get(request.key, TopicSubscriptionState(request=request))
+        state = state.with_status(SubscriptionStatus.STOPPED, "fake subscription stopped")
+        self.states[request.key] = state
+        self.unsubscribed_requests.append(request)
+        return state
+
+    async def take_available(self, request: TopicSubscriptionRequest) -> Tuple[SampleEnvelope, ...]:
+        self.taken_requests.append(request)
+        samples = tuple(self.queued_samples.pop(request.key, ()))
+        state = self.states.get(request.key, TopicSubscriptionState(request=request))
+        self.states[request.key] = state.with_samples(samples)
+        return samples
+
+    async def samples(self, request: TopicSubscriptionRequest) -> AsyncIterator[SampleEnvelope]:
+        for sample in await self.take_available(request):
+            yield sample
+
+    async def close(self) -> None:
+        self.closed = True
+
+    def queue_sample(self, sample: SampleEnvelope) -> None:
+        self.queued_samples[sample.subscription_key].append(sample)
+
+    def queue_samples(self, samples: Iterable[SampleEnvelope]) -> None:
+        for sample in samples:
+            self.queue_sample(sample)
 
 
 def subscription_key(domain_id: int, topic_name: str, type_name: str) -> str:

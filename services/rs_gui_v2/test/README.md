@@ -11,6 +11,8 @@ Run from `services/rs_gui_v2`:
 
 Current layers:
 
+- `test_data_session.py`: DDS-free workspace-to-subscription coordination,
+  type-resolution gating, sample cache updates, plot feeding, and shutdown
 - `test_events_and_state.py`: immutable command, event, result, and state DTOs
 - `test_field_extractors.py`: DDS-free field-path parsing, extraction from
   mapping/object/DynamicData-like values, invalid sample handling, and value
@@ -23,6 +25,8 @@ Current layers:
 - `test_import_boundaries.py`: no app-core imports from DDS, UI libraries, or
   `rs_gui_v1` implementation modules, with Connext imports limited to explicit
   adapter modules
+- `test_plotting.py`: DDS-free numeric plot buffers, bounded history,
+  deterministic decimation, skipped/dropped counters, and UI-facing snapshots
 - `test_rti_admin_adapter.py`: RTI Service Admin adapter encoding and outcome
   mapping using fake Connext modules
 - `test_rti_discovery_adapter.py`: RTI built-in topic discovery sample mapping,
@@ -48,5 +52,5 @@ Current layers:
 - `test_workspace.py`: DDS-free versioned workspace JSON persistence,
   migration, validation, and declarative topic/field/plot selection round trips
 
-Future layers will add live adapter fixtures, plotting, and GUI tests after the
-wireframe approval gate.
+Future layers will add live adapter fixtures, GUI rendering, and GUI tests after
+the wireframe approval gate.

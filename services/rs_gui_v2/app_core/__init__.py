@@ -18,6 +18,22 @@ from .fields import (
     FieldScalarKind,
     field_catalog_from_descriptors,
 )
+from .data_session import (
+    DataSessionConfig,
+    DataSessionCoordinator,
+    DataSessionSnapshot,
+    DataSessionUpdate,
+    build_workspace_subscription_requests,
+)
+from .plotting import (
+    PlotBufferSet,
+    PlotBufferSnapshot,
+    PlotSamplePoint,
+    PlotSeriesBuffer,
+    PlotSeriesSnapshot,
+    PlotUpdateResult,
+    build_plot_buffer_sets,
+)
 from .discovery import (
     DiscoveredEndpoint,
     DiscoveredTopic,
@@ -50,10 +66,12 @@ from .services import (
 )
 from .state import AppState
 from .subscriptions import (
+    FakeTopicSubscriptionClient,
     SampleCache,
     SampleEnvelope,
     SampleInfoSnapshot,
     SubscriptionStatus,
+    TopicSubscriptionClient,
     TopicSubscriptionRequest,
     TopicSubscriptionState,
 )
@@ -78,6 +96,11 @@ __all__ = [
     "AppState",
     "CommandResult",
     "CommandStatus",
+    "build_workspace_subscription_requests",
+    "DataSessionConfig",
+    "DataSessionCoordinator",
+    "DataSessionSnapshot",
+    "DataSessionUpdate",
     "DiscoveredEndpoint",
     "DiscoveredTopic",
     "EndpointDirection",
@@ -94,12 +117,20 @@ __all__ = [
     "FieldDescriptor",
     "FieldScalarKind",
     "field_catalog_from_descriptors",
+    "FakeTopicSubscriptionClient",
     "FakeTopicDiscoveryClient",
     "FakeServiceAdminClient",
     "FakeServiceMonitoringClient",
     "LifecyclePhase",
     "MonitoringSnapshot",
     "MonitoringSnapshotKind",
+    "build_plot_buffer_sets",
+    "PlotBufferSet",
+    "PlotBufferSnapshot",
+    "PlotSamplePoint",
+    "PlotSeriesBuffer",
+    "PlotSeriesSnapshot",
+    "PlotUpdateResult",
     "RuntimeConfig",
     "SampleCache",
     "SampleEnvelope",
@@ -115,6 +146,7 @@ __all__ = [
     "ServiceMonitoringFacade",
     "ServiceStateSnapshot",
     "SubscriptionStatus",
+    "TopicSubscriptionClient",
     "TopicDiscoveryFacade",
     "TopicDiscoveryState",
     "TopicInventory",

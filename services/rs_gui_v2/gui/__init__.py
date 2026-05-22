@@ -9,7 +9,12 @@ from .factory import (
 )
 from .scheduler import UiFrameScheduler
 from .session import GuiShellSession, GuiShellSessionConfig
-from .tabs import RecordTabController, RecordTabControllerConfig
+from .tabs import (
+    RecordTabController,
+    RecordTabControllerConfig,
+    TopicsTabController,
+    TopicsTabControllerConfig,
+)
 from .tabs.topics_tab import (
     SampleInspectorRow,
     TopicActionView,
@@ -42,6 +47,8 @@ __all__ = [
     "TopicActionView",
     "TopicFieldRow",
     "TopicRow",
+    "TopicsTabController",
+    "TopicsTabControllerConfig",
     "TopicsTabViewModel",
     "UiFrameScheduler",
     "build_default_gui_shell_session",

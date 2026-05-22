@@ -4,9 +4,25 @@ from dataclasses import dataclass, field
 from enum import Enum
 import socket
 import time
-from typing import Optional, Tuple
+from typing import Mapping, Optional, Tuple
 
-from app_core import AppRuntime, RuntimeConfig
+from app_core import (
+    AppRuntime,
+    DiscoveredEndpoint,
+    EndpointDirection,
+    FakeTopicDiscoveryClient,
+    FieldCatalog,
+    FieldDescriptor,
+    RuntimeConfig,
+    SampleEnvelope,
+    SubscriptionStatus,
+    TopicDiscoveryFacade,
+    TopicSelection,
+    TopicSelectionState,
+    TopicSubscriptionRequest,
+    TopicSubscriptionState,
+    TypeCatalog,
+)
 from app_core.services import (
     FakeServiceAdminClient,
     FakeServiceMonitoringClient,
@@ -22,7 +38,12 @@ from app_core.services import (
 
 from .scheduler import UiFrameScheduler
 from .session import GuiShellSession, GuiShellSessionConfig
-from .tabs import RecordTabController, RecordTabControllerConfig
+from .tabs import (
+    RecordTabController,
+    RecordTabControllerConfig,
+    TopicsTabController,
+    TopicsTabControllerConfig,
+)
 
 
 class GuiShellSessionMode(str, Enum):
@@ -53,6 +74,7 @@ class GuiShellSessionFactoryConfig:
     )
     admin_domain_id: int = 0
     monitoring_domain_id: int = 0
+    topics_domain_id: int = 0
     mock_hostname: str = "dev-host"
     mock_pid: int = 4218
     mock_launch_id: str = "launch-recording-main"
@@ -72,6 +94,7 @@ class GuiShellSessionFactoryConfig:
         object.__setattr__(self, "recording_config_paths", tuple(str(path) for path in self.recording_config_paths))
         object.__setattr__(self, "admin_domain_id", int(self.admin_domain_id))
         object.__setattr__(self, "monitoring_domain_id", int(self.monitoring_domain_id))
+        object.__setattr__(self, "topics_domain_id", int(self.topics_domain_id))
         object.__setattr__(self, "mock_pid", int(self.mock_pid))
         object.__setattr__(self, "start_runtime", bool(self.start_runtime))
 
@@ -84,8 +107,10 @@ class GuiShellAssembly:
     runtime: AppRuntime
     process_manager: ServiceProcessManager
     record_controller: RecordTabController
+    topics_controller: TopicsTabController
     admin_client: Optional[FakeServiceAdminClient] = None
     monitoring_client: Optional[FakeServiceMonitoringClient] = None
+    discovery_client: Optional[FakeTopicDiscoveryClient] = None
 
     def shell(self, dpg_module=None):
         """Create a Dear PyGui shell using this assembly's session wiring."""
@@ -124,6 +149,11 @@ def build_gui_shell_assembly(
     monitoring_client = FakeServiceMonitoringClient() if config.mode == GuiShellSessionMode.MOCK else None
     admin_facade = ServiceAdminFacade(admin_client) if admin_client is not None else None
     monitoring_facade = ServiceMonitoringFacade(monitoring_client) if monitoring_client is not None else None
+    discovery_client = _mock_discovery_client(config) if config.mode == GuiShellSessionMode.MOCK else None
+    discovery_facade = (
+        TopicDiscoveryFacade(discovery_client, selections=_mock_topic_selections(config))
+        if discovery_client is not None else None
+    )
 
     process_manager = ServiceProcessManager(
         spawner=_MockServiceProcessSpawner(config.mock_pid) if config.mode == GuiShellSessionMode.MOCK else None,
@@ -148,6 +178,16 @@ def build_gui_shell_assembly(
             local_hostnames=local_hostnames,
         ),
     )
+    topics_controller = TopicsTabController(
+        discovery_facade=discovery_facade,
+        field_catalogs=_mock_topic_field_catalogs() if config.mode == GuiShellSessionMode.MOCK else {},
+        subscription_states=_mock_topic_subscription_states(config) if config.mode == GuiShellSessionMode.MOCK else (),
+        samples=_mock_topic_samples(config) if config.mode == GuiShellSessionMode.MOCK else (),
+        config=TopicsTabControllerConfig(
+            domain_id=config.topics_domain_id,
+            selected_topic_key=f"{config.topics_domain_id}:RobotTelemetry" if config.mode == GuiShellSessionMode.MOCK else "",
+        ),
+    )
     scheduler = UiFrameScheduler(
         runtime,
         max_event_log=config.event_log_max_size,
@@ -157,6 +197,7 @@ def build_gui_shell_assembly(
         runtime=runtime,
         scheduler=scheduler,
         record_controller=controller,
+        topics_controller=topics_controller,
         config=GuiShellSessionConfig(
             workspace_name=config.workspace_name,
             unsaved=config.unsaved,
@@ -169,8 +210,10 @@ def build_gui_shell_assembly(
         runtime=runtime,
         process_manager=process_manager,
         record_controller=controller,
+        topics_controller=topics_controller,
         admin_client=admin_client,
         monitoring_client=monitoring_client,
+        discovery_client=discovery_client,
     )
 
 
@@ -230,6 +273,123 @@ def _mock_monitoring_snapshot(
         },
         observed_at=time.time(),
     )
+
+
+def _mock_discovery_client(config: GuiShellSessionFactoryConfig) -> FakeTopicDiscoveryClient:
+    catalog = TypeCatalog()
+    catalog.register_type("Robot::Telemetry", source="dds/datamodel/xml_gen/RobotTelemetry.xml", kind="struct")
+    catalog.register_type(
+        "RTI::Service::Monitoring::Periodic",
+        source="built-in monitoring XML",
+        kind="struct",
+    )
+    client = FakeTopicDiscoveryClient(type_catalog=catalog)
+    now = time.time()
+    for endpoint in (
+            DiscoveredEndpoint(
+                domain_id=config.topics_domain_id,
+                topic_name="RobotTelemetry",
+                type_name="Robot::Telemetry",
+                direction=EndpointDirection.WRITER,
+                endpoint_key="robot-telemetry-writer",
+                participant_key="participant-robot-publisher",
+                participant_name="robot_state_publisher",
+                partitions=("/robot/alpha",),
+                observed_at=now - 2,
+            ),
+            DiscoveredEndpoint(
+                domain_id=config.topics_domain_id,
+                topic_name="RobotTelemetry",
+                type_name="Robot::Telemetry",
+                direction=EndpointDirection.READER,
+                endpoint_key="robot-telemetry-reader",
+                participant_key="participant-gui-reader",
+                participant_name="rs_gui_v2",
+                partitions=("/robot/alpha",),
+                observed_at=now - 1,
+            ),
+            DiscoveredEndpoint(
+                domain_id=config.topics_domain_id,
+                topic_name="CameraStatus",
+                type_name="Camera::Status",
+                direction=EndpointDirection.WRITER,
+                endpoint_key="camera-status-writer",
+                participant_key="participant-camera",
+                participant_name="camera_driver",
+                partitions=("/sensors",),
+                observed_at=now - 8,
+            ),
+            DiscoveredEndpoint(
+                domain_id=config.topics_domain_id,
+                topic_name="rti/service/monitoring/periodic",
+                type_name="RTI::Service::Monitoring::Periodic",
+                direction=EndpointDirection.WRITER,
+                endpoint_key="service-monitoring-writer",
+                participant_key="participant-recording-service",
+                participant_name="recording_service_8f4f2a1c",
+                observed_at=now - 1,
+            ),
+    ):
+        client.apply(endpoint)
+    return client
+
+
+def _mock_topic_selections(config: GuiShellSessionFactoryConfig) -> TopicSelectionState:
+    return TopicSelectionState().select(TopicSelection(
+        domain_id=config.topics_domain_id,
+        topic_name="RobotTelemetry",
+        type_name="Robot::Telemetry",
+        selected_fields=("pose.x", "pose.y", "velocity"),
+        plot_fields=("velocity",),
+        created_at=time.time() - 60,
+        updated_at=time.time() - 10,
+    ))
+
+
+def _mock_topic_field_catalogs() -> Mapping[str, FieldCatalog]:
+    return {
+        "Robot::Telemetry": FieldCatalog(
+            type_name="Robot::Telemetry",
+            fields=(
+                FieldDescriptor("pose", "pose", "Robot::Pose", "struct", "struct", depth=0),
+                FieldDescriptor("pose.x", "x", "float64", "float64", "float", parent_path="pose", depth=1),
+                FieldDescriptor("pose.y", "y", "float64", "float64", "float", parent_path="pose", depth=1),
+                FieldDescriptor("velocity", "velocity", "float32", "float32", "float", depth=0),
+                FieldDescriptor("mode", "mode", "Robot::Mode", "enum", "enum", depth=0),
+            ),
+        ),
+    }
+
+
+def _mock_topic_subscription_request(config: GuiShellSessionFactoryConfig) -> TopicSubscriptionRequest:
+    return TopicSubscriptionRequest(
+        domain_id=config.topics_domain_id,
+        topic_name="RobotTelemetry",
+        type_name="Robot::Telemetry",
+        selected_fields=("pose.x", "pose.y", "velocity"),
+        max_samples=256,
+    )
+
+
+def _mock_topic_subscription_states(config: GuiShellSessionFactoryConfig) -> Tuple[TopicSubscriptionState, ...]:
+    return (TopicSubscriptionState(
+        request=_mock_topic_subscription_request(config),
+        status=SubscriptionStatus.RECEIVING,
+        received_samples=42,
+        updated_at=time.time(),
+    ),)
+
+
+def _mock_topic_samples(config: GuiShellSessionFactoryConfig) -> Tuple[SampleEnvelope, ...]:
+    request = _mock_topic_subscription_request(config)
+    return (SampleEnvelope(
+        subscription_key=request.key,
+        domain_id=config.topics_domain_id,
+        topic_name="RobotTelemetry",
+        type_name="Robot::Telemetry",
+        data={"pose": {"x": 12.5, "y": -3.25}, "velocity": 1.7, "mode": "AUTO"},
+        observed_at=time.time(),
+    ),)
 
 
 def _default_local_hostnames(config: GuiShellSessionFactoryConfig) -> Tuple[str, ...]:

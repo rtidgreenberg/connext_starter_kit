@@ -652,6 +652,10 @@ Initial implementation status:
   the first GUI surface shows realistic discovered topics, unresolved type
   states, selected fields, plot-ready fields, and the latest sample values
   without requiring live DDS entities.
+- Added `TopicsTabController` and factory wiring through `TopicDiscoveryFacade`
+  so the default mock shell now scans a fake discovery inventory instead of
+  using only static topic rows. Headless assembly keeps the same Topics view path
+  but has no discovery client or mock topics.
 
 ## Milestone H: Plots Tab
 

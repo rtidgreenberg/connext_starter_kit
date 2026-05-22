@@ -100,11 +100,14 @@ class TestGuiShellFactory(unittest.TestCase):
         self.assertEqual(assembly.runtime.lifecycle, LifecyclePhase.RUNNING)
         self.assertIsNotNone(assembly.admin_client)
         self.assertIsNotNone(assembly.monitoring_client)
+        self.assertIsNotNone(assembly.discovery_client)
         self.assertIn("Factory Workspace", view.title)
         self.assertTrue(view.title.endswith("*"))
         self.assertEqual(view.record_tab.selected_candidate_id, "launch-recording-main")
         self.assertEqual(view.record_tab.selected_candidate.control_name, "recording_service_8f4f2a1c")
         self.assertIn(("memory_mb", "180"), view.record_tab.monitoring_summary)
+        self.assertEqual(view.topics_tab.selected_topic.topic_name, "RobotTelemetry")
+        self.assertEqual(assembly.discovery_client.scans, [(0, False)])
 
     def test_default_session_dispatches_commands_through_fake_admin(self):
         assembly = build_gui_shell_assembly()
@@ -135,9 +138,11 @@ class TestGuiShellFactory(unittest.TestCase):
 
         self.assertIsNone(assembly.admin_client)
         self.assertIsNone(assembly.monitoring_client)
+        self.assertIsNone(assembly.discovery_client)
         self.assertEqual(assembly.process_manager.launches(), ())
         self.assertEqual(view.record_tab.candidates, ())
         self.assertEqual(view.record_tab.target_label, "No Recording Service")
+        self.assertEqual(view.topics_tab.rows, ())
 
     def test_default_session_convenience_returns_session_only(self):
         session = build_default_gui_shell_session(GuiShellSessionFactoryConfig(

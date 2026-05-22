@@ -25,6 +25,9 @@ Current layers:
 - `test_gui_shell.py`: mocked Dear PyGui shell snapshots, Record-tab selector
   view models, command intents, event-log scheduling, and fake-renderer smoke
   coverage without requiring a display
+- `test_record_tab_controller.py`: Record tab wiring from the local process
+  manager, Service Admin facade, monitoring facade, command history, duplicate
+  candidate detection, and guarded termination state into GUI snapshots
 - `test_import_boundaries.py`: no app-core imports from DDS, UI libraries, or
   `rs_gui_v1` implementation modules, with Connext imports limited to explicit
   adapter modules; GUI modules are also checked for no DDS or v1 imports

@@ -595,6 +595,11 @@ Initial implementation status:
   shell bridge.
 - Added headless GUI shell tests and expanded import-boundary tests so GUI
   modules cannot import DDS, tkinter, or rs_gui_v1 implementation modules.
+- Added `RecordTabController` to compose local process-manager candidates,
+  Service Admin readiness/actions, monitoring snapshots, selected candidate
+  state, tag state, shutdown fallback state, and command history into the
+  existing Record-tab view model without importing DDS or owning service
+  entities in Dear PyGui.
 
 ## Milestone G: Topics Tab
 

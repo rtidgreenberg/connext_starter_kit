@@ -1,5 +1,6 @@
 """View-model builders for rs_gui_v2 tabs."""
 
+from .record_controller import RecordTabController, RecordTabControllerConfig
 from .record_tab import (
     RecordActionView,
     RecordCandidateRow,
@@ -14,6 +15,8 @@ __all__ = [
     "RecordActionView",
     "RecordCandidateRow",
     "RecordCommandRow",
+    "RecordTabController",
+    "RecordTabControllerConfig",
     "RecordTabViewModel",
     "build_mock_record_tab_view_model",
     "build_record_action_command",

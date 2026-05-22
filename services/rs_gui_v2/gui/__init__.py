@@ -1,6 +1,7 @@
 """Dear PyGui-facing shell helpers for rs_gui_v2."""
 
 from .scheduler import UiFrameScheduler
+from .tabs import RecordTabController, RecordTabControllerConfig
 from .view_models import (
     EventLogEntry,
     ShellStatusItem,
@@ -11,6 +12,8 @@ from .view_models import (
 
 __all__ = [
     "EventLogEntry",
+    "RecordTabController",
+    "RecordTabControllerConfig",
     "ShellStatusItem",
     "ShellViewModel",
     "UiFrameScheduler",

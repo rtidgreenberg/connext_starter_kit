@@ -685,6 +685,8 @@ Purpose: Validate persistence before implementing schema details.
 Must show:
 
 - current workspace name/path
+- save and open controls dispatch shell commands rather than reaching into file
+  persistence directly
 - saved domains, service targets, selected topics, selected fields, and plots
 - recent recordings and conversion outputs
 - restore behavior when topics or types are missing

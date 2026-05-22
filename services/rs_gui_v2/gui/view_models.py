@@ -35,6 +35,9 @@ class ShellViewModel:
 
     title: str
     active_tab: str
+    workspace_name: str = "Workspace"
+    workspace_path: str = ""
+    workspace_unsaved: bool = False
     status_items: Tuple[ShellStatusItem, ...] = field(default_factory=tuple)
     record_tab: RecordTabViewModel = field(default_factory=build_mock_record_tab_view_model)
     topics_tab: TopicsTabViewModel = field(default_factory=build_mock_topics_tab_view_model)
@@ -51,6 +54,7 @@ def build_shell_view_model(
         plots_tab: PlotsTabViewModel = None,
         event_log: Iterable[EventLogEntry] = (),
         workspace_name: str = "Mock Workspace",
+        workspace_path: str = "",
         unsaved: bool = False,
 ) -> ShellViewModel:
     """Build the first shell snapshot from app state and a Record tab view."""
@@ -68,6 +72,9 @@ def build_shell_view_model(
     return ShellViewModel(
         title=title,
         active_tab="Record",
+        workspace_name=workspace_name,
+        workspace_path=workspace_path,
+        workspace_unsaved=unsaved,
         status_items=_status_items(app_state, record_tab, topics_tab, plots_tab),
         record_tab=record_tab,
         topics_tab=topics_tab,
@@ -99,6 +106,7 @@ def build_mock_shell_view_model(now: float = 120.0) -> ShellViewModel:
         plots_tab=build_mock_plots_tab_view_model(now=now),
         event_log=event_log,
         workspace_name="Robot Run 03",
+        workspace_path="services/rs_gui_v2/test_output/robot_run_03.json",
         unsaved=True,
     )
 

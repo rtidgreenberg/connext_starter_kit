@@ -10,6 +10,7 @@ from .factory import (
 from .scheduler import UiFrameScheduler
 from .session import GuiShellSession, GuiShellSessionConfig
 from .workspace import GuiWorkspaceController, GuiWorkspaceControllerConfig
+from .main_window import build_workspace_action_command
 from .tabs import (
     PlotsTabController,
     PlotsTabControllerConfig,
@@ -83,6 +84,7 @@ __all__ = [
     "build_mock_shell_view_model",
     "build_mock_topics_tab_view_model",
     "build_plots_tab_view_model",
+    "build_workspace_action_command",
     "build_shell_view_model",
     "build_topic_action_command",
     "build_topic_field_command",

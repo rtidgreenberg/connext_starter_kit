@@ -117,6 +117,7 @@ class GuiShellSession:
             topics_tab=topics_view,
             plots_tab=plots_view,
             workspace_name=self._config.workspace_name,
+            workspace_path=self._workspace_controller.current_path,
             unsaved=self._config.unsaved,
         )
 

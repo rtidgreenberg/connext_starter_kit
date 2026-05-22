@@ -17,6 +17,10 @@ from .tabs.topics_tab import (
 from .view_models import ShellViewModel, build_mock_shell_view_model
 
 
+WORKSPACE_NAME_INPUT_TAG = "rs_gui_v2_workspace_name"
+WORKSPACE_PATH_INPUT_TAG = "rs_gui_v2_workspace_path"
+
+
 class DearPyGuiUnavailable(RuntimeError):
     """Raised when the optional Dear PyGui dependency is not installed."""
 
@@ -96,7 +100,7 @@ def render_shell_view(
             with dpg.tab(label="Plots"):
                 _render_plots_tab(dpg, view.plots_tab)
             with dpg.tab(label="Workspace"):
-                dpg.add_text("No workspace changes")
+                _render_workspace_tab(dpg, view, command_sink=command_sink)
         _render_inspector(dpg, view)
         _render_event_log(dpg, view)
 
@@ -378,6 +382,84 @@ def _render_plots_tab(dpg, plots: PlotsTabViewModel) -> None:
     _render_plot_points_table(dpg, plots)
     for diagnostic in plots.diagnostics:
         dpg.add_text(f"Diagnostic: {diagnostic}")
+
+
+def _render_workspace_tab(
+        dpg,
+        view: ShellViewModel,
+        command_sink: Optional[Callable[[AppCommand], bool]] = None,
+) -> None:
+    dpg.add_text(
+        f"Workspace: {view.workspace_name} | "
+        f"State: {'unsaved' if view.workspace_unsaved else 'saved'}"
+    )
+    dpg.add_input_text(
+        label="Workspace Name",
+        tag=WORKSPACE_NAME_INPUT_TAG,
+        default_value=view.workspace_name,
+    )
+    dpg.add_input_text(
+        label="Workspace Path",
+        tag=WORKSPACE_PATH_INPUT_TAG,
+        default_value=view.workspace_path,
+    )
+    with dpg.group(horizontal=True):
+        dpg.add_button(
+            label="Save Workspace",
+            callback=_workspace_action_callback(dpg, view, "save", command_sink),
+        )
+        dpg.add_button(
+            label="Load Workspace",
+            callback=_workspace_action_callback(dpg, view, "load", command_sink),
+        )
+
+
+def build_workspace_action_command(
+        action_id: str,
+        path: str = "",
+        workspace_name: str = "",
+) -> AppCommand:
+    """Build a workspace command from GUI control values."""
+
+    if action_id == "save":
+        return AppCommand(
+            command_type="workspace.save",
+            payload={"path": path, "workspace_name": workspace_name},
+        )
+    if action_id == "load":
+        return AppCommand(
+            command_type="workspace.load",
+            payload={"path": path},
+        )
+    raise ValueError(f"Unsupported workspace action: {action_id}")
+
+
+def _workspace_action_callback(
+        dpg,
+        view: ShellViewModel,
+        action_id: str,
+        command_sink: Optional[Callable[[AppCommand], bool]],
+):
+    def _callback(_sender=None, _app_data=None, _user_data=None):
+        if command_sink is None:
+            return False
+        path = _widget_value(dpg, WORKSPACE_PATH_INPUT_TAG, view.workspace_path)
+        workspace_name = _widget_value(dpg, WORKSPACE_NAME_INPUT_TAG, view.workspace_name)
+        command = build_workspace_action_command(
+            action_id,
+            path=path,
+            workspace_name=workspace_name,
+        )
+        return command_sink(command)
+    return _callback
+
+
+def _widget_value(dpg, tag: str, default: str) -> str:
+    get_value = getattr(dpg, "get_value", None)
+    if get_value is None:
+        return default
+    value = get_value(tag)
+    return str(value if value is not None else default)
 
 
 def _render_plot_actions(dpg, plots: PlotsTabViewModel) -> None:

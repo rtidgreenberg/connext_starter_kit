@@ -23,8 +23,8 @@ Current layers:
   internal-topic filtering, and persisted topic-selection DTOs
 - `test_headless_entrypoint.py`: headless app entry point startup/shutdown
 - `test_gui_shell.py`: mocked Dear PyGui shell snapshots, Record-tab selector
-  view models, command intents, event-log scheduling, and fake-renderer smoke
-  coverage without requiring a display
+  view models, workspace save/load command intents, event-log scheduling, and
+  fake-renderer smoke coverage without requiring a display
 - `test_gui_factory.py`: default GUI shell session assembly for mock and
   headless modes, including Topics/Plots snapshot wiring, CLI mock GUI checks,
   and fake-renderer coverage

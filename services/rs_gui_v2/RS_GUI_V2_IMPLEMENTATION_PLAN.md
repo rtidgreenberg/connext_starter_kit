@@ -761,6 +761,10 @@ Initial implementation status:
   restore internal-topic visibility, search text, selected topic, selected
   fields, plot fields, active subscription intent, selected plot, and empty plot
   layout definitions.
+- Added mocked Dear PyGui Workspace-tab controls for workspace name/path plus
+  save and load buttons. The buttons only emit `workspace.save` and
+  `workspace.load` commands through the shell command sink; file persistence
+  remains behind the runtime-backed session and `GuiWorkspaceController`.
 
 ## Milestone J: Replay Tab
 

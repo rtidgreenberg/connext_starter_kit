@@ -23,7 +23,12 @@ from app_core.services import (
     candidate_from_control_identity,
 )
 from gui import UiFrameScheduler, build_mock_shell_view_model
-from gui.main_window import DearPyGuiShell
+from gui.main_window import (
+    WORKSPACE_NAME_INPUT_TAG,
+    WORKSPACE_PATH_INPUT_TAG,
+    DearPyGuiShell,
+    build_workspace_action_command,
+)
 from gui.tabs.record_tab import build_record_action_command, build_record_tab_view_model
 from rs_gui_v2_app import main
 
@@ -39,6 +44,7 @@ class FakeContext:
 class FakeDpg:
     def __init__(self):
         self.calls = []
+        self.values = {}
         self.context_created = False
         self.context_destroyed = False
 
@@ -84,7 +90,13 @@ class FakeDpg:
         self.calls.append(("add_button", args, kwargs))
 
     def add_input_text(self, *args, **kwargs):
+        tag = kwargs.get("tag")
+        if tag:
+            self.values[tag] = kwargs.get("default_value", "")
         self.calls.append(("add_input_text", args, kwargs))
+
+    def get_value(self, tag):
+        return self.values.get(tag)
 
     def add_separator(self, *args, **kwargs):
         self.calls.append(("add_separator", args, kwargs))
@@ -154,6 +166,24 @@ class TestMockShellViewModel(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_record_action_command("tag", candidate)
 
+    def test_workspace_action_commands_preserve_file_intent(self):
+        save = build_workspace_action_command(
+            "save",
+            path="services/rs_gui_v2/test_output/demo.json",
+            workspace_name="Demo Workspace",
+        )
+        load = build_workspace_action_command(
+            "load",
+            path="services/rs_gui_v2/test_output/demo.json",
+            workspace_name="Ignored",
+        )
+
+        self.assertEqual(save.command_type, "workspace.save")
+        self.assertEqual(save.payload["path"], "services/rs_gui_v2/test_output/demo.json")
+        self.assertEqual(save.payload["workspace_name"], "Demo Workspace")
+        self.assertEqual(load.command_type, "workspace.load")
+        self.assertEqual(load.payload, {"path": "services/rs_gui_v2/test_output/demo.json"})
+
 
 class TestUiFrameScheduler(unittest.TestCase):
     def test_scheduler_drains_events_into_bounded_log(self):
@@ -194,10 +224,36 @@ class TestDearPyGuiRenderer(unittest.TestCase):
         self.assertIn("add_button", call_names)
         self.assertEqual(view.record_tab.selected_candidate.control_name, "recording_service_8f4f2a1c")
 
+    def test_workspace_buttons_dispatch_commands_from_inputs(self):
+        fake = FakeDpg()
+        commands = []
+        shell = DearPyGuiShell(dpg_module=fake, command_sink=commands.append)
+
+        shell.render_once()
+        fake.values[WORKSPACE_PATH_INPUT_TAG] = "services/rs_gui_v2/test_output/robot.json"
+        fake.values[WORKSPACE_NAME_INPUT_TAG] = "Robot Workspace"
+        _button_callback(fake, "Save Workspace")()
+        _button_callback(fake, "Load Workspace")()
+
+        self.assertEqual([command.command_type for command in commands], ["workspace.save", "workspace.load"])
+        self.assertEqual(commands[0].payload["path"], "services/rs_gui_v2/test_output/robot.json")
+        self.assertEqual(commands[0].payload["workspace_name"], "Robot Workspace")
+        self.assertEqual(commands[1].payload, {"path": "services/rs_gui_v2/test_output/robot.json"})
+
 
 class TestGuiEntrypoint(unittest.TestCase):
     def test_mock_gui_check_returns_success(self):
         self.assertEqual(main(["--mock-gui-check"]), 0)
+
+
+def _button_callback(fake: FakeDpg, label: str):
+    for name, args, kwargs in fake.calls:
+        if name != "add_button":
+            continue
+        button_label = kwargs.get("label") or (args[0] if args else "")
+        if button_label == label:
+            return kwargs["callback"]
+    raise AssertionError(f"Button not rendered: {label}")
 
 
 if __name__ == "__main__":

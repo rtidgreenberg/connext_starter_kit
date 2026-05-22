@@ -36,6 +36,7 @@ class UiFrameScheduler:
             topics_tab: TopicsTabViewModel = None,
             plots_tab: PlotsTabViewModel = None,
             workspace_name: str = "Mock Workspace",
+            workspace_path: str = "",
             unsaved: bool = False,
     ) -> ShellViewModel:
         """Drain pending events and return the next GUI-safe shell snapshot."""
@@ -48,6 +49,7 @@ class UiFrameScheduler:
             plots_tab=plots_tab,
             event_log=self._event_log,
             workspace_name=workspace_name,
+            workspace_path=workspace_path,
             unsaved=unsaved,
         )
 

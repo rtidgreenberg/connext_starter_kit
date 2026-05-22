@@ -53,6 +53,10 @@ class GuiWorkspaceController:
     def last_path(self) -> str:
         return self._last_path
 
+    @property
+    def current_path(self) -> str:
+        return self._last_path or self._config.default_path
+
     def build_document(
             self,
             workspace_name: str = "",

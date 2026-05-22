@@ -27,7 +27,14 @@ from app_core import (
     TypeAvailabilityStatus,
     TypeResolution,
 )
-from gui import build_mock_topics_tab_view_model, build_shell_view_model, build_topics_tab_view_model
+from gui import (
+    build_mock_topics_tab_view_model,
+    build_shell_view_model,
+    build_topic_action_command,
+    build_topic_field_command,
+    build_topic_select_command,
+    build_topics_tab_view_model,
+)
 from gui.main_window import DearPyGuiShell
 from gui.tabs.record_tab import build_mock_record_tab_view_model
 
@@ -181,6 +188,26 @@ class TestTopicsTabViewModel(unittest.TestCase):
         self.assertEqual(topics.sample_rows[0].path, "pose.x")
         self.assertEqual(topics.sample_rows[0].value, "8")
 
+    def test_topic_command_builders_preserve_selected_context(self):
+        topics = build_mock_topics_tab_view_model(now=120.0)
+        field_by_path = {field.path: field for field in topics.fields}
+
+        unsubscribe = build_topic_action_command("unsubscribe", topics)
+        select_camera = build_topic_select_command(topics.rows[0])
+        clear_plot = build_topic_field_command(field_by_path["velocity"], topics, plot=True, selected=False)
+        search = build_topic_action_command("set_search", topics, value="camera")
+
+        self.assertEqual(unsubscribe.command_type, "topics.unsubscribe")
+        self.assertEqual(unsubscribe.payload["topic_name"], "RobotTelemetry")
+        self.assertEqual(unsubscribe.payload["selected_fields"], ("pose.x", "pose.y", "velocity"))
+        self.assertEqual(select_camera.command_type, "topics.select")
+        self.assertEqual(select_camera.payload["topic_key"], topics.rows[0].topic_key)
+        self.assertEqual(clear_plot.command_type, "topics.set_plot_field_selected")
+        self.assertEqual(clear_plot.payload["field_path"], "velocity")
+        self.assertFalse(clear_plot.payload["selected"])
+        self.assertEqual(search.command_type, "topics.set_search")
+        self.assertEqual(search.payload["search_text"], "camera")
+
 
 class TestTopicsShellRendering(unittest.TestCase):
     def test_shell_renders_topics_tab_snapshot(self):
@@ -202,6 +229,37 @@ class TestTopicsShellRendering(unittest.TestCase):
         self.assertIn("RobotTelemetry", text_values)
         self.assertIn("Field Picker", text_values)
         self.assertIn("Sample Inspector", text_values)
+
+    def test_topics_buttons_emit_commands_when_command_sink_is_present(self):
+        commands = []
+        view = build_shell_view_model(
+            AppState(lifecycle=LifecyclePhase.RUNNING, discovery_enabled=True),
+            build_mock_record_tab_view_model(),
+            topics_tab=build_mock_topics_tab_view_model(),
+            workspace_name="Topics Workspace",
+        )
+        fake = FakeDpg()
+        shell = DearPyGuiShell(
+            view_provider=lambda: view,
+            command_sink=lambda command: commands.append(command) or True,
+            dpg_module=fake,
+        )
+
+        shell.render_once()
+        unsubscribe = next(
+            kwargs["callback"] for name, args, kwargs in fake.calls
+            if name == "add_button" and (kwargs.get("label") == "Unsubscribe" or (args and args[0] == "Unsubscribe"))
+        )
+        plot_velocity = next(
+            kwargs["callback"] for name, args, kwargs in fake.calls
+            if name == "add_button" and (kwargs.get("label") == "*" or (args and args[0] == "*"))
+        )
+
+        self.assertTrue(unsubscribe())
+        self.assertTrue(plot_velocity())
+
+        self.assertEqual(commands[0].command_type, "topics.unsubscribe")
+        self.assertTrue(commands[1].command_type.startswith("topics."))
 
 
 def _fixture_topics():

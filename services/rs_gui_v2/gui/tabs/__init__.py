@@ -35,6 +35,9 @@ from .topics_tab import (
     TopicFieldRow,
     TopicRow,
     TopicsTabViewModel,
+    build_topic_action_command,
+    build_topic_field_command,
+    build_topic_select_command,
     build_mock_topics_tab_view_model,
     build_topics_tab_view_model,
 )
@@ -68,5 +71,8 @@ __all__ = [
     "build_plots_tab_view_model",
     "build_record_action_command",
     "build_record_tab_view_model",
+    "build_topic_action_command",
+    "build_topic_field_command",
+    "build_topic_select_command",
     "build_topics_tab_view_model",
 ]

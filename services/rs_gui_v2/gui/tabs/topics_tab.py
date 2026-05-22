@@ -5,6 +5,7 @@ import time
 from typing import Any, Iterable, Mapping, Optional, Tuple
 
 from app_core import (
+    AppCommand,
     DiscoveredTopic,
     FieldCatalog,
     FieldCatalogStatus,
@@ -301,6 +302,61 @@ def build_mock_topics_tab_view_model(now: float = 120.0) -> TopicsTabViewModel:
     )
 
 
+def build_topic_action_command(
+        action_id: str,
+        topics: TopicsTabViewModel,
+        value: Any = None,
+) -> AppCommand:
+    """Build an app-core command from a Topics-tab action."""
+
+    payload = _selected_topic_payload(topics)
+    if action_id == "subscribe":
+        return AppCommand("topics.subscribe", target=topics.selected_topic_key, payload=payload)
+    if action_id == "unsubscribe":
+        return AppCommand("topics.unsubscribe", target=topics.selected_topic_key, payload=payload)
+    if action_id == "toggle_internal":
+        payload["include_internal"] = not topics.include_internal
+        return AppCommand("topics.set_include_internal", target="topics", payload=payload)
+    if action_id == "clear_filter":
+        payload["search_text"] = ""
+        return AppCommand("topics.set_search", target="topics", payload=payload)
+    if action_id == "set_search":
+        payload["search_text"] = "" if value is None else str(value)
+        return AppCommand("topics.set_search", target="topics", payload=payload)
+    raise ValueError(f"Unknown Topics action: {action_id}")
+
+
+def build_topic_select_command(row: TopicRow) -> AppCommand:
+    """Build an app-core command to select a discovered topic row."""
+
+    return AppCommand(
+        "topics.select",
+        target=row.topic_key,
+        payload={
+            "topic_key": row.topic_key,
+            "domain_id": row.domain_id,
+            "topic_name": row.topic_name,
+            "type_name": row.type_name,
+        },
+    )
+
+
+def build_topic_field_command(
+        field: TopicFieldRow,
+        topics: TopicsTabViewModel,
+        plot: bool = False,
+        selected: Optional[bool] = None,
+) -> AppCommand:
+    """Build an app-core command to update field or plot-field selection."""
+
+    payload = _selected_topic_payload(topics)
+    payload["field_path"] = field.path
+    if selected is not None:
+        payload["selected"] = bool(selected)
+    command_type = "topics.set_plot_field_selected" if plot else "topics.set_field_selected"
+    return AppCommand(command_type, target=topics.selected_topic_key, payload=payload)
+
+
 def _mock_topic_selections(now: float) -> TopicSelectionState:
     from app_core import TopicSelection
     return TopicSelectionState().select(TopicSelection(
@@ -459,9 +515,30 @@ def _topic_actions(
     return (
         TopicActionView("subscribe", "Subscribe", can_subscribe, subscribe_reason),
         TopicActionView("unsubscribe", "Unsubscribe", active, "reader is not active" if not active else ""),
-        TopicActionView("toggle_internal", "Show Internal", True),
+        TopicActionView("toggle_internal", "Toggle Internal", True),
         TopicActionView("clear_filter", "Clear Filter", bool(search_text), "filter is already empty" if not search_text else ""),
     )
+
+
+def _selected_topic_payload(topics: TopicsTabViewModel) -> dict:
+    row = topics.selected_topic
+    payload = {
+        "domain_id": topics.domain_id,
+        "topic_key": topics.selected_topic_key,
+    }
+    if row is not None:
+        payload.update({
+            "domain_id": row.domain_id,
+            "topic_name": row.topic_name,
+            "type_name": row.type_name,
+        })
+    selected_fields = tuple(field.path for field in topics.fields if field.selected)
+    plot_fields = tuple(field.path for field in topics.fields if field.plot_selected)
+    if selected_fields:
+        payload["selected_fields"] = selected_fields
+    if plot_fields:
+        payload["plot_fields"] = plot_fields
+    return payload
 
 
 def _subscribe_disabled_reason(selected_topic: Optional[DiscoveredTopic], active: bool) -> str:

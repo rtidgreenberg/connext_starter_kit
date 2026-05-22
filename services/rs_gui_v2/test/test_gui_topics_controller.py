@@ -12,6 +12,8 @@ if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
 from app_core import (
+    AppCommand,
+    CommandStatus,
     DataSessionSnapshot,
     DiscoveredEndpoint,
     EndpointDirection,
@@ -157,6 +159,118 @@ class TestTopicsTabController(unittest.IsolatedAsyncioTestCase):
         view = await controller.refresh_view()
 
         self.assertTrue(view.diagnostics[0].startswith("Data session snapshot failed: snapshot unavailable"))
+
+    async def test_subscribe_and_unsubscribe_commands_update_subscription_state(self):
+        controller = TopicsTabController(
+            discovery_facade=TopicDiscoveryFacade(_fake_discovery_client()),
+            field_catalogs={"Robot::Telemetry": FieldCatalog(
+                type_name="Robot::Telemetry",
+                fields=(FieldDescriptor("pose.x", "x", "float64", scalar_kind="float"),),
+            )},
+            config=TopicsTabControllerConfig(domain_id=7, selected_topic_key="7:RobotTelemetry"),
+            clock=lambda: 80.0,
+        )
+
+        subscribe = controller.handle_command(AppCommand(
+            command_type="topics.subscribe",
+            payload={
+                "domain_id": 7,
+                "topic_name": "RobotTelemetry",
+                "type_name": "Robot::Telemetry",
+                "selected_fields": ("pose.x",),
+            },
+            command_id="subscribe-robot",
+            created_at=1.0,
+        ))
+        subscribed = await controller.refresh_view()
+
+        self.assertEqual(subscribe.status, CommandStatus.ACKNOWLEDGED)
+        self.assertEqual(subscribed.selected_topic.subscription_status, SubscriptionStatus.READER_CREATED.value)
+        self.assertTrue(subscribed.action_by_id["unsubscribe"].enabled)
+        self.assertTrue(subscribed.fields[0].selected)
+
+        unsubscribe = controller.handle_command(AppCommand(
+            command_type="topics.unsubscribe",
+            payload={
+                "domain_id": 7,
+                "topic_name": "RobotTelemetry",
+                "type_name": "Robot::Telemetry",
+            },
+            command_id="unsubscribe-robot",
+            created_at=2.0,
+        ))
+        stopped = await controller.refresh_view()
+
+        self.assertEqual(unsubscribe.status, CommandStatus.ACKNOWLEDGED)
+        self.assertEqual(stopped.selected_topic.subscription_status, SubscriptionStatus.STOPPED.value)
+        self.assertFalse(stopped.action_by_id["unsubscribe"].enabled)
+        self.assertTrue(stopped.action_by_id["subscribe"].enabled)
+
+    async def test_data_session_subscription_overrides_survive_snapshot_refresh(self):
+        snapshot = _data_session_snapshot()
+        controller = TopicsTabController(
+            discovery_facade=TopicDiscoveryFacade(_fake_discovery_client()),
+            data_session_snapshot_provider=lambda: snapshot,
+            config=TopicsTabControllerConfig(domain_id=7, selected_topic_key="7:RobotTelemetry"),
+            clock=lambda: 90.0,
+        )
+        await controller.refresh_view()
+
+        controller.handle_command(AppCommand(
+            command_type="topics.unsubscribe",
+            payload={
+                "domain_id": 7,
+                "topic_name": "RobotTelemetry",
+                "type_name": "Robot::Telemetry",
+            },
+        ))
+        view = await controller.refresh_view()
+
+        self.assertEqual(view.selected_topic.subscription_status, SubscriptionStatus.STOPPED.value)
+        self.assertEqual(view.selected_topic.sample_count, 2)
+
+    async def test_filter_internal_and_field_commands_update_controller_state(self):
+        controller = TopicsTabController(
+            discovery_facade=TopicDiscoveryFacade(_fake_discovery_client()),
+            field_catalogs={"Robot::Telemetry": FieldCatalog(
+                type_name="Robot::Telemetry",
+                fields=(
+                    FieldDescriptor("pose.x", "x", "float64", scalar_kind="float"),
+                    FieldDescriptor("velocity", "velocity", "float32", scalar_kind="float"),
+                ),
+            )},
+            config=TopicsTabControllerConfig(domain_id=7, selected_topic_key="7:RobotTelemetry"),
+        )
+
+        controller.handle_command(AppCommand("topics.set_search", payload={"search_text": "robot"}))
+        controller.handle_command(AppCommand("topics.set_include_internal", payload={"include_internal": True}))
+        controller.handle_command(AppCommand(
+            "topics.set_field_selected",
+            payload={
+                "domain_id": 7,
+                "topic_name": "RobotTelemetry",
+                "type_name": "Robot::Telemetry",
+                "field_path": "pose.x",
+                "selected": True,
+            },
+        ))
+        controller.handle_command(AppCommand(
+            "topics.set_plot_field_selected",
+            payload={
+                "domain_id": 7,
+                "topic_name": "RobotTelemetry",
+                "type_name": "Robot::Telemetry",
+                "field_path": "velocity",
+                "selected": True,
+            },
+        ))
+        view = await controller.refresh_view()
+
+        self.assertEqual(view.search_text, "robot")
+        self.assertTrue(view.include_internal)
+        fields = {field.path: field for field in view.fields}
+        self.assertTrue(fields["pose.x"].selected)
+        self.assertTrue(fields["velocity"].plot_selected)
 
 
 class TestDataSessionSnapshotBridge(unittest.TestCase):

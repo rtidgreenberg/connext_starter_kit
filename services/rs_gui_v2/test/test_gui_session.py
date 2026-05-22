@@ -11,7 +11,15 @@ PARENT_DIR = os.path.dirname(SCRIPT_DIR)
 if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
-from app_core import AppCommand, AppRuntime, RuntimeConfig
+from app_core import (
+    AppCommand,
+    AppRuntime,
+    FieldCatalog,
+    FieldDescriptor,
+    RuntimeConfig,
+    SubscriptionStatus,
+    TopicDiscoveryFacade,
+)
 from app_core.services import (
     FakeServiceAdminClient,
     ServiceAdminFacade,
@@ -23,8 +31,9 @@ from app_core.services import (
 )
 from gui import GuiShellSession, GuiShellSessionConfig, UiFrameScheduler
 from gui.main_window import DearPyGuiShell
-from gui.tabs import RecordTabController, RecordTabControllerConfig
+from gui.tabs import RecordTabController, RecordTabControllerConfig, TopicsTabController, TopicsTabControllerConfig
 from test_gui_shell import FakeDpg
+from test_gui_topics_controller import _fake_discovery_client
 
 
 class FakeHandle:
@@ -64,7 +73,7 @@ def launch_request():
     )
 
 
-def build_session(runtime=None, admin_client=None):
+def build_session(runtime=None, admin_client=None, topics_controller=None):
     runtime = runtime or AppRuntime()
     manager = ServiceProcessManager(
         spawner=FakeSpawner(FakeHandle(4218)),
@@ -87,9 +96,22 @@ def build_session(runtime=None, admin_client=None):
         runtime=runtime,
         scheduler=UiFrameScheduler(runtime, max_event_log=20),
         record_controller=controller,
+        topics_controller=topics_controller,
         config=GuiShellSessionConfig(workspace_name="Robot Run 03", unsaved=True),
     )
     return session, admin_client, launch
+
+
+def build_topics_controller():
+    return TopicsTabController(
+        discovery_facade=TopicDiscoveryFacade(_fake_discovery_client()),
+        field_catalogs={"Robot::Telemetry": FieldCatalog(
+            type_name="Robot::Telemetry",
+            fields=(FieldDescriptor("pose.x", "x", "float64", scalar_kind="float"),),
+        )},
+        config=TopicsTabControllerConfig(domain_id=7, selected_topic_key="7:RobotTelemetry"),
+        clock=lambda: 20.0,
+    )
 
 
 class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
@@ -161,6 +183,55 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(admin_client.requests, [])
         self.assertTrue(any(entry.level == "error" for entry in view.event_log))
         self.assertTrue(any("Unsupported GUI command type" in entry.message for entry in view.event_log))
+
+    async def test_topics_commands_route_to_topics_controller(self):
+        session, _admin_client, _launch = build_session(topics_controller=build_topics_controller())
+        await session.next_view_async(process_commands=False)
+        session.command_sink(AppCommand(
+            command_type="topics.subscribe",
+            payload={
+                "domain_id": 7,
+                "topic_name": "RobotTelemetry",
+                "type_name": "Robot::Telemetry",
+                "selected_fields": ("pose.x",),
+            },
+            command_id="subscribe-topic",
+            created_at=4.0,
+        ))
+
+        view = await session.next_view_async()
+
+        self.assertEqual(view.topics_tab.selected_topic.subscription_status, SubscriptionStatus.READER_CREATED.value)
+        self.assertTrue(view.topics_tab.action_by_id["unsubscribe"].enabled)
+        self.assertTrue(any(entry.message == "Dispatched topics.subscribe" for entry in view.event_log))
+
+    async def test_topics_filter_command_updates_next_shell_snapshot(self):
+        session, _admin_client, _launch = build_session(topics_controller=build_topics_controller())
+        session.command_sink(AppCommand(
+            command_type="topics.set_search",
+            payload={"search_text": "robot"},
+            command_id="filter-topics",
+            created_at=5.0,
+        ))
+
+        view = await session.next_view_async()
+
+        self.assertEqual(view.topics_tab.search_text, "robot")
+        self.assertEqual([row.topic_name for row in view.topics_tab.rows], ["RobotTelemetry"])
+
+    async def test_topics_command_without_controller_reports_failure(self):
+        session, _admin_client, _launch = build_session()
+        session.command_sink(AppCommand(
+            command_type="topics.set_search",
+            payload={"search_text": "robot"},
+            command_id="filter-without-controller",
+            created_at=6.0,
+        ))
+
+        view = await session.next_view_async()
+
+        self.assertTrue(any(entry.level == "error" for entry in view.event_log))
+        self.assertTrue(any("Unsupported GUI command type: topics.set_search" in entry.message for entry in view.event_log))
 
     async def test_command_queue_backpressure_is_reported(self):
         runtime = AppRuntime(RuntimeConfig(command_queue_max_size=1, event_queue_max_size=10))

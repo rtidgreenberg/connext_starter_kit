@@ -660,6 +660,11 @@ Initial implementation status:
   and cached `SampleEnvelope` values can feed the sample inspector from the
   app-core data-session pipeline. The default mock assembly now supplies Topics
   sample/subscription state through that snapshot path.
+- Added `topics.*` command intents and session dispatch for topic selection,
+  search/internal visibility, subscribe/unsubscribe, selected fields, and
+  plot-field selection. The Dear PyGui Topics controls now emit queued
+  `AppCommand`s while the controller keeps command effects fake-first and
+  layered over data-session snapshots.
 
 ## Milestone H: Plots Tab
 

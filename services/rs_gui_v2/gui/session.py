@@ -145,7 +145,12 @@ class GuiShellSession:
         return tuple(results)
 
     async def dispatch_command(self, command: AppCommand):
-        """Translate one queued app command into a Record-tab controller action."""
+        """Translate one queued app command into the matching GUI controller action."""
+
+        if command.command_type.startswith("topics."):
+            if self._topics_controller is None:
+                raise ValueError(f"Unsupported GUI command type: {command.command_type}")
+            return self._topics_controller.handle_command(command)
 
         action_id = _record_action_for_command(command.command_type)
         payload = dict(command.payload)

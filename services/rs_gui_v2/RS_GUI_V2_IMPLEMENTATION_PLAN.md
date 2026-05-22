@@ -489,6 +489,9 @@ Initial wireframe draft status:
 - Added Milestone F.0 headless service control foundation with session-GUID
   control identities, process candidates, selector state, duplicate-target
   detection, and guarded process-termination availability tests.
+- Added candidate composition helpers that merge GUI launch identity, RTI
+  monitoring snapshots, and DDS discovery endpoint evidence into selector-ready
+  `ServiceCandidateSelection` snapshots.
 - Marked the wireframe package as drafted for review, not yet approved.
 
 ## Milestone F.0: Headless Service Candidate and Control Identity Foundation
@@ -509,6 +512,9 @@ Implemented:
   control availability to the selected process candidate.
 - `ServiceControlAvailability` distinguishes Service Admin availability from
   guarded local process termination fallback.
+- Candidate composition helpers build candidates from GUI launch identities,
+  monitoring snapshots, and discovered endpoints, then merge matching evidence
+  by application guid, participant key, launch id, or host/pid.
 
 Acceptance gates:
 
@@ -519,6 +525,9 @@ Acceptance gates:
   for owned or verified-local process candidates.
 - Service control foundation remains DDS-free, GUI-free, and independent of
   rs_gui_v1.
+- Candidate composition preserves the owned-process flag from GUI launches while
+  enriching the selected candidate with monitoring metrics and discovery
+  participant identity.
 
 ## Milestone F: RS GUI v2 Shell and Record Tab MVP
 

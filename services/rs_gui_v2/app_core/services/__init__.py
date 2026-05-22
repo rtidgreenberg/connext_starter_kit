@@ -1,6 +1,12 @@
 """Service-facing models and facades owned by rs_gui_v2."""
 
 from .admin import ServiceAdminClient, ServiceAdminFacade
+from .candidates import (
+    build_service_candidate_selection,
+    candidate_from_control_identity,
+    candidate_from_monitoring_snapshot,
+    candidates_from_discovered_endpoints,
+)
 from .control import (
     ServiceCandidateSelection,
     ServiceCandidateSource,
@@ -49,6 +55,10 @@ __all__ = [
     "ServiceMonitoringFacade",
     "ServiceProcessCandidate",
     "ServiceStateSnapshot",
+    "build_service_candidate_selection",
+    "candidate_from_control_identity",
+    "candidate_from_monitoring_snapshot",
+    "candidates_from_discovered_endpoints",
     "service_admin_target_key",
     "service_label_prefix",
 ]

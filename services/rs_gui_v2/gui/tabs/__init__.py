@@ -10,6 +10,20 @@ from .record_tab import (
     build_record_action_command,
     build_record_tab_view_model,
 )
+from .plots_controller import (
+    PlotsTabController,
+    PlotsTabControllerConfig,
+    plots_inputs_from_data_session_snapshot,
+)
+from .plots_tab import (
+    PlotActionView,
+    PlotPointRow,
+    PlotRow,
+    PlotSeriesRow,
+    PlotsTabViewModel,
+    build_mock_plots_tab_view_model,
+    build_plots_tab_view_model,
+)
 from .topics_controller import (
     TopicsTabController,
     TopicsTabControllerConfig,
@@ -32,6 +46,13 @@ __all__ = [
     "RecordTabController",
     "RecordTabControllerConfig",
     "RecordTabViewModel",
+    "PlotActionView",
+    "PlotPointRow",
+    "PlotRow",
+    "PlotSeriesRow",
+    "PlotsTabController",
+    "PlotsTabControllerConfig",
+    "PlotsTabViewModel",
     "SampleInspectorRow",
     "TopicActionView",
     "TopicFieldRow",
@@ -39,9 +60,12 @@ __all__ = [
     "TopicsTabController",
     "TopicsTabControllerConfig",
     "TopicsTabViewModel",
+    "plots_inputs_from_data_session_snapshot",
     "topics_inputs_from_data_session_snapshot",
+    "build_mock_plots_tab_view_model",
     "build_mock_record_tab_view_model",
     "build_mock_topics_tab_view_model",
+    "build_plots_tab_view_model",
     "build_record_action_command",
     "build_record_tab_view_model",
     "build_topics_tab_view_model",

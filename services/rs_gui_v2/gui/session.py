@@ -7,7 +7,7 @@ from typing import Any, Optional, Tuple
 from app_core import AppCommand, AppEvent, AppRuntime
 
 from .scheduler import UiFrameScheduler
-from .tabs import RecordTabController, TopicsTabController
+from .tabs import PlotsTabController, RecordTabController, TopicsTabController
 from .view_models import ShellViewModel
 
 
@@ -35,12 +35,14 @@ class GuiShellSession:
             scheduler: UiFrameScheduler,
             record_controller: RecordTabController,
             topics_controller: Optional[TopicsTabController] = None,
+            plots_controller: Optional[PlotsTabController] = None,
             config: Optional[GuiShellSessionConfig] = None,
     ) -> None:
         self._runtime = runtime
         self._scheduler = scheduler
         self._record_controller = record_controller
         self._topics_controller = topics_controller
+        self._plots_controller = plots_controller
         self._config = config or GuiShellSessionConfig()
 
     @property
@@ -54,6 +56,10 @@ class GuiShellSession:
     @property
     def topics_controller(self) -> Optional[TopicsTabController]:
         return self._topics_controller
+
+    @property
+    def plots_controller(self) -> Optional[PlotsTabController]:
+        return self._plots_controller
 
     def command_sink(self, command: AppCommand) -> bool:
         """Queue a GUI command intent for app-core processing."""
@@ -93,9 +99,13 @@ class GuiShellSession:
         topics_view = None
         if self._topics_controller is not None:
             topics_view = await self._topics_controller.refresh_view()
+        plots_view = None
+        if self._plots_controller is not None:
+            plots_view = await self._plots_controller.refresh_view()
         return self._scheduler.next_view(
             record_tab=record_view,
             topics_tab=topics_view,
+            plots_tab=plots_view,
             workspace_name=self._config.workspace_name,
             unsaved=self._config.unsaved,
         )

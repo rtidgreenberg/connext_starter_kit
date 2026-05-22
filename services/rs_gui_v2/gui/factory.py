@@ -14,6 +14,7 @@ from app_core import (
     FakeTopicDiscoveryClient,
     FieldCatalog,
     FieldDescriptor,
+    SampleInfoSnapshot,
     RuntimeConfig,
     SampleEnvelope,
     SubscriptionStatus,
@@ -23,6 +24,9 @@ from app_core import (
     TopicSubscriptionRequest,
     TopicSubscriptionState,
     TypeCatalog,
+    WorkspacePlotDefinition,
+    WorkspacePlotSeries,
+    build_plot_buffer_sets,
 )
 from app_core.services import (
     FakeServiceAdminClient,
@@ -40,6 +44,8 @@ from app_core.services import (
 from .scheduler import UiFrameScheduler
 from .session import GuiShellSession, GuiShellSessionConfig
 from .tabs import (
+    PlotsTabController,
+    PlotsTabControllerConfig,
     RecordTabController,
     RecordTabControllerConfig,
     TopicsTabController,
@@ -109,6 +115,7 @@ class GuiShellAssembly:
     process_manager: ServiceProcessManager
     record_controller: RecordTabController
     topics_controller: TopicsTabController
+    plots_controller: PlotsTabController
     admin_client: Optional[FakeServiceAdminClient] = None
     monitoring_client: Optional[FakeServiceMonitoringClient] = None
     discovery_client: Optional[FakeTopicDiscoveryClient] = None
@@ -155,6 +162,10 @@ def build_gui_shell_assembly(
         TopicDiscoveryFacade(discovery_client, selections=_mock_topic_selections(config))
         if discovery_client is not None else None
     )
+    data_session_snapshot_provider = (
+        _mock_data_session_snapshot_provider(config)
+        if config.mode == GuiShellSessionMode.MOCK else None
+    )
 
     process_manager = ServiceProcessManager(
         spawner=_MockServiceProcessSpawner(config.mock_pid) if config.mode == GuiShellSessionMode.MOCK else None,
@@ -182,13 +193,16 @@ def build_gui_shell_assembly(
     topics_controller = TopicsTabController(
         discovery_facade=discovery_facade,
         field_catalogs=_mock_topic_field_catalogs() if config.mode == GuiShellSessionMode.MOCK else {},
-        data_session_snapshot_provider=(
-            _mock_data_session_snapshot_provider(config)
-            if config.mode == GuiShellSessionMode.MOCK else None
-        ),
+        data_session_snapshot_provider=data_session_snapshot_provider,
         config=TopicsTabControllerConfig(
             domain_id=config.topics_domain_id,
             selected_topic_key=f"{config.topics_domain_id}:RobotTelemetry" if config.mode == GuiShellSessionMode.MOCK else "",
+        ),
+    )
+    plots_controller = PlotsTabController(
+        data_session_snapshot_provider=data_session_snapshot_provider,
+        config=PlotsTabControllerConfig(
+            selected_plot_name="Robot Motion" if config.mode == GuiShellSessionMode.MOCK else "",
         ),
     )
     scheduler = UiFrameScheduler(
@@ -201,6 +215,7 @@ def build_gui_shell_assembly(
         scheduler=scheduler,
         record_controller=controller,
         topics_controller=topics_controller,
+        plots_controller=plots_controller,
         config=GuiShellSessionConfig(
             workspace_name=config.workspace_name,
             unsaved=config.unsaved,
@@ -214,6 +229,7 @@ def build_gui_shell_assembly(
         process_manager=process_manager,
         record_controller=controller,
         topics_controller=topics_controller,
+        plots_controller=plots_controller,
         admin_client=admin_client,
         monitoring_client=monitoring_client,
         discovery_client=discovery_client,
@@ -388,6 +404,7 @@ def _mock_data_session_snapshot_provider(config: GuiShellSessionFactoryConfig):
         workspace_name=config.workspace_name,
         subscriptions=_mock_topic_subscription_states(config),
         samples={_mock_topic_subscription_request(config).key: _mock_topic_samples(config)},
+        plots=_mock_plot_snapshots(config),
         updated_at=time.time(),
     )
 
@@ -406,6 +423,51 @@ def _mock_topic_samples(config: GuiShellSessionFactoryConfig) -> Tuple[SampleEnv
         data={"pose": {"x": 12.5, "y": -3.25}, "velocity": 1.7, "mode": "AUTO"},
         observed_at=time.time(),
     ),)
+
+
+def _mock_plot_snapshots(config: GuiShellSessionFactoryConfig):
+    plot = WorkspacePlotDefinition(
+        name="Robot Motion",
+        history_seconds=30.0,
+        max_points=512,
+        series=(
+            WorkspacePlotSeries(
+                domain_id=config.topics_domain_id,
+                topic_name="RobotTelemetry",
+                type_name="Robot::Telemetry",
+                field_path="velocity",
+                label="Velocity",
+            ),
+            WorkspacePlotSeries(
+                domain_id=config.topics_domain_id,
+                topic_name="RobotTelemetry",
+                type_name="Robot::Telemetry",
+                field_path="pose.x",
+                label="Pose X",
+            ),
+        ),
+    )
+    buffers = build_plot_buffer_sets((plot,), min_interval_seconds=0.25)
+    request = _mock_topic_subscription_request(config)
+    now = time.time()
+    for offset, pose_x, velocity in (
+            (6.0, 10.8, 1.2),
+            (4.0, 11.4, 1.35),
+            (2.0, 12.5, 1.7),
+            (0.0, 13.1, 1.55),
+    ):
+        sample = SampleEnvelope(
+            subscription_key=request.key,
+            domain_id=config.topics_domain_id,
+            topic_name="RobotTelemetry",
+            type_name="Robot::Telemetry",
+            data={"pose": {"x": pose_x, "y": -3.25}, "velocity": velocity, "mode": "AUTO"},
+            info=SampleInfoSnapshot(source_timestamp=now - offset),
+            observed_at=now - offset,
+        )
+        for buffer in buffers:
+            buffer.update_from_sample(sample)
+    return tuple(buffer.snapshot() for buffer in buffers)
 
 
 def _default_local_hostnames(config: GuiShellSessionFactoryConfig) -> Tuple[str, ...]:

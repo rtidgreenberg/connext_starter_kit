@@ -26,7 +26,13 @@ Current layers:
   view models, command intents, event-log scheduling, and fake-renderer smoke
   coverage without requiring a display
 - `test_gui_factory.py`: default GUI shell session assembly for mock and
-  headless modes, including CLI mock GUI checks and fake-renderer coverage
+  headless modes, including Topics/Plots snapshot wiring, CLI mock GUI checks,
+  and fake-renderer coverage
+- `test_gui_plots_tab.py`: mocked Plots-tab plot rows, series summaries,
+  pause/resume affordances, bounded recent point rows, and diagnostics
+- `test_gui_plots_controller.py`: Plots-tab controller wiring from
+  data-session plot snapshots into shell snapshots, including provider
+  failures and headless degraded states
 - `test_gui_topics_tab.py`: mocked Topics-tab discovery rows, field picker,
   subscription/sample inspector state, and fake-renderer coverage
 - `test_gui_topics_controller.py`: Topics-tab controller wiring from the

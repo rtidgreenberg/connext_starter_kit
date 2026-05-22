@@ -107,6 +107,8 @@ class TestGuiShellFactory(unittest.TestCase):
         self.assertEqual(view.record_tab.selected_candidate.control_name, "recording_service_8f4f2a1c")
         self.assertIn(("memory_mb", "180"), view.record_tab.monitoring_summary)
         self.assertEqual(view.topics_tab.selected_topic.topic_name, "RobotTelemetry")
+        self.assertEqual(view.plots_tab.selected_plot_name, "Robot Motion")
+        self.assertEqual(view.plots_tab.total_point_count, 8)
         self.assertEqual(assembly.discovery_client.scans, [(0, False)])
 
     def test_default_session_dispatches_commands_through_fake_admin(self):
@@ -143,6 +145,7 @@ class TestGuiShellFactory(unittest.TestCase):
         self.assertEqual(view.record_tab.candidates, ())
         self.assertEqual(view.record_tab.target_label, "No Recording Service")
         self.assertEqual(view.topics_tab.rows, ())
+        self.assertEqual(view.plots_tab.rows, ())
 
     def test_default_session_convenience_returns_session_only(self):
         session = build_default_gui_shell_session(GuiShellSessionFactoryConfig(

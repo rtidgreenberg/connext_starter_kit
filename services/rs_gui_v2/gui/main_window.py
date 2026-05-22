@@ -4,6 +4,7 @@ from typing import Callable, Optional
 
 from app_core import AppCommand
 
+from .tabs.plots_tab import PlotsTabViewModel
 from .tabs.record_tab import RecordTabViewModel, build_record_action_command
 from .tabs.topics_tab import TopicsTabViewModel
 from .view_models import ShellViewModel, build_mock_shell_view_model
@@ -86,7 +87,7 @@ def render_shell_view(
             with dpg.tab(label="Topics"):
                 _render_topics_tab(dpg, view.topics_tab)
             with dpg.tab(label="Plots"):
-                dpg.add_text("No plot selected")
+                _render_plots_tab(dpg, view.plots_tab)
             with dpg.tab(label="Workspace"):
                 dpg.add_text("No workspace changes")
         _render_inspector(dpg, view)
@@ -272,6 +273,78 @@ def _render_sample_inspector(dpg, topics: TopicsTabViewModel) -> None:
                 dpg.add_text(row.path)
                 dpg.add_text(row.value)
                 dpg.add_text(row.value_kind)
+
+
+def _render_plots_tab(dpg, plots: PlotsTabViewModel) -> None:
+    selected = plots.selected_plot_name or "(none)"
+    dpg.add_text(
+        f"Selected plot: {selected} | Points: {plots.total_point_count} | "
+        f"Updates: {'paused' if plots.paused else 'running'}"
+    )
+    _render_plot_actions(dpg, plots)
+    _render_plot_table(dpg, plots)
+    _render_plot_series_table(dpg, plots)
+    _render_plot_points_table(dpg, plots)
+    for diagnostic in plots.diagnostics:
+        dpg.add_text(f"Diagnostic: {diagnostic}")
+
+
+def _render_plot_actions(dpg, plots: PlotsTabViewModel) -> None:
+    with dpg.group(horizontal=True):
+        for action in plots.actions:
+            dpg.add_button(label=action.label, enabled=action.enabled)
+            if action.reason and not action.enabled:
+                dpg.add_text(action.reason)
+
+
+def _render_plot_table(dpg, plots: PlotsTabViewModel) -> None:
+    dpg.add_text("Configured Plots")
+    with dpg.table(header_row=True, borders_innerH=True, borders_outerH=True, borders_innerV=True):
+        for heading in ("Selected", "Name", "Series", "Points", "History", "Max Points"):
+            dpg.add_table_column(label=heading)
+        for row in plots.rows:
+            with dpg.table_row():
+                dpg.add_text("*" if row.selected else "")
+                dpg.add_text(row.name)
+                dpg.add_text(str(row.series_count))
+                dpg.add_text(str(row.point_count))
+                dpg.add_text(f"{row.history_seconds:g}s")
+                dpg.add_text(str(row.max_points))
+
+
+def _render_plot_series_table(dpg, plots: PlotsTabViewModel) -> None:
+    dpg.add_text("Series")
+    with dpg.table(header_row=True, borders_innerH=True, borders_outerH=True, borders_innerV=True):
+        for heading in (
+                "Label", "Topic", "Field", "Points", "Latest", "Timestamp",
+                "Accepted", "Skipped", "Dropped", "Decimated", "Status"):
+            dpg.add_table_column(label=heading)
+        for row in plots.series:
+            with dpg.table_row():
+                dpg.add_text(row.label)
+                dpg.add_text(row.topic_name)
+                dpg.add_text(row.field_path)
+                dpg.add_text(str(row.point_count))
+                dpg.add_text(row.latest_value)
+                dpg.add_text(row.latest_timestamp)
+                dpg.add_text(str(row.accepted_samples))
+                dpg.add_text(str(row.skipped_samples))
+                dpg.add_text(str(row.dropped_points))
+                dpg.add_text(str(row.decimated_points))
+                dpg.add_text(row.status)
+
+
+def _render_plot_points_table(dpg, plots: PlotsTabViewModel) -> None:
+    dpg.add_text("Recent Points")
+    with dpg.table(header_row=True, borders_innerH=True, borders_outerH=True):
+        for heading in ("Series", "Timestamp", "Value", "Source"):
+            dpg.add_table_column(label=heading)
+        for row in plots.point_rows:
+            with dpg.table_row():
+                dpg.add_text(row.label)
+                dpg.add_text(row.timestamp)
+                dpg.add_text(row.value)
+                dpg.add_text(row.source)
 
 
 def _render_inspector(dpg, view: ShellViewModel) -> None:

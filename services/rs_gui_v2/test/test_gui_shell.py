@@ -104,6 +104,8 @@ class TestMockShellViewModel(unittest.TestCase):
         self.assertEqual(view.record_tab.command_history[0].command_id, "pause-21")
         self.assertTrue(view.record_tab.action_by_id["pause"].enabled)
         self.assertFalse(view.record_tab.action_by_id["terminate_local"].enabled)
+        self.assertEqual(view.plots_tab.selected_plot_name, "Robot Motion")
+        self.assertEqual(view.plots_tab.total_point_count, 8)
 
     def test_record_actions_disable_admin_for_duplicate_live_targets(self):
         intent = ServiceLaunchIntent(ServiceKind.RECORDING, "Recorder")

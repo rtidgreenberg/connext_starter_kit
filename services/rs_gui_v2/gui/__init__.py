@@ -10,11 +10,23 @@ from .factory import (
 from .scheduler import UiFrameScheduler
 from .session import GuiShellSession, GuiShellSessionConfig
 from .tabs import (
+    PlotsTabController,
+    PlotsTabControllerConfig,
     RecordTabController,
     RecordTabControllerConfig,
     TopicsTabController,
     TopicsTabControllerConfig,
+    plots_inputs_from_data_session_snapshot,
     topics_inputs_from_data_session_snapshot,
+)
+from .tabs.plots_tab import (
+    PlotActionView,
+    PlotPointRow,
+    PlotRow,
+    PlotSeriesRow,
+    PlotsTabViewModel,
+    build_mock_plots_tab_view_model,
+    build_plots_tab_view_model,
 )
 from .tabs.topics_tab import (
     SampleInspectorRow,
@@ -40,6 +52,13 @@ __all__ = [
     "GuiShellSessionConfig",
     "GuiShellSessionFactoryConfig",
     "GuiShellSessionMode",
+    "PlotActionView",
+    "PlotPointRow",
+    "PlotRow",
+    "PlotSeriesRow",
+    "PlotsTabController",
+    "PlotsTabControllerConfig",
+    "PlotsTabViewModel",
     "RecordTabController",
     "RecordTabControllerConfig",
     "SampleInspectorRow",
@@ -54,9 +73,12 @@ __all__ = [
     "UiFrameScheduler",
     "build_default_gui_shell_session",
     "build_gui_shell_assembly",
+    "build_mock_plots_tab_view_model",
     "build_mock_shell_view_model",
     "build_mock_topics_tab_view_model",
+    "build_plots_tab_view_model",
     "build_shell_view_model",
     "build_topics_tab_view_model",
+    "plots_inputs_from_data_session_snapshot",
     "topics_inputs_from_data_session_snapshot",
 ]

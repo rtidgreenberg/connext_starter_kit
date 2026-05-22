@@ -696,6 +696,18 @@ Suggested PRs:
 2. Add Plots tab with mocked series.
 3. Wire Plots tab to selected live or replayed DDS fields.
 
+Initial implementation status:
+
+- Added DDS-free Plots-tab view models for configured plot rows, selected
+  series summaries, bounded recent point rows, pause/resume affordances, and
+  diagnostic states when no plot buffers are available.
+- Added `PlotsTabController` and a `DataSessionSnapshot.plots` bridge so the
+  shell can render app-core plot buffer snapshots without owning DDS readers or
+  mutating GUI widgets from data callbacks.
+- Extended the default mock GUI assembly with a deterministic `Robot Motion`
+  plot fed through the same sample-to-plot-buffer path used by app-core data
+  sessions.
+
 ## Milestone I: Workspace Persistence
 
 Goal: Restore user intent across restarts without persisting DDS runtime

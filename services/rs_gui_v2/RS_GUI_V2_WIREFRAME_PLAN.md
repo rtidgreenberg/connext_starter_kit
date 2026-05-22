@@ -324,6 +324,13 @@ Approval focus:
 - Keep tags and time windows visible because they connect to Recording Service
   workflows.
 
+Initial implementation note:
+
+- The current v2 shell renders a mocked Replay tab that captures the approved
+  information shape and emits `replay.*` command intents only. Live Replay
+  Service control, command history, and replay-to-topic E2E validation are still
+  later phases.
+
 ### 4. Convert Tab
 
 Purpose: Present conversion as a bounded job workflow with clear validation,

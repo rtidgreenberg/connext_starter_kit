@@ -6,6 +6,7 @@ from app_core import AppEvent, AppRuntime, AppState
 
 from .tabs.plots_tab import PlotsTabViewModel
 from .tabs.record_tab import RecordTabViewModel, build_mock_record_tab_view_model
+from .tabs.replay_tab import ReplayTabViewModel
 from .tabs.topics_tab import TopicsTabViewModel
 from .view_models import EventLogEntry, ShellViewModel, build_shell_view_model, event_log_entry_from_event
 
@@ -33,6 +34,7 @@ class UiFrameScheduler:
     def next_view(
             self,
             record_tab: RecordTabViewModel = None,
+            replay_tab: ReplayTabViewModel = None,
             topics_tab: TopicsTabViewModel = None,
             plots_tab: PlotsTabViewModel = None,
             workspace_name: str = "Mock Workspace",
@@ -45,6 +47,7 @@ class UiFrameScheduler:
         return self._view_builder(
             self._runtime.state,
             record_tab or build_mock_record_tab_view_model(),
+            replay_tab=replay_tab,
             topics_tab=topics_tab,
             plots_tab=plots_tab,
             event_log=self._event_log,

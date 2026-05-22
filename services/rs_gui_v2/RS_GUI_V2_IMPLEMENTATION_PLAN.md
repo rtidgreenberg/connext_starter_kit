@@ -804,6 +804,19 @@ Suggested PRs:
 2. Add Replay tab with mocked state.
 3. Add live replay-to-topic-inspection E2E test.
 
+Initial implementation status:
+
+- Added a DDS-free mocked Replay-tab view model with service candidate rows,
+  recording database path, playback rate, loop/time-window intent, timeline
+  rows, progress text, duplicate-target diagnostics, and action enablement for
+  start, pause, resume, stop, and shutdown.
+- Added Replay-tab command builders that emit `replay.*` `AppCommand` intents
+  from UI state without assembling RTI Service Admin request bodies in renderer
+  callbacks.
+- Rendered the mocked Replay tab in the Dear PyGui shell and covered fake-DPG
+  button dispatch. Runtime-backed Replay command routing and live Replay Service
+  adapter behavior remain future work.
+
 ## Milestone K: Convert Tab
 
 Goal: Add Converter Service or conversion-job orchestration after the core UI is

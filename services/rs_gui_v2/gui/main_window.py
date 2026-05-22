@@ -6,6 +6,11 @@ from app_core import AppCommand
 
 from .tabs.plots_tab import PlotsTabViewModel
 from .tabs.record_tab import RecordTabViewModel, build_record_action_command
+from .tabs.replay_tab import (
+    ReplayTargetRow,
+    ReplayTabViewModel,
+    build_replay_action_command,
+)
 from .tabs.topics_tab import (
     TopicFieldRow,
     TopicRow,
@@ -92,7 +97,7 @@ def render_shell_view(
             with dpg.tab(label="Record"):
                 _render_record_tab(dpg, view.record_tab, command_sink=command_sink)
             with dpg.tab(label="Replay"):
-                dpg.add_text("No Replay Service selected")
+                _render_replay_tab(dpg, view.replay_tab, command_sink=command_sink)
             with dpg.tab(label="Convert"):
                 dpg.add_text("No Converter job selected")
             with dpg.tab(label="Topics"):
@@ -177,6 +182,109 @@ def _record_action_callback(
         candidate = _candidate_from_record_row(record, selected_row.candidate_id)
         command = build_record_action_command(action_id, candidate, tag_name=record.tag_value)
         return command_sink(command)
+    return _callback
+
+
+def _render_replay_tab(
+        dpg,
+        replay: ReplayTabViewModel,
+        command_sink: Optional[Callable[[AppCommand], bool]] = None,
+) -> None:
+    target_name = replay.selected_target.control_name if replay.selected_target else "(none)"
+    dpg.add_text(
+        f"Replay target: {target_name} | "
+        f"State: {replay.observed_state} | Rate: {replay.playback_rate:g}x | "
+        f"Loop: {'on' if replay.loop else 'off'}"
+    )
+    dpg.add_input_text(label="Recording Database", default_value=replay.database_path)
+    dpg.add_input_text(label="Playback Rate", default_value=f"{replay.playback_rate:g}")
+    dpg.add_input_text(label="Time Window", default_value=replay.time_window)
+    _render_replay_actions(dpg, replay, command_sink=command_sink)
+    _render_replay_targets(dpg, replay, command_sink=command_sink)
+    _render_replay_timeline(dpg, replay)
+    for diagnostic in replay.diagnostics:
+        dpg.add_text(f"Diagnostic: {diagnostic}")
+
+
+def _render_replay_actions(
+        dpg,
+        replay: ReplayTabViewModel,
+        command_sink: Optional[Callable[[AppCommand], bool]] = None,
+) -> None:
+    with dpg.group(horizontal=True):
+        for action in replay.actions:
+            dpg.add_button(
+                label=action.label,
+                enabled=action.enabled,
+                callback=_replay_action_callback(replay, action.action_id, command_sink),
+            )
+            if action.reason and not action.enabled:
+                dpg.add_text(action.reason)
+
+
+def _render_replay_targets(
+        dpg,
+        replay: ReplayTabViewModel,
+        command_sink: Optional[Callable[[AppCommand], bool]] = None,
+) -> None:
+    dpg.add_text("Replay Service Candidates")
+    with dpg.table(header_row=True, borders_innerH=True, borders_outerH=True, borders_innerV=True):
+        for heading in (
+                "Selected", "Control Name", "Source", "Host", "State",
+                "Progress", "Diagnostic"):
+            dpg.add_table_column(label=heading)
+        for row in replay.targets:
+            with dpg.table_row():
+                dpg.add_button(
+                    label="*" if row.selected else "Select",
+                    enabled=not row.selected,
+                    callback=_replay_select_callback(row, command_sink),
+                )
+                dpg.add_text(row.control_name)
+                dpg.add_text(row.source)
+                dpg.add_text(row.hostname)
+                dpg.add_text(row.state)
+                dpg.add_text(row.progress)
+                dpg.add_text("duplicate target" if row.conflict else "")
+
+
+def _render_replay_timeline(dpg, replay: ReplayTabViewModel) -> None:
+    dpg.add_text("Recording Timeline")
+    with dpg.table(header_row=True, borders_innerH=True, borders_outerH=True):
+        for heading in ("Label", "Start", "End", "State"):
+            dpg.add_table_column(label=heading)
+        for row in replay.timeline:
+            with dpg.table_row():
+                dpg.add_text(row.label)
+                dpg.add_text(row.start_time)
+                dpg.add_text(row.end_time)
+                dpg.add_text(row.state)
+
+
+def _replay_action_callback(
+        replay: ReplayTabViewModel,
+        action_id: str,
+        command_sink: Optional[Callable[[AppCommand], bool]],
+):
+    def _callback(_sender=None, _app_data=None, _user_data=None):
+        if command_sink is None:
+            return False
+        return command_sink(build_replay_action_command(action_id, replay))
+    return _callback
+
+
+def _replay_select_callback(
+        row: ReplayTargetRow,
+        command_sink: Optional[Callable[[AppCommand], bool]],
+):
+    def _callback(_sender=None, _app_data=None, _user_data=None):
+        if command_sink is None:
+            return False
+        return command_sink(AppCommand(
+            command_type="replay.select_target",
+            target=row.control_name,
+            payload={"target_id": row.target_id, "control_name": row.control_name},
+        ))
     return _callback
 
 

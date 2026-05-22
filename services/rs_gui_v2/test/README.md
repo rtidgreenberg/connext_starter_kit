@@ -33,6 +33,9 @@ Current layers:
 - `test_gui_plots_controller.py`: Plots-tab controller wiring from
   data-session plot snapshots into shell snapshots, including provider
   failures and headless degraded states
+- `test_gui_replay_tab.py`: mocked Replay-tab service candidates, database
+  selection state, start/pause/resume/stop/shutdown affordances, timeline rows,
+  duplicate-target diagnostics, and command intents
 - `test_gui_topics_tab.py`: mocked Topics-tab discovery rows, field picker,
   subscription/sample inspector state, `topics.*` command builders, and
   fake-renderer command callback coverage

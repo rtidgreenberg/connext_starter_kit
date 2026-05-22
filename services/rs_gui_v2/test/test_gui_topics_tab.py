@@ -250,16 +250,17 @@ class TestTopicsShellRendering(unittest.TestCase):
             kwargs["callback"] for name, args, kwargs in fake.calls
             if name == "add_button" and (kwargs.get("label") == "Unsubscribe" or (args and args[0] == "Unsubscribe"))
         )
-        plot_velocity = next(
+        star_callbacks = tuple(
             kwargs["callback"] for name, args, kwargs in fake.calls
             if name == "add_button" and (kwargs.get("label") == "*" or (args and args[0] == "*"))
         )
 
         self.assertTrue(unsubscribe())
-        self.assertTrue(plot_velocity())
+        for callback in star_callbacks:
+            self.assertTrue(callback())
 
         self.assertEqual(commands[0].command_type, "topics.unsubscribe")
-        self.assertTrue(commands[1].command_type.startswith("topics."))
+        self.assertTrue(any(command.command_type.startswith("topics.") for command in commands[1:]))
 
 
 def _fixture_topics():

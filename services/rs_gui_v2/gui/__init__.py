@@ -14,6 +14,7 @@ from .tabs import (
     RecordTabControllerConfig,
     TopicsTabController,
     TopicsTabControllerConfig,
+    topics_inputs_from_data_session_snapshot,
 )
 from .tabs.topics_tab import (
     SampleInspectorRow,
@@ -57,4 +58,5 @@ __all__ = [
     "build_mock_topics_tab_view_model",
     "build_shell_view_model",
     "build_topics_tab_view_model",
+    "topics_inputs_from_data_session_snapshot",
 ]

@@ -2,9 +2,10 @@
 
 from dataclasses import dataclass, field, replace
 import time
-from typing import Mapping, Optional, Tuple
+from typing import Callable, Mapping, Optional, Tuple
 
 from app_core import (
+    DataSessionSnapshot,
     FieldCatalog,
     SampleEnvelope,
     TopicDiscoveryFacade,
@@ -40,6 +41,7 @@ class TopicsTabController:
             field_catalogs: Optional[Mapping[str, FieldCatalog]] = None,
             subscription_states: Tuple[TopicSubscriptionState, ...] = (),
             samples: Tuple[SampleEnvelope, ...] = (),
+            data_session_snapshot_provider: Optional[Callable[[], Optional[DataSessionSnapshot]]] = None,
             config: Optional[TopicsTabControllerConfig] = None,
             clock=time.time,
     ) -> None:
@@ -47,6 +49,7 @@ class TopicsTabController:
         self._field_catalogs = dict(field_catalogs or {})
         self._subscription_states = tuple(subscription_states)
         self._samples = tuple(samples)
+        self._data_session_snapshot_provider = data_session_snapshot_provider
         self._config = config or TopicsTabControllerConfig()
         self._clock = clock
         self._last_view = TopicsTabViewModel(domain_id=self._config.domain_id)
@@ -89,11 +92,24 @@ class TopicsTabController:
     def set_samples(self, samples: Tuple[SampleEnvelope, ...]) -> None:
         self._samples = tuple(samples)
 
+    def apply_data_session_snapshot(self, snapshot: DataSessionSnapshot) -> None:
+        """Use a data-session snapshot as the source for subscription/sample state."""
+
+        self._subscription_states, self._samples = topics_inputs_from_data_session_snapshot(snapshot)
+
     async def refresh_view(self) -> TopicsTabViewModel:
         """Scan discovery state and return the next Topics-tab view."""
 
         topics = ()
-        diagnostics = ()
+        diagnostics = []
+        if self._data_session_snapshot_provider is not None:
+            try:
+                snapshot = self._data_session_snapshot_provider()
+                if snapshot is not None:
+                    self.apply_data_session_snapshot(snapshot)
+            except Exception as exc:
+                diagnostics.append(f"Data session snapshot failed: {exc}")
+
         selections = TopicSelectionState(include_internal=self._config.include_internal)
         if self._discovery_facade is not None:
             selections = self._discovery_facade.selections
@@ -103,7 +119,7 @@ class TopicsTabController:
                     include_internal=self._config.include_internal,
                 )
             except Exception as exc:
-                diagnostics = (f"Discovery scan failed: {exc}",)
+                diagnostics.append(f"Discovery scan failed: {exc}")
 
         view = build_topics_tab_view_model(
             topics=topics,
@@ -118,8 +134,19 @@ class TopicsTabController:
             now=self._clock(),
         )
         if diagnostics:
-            view = replace(view, diagnostics=diagnostics + view.diagnostics)
+            view = replace(view, diagnostics=tuple(diagnostics) + view.diagnostics)
         if view.selected_topic_key and view.selected_topic_key != self._config.selected_topic_key:
             self._config = replace(self._config, selected_topic_key=view.selected_topic_key)
         self._last_view = view
         return view
+
+
+def topics_inputs_from_data_session_snapshot(
+        snapshot: DataSessionSnapshot,
+) -> Tuple[Tuple[TopicSubscriptionState, ...], Tuple[SampleEnvelope, ...]]:
+    """Extract Topics-tab subscription and sample inputs from a data-session snapshot."""
+
+    samples = []
+    for key in sorted(snapshot.samples):
+        samples.extend(snapshot.samples[key])
+    return tuple(snapshot.subscriptions), tuple(samples)

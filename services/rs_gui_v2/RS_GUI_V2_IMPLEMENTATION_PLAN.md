@@ -656,6 +656,10 @@ Initial implementation status:
   so the default mock shell now scans a fake discovery inventory instead of
   using only static topic rows. Headless assembly keeps the same Topics view path
   but has no discovery client or mock topics.
+- Added a `DataSessionSnapshot` bridge for the Topics tab so subscription states
+  and cached `SampleEnvelope` values can feed the sample inspector from the
+  app-core data-session pipeline. The default mock assembly now supplies Topics
+  sample/subscription state through that snapshot path.
 
 ## Milestone H: Plots Tab
 

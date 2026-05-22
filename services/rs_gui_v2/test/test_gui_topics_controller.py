@@ -12,6 +12,7 @@ if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
 from app_core import (
+    DataSessionSnapshot,
     DiscoveredEndpoint,
     EndpointDirection,
     FakeTopicDiscoveryClient,
@@ -26,7 +27,11 @@ from app_core import (
     TopicSubscriptionState,
     TypeCatalog,
 )
-from gui import TopicsTabController, TopicsTabControllerConfig
+from gui import (
+    TopicsTabController,
+    TopicsTabControllerConfig,
+    topics_inputs_from_data_session_snapshot,
+)
 
 
 class FailingDiscoveryClient:
@@ -36,6 +41,11 @@ class FailingDiscoveryClient:
     async def topics(self, domain_id: int, include_internal: bool = False):
         return
         yield
+
+
+class FailingDataSessionSnapshotProvider:
+    def __call__(self):
+        raise RuntimeError("snapshot unavailable")
 
 
 class TestTopicsTabController(unittest.IsolatedAsyncioTestCase):
@@ -117,6 +127,47 @@ class TestTopicsTabController(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(view.diagnostics[0].startswith("Discovery scan failed: scan failed for domain 11"))
         self.assertEqual(view.rows, ())
 
+    async def test_data_session_snapshot_provider_populates_samples(self):
+        client = _fake_discovery_client()
+        snapshot = _data_session_snapshot()
+        controller = TopicsTabController(
+            discovery_facade=TopicDiscoveryFacade(client),
+            field_catalogs={"Robot::Telemetry": FieldCatalog(
+                type_name="Robot::Telemetry",
+                fields=(FieldDescriptor("pose.x", "x", "float64", scalar_kind="float"),),
+            )},
+            data_session_snapshot_provider=lambda: snapshot,
+            config=TopicsTabControllerConfig(domain_id=7, selected_topic_key="7:RobotTelemetry"),
+        )
+
+        view = await controller.refresh_view()
+
+        self.assertEqual(view.selected_topic.subscription_status, SubscriptionStatus.RECEIVING.value)
+        self.assertEqual(view.selected_topic.sample_count, 2)
+        self.assertEqual([row.value for row in view.sample_rows], ["7.5"])
+        self.assertEqual(view.fields[0].path, "pose.x")
+
+    async def test_data_session_snapshot_failure_is_reported(self):
+        controller = TopicsTabController(
+            discovery_facade=TopicDiscoveryFacade(_fake_discovery_client()),
+            data_session_snapshot_provider=FailingDataSessionSnapshotProvider(),
+            config=TopicsTabControllerConfig(domain_id=7),
+        )
+
+        view = await controller.refresh_view()
+
+        self.assertTrue(view.diagnostics[0].startswith("Data session snapshot failed: snapshot unavailable"))
+
+
+class TestDataSessionSnapshotBridge(unittest.TestCase):
+    def test_extracts_subscription_states_and_samples_in_stable_order(self):
+        snapshot = _data_session_snapshot()
+
+        states, samples = topics_inputs_from_data_session_snapshot(snapshot)
+
+        self.assertEqual([state.request.key for state in states], ["7:RobotTelemetry:Robot::Telemetry"])
+        self.assertEqual([sample.data["pose"]["x"] for sample in samples], [7.0, 7.5])
+
 
 def _fake_discovery_client():
     catalog = TypeCatalog()
@@ -147,6 +198,36 @@ def _fake_discovery_client():
         endpoint_key="writer-monitoring",
     ))
     return client
+
+
+def _data_session_snapshot():
+    request = TopicSubscriptionRequest(7, "RobotTelemetry", "Robot::Telemetry")
+    samples = (
+        SampleEnvelope(
+            subscription_key=request.key,
+            domain_id=7,
+            topic_name="RobotTelemetry",
+            type_name="Robot::Telemetry",
+            data={"pose": {"x": 7.0}},
+        ),
+        SampleEnvelope(
+            subscription_key=request.key,
+            domain_id=7,
+            topic_name="RobotTelemetry",
+            type_name="Robot::Telemetry",
+            data={"pose": {"x": 7.5}},
+        ),
+    )
+    return DataSessionSnapshot(
+        workspace_name="Data Session",
+        subscriptions=(TopicSubscriptionState(
+            request=request,
+            status=SubscriptionStatus.RECEIVING,
+            received_samples=2,
+        ),),
+        samples={request.key: samples},
+        updated_at=20.0,
+    )
 
 
 if __name__ == "__main__":

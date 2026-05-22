@@ -8,6 +8,7 @@ from typing import Mapping, Optional, Tuple
 
 from app_core import (
     AppRuntime,
+    DataSessionSnapshot,
     DiscoveredEndpoint,
     EndpointDirection,
     FakeTopicDiscoveryClient,
@@ -181,8 +182,10 @@ def build_gui_shell_assembly(
     topics_controller = TopicsTabController(
         discovery_facade=discovery_facade,
         field_catalogs=_mock_topic_field_catalogs() if config.mode == GuiShellSessionMode.MOCK else {},
-        subscription_states=_mock_topic_subscription_states(config) if config.mode == GuiShellSessionMode.MOCK else (),
-        samples=_mock_topic_samples(config) if config.mode == GuiShellSessionMode.MOCK else (),
+        data_session_snapshot_provider=(
+            _mock_data_session_snapshot_provider(config)
+            if config.mode == GuiShellSessionMode.MOCK else None
+        ),
         config=TopicsTabControllerConfig(
             domain_id=config.topics_domain_id,
             selected_topic_key=f"{config.topics_domain_id}:RobotTelemetry" if config.mode == GuiShellSessionMode.MOCK else "",
@@ -378,6 +381,19 @@ def _mock_topic_subscription_states(config: GuiShellSessionFactoryConfig) -> Tup
         received_samples=42,
         updated_at=time.time(),
     ),)
+
+
+def _mock_data_session_snapshot_provider(config: GuiShellSessionFactoryConfig):
+    snapshot = DataSessionSnapshot(
+        workspace_name=config.workspace_name,
+        subscriptions=_mock_topic_subscription_states(config),
+        samples={_mock_topic_subscription_request(config).key: _mock_topic_samples(config)},
+        updated_at=time.time(),
+    )
+
+    def _provider() -> DataSessionSnapshot:
+        return snapshot
+    return _provider
 
 
 def _mock_topic_samples(config: GuiShellSessionFactoryConfig) -> Tuple[SampleEnvelope, ...]:

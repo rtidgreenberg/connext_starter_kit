@@ -157,7 +157,7 @@ Rules for new modules:
 | Service monitoring | `ServiceMonitoringClient` implementation | `app_core/services/rti_monitoring.py` | monitoring config/event/periodic topics, DynamicData readers, sample normalization |
 | Topic discovery | `TopicDiscoveryFacade`, `TopicInventory`, `TopicSelectionState` | `app_core/rti_discovery.py` | publication/subscription built-in topic readers, endpoint metadata, discovery churn |
 | Type catalog | `TypeCatalog`, `TypeResolution` | `app_core/types.py`, `app_core/rti_types.py` | XML type enumeration, local type availability, `QosProvider.type()` DynamicType lookup |
-| Data subscription | subscription manager protocol | `app_core/rti_subscriptions.py` | DynamicData topics/readers, `read`/`take`, sample info, instance state |
+| Data subscription | `TopicSubscriptionRequest`, `SampleEnvelope`, `SampleCache` | `app_core/subscriptions.py`, `app_core/rti_subscriptions.py` | DynamicData topics/readers, `take`, sample info, instance state, reader shutdown |
 | Replay visualization | normal topic subscription APIs | `app_core/rti_subscriptions.py` | replayed samples are just DDS data consumed by Topics/Plots |
 
 Each adapter should make the Connext calls visible in one place. The facade
@@ -276,6 +276,9 @@ graduate into plotting only when the UX and extraction rules are clear.
 Reference example guidance:
 
 - Keep raw DynamicData reading separate from field extraction and plotting.
+- Keep declarative subscription requests, sample envelopes, and bounded caches
+  in `subscriptions.py`; keep Connext DynamicData topic/reader creation in
+  `rti_subscriptions.py`.
 - Show selected-field extraction as a reusable API rather than burying it inside
   chart code.
 - Keep backpressure visible through dropped/decimated sample counters.

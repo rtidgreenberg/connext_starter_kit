@@ -32,6 +32,14 @@ from .services import (
     ServiceStateSnapshot,
 )
 from .state import AppState
+from .subscriptions import (
+    SampleCache,
+    SampleEnvelope,
+    SampleInfoSnapshot,
+    SubscriptionStatus,
+    TopicSubscriptionRequest,
+    TopicSubscriptionState,
+)
 from .types import TypeAvailabilityStatus, TypeCatalog, TypeResolution, TypeSource
 
 __all__ = [
@@ -53,6 +61,9 @@ __all__ = [
     "MonitoringSnapshot",
     "MonitoringSnapshotKind",
     "RuntimeConfig",
+    "SampleCache",
+    "SampleEnvelope",
+    "SampleInfoSnapshot",
     "ServiceAdminClient",
     "ServiceAdminFacade",
     "ServiceCommand",
@@ -63,11 +74,14 @@ __all__ = [
     "ServiceMonitoringClient",
     "ServiceMonitoringFacade",
     "ServiceStateSnapshot",
+    "SubscriptionStatus",
     "TopicDiscoveryFacade",
     "TopicDiscoveryState",
     "TopicInventory",
     "TopicSelection",
     "TopicSelectionState",
+    "TopicSubscriptionRequest",
+    "TopicSubscriptionState",
     "TypeAvailabilityStatus",
     "TypeCatalog",
     "TypeResolution",

@@ -579,6 +579,23 @@ Suggested PRs:
 2. Add Record tab backed by mocked app-state snapshots.
 3. Wire Record tab to the real service facade.
 
+Initial implementation status:
+
+- Added a `gui` package with DDS-free shell and Record-tab view models consumed
+  by the future Dear PyGui layer.
+- Added `UiFrameScheduler` to drain app-core events into a bounded UI event log
+  and build immutable shell snapshots on the GUI thread.
+- Added a mocked Record tab snapshot with target selector rows, candidate table
+  state, command buttons, tag input state, command history, monitoring summary,
+  diagnostics, and command-intent factories.
+- Added a lazy Dear PyGui renderer that accepts injected view providers and
+  command sinks, so tests can smoke-render the shell without a display or a
+  real Dear PyGui installation.
+- Added `--mock-gui-check` and optional `--gui` entry-point modes for the first
+  shell bridge.
+- Added headless GUI shell tests and expanded import-boundary tests so GUI
+  modules cannot import DDS, tkinter, or rs_gui_v1 implementation modules.
+
 ## Milestone G: Topics Tab
 
 Goal: Make discovery and sample inspection useful before plotting.

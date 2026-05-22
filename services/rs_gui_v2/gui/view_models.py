@@ -1,0 +1,143 @@
+"""Immutable shell view models for the rs_gui_v2 Dear PyGui layer."""
+
+from dataclasses import dataclass, field
+from typing import Iterable, Tuple
+
+from app_core import AppEvent, AppState, LifecyclePhase
+
+from .tabs.record_tab import RecordTabViewModel, build_mock_record_tab_view_model
+
+
+@dataclass(frozen=True)
+class ShellStatusItem:
+    """One compact value in the top application status strip."""
+
+    label: str
+    value: str
+    state: str = "normal"
+
+
+@dataclass(frozen=True)
+class EventLogEntry:
+    """UI-facing event log row."""
+
+    timestamp: str
+    level: str
+    source: str
+    message: str
+
+
+@dataclass(frozen=True)
+class ShellViewModel:
+    """Top-level immutable snapshot consumed by the GUI renderer."""
+
+    title: str
+    active_tab: str
+    status_items: Tuple[ShellStatusItem, ...] = field(default_factory=tuple)
+    record_tab: RecordTabViewModel = field(default_factory=build_mock_record_tab_view_model)
+    event_log: Tuple[EventLogEntry, ...] = field(default_factory=tuple)
+    inspector_title: str = "Inspector"
+    inspector_lines: Tuple[str, ...] = field(default_factory=tuple)
+
+
+def build_shell_view_model(
+        app_state: AppState,
+        record_tab: RecordTabViewModel,
+        event_log: Iterable[EventLogEntry] = (),
+        workspace_name: str = "Mock Workspace",
+        unsaved: bool = False,
+) -> ShellViewModel:
+    """Build the first shell snapshot from app state and a Record tab view."""
+
+    selected = record_tab.selected_candidate
+    inspector_lines = (
+        f"Target: {record_tab.target_label}",
+        f"Selected: {selected.candidate_id if selected else 'none'}",
+        f"Readiness: {record_tab.readiness}",
+        f"Observed: {record_tab.observed_state}",
+    ) + record_tab.diagnostics
+    title = f"Workspace: {workspace_name}{' *' if unsaved else ''}"
+    return ShellViewModel(
+        title=title,
+        active_tab="Record",
+        status_items=_status_items(app_state, record_tab),
+        record_tab=record_tab,
+        event_log=tuple(event_log),
+        inspector_title="Record Inspector",
+        inspector_lines=inspector_lines,
+    )
+
+
+def build_mock_shell_view_model(now: float = 120.0) -> ShellViewModel:
+    """Return a deterministic shell snapshot for GUI smoke rendering."""
+
+    app_state = AppState(
+        lifecycle=LifecyclePhase.RUNNING,
+        dds_enabled=True,
+        monitoring_enabled=True,
+        discovery_enabled=True,
+        admin_rpc_enabled=True,
+    )
+    event_log = (
+        EventLogEntry("13:12:01", "info", "runtime", "Monitoring active on domain 0"),
+        EventLogEntry("13:12:03", "info", "service_admin", "Pause acknowledged"),
+    )
+    return build_shell_view_model(
+        app_state,
+        build_mock_record_tab_view_model(now=now),
+        event_log=event_log,
+        workspace_name="Robot Run 03",
+        unsaved=True,
+    )
+
+
+def event_log_entry_from_event(event: AppEvent) -> EventLogEntry:
+    """Normalize an app-core event for the bottom shell event log."""
+
+    level = str(event.payload.get("level", "info"))
+    message = str(event.payload.get("message", ""))
+    if not message and event.event_type == "runtime.lifecycle_changed":
+        message = (
+            f"Lifecycle {event.payload.get('previous', '?')} -> "
+            f"{event.payload.get('current', '?')}"
+        )
+    if not message:
+        message = event.event_type
+    return EventLogEntry(
+        timestamp=_time_text(event.created_at),
+        level=level,
+        source=event.source,
+        message=message,
+    )
+
+
+def _status_items(app_state: AppState, record_tab: RecordTabViewModel) -> Tuple[ShellStatusItem, ...]:
+    error_count = len(app_state.recent_errors)
+    return (
+        ShellStatusItem("Runtime", app_state.lifecycle.value, _state_for_lifecycle(app_state.lifecycle)),
+        ShellStatusItem("DDS", "enabled" if app_state.dds_enabled else "off", "ok" if app_state.dds_enabled else "muted"),
+        ShellStatusItem("Admin", "enabled" if app_state.admin_rpc_enabled else "off", "ok" if app_state.admin_rpc_enabled else "muted"),
+        ShellStatusItem("Monitoring", "enabled" if app_state.monitoring_enabled else "off", "ok" if app_state.monitoring_enabled else "muted"),
+        ShellStatusItem("Record", record_tab.observed_state, "ok" if record_tab.observed_state.lower() == "running" else "normal"),
+        ShellStatusItem("Errors", str(error_count), "error" if error_count else "ok"),
+    )
+
+
+def _state_for_lifecycle(lifecycle: LifecyclePhase) -> str:
+    if lifecycle == LifecyclePhase.RUNNING:
+        return "ok"
+    if lifecycle == LifecyclePhase.FAILED:
+        return "error"
+    if lifecycle in (LifecyclePhase.STARTING, LifecyclePhase.STOPPING):
+        return "busy"
+    return "normal"
+
+
+def _time_text(created_at: float) -> str:
+    if created_at <= 0:
+        return "--:--:--"
+    seconds = int(created_at) % 86400
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    second = seconds % 60
+    return f"{hours:02d}:{minutes:02d}:{second:02d}"

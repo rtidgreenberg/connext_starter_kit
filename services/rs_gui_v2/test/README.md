@@ -22,9 +22,12 @@ Current layers:
 - `test_discovery_catalog.py`: DDS-free topic inventory, type resolution,
   internal-topic filtering, and persisted topic-selection DTOs
 - `test_headless_entrypoint.py`: headless app entry point startup/shutdown
+- `test_gui_shell.py`: mocked Dear PyGui shell snapshots, Record-tab selector
+  view models, command intents, event-log scheduling, and fake-renderer smoke
+  coverage without requiring a display
 - `test_import_boundaries.py`: no app-core imports from DDS, UI libraries, or
   `rs_gui_v1` implementation modules, with Connext imports limited to explicit
-  adapter modules
+  adapter modules; GUI modules are also checked for no DDS or v1 imports
 - `test_plotting.py`: DDS-free numeric plot buffers, bounded history,
   deterministic decimation, skipped/dropped counters, and UI-facing snapshots
 - `test_rti_admin_adapter.py`: RTI Service Admin adapter encoding and outcome
@@ -52,5 +55,6 @@ Current layers:
 - `test_workspace.py`: DDS-free versioned workspace JSON persistence,
   migration, validation, and declarative topic/field/plot selection round trips
 
-Future layers will add live adapter fixtures, GUI rendering, and GUI tests after
-the wireframe approval gate.
+Future layers will add live adapter fixtures and GUI rendering tests against a
+real Dear PyGui installation after the mocked shell is wired to live app-core
+snapshots.

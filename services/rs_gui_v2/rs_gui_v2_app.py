@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Headless entry point for rs_gui_v2."""
+"""Entry point for rs_gui_v2 headless and GUI checks."""
 
 import argparse
 import asyncio
 from typing import List, Optional
 
 from app_core import AppRuntime, LifecyclePhase
+from gui import build_mock_shell_view_model
+from gui.main_window import DearPyGuiShell, DearPyGuiUnavailable
 
 
 async def run_headless_once() -> LifecyclePhase:
@@ -23,6 +25,16 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="start and stop the app core, then exit",
     )
+    parser.add_argument(
+        "--mock-gui-check",
+        action="store_true",
+        help="build the mocked GUI shell snapshot, then exit",
+    )
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="run the Dear PyGui shell with mocked Record-tab data",
+    )
     return parser.parse_args(argv)
 
 
@@ -31,6 +43,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.headless_check:
         lifecycle = asyncio.run(run_headless_once())
         return 0 if lifecycle == LifecyclePhase.STOPPED else 1
+    if args.mock_gui_check:
+        view = build_mock_shell_view_model()
+        return 0 if view.record_tab.candidates else 1
+    if args.gui:
+        try:
+            DearPyGuiShell().run()
+            return 0
+        except DearPyGuiUnavailable as exc:
+            print(str(exc))
+            return 2
     _parse_args(["--help"])
     return 0
 

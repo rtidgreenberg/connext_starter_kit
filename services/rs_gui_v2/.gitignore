@@ -1,0 +1,9 @@
+# Generated type files recreated by setup.sh
+xml_types/
+
+# Runtime artifacts
+log_dir/
+
+# Python
+__pycache__/
+*.pyc

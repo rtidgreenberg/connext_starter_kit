@@ -33,6 +33,14 @@ front-loads those risks.
   on the other.
 - Create and approve mock wireframes before implementing rs_gui_v2 screens.
 - Build and test the app core in headless mode before wiring rich UI behavior.
+- Treat rs_gui_v2 as a Connext reference example: each new capability should
+  have a small app-level API, an isolated Connext adapter when DDS is needed,
+  and tests or docs that make the RTI API usage easy to find.
+- Keep direct `rti.*` imports out of pure models, facades, state reducers,
+  persistence, plotting buffers, and GUI modules. Direct Connext imports belong
+  only in explicitly named `rti_` or `dds_` adapter modules and their live tests.
+- Document the public API and the matching Connext API surface before expanding
+  a feature into UI code.
 - Do not let the UI layer or Dear PyGui own DDS entities or mutate widgets from
   DDS callbacks.
 - Model admin command acknowledgment separately from observed service state.
@@ -89,8 +97,14 @@ Milestone B initial implementation status:
 - Added deterministic fake admin and monitoring clients for headless tests.
 - Added import-boundary tests proving the headless app core does not import DDS,
   Dear PyGui, tkinter, or rs_gui_v1 implementation modules.
-- Deferred real RTI Service Admin and monitoring adapters to the next Milestone B
-  slice so this foundation remains transport-independent.
+- Added `app_core/services/rti_admin.py` as the v2-owned RTI Service Admin
+  request/reply adapter, with Connext imports isolated to the adapter module.
+- Added `setup.sh` and ignored `xml_types/` path so v2 generates its own
+  Service Admin XML DynamicData artifacts instead of depending on rs_gui_v1.
+- Added fake-Connext adapter tests for Service Admin resource paths, state and
+  tag payload encoding, readiness, reply timeout, rejected replies, and cleanup.
+- Deferred RTI service monitoring, live service fixtures, and broader DDS
+  runtime setup to later Milestone B slices.
 
 ## Milestone B: Service Admin and Monitoring Facades
 
@@ -105,6 +119,8 @@ Deliverables:
 - shared resource path builders.
 - service state model with requested, acknowledged, and observed states.
 - import-boundary tests proving service adapters do not depend on rs_gui_v1.
+- reference notes that show which RTI Service Admin and monitoring topics, types,
+  and resource paths are used by the Connext adapters.
 
 Acceptance gates:
 
@@ -115,6 +131,12 @@ Acceptance gates:
 - Existing rs_gui_v1 controller and monitor tests still pass as an external
   regression baseline.
 - rs_gui_v2 service adapters have no imports from `services/rs_gui_v1`.
+- Pure service models, facades, and fakes have no `rti.*` imports.
+- Any DDS-backed admin or monitoring client lives in an explicitly named Connext
+  adapter module and implements the DDS-free protocol.
+- Adapter tests show pause, resume, tag, shutdown, readiness, timeout, and
+  rejected-command behavior through typed outcomes. Live tests should be added
+  once v2 service fixtures are available.
 
 DDS notes:
 
@@ -127,12 +149,26 @@ Suggested PRs:
 
 1. Add `app_core/services/models.py` with service refs, readiness, command
   results, and monitoring snapshots.
-2. Add `app_core/services/admin.py` as a v2-owned RTI Service Admin client.
-3. Add `app_core/services/monitoring.py` as a v2-owned infrastructure service
-  monitoring client.
+2. Add `app_core/services/admin.py` as the DDS-free admin protocol and facade.
+3. Add `app_core/services/monitoring.py` as the DDS-free monitoring protocol and
+  facade.
 4. Add fake service adapters for deterministic headless tests.
 5. Add live service facade tests that compare against the existing service
   fixtures without importing rs_gui_v1 implementation modules.
+6. Add `app_core/services/rti_admin.py` and `rti_monitoring.py` only after the
+   DDS-free protocols and fakes are covered by tests.
+
+Reference API checklist:
+
+- `ServiceInstanceRef` names the service kind, service name, admin domain, and
+  monitoring domain without storing DDS handles.
+- `ServiceAdminFacade` exposes operator verbs and returns typed command
+  outcomes.
+- `rti_admin.py` shows request/reply topic names, request/reply types,
+  correlation handling, resource paths, readiness matching, and timeout mapping.
+- `ServiceMonitoringFacade` exposes normalized snapshots.
+- `rti_monitoring.py` shows config, event, and periodic monitoring readers and
+  maps DynamicData into typed snapshots.
 
 ## Milestone C: Discovery and Type Catalog
 
@@ -156,6 +192,9 @@ Acceptance gates:
   topics.
 - Discovery churn test handles writers/readers appearing and disappearing.
 - Internal `rti/*` and service topics are hidden by default but can be shown.
+- Discovery APIs distinguish DDS discovery metadata from local type availability
+  and reader/subscription state.
+- Connext built-in topic reader usage is isolated to a dedicated adapter module.
 
 DDS notes:
 
@@ -170,6 +209,17 @@ Suggested PRs:
 1. Add `app_core/discovery.py` with topic inventory models.
 2. Add `app_core/types.py` for local XML DynamicData type lookup.
 3. Add tests for filtering, ambiguity, and missing type handling.
+4. Add a dedicated `rti_discovery.py` adapter that demonstrates built-in topic
+   reader usage without leaking DDS objects into catalog models.
+
+Reference API checklist:
+
+- Discovery models identify domain, topic name, type name, endpoint direction,
+  endpoint count, and internal-topic classification.
+- Type catalog APIs identify whether local DynamicData type information exists
+  and why a type is unresolved or ambiguous.
+- Adapter tests include discovery churn and a topic with discovered metadata but
+  missing local type information.
 
 ## Milestone D: DynamicData Subscription Engine
 
@@ -190,6 +240,8 @@ Acceptance gates:
 - Sustained sample-rate test has bounded memory growth.
 - Multiple simultaneous topic subscriptions work in headless tests.
 - Invalid samples and instance state changes are represented, not silently lost.
+- Raw DynamicData reading, field extraction, sample caching, and plotting remain
+  separate modules with separate tests.
 
 DDS notes:
 
@@ -204,6 +256,18 @@ Suggested PRs:
 1. Add `app_core/subscriptions.py` and `app_core/sample_cache.py`.
 2. Add `app_core/extractors.py` for canonical field paths.
 3. Add headless load tests with a fixture publisher.
+4. Add `rti_subscriptions.py` as the only module in this layer that creates
+   Connext DynamicData readers.
+
+Reference API checklist:
+
+- Subscription APIs accept declarative topic/type/field selections, not DDS
+  handles.
+- `rti_subscriptions.py` shows topic lookup/creation, DynamicData reader
+  creation, `read`/`take` choice, sample-info handling, and shutdown.
+- Extractor tests show scalar, nested-struct, optional/missing, and nonnumeric
+  field behavior without requiring live DDS.
+- Sample-cache tests prove bounded memory and dropped/decimated sample counters.
 
 ## Milestone E: UI Wireframes and Approval
 

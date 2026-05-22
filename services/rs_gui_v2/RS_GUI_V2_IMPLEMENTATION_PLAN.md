@@ -816,6 +816,11 @@ Initial implementation status:
 - Rendered the mocked Replay tab in the Dear PyGui shell and covered fake-DPG
   button dispatch. Runtime-backed Replay command routing and live Replay Service
   adapter behavior remain future work.
+- Added a fake-first `ReplayTabController` and routed `replay.select_target`,
+  `replay.start`, `replay.pause`, `replay.resume`, `replay.stop`, and
+  `replay.shutdown` through the GUI session. The controller updates shell state
+  and command events only; live Replay Service Admin integration remains future
+  work.
 
 ## Milestone K: Convert Tab
 

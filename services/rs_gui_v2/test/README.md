@@ -36,6 +36,8 @@ Current layers:
 - `test_gui_replay_tab.py`: mocked Replay-tab service candidates, database
   selection state, start/pause/resume/stop/shutdown affordances, timeline rows,
   duplicate-target diagnostics, and command intents
+- `test_gui_replay_controller.py`: fake-first Replay-tab controller state
+  transitions and `replay.*` command handling before live Replay Service wiring
 - `test_gui_topics_tab.py`: mocked Topics-tab discovery rows, field picker,
   subscription/sample inspector state, `topics.*` command builders, and
   fake-renderer command callback coverage
@@ -44,8 +46,8 @@ Current layers:
   fake discovery scans, command-driven selection/subscription state,
   sample-inspector state, and headless degraded states
 - `test_gui_session.py`: runtime-backed GUI session wiring from app-core command
-  queues through Record and Topics controllers into shell snapshots and event
-  logs
+  queues through Record, Replay, and Topics controllers into shell snapshots and
+  event logs
 - `test_gui_workspace.py`: GUI workspace projection, save/load command routing,
   and restoration of Topics/Plots intent using workspace-local test output
 - `test_record_tab_controller.py`: Record tab wiring from the local process

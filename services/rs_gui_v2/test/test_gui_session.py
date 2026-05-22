@@ -31,7 +31,13 @@ from app_core.services import (
 )
 from gui import GuiShellSession, GuiShellSessionConfig, UiFrameScheduler
 from gui.main_window import DearPyGuiShell
-from gui.tabs import RecordTabController, RecordTabControllerConfig, TopicsTabController, TopicsTabControllerConfig
+from gui.tabs import (
+    RecordTabController,
+    RecordTabControllerConfig,
+    ReplayTabController,
+    TopicsTabController,
+    TopicsTabControllerConfig,
+)
 from test_gui_shell import FakeDpg
 from test_gui_topics_controller import _fake_discovery_client
 
@@ -73,7 +79,7 @@ def launch_request():
     )
 
 
-def build_session(runtime=None, admin_client=None, topics_controller=None):
+def build_session(runtime=None, admin_client=None, replay_controller=None, topics_controller=None):
     runtime = runtime or AppRuntime()
     manager = ServiceProcessManager(
         spawner=FakeSpawner(FakeHandle(4218)),
@@ -96,6 +102,7 @@ def build_session(runtime=None, admin_client=None, topics_controller=None):
         runtime=runtime,
         scheduler=UiFrameScheduler(runtime, max_event_log=20),
         record_controller=controller,
+        replay_controller=replay_controller,
         topics_controller=topics_controller,
         config=GuiShellSessionConfig(workspace_name="Robot Run 03", unsaved=True),
     )
@@ -204,6 +211,27 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(view.topics_tab.selected_topic.subscription_status, SubscriptionStatus.READER_CREATED.value)
         self.assertTrue(view.topics_tab.action_by_id["unsubscribe"].enabled)
         self.assertTrue(any(entry.message == "Dispatched topics.subscribe" for entry in view.event_log))
+
+    async def test_replay_commands_route_to_replay_controller(self):
+        session, _admin_client, _launch = build_session(replay_controller=ReplayTabController.mock())
+        await session.next_view_async(process_commands=False)
+        session.command_sink(AppCommand(
+            command_type="replay.start",
+            payload={
+                "target_id": "launch-replay-main",
+                "database_path": "services/replay_input/robot_run_03",
+                "playback_rate": 2.0,
+            },
+            command_id="start-replay",
+            created_at=4.5,
+        ))
+
+        view = await session.next_view_async()
+
+        self.assertEqual(view.replay_tab.observed_state, "RUNNING")
+        self.assertEqual(view.replay_tab.playback_rate, 2.0)
+        self.assertTrue(view.replay_tab.action_by_id["pause"].enabled)
+        self.assertTrue(any(entry.message == "Dispatched replay.start" for entry in view.event_log))
 
     async def test_topics_filter_command_updates_next_shell_snapshot(self):
         session, _admin_client, _launch = build_session(topics_controller=build_topics_controller())

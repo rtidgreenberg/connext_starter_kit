@@ -330,6 +330,9 @@ Initial implementation note:
   information shape and emits `replay.*` command intents only. Live Replay
   Service control, command history, and replay-to-topic E2E validation are still
   later phases.
+- The GUI session now handles mocked `replay.*` commands through a controller so
+  selecting a Replay target and changing start/pause/resume/stop/shutdown state
+  are visible before live Service Admin wiring is added.
 
 ### 4. Convert Tab
 

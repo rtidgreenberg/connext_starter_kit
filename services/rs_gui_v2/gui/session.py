@@ -7,7 +7,12 @@ from typing import Any, Optional, Tuple
 from app_core import AppCommand, AppEvent, AppRuntime
 
 from .scheduler import UiFrameScheduler
-from .tabs import PlotsTabController, RecordTabController, TopicsTabController
+from .tabs import (
+    PlotsTabController,
+    RecordTabController,
+    ReplayTabController,
+    TopicsTabController,
+)
 from .view_models import ShellViewModel
 from .workspace import GuiWorkspaceController
 
@@ -35,6 +40,7 @@ class GuiShellSession:
             runtime: AppRuntime,
             scheduler: UiFrameScheduler,
             record_controller: RecordTabController,
+            replay_controller: Optional[ReplayTabController] = None,
             topics_controller: Optional[TopicsTabController] = None,
             plots_controller: Optional[PlotsTabController] = None,
             workspace_controller: Optional[GuiWorkspaceController] = None,
@@ -43,6 +49,7 @@ class GuiShellSession:
         self._runtime = runtime
         self._scheduler = scheduler
         self._record_controller = record_controller
+        self._replay_controller = replay_controller
         self._topics_controller = topics_controller
         self._plots_controller = plots_controller
         self._config = config or GuiShellSessionConfig()
@@ -58,6 +65,10 @@ class GuiShellSession:
     @property
     def record_controller(self) -> RecordTabController:
         return self._record_controller
+
+    @property
+    def replay_controller(self) -> Optional[ReplayTabController]:
+        return self._replay_controller
 
     @property
     def topics_controller(self) -> Optional[TopicsTabController]:
@@ -106,6 +117,9 @@ class GuiShellSession:
         if process_commands:
             await self.process_pending_commands(limit=self._config.command_drain_limit)
         record_view = await self._record_controller.refresh_view()
+        replay_view = None
+        if self._replay_controller is not None:
+            replay_view = await self._replay_controller.refresh_view()
         topics_view = None
         if self._topics_controller is not None:
             topics_view = await self._topics_controller.refresh_view()
@@ -114,6 +128,7 @@ class GuiShellSession:
             plots_view = await self._plots_controller.refresh_view()
         return self._scheduler.next_view(
             record_tab=record_view,
+            replay_tab=replay_view,
             topics_tab=topics_view,
             plots_tab=plots_view,
             workspace_name=self._config.workspace_name,
@@ -162,6 +177,10 @@ class GuiShellSession:
             if self._topics_controller is None:
                 raise ValueError(f"Unsupported GUI command type: {command.command_type}")
             return self._topics_controller.handle_command(command)
+        if command.command_type.startswith("replay."):
+            if self._replay_controller is None:
+                raise ValueError(f"Unsupported GUI command type: {command.command_type}")
+            return self._replay_controller.handle_command(command)
         if command.command_type.startswith("workspace."):
             result = self._workspace_controller.handle_command(
                 command,

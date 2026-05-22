@@ -19,6 +19,7 @@ from .replay_tab import (
     build_replay_action_command,
     build_replay_tab_view_model,
 )
+from .replay_controller import ReplayTabController, ReplayTabControllerConfig
 from .plots_controller import (
     PlotsTabController,
     PlotsTabControllerConfig,
@@ -60,6 +61,8 @@ __all__ = [
     "RecordTabViewModel",
     "ReplayActionView",
     "ReplayTargetRow",
+    "ReplayTabController",
+    "ReplayTabControllerConfig",
     "ReplayTabViewModel",
     "ReplayTimelineRow",
     "PlotActionView",

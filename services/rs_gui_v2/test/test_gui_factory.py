@@ -105,6 +105,7 @@ class TestGuiShellFactory(unittest.TestCase):
         self.assertTrue(view.title.endswith("*"))
         self.assertEqual(view.record_tab.selected_candidate_id, "launch-recording-main")
         self.assertEqual(view.record_tab.selected_candidate.control_name, "recording_service_8f4f2a1c")
+        self.assertEqual(view.replay_tab.selected_target.control_name, "replay_service_2d91c4a0")
         self.assertIn(("memory_mb", "180"), view.record_tab.monitoring_summary)
         self.assertEqual(view.topics_tab.selected_topic.topic_name, "RobotTelemetry")
         self.assertEqual(view.plots_tab.selected_plot_name, "Robot Motion")
@@ -144,6 +145,7 @@ class TestGuiShellFactory(unittest.TestCase):
         self.assertEqual(assembly.process_manager.launches(), ())
         self.assertEqual(view.record_tab.candidates, ())
         self.assertEqual(view.record_tab.target_label, "No Recording Service")
+        self.assertEqual(view.replay_tab.targets, ())
         self.assertEqual(view.topics_tab.rows, ())
         self.assertEqual(view.plots_tab.rows, ())
 

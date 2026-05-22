@@ -48,6 +48,7 @@ from .tabs import (
     PlotsTabControllerConfig,
     RecordTabController,
     RecordTabControllerConfig,
+    ReplayTabController,
     TopicsTabController,
     TopicsTabControllerConfig,
 )
@@ -115,6 +116,7 @@ class GuiShellAssembly:
     runtime: AppRuntime
     process_manager: ServiceProcessManager
     record_controller: RecordTabController
+    replay_controller: ReplayTabController
     topics_controller: TopicsTabController
     plots_controller: PlotsTabController
     workspace_controller: GuiWorkspaceController
@@ -207,6 +209,10 @@ def build_gui_shell_assembly(
             selected_plot_name="Robot Motion" if config.mode == GuiShellSessionMode.MOCK else "",
         ),
     )
+    replay_controller = (
+        ReplayTabController.mock()
+        if config.mode == GuiShellSessionMode.MOCK else ReplayTabController()
+    )
     scheduler = UiFrameScheduler(
         runtime,
         max_event_log=config.event_log_max_size,
@@ -216,6 +222,7 @@ def build_gui_shell_assembly(
         runtime=runtime,
         scheduler=scheduler,
         record_controller=controller,
+        replay_controller=replay_controller,
         topics_controller=topics_controller,
         plots_controller=plots_controller,
         workspace_controller=GuiWorkspaceController(
@@ -234,6 +241,7 @@ def build_gui_shell_assembly(
         runtime=runtime,
         process_manager=process_manager,
         record_controller=controller,
+        replay_controller=replay_controller,
         topics_controller=topics_controller,
         plots_controller=plots_controller,
         workspace_controller=session.workspace_controller,

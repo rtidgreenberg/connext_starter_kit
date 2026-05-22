@@ -1,6 +1,6 @@
 """Replay tab view models and command factories for rs_gui_v2."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 from app_core import AppCommand
@@ -102,6 +102,10 @@ def build_replay_tab_view_model(
 
     targets = tuple(targets)
     selected_target_id = _selected_target_id(targets, selected_target_id)
+    targets = tuple(
+        replace(target, selected=target.target_id == selected_target_id)
+        for target in targets
+    )
     selected_target = next(
         (target for target in targets if target.target_id == selected_target_id),
         None,

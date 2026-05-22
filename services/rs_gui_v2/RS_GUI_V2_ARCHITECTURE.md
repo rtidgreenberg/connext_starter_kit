@@ -209,6 +209,26 @@ Core concepts:
 
 - `ServiceInstanceRef`: service kind, service name, admin domain, monitoring
   domain, and optional configuration paths.
+- Two control layers: application-level control uses Service Admin requests
+  addressed by the unique session-GUID service name; process-level recovery uses
+  local host/pid identity to terminate a process only when graceful service
+  control fails.
+- Service name uniqueness: the tuple of service kind, service name, and admin
+  domain must be unique for controllable services so Service Admin requests can
+  target exactly one service instance.
+- Generated identity: GUI-created services should keep a human-facing service
+  label plus a session-scoped GUID-backed control name. The control name, not
+  just metadata beside the service, must be the name used in the launched
+  service configuration and Service Admin target.
+- Discovered identity: store hostname, application/process id when available,
+  participant key/GUID, participant name, and last-seen timestamps from DDS
+  discovery/monitoring as candidate evidence. This identifies observed process
+  instances for diagnostics and cleanup, but does not replace the unique service
+  control name used by Service Admin.
+- Process selector view: Record and Replay UI surfaces should present a compact
+  target selector backed by an expandable candidate table. Selecting a candidate
+  scopes readiness, stats, command history, and available controls to that
+  process/service instance.
 - `ServiceAdminClient`: pause, resume, shutdown, tag, and service-specific
   commands using RTI Service Admin request/reply.
 - `ServiceMonitoringClient`: config, event, and periodic monitoring readers.
@@ -222,6 +242,43 @@ Reference example guidance:
 
 - `ServiceAdminFacade` should expose operator verbs such as `pause`, `resume`,
   `shutdown`, and `tag`.
+- The launch/configuration path should enforce unique service names before a
+  service is started; restored workspaces and discovered external services
+  should surface duplicate names as a validation conflict.
+- For GUI-created services, generate a new service session GUID each time the
+  GUI creates or restarts a service process, derive the admin control name from
+  the human label and session GUID, and persist only the user-facing launch
+  intent needed to recreate the service on the next run.
+- If the GUI restarts while an old service process is still running, treat that
+  process as a discovered external candidate with its old control name instead
+  of assuming it belongs to the new session.
+- For discovered external services, preserve discovery identity fields alongside
+  the service name so the UI can show exactly which host/application instance is
+  in conflict and whether it is the same process across refreshes.
+- In Connext Python, collect participant process identity from
+  `DomainParticipant.discovered_participants()` and
+  `DomainParticipant.discovered_participant_data(handle)`, or from
+  `participant.participant_reader`. The returned `ParticipantBuiltinTopicData`
+  exposes a `property` map; read `dds.sys_info.hostname` and
+  `dds.sys_info.process_id` with `property.try_get(...)` when present.
+- Service monitoring config samples can also report service process identity:
+  `ServiceConfig.process.id`, `ServiceConfig.host.name`, and
+  `ServiceConfig.application_guid`. Prefer monitoring identity when correlating
+  RTI Infrastructure Service processes, and use participant discovery properties
+  as additional evidence.
+- Service Admin commands should be disabled for duplicate service-name targets
+  because selecting a process row does not make a DDS admin request uniquely
+  addressable when multiple services share the same kind, name, and admin
+  domain.
+- Service shutdown should be a two-layer flow: first request graceful shutdown
+  through Service Admin when the control target is unique, then offer local
+  process termination only if the command is rejected, times out, or monitoring
+  shows the process is still alive after the grace period.
+- Local process termination belongs to the launch/process-control adapter, not
+  the Service Admin adapter. It is available only for GUI-launched processes or
+  local-host candidates whose pid/process handle can be validated immediately
+  before termination. The pid discovered from DDS is an input to that local
+  validation, not a Service Admin address.
 - `rti_admin.py` should expose the Connext mechanics behind those verbs:
   request topic, reply topic, request type, reply type, resource path, timeout,
   and correlation handling.
@@ -269,7 +326,9 @@ Reference example guidance:
 
 ### 4. Visualization Pipeline Layer
 
-Owns live data subscriptions requested by the GUI.
+Owns DDS data subscriptions requested by the GUI, regardless of whether samples
+come from live publishers or from Replay Service publishing recorded data back
+onto DDS topics.
 
 Responsibilities:
 
@@ -286,6 +345,11 @@ graduate into plotting only when the UX and extraction rules are clear.
 
 Reference example guidance:
 
+- Treat live and replayed data as the same visualization path after the data is
+  on DDS: discovery finds topics, subscriptions create DynamicData readers,
+  sample envelopes feed inspectors and plots.
+- Replay controls may start, stop, or configure the source of replayed samples,
+  but Replay should not own plot buffers or bypass the Topics/Plots pipeline.
 - Keep raw DynamicData reading separate from field extraction and plotting.
 - Keep declarative subscription requests, sample envelopes, and bounded caches
   in `subscriptions.py`; keep Connext DynamicData topic/reader creation in

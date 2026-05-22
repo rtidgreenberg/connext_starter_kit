@@ -186,6 +186,31 @@ Reference API checklist:
 
 - `ServiceInstanceRef` names the service kind, service name, admin domain, and
   monitoring domain without storing DDS handles.
+- Enforce service-name uniqueness for the service kind and admin domain before
+  launch, during workspace restore, and when discovered services are merged into
+  the operator target list.
+- For GUI-created services, generate a fresh session GUID each time the GUI
+  creates or restarts a service process, derive the launched service control name
+  from the operator label plus that session GUID, and store the editable label
+  and launch intent in the workspace document without reusing old session GUIDs.
+- Keep application-level control and process-level recovery separate in the API:
+  Service Admin commands target the unique service control name, while process
+  termination uses verified local host/pid identity only after graceful shutdown
+  fails.
+- Store discovered hostname, application/process id when available, participant
+  key/GUID, participant name, and last-seen timestamps for each service
+  candidate so duplicate-name conflicts can still identify the physical process
+  instances involved.
+- Extend the RTI discovery adapter to collect participant system properties from
+  `ParticipantBuiltinTopicData.property`, including `dds.sys_info.hostname` and
+  `dds.sys_info.process_id`, using `discovered_participants()` /
+  `discovered_participant_data(handle)` or the participant built-in topic reader.
+- Extend the RTI monitoring adapter to preserve service identity fields from
+  config samples, including `application_guid`, `process.id`, and `host.name`,
+  as candidate-correlation evidence.
+- Model shutdown as a two-layer operation: Service Admin graceful shutdown first,
+  followed by a guarded local process termination fallback only for verified
+  local process candidates when graceful shutdown fails or does not complete.
 - `ServiceAdminFacade` exposes operator verbs and returns typed command
   outcomes.
 - `rti_admin.py` shows request/reply topic names, request/reply types,
@@ -424,6 +449,77 @@ Suggested PRs:
 2. Review and revise wireframes with operator feedback.
 3. Freeze the approved MVP UI scope before rs_gui_v2 widget implementation.
 
+Initial wireframe draft status:
+
+- Expanded [RS_GUI_V2_WIREFRAME_PLAN.md](RS_GUI_V2_WIREFRAME_PLAN.md) with
+  low-fidelity Markdown sketches for App Shell, Record, Replay, Convert,
+  Topics, Plots, and Workspace/Settings.
+- Added app-core API annotations for each view so the future Dear PyGui shell
+  can stay snapshot-driven and DDS-free.
+- Added state tables for command lifecycle, topic lifecycle, degraded restore,
+  missing type, unavailable service, invalid sample, high-rate plotting, and
+  job failure behavior.
+- Added duplicate-service tracking guidance so accidental multiple Recording or
+  Replay Service instances are represented as ambiguous physical candidates for
+  one logical `ServiceInstanceRef`, rather than silently selecting one process.
+- Added candidate-level control guidance that distinguishes local process stop
+  from Service Admin shutdown, and keeps Service Admin controls disabled when a
+  duplicate service name would make the DDS admin target non-unique.
+- Added service-name uniqueness guidance so duplicate service kind/name/admin
+  domain combinations are treated as validation conflicts and Service Admin
+  controls stay disabled until the conflict is resolved.
+- Added session-GUID-backed service control-name guidance so GUI-created
+  services can keep friendly labels while producing fresh, uniquely targetable
+  Service Admin names on each service launch or restart.
+- Added discovery-identity guidance so host/app ids and participant keys can be
+  stored as candidate evidence without replacing the unique service control name
+  required for Service Admin targeting.
+- Added two-layer shutdown guidance so graceful Service Admin shutdown is tried
+  before local process termination, and process termination remains an explicit,
+  validated fallback path.
+- Added Connext discovery guidance for retrieving host and process id from
+  participant builtin topic properties while keeping PID-based termination as a
+  local fallback, not a Service Admin command target.
+- Added an explicit two-layer control summary: unique session-GUID application
+  names for Service Admin commands, and stored process ids for guarded local
+  termination fallback.
+- Added Record/Replay process selector guidance so multiple launched or
+  discovered candidates can be selected, inspected, and controlled without
+  silently choosing one.
+- Added Milestone F.0 headless service control foundation with session-GUID
+  control identities, process candidates, selector state, duplicate-target
+  detection, and guarded process-termination availability tests.
+- Marked the wireframe package as drafted for review, not yet approved.
+
+## Milestone F.0: Headless Service Candidate and Control Identity Foundation
+
+Goal: Prove the service/process identity model before adding Dear PyGui state.
+
+Implemented:
+
+- `ServiceLaunchIntent` captures persisted operator launch intent without
+  storing runtime DDS handles or stale session GUIDs.
+- `ServiceControlIdentity` derives a fresh session-GUID service control name for
+  each GUI-created launch/restart and exposes the corresponding
+  `ServiceInstanceRef` for Service Admin commands.
+- `ServiceProcessCandidate` stores launched or discovered process evidence:
+  source, host, pid, participant identity, application guid, config paths,
+  state, metrics, ownership, confidence, and timestamps.
+- `ServiceCandidateSelection` backs the Record/Replay target selector and scopes
+  control availability to the selected process candidate.
+- `ServiceControlAvailability` distinguishes Service Admin availability from
+  guarded local process termination fallback.
+
+Acceptance gates:
+
+- Fresh session GUIDs produce unique Service Admin control names.
+- Duplicate live candidates for the same service kind/name/admin-domain disable
+  Service Admin controls.
+- Process termination is enabled only after graceful shutdown failure and only
+  for owned or verified-local process candidates.
+- Service control foundation remains DDS-free, GUI-free, and independent of
+  rs_gui_v1.
+
 ## Milestone F: RS GUI v2 Shell and Record Tab MVP
 
 Goal: Deliver the first useful operator workflow while proving the UI bridge.
@@ -432,8 +528,8 @@ Deliverables:
 
 - UI scheduler that drains app-core events on the Dear PyGui thread.
 - status bar and event log panel.
-- Record tab with service status, command buttons, tag controls, command history,
-  and observed-state display.
+- Record tab with target selector/dropdown, candidate table, service status,
+  command buttons, tag controls, command history, and observed-state display.
 - error presentation for timeout, no match, rejected command, and stale XML
   types.
 
@@ -441,6 +537,8 @@ Acceptance gates:
 
 - UI remains responsive during service monitoring bursts.
 - Record tab can pause/resume/tag/shutdown a live fixture service.
+- Record tab can select among multiple launched or discovered Recording Service
+  candidates and scope stats/controls to the selected candidate.
 - Command history shows request id, target resource, reply status, and observed
   state when available.
 - No Dear PyGui calls occur from DDS/runtime threads.
@@ -492,8 +590,8 @@ Suggested PRs:
 
 ## Milestone H: Plots Tab
 
-Goal: Plot selected numeric fields from live DynamicData streams with bounded
-resource usage.
+Goal: Plot selected numeric fields from live or replayed DynamicData streams
+with bounded resource usage.
 
 Deliverables:
 
@@ -506,6 +604,8 @@ Deliverables:
 Acceptance gates:
 
 - Plot remains responsive under sustained fixture traffic.
+- Plot remains source-agnostic: live publishers and Replay Service output both
+  feed the same topic subscription, sample cache, and plot buffer pipeline.
 - Missing or invalid values do not break the plot loop.
 - Memory remains bounded during a long plotting test.
 - Plot configuration can be serialized by the workspace layer.
@@ -521,7 +621,7 @@ Suggested PRs:
 
 1. Add `app_core/plotting.py` with series reducers and buffers.
 2. Add Plots tab with mocked series.
-3. Wire Plots tab to selected live fields.
+3. Wire Plots tab to selected live or replayed DDS fields.
 
 ## Milestone I: Workspace Persistence
 
@@ -564,7 +664,8 @@ are proven.
 
 Deliverables:
 
-- replay service target selection.
+- replay service target selection with process selector/dropdown and candidate
+  table.
 - recording database selection.
 - replay start, pause, resume, stop, and shutdown actions.
 - replay rate, loop, and time-window controls where supported by config.
@@ -573,7 +674,11 @@ Deliverables:
 Acceptance gates:
 
 - Live fixture replay can be controlled through the facade and UI.
+- Replay tab can select among multiple Replay Service candidates and scope
+  progress, stats, and controls to the selected candidate.
 - Replayed data can be inspected in Topics and plotted in Plots.
+- Replay visualization uses the same Topics/Plots pipeline as live data after
+  Replay Service publishes samples onto DDS topics.
 - Replay command errors and monitoring lag are visible.
 
 DDS notes:

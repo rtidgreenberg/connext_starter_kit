@@ -79,6 +79,8 @@ services/rs_gui_v2/
 |   +-- rti_discovery.py        # Connext built-in topic reader adapter
 |   +-- types.py                # XML DynamicData type registry
 |   +-- rti_types.py            # Connext QosProvider DynamicType lookup adapter
+|   +-- fields.py               # DDS-free field catalog DTOs
+|   +-- rti_fields.py           # Connext DynamicType field catalog adapter
 |   +-- subscriptions.py        # DynamicData reader lifecycle
 |   +-- rti_subscriptions.py    # Connext DynamicData reader adapter
 |   +-- extractors.py           # Field-path compilation and value extraction
@@ -157,6 +159,7 @@ Rules for new modules:
 | Service monitoring | `ServiceMonitoringClient` implementation | `app_core/services/rti_monitoring.py` | monitoring config/event/periodic topics, DynamicData readers, sample normalization |
 | Topic discovery | `TopicDiscoveryFacade`, `TopicInventory`, `TopicSelectionState` | `app_core/rti_discovery.py` | publication/subscription built-in topic readers, endpoint metadata, discovery churn |
 | Type catalog | `TypeCatalog`, `TypeResolution` | `app_core/types.py`, `app_core/rti_types.py` | XML type enumeration, local type availability, `QosProvider.type()` DynamicType lookup |
+| Field catalog | `FieldCatalog`, `FieldDescriptor` | `app_core/fields.py`, `app_core/rti_fields.py` | DynamicType member traversal, scalar/collection classification, plot eligibility |
 | Data subscription | `TopicSubscriptionRequest`, `SampleEnvelope`, `SampleCache` | `app_core/subscriptions.py`, `app_core/rti_subscriptions.py` | DynamicData topics/readers, `take`, sample info, instance state, reader shutdown |
 | Field extraction | `FieldPath`, `FieldExtraction` | `app_core/extractors.py` | DDS-free extraction from mapping/object/DynamicData-like sample values |
 | Replay visualization | normal topic subscription APIs | `app_core/rti_subscriptions.py` | replayed samples are just DDS data consumed by Topics/Plots |
@@ -256,6 +259,9 @@ Reference example guidance:
 - Keep XML parsing and type-resolution DTOs in `types.py`; keep Connext
   `QosProvider.type()` calls in `rti_types.py` so type lookup remains a clear,
   standalone reference example.
+- Keep field catalog DTOs and plot-eligibility decisions in `fields.py`; keep
+  Connext DynamicType member traversal in `rti_fields.py` so the field picker
+  can explain what is selectable without creating readers.
 
 ### 4. Visualization Pipeline Layer
 
@@ -285,6 +291,9 @@ Reference example guidance:
 - Keep field-path parsing and value classification DDS-free in `extractors.py`;
   extract from mapping/object/DynamicData-like values but do not create readers
   or plot series there.
+- Use `FieldCatalog` metadata to drive field pickers and initial plot
+  eligibility, then use `extractors.py` only for sample values that arrive from
+  active subscriptions.
 - Keep backpressure visible through dropped/decimated sample counters.
 
 ### 5. Workspace Persistence Layer

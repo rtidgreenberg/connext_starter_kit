@@ -10,6 +10,14 @@ from .extractors import (
     extract_field,
     extract_fields,
 )
+from .fields import (
+    FieldCatalog,
+    FieldCatalogStatus,
+    FieldCollectionKind,
+    FieldDescriptor,
+    FieldScalarKind,
+    field_catalog_from_descriptors,
+)
 from .discovery import (
     DiscoveredEndpoint,
     DiscoveredTopic,
@@ -70,6 +78,12 @@ __all__ = [
     "FieldPath",
     "FieldPathStep",
     "FieldValueKind",
+    "FieldCatalog",
+    "FieldCatalogStatus",
+    "FieldCollectionKind",
+    "FieldDescriptor",
+    "FieldScalarKind",
+    "field_catalog_from_descriptors",
     "FakeTopicDiscoveryClient",
     "FakeServiceAdminClient",
     "FakeServiceMonitoringClient",

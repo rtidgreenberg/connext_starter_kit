@@ -344,8 +344,20 @@ Initial implementation status:
   DynamicData-like item access, sequence indexes, missing fields, null values,
   invalid paths, invalid samples, and numeric/text/boolean/sequence
   classification.
-- Deferred plot decimation, type-driven field catalogs, and live fixture
-  publishers to later Milestone D slices.
+- Added `app_core/fields.py` with DDS-free `FieldCatalog`, `FieldDescriptor`,
+  catalog status, scalar-kind classification, collection-kind classification,
+  parent/child path metadata, and plot-eligibility helpers.
+- Added `app_core/rti_fields.py` as the v2-owned Connext DynamicType field
+  catalog adapter. It resolves DynamicTypes through `RtiTypeRegistry`, walks
+  struct and union members, records bounded strings and sequences, classifies
+  numeric scalar leaves, and keeps collection expansion explicit.
+- Added headless field catalog tests for DTO round trips, child-path population,
+  plottable-field filtering, nested DynamicType traversal, union variants,
+  unresolved types, depth limits, and optional collection-content expansion.
+- Verified a real smoke builds field catalogs from generated v2 XML DynamicTypes
+  and finds plottable numeric leaves without creating DDS readers.
+- Deferred plot decimation and live fixture publishers to later Milestone D
+  slices.
 
 ## Milestone E: UI Wireframes and Approval
 

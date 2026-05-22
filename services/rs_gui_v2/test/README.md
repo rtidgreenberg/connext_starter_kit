@@ -15,6 +15,8 @@ Current layers:
 - `test_field_extractors.py`: DDS-free field-path parsing, extraction from
   mapping/object/DynamicData-like values, invalid sample handling, and value
   classification
+- `test_fields.py`: DDS-free field catalog DTOs, child path population, and
+  plottable field filtering
 - `test_discovery_catalog.py`: DDS-free topic inventory, type resolution,
   internal-topic filtering, and persisted topic-selection DTOs
 - `test_headless_entrypoint.py`: headless app entry point startup/shutdown
@@ -25,6 +27,9 @@ Current layers:
   mapping using fake Connext modules
 - `test_rti_discovery_adapter.py`: RTI built-in topic discovery sample mapping,
   endpoint churn, and cleanup using fake Connext modules
+- `test_rti_fields_adapter.py`: RTI DynamicType member traversal, scalar and
+  collection classification, union handling, and depth limits using fake Connext
+  modules
 - `test_rti_monitoring_adapter.py`: RTI service monitoring reader setup and
   config/event/periodic snapshot normalization using fake Connext modules
 - `test_rti_subscriptions_adapter.py`: RTI DynamicData topic/reader creation,
@@ -41,6 +46,5 @@ Current layers:
 - `test_subscriptions.py`: DDS-free subscription requests, sample envelopes,
   subscription state counters, and bounded sample cache behavior
 
-Future layers will add live adapter fixtures, type-driven field catalogs,
-workspace file persistence, plotting, and GUI tests after the wireframe approval
-gate.
+Future layers will add live adapter fixtures, workspace file persistence,
+plotting, and GUI tests after the wireframe approval gate.

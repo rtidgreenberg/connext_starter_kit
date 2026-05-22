@@ -123,6 +123,9 @@ class TestMonitoringSampleNormalization(unittest.TestCase):
     def test_config_service_sample_normalizes_details(self):
         branch = SimpleNamespace(
             application_name="deploy",
+            application_guid=SimpleNamespace(value=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
+            process=SimpleNamespace(id=4321),
+            host=SimpleNamespace(name="dev-host", id=7, target="x64Linux4gcc7.3.0"),
             builtin_sqlite=SimpleNamespace(db_directory="/tmp/recordings"),
         )
         snapshot = normalize_monitoring_sample(
@@ -134,6 +137,11 @@ class TestMonitoringSampleNormalization(unittest.TestCase):
         self.assertEqual(snapshot.kind, MonitoringSnapshotKind.CONFIG)
         self.assertEqual(snapshot.state, "configured")
         self.assertEqual(snapshot.details["service_name"], "deploy")
+        self.assertEqual(snapshot.details["application_guid"], "000102030405060708090a0b0c0d0e0f")
+        self.assertEqual(snapshot.details["process_id"], 4321)
+        self.assertEqual(snapshot.details["host_name"], "dev-host")
+        self.assertEqual(snapshot.details["host_id"], 7)
+        self.assertEqual(snapshot.details["host_target"], "x64Linux4gcc7.3.0")
         self.assertEqual(snapshot.details["db_directory"], "/tmp/recordings")
 
     def test_config_topic_sample_normalizes_topic_name(self):

@@ -266,6 +266,25 @@ def _parse_config_sample(service: ServiceInstanceRef, data: Any) -> Optional[Mon
             "service_detected": True,
             "service_name": _to_text(_field(recording_service, "application_name", service.name)),
         }
+        application_guid = _guid_to_text(_field(recording_service, "application_guid", None))
+        if application_guid:
+            details["application_guid"] = application_guid
+        process = _field(recording_service, "process", None)
+        if process is not None:
+            process_id = _to_int(_field(process, "id", -1), -1)
+            if process_id >= 0:
+                details["process_id"] = process_id
+        host = _field(recording_service, "host", None)
+        if host is not None:
+            host_name = _to_text(_field(host, "name", ""))
+            if host_name:
+                details["host_name"] = host_name
+            host_id = _to_int(_field(host, "id", -1), -1)
+            if host_id >= 0:
+                details["host_id"] = host_id
+            host_target = _to_text(_field(host, "target", ""))
+            if host_target:
+                details["host_target"] = host_target
         sqlite = _field(recording_service, "builtin_sqlite", None)
         if sqlite is not None:
             details["db_directory"] = _to_text(_field(sqlite, "db_directory", ""))
@@ -431,6 +450,18 @@ def _to_text(value: Any, default: str = "") -> str:
     if value is None or value is _MISSING:
         return default
     return str(value)
+
+
+def _guid_to_text(value: Any) -> str:
+    if value is None or value is _MISSING:
+        return ""
+    raw = _field(value, "value", None)
+    if raw is None:
+        return _to_text(value)
+    try:
+        return "".join(f"{int(item) & 0xff:02x}" for item in raw)
+    except Exception:
+        return _to_text(raw)
 
 
 def _safe_close(entity: Any) -> None:

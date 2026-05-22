@@ -7,7 +7,7 @@ The DDS-free discovery catalog and selection models remain in `discovery.py`.
 import asyncio
 from dataclasses import dataclass
 import time
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 from .connext_environment import detect_nddshome, ensure_rti_license, license_setup_message
 from .discovery import (
@@ -20,6 +20,13 @@ from .types import TypeCatalog
 
 
 DEFAULT_DISCOVERY_POLL_SEC = 0.25
+SYS_INFO_PROPERTY_NAMES = (
+    "dds.sys_info.hostname",
+    "dds.sys_info.process_id",
+    "dds.sys_info.username",
+    "dds.sys_info.executable_filepath",
+    "dds.sys_info.target",
+)
 
 
 @dataclass(frozen=True)
@@ -111,16 +118,19 @@ class RtiTopicDiscoveryClient:
         return session
 
     def _take_builtin_samples(self, session: _DiscoverySession, domain_id: int) -> None:
+        participant_identity = _participant_identity_by_key(session.participant)
         for endpoint in _endpoints_from_reader(
                 getattr(session.participant, "publication_reader"),
                 domain_id,
                 EndpointDirection.WRITER,
+            participant_identity,
         ):
             session.inventory.apply(endpoint)
         for endpoint in _endpoints_from_reader(
                 getattr(session.participant, "subscription_reader"),
                 domain_id,
                 EndpointDirection.READER,
+            participant_identity,
         ):
             session.inventory.apply(endpoint)
 
@@ -140,9 +150,10 @@ def _endpoints_from_reader(
         reader: Any,
         domain_id: int,
         direction: EndpointDirection,
+        participant_identity: Optional[Mapping[str, Mapping[str, Any]]] = None,
 ) -> Iterable[DiscoveredEndpoint]:
     for sample in _reader_take(reader):
-        endpoint = endpoint_from_builtin_sample(domain_id, direction, sample)
+        endpoint = endpoint_from_builtin_sample(domain_id, direction, sample, participant_identity)
         if endpoint is not None:
             yield endpoint
 
@@ -151,6 +162,7 @@ def endpoint_from_builtin_sample(
         domain_id: int,
         direction: EndpointDirection,
         sample: Any,
+    participant_identity: Optional[Mapping[str, Mapping[str, Any]]] = None,
 ) -> Optional[DiscoveredEndpoint]:
     data, info = _sample_data_and_info(sample)
     alive = bool(getattr(info, "valid", False))
@@ -173,19 +185,92 @@ def endpoint_from_builtin_sample(
         )
     if not topic_name:
         return None
+    participant_key = _key_to_text(_field(data, "participant_key", ""))
+    identity = dict((participant_identity or {}).get(participant_key, {}))
+    participant_name = str(identity.pop("participant_name", ""))
+    properties = _participant_properties(data)
+    properties.update(identity)
     return DiscoveredEndpoint(
         domain_id=domain_id,
         topic_name=topic_name,
         type_name=type_name,
         direction=direction,
         endpoint_key=endpoint_key,
-        participant_key=_key_to_text(_field(data, "participant_key", "")),
+        participant_key=participant_key,
+        participant_name=participant_name,
+        participant_properties=properties,
         partitions=_partition_names(_field(data, "partition", None)),
         qos=_qos_summary(data),
         type_available=_field(data, "type", None) is not None,
         alive=alive,
         observed_at=time.time(),
     )
+
+
+def _participant_identity_by_key(participant: Any) -> Dict[str, Mapping[str, Any]]:
+    identity: Dict[str, Mapping[str, Any]] = {}
+    for data in _participant_builtin_data(participant):
+        key = _key_to_text(_field(data, "key", ""))
+        if not key:
+            continue
+        values = dict(_participant_properties(data))
+        participant_name = _participant_name(data)
+        if participant_name:
+            values["participant_name"] = participant_name
+        identity[key] = values
+    return identity
+
+
+def _participant_builtin_data(participant: Any) -> Iterable[Any]:
+    discovered = getattr(participant, "discovered_participants", None)
+    data_for = getattr(participant, "discovered_participant_data", None)
+    if callable(discovered) and callable(data_for):
+        try:
+            for handle in discovered():
+                yield data_for(handle)
+            return
+        except Exception:
+            pass
+
+    reader = getattr(participant, "participant_reader", None)
+    if reader is None:
+        return
+    for sample in _reader_take(reader):
+        data, info = _sample_data_and_info(sample)
+        if data is not None and bool(getattr(info, "valid", False)):
+            yield data
+
+
+def _participant_name(data: Any) -> str:
+    participant_name = _field(data, "participant_name", "")
+    return _to_text(_field(participant_name, "name", participant_name))
+
+
+def _participant_properties(data: Any) -> Dict[str, Any]:
+    properties = _field(data, "property", None)
+    if properties is None:
+        return {}
+    values: Dict[str, Any] = {}
+    for name in SYS_INFO_PROPERTY_NAMES:
+        value = _property_try_get(properties, name)
+        if value is not None:
+            values[name] = _to_text(value)
+    return values
+
+
+def _property_try_get(properties: Any, name: str) -> Optional[Any]:
+    try_get = getattr(properties, "try_get", None)
+    if callable(try_get):
+        return try_get(name)
+    get = getattr(properties, "get", None)
+    if callable(get):
+        try:
+            return get(name)
+        except Exception:
+            return None
+    if isinstance(properties, Mapping):
+        return properties.get(name)
+    return None
 
 
 def _sample_data_and_info(sample: Any) -> Tuple[Any, Any]:

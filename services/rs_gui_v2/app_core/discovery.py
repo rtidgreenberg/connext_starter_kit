@@ -44,6 +44,8 @@ class DiscoveredEndpoint:
     direction: EndpointDirection
     endpoint_key: str
     participant_key: str = ""
+    participant_name: str = ""
+    participant_properties: Mapping[str, Any] = field(default_factory=dict)
     partitions: Tuple[str, ...] = field(default_factory=tuple)
     qos: Mapping[str, Any] = field(default_factory=dict)
     type_available: bool = False
@@ -54,6 +56,7 @@ class DiscoveredEndpoint:
         if not isinstance(self.direction, EndpointDirection):
             object.__setattr__(self, "direction", EndpointDirection(self.direction))
         object.__setattr__(self, "domain_id", int(self.domain_id))
+        object.__setattr__(self, "participant_properties", _frozen_mapping(self.participant_properties))
         object.__setattr__(self, "partitions", _tuple_of_text(self.partitions))
         object.__setattr__(self, "qos", _frozen_mapping(self.qos))
         object.__setattr__(self, "type_available", bool(self.type_available))
@@ -71,6 +74,8 @@ class DiscoveredEndpoint:
             "direction": self.direction.value,
             "endpoint_key": self.endpoint_key,
             "participant_key": self.participant_key,
+            "participant_name": self.participant_name,
+            "participant_properties": dict(self.participant_properties),
             "partitions": list(self.partitions),
             "qos": dict(self.qos),
             "type_available": self.type_available,
@@ -87,6 +92,8 @@ class DiscoveredEndpoint:
             direction=EndpointDirection(data.get("direction", EndpointDirection.WRITER.value)),
             endpoint_key=str(data.get("endpoint_key", "")),
             participant_key=str(data.get("participant_key", "")),
+            participant_name=str(data.get("participant_name", "")),
+            participant_properties=data.get("participant_properties", {}),
             partitions=tuple(data.get("partitions", ())),
             qos=data.get("qos", {}),
             type_available=bool(data.get("type_available", False)),
@@ -360,6 +367,13 @@ class TopicInventory:
             self._endpoints[endpoint.endpoint_key] = endpoint
         else:
             self._endpoints.pop(endpoint.endpoint_key, None)
+
+    def endpoints(self, domain_id: Optional[int] = None) -> Tuple[DiscoveredEndpoint, ...]:
+        endpoints = tuple(
+            endpoint for endpoint in self._endpoints.values()
+            if domain_id is None or endpoint.domain_id == int(domain_id)
+        )
+        return tuple(sorted(endpoints, key=lambda endpoint: endpoint.endpoint_key))
 
     def topics(
             self,

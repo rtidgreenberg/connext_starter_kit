@@ -36,6 +36,26 @@ class FakeQosPolicy:
         self.kind = kind
 
 
+class FakeProperty:
+    def __init__(self, values):
+        self.values = dict(values)
+
+    def try_get(self, name):
+        return self.values.get(name)
+
+
+class FakeParticipantName:
+    def __init__(self, name):
+        self.name = name
+
+
+class FakeParticipantBuiltinData:
+    def __init__(self, key=(4, 5, 6), participant_name="Participant", properties=None):
+        self.key = FakeKey(key)
+        self.participant_name = FakeParticipantName(participant_name)
+        self.property = FakeProperty(properties or {})
+
+
 class FakeBuiltinData:
     def __init__(
             self,
@@ -45,12 +65,14 @@ class FakeBuiltinData:
             participant_key=(4, 5, 6),
             partition=(),
             type_object=None,
+            properties=None,
     ):
         self.topic_name = topic_name
         self.type_name = type_name
         self.key = FakeKey(key)
         self.participant_key = FakeKey(participant_key)
         self.partition = FakePartition(partition)
+        self.property = FakeProperty(properties or {})
         self.type = type_object
         self.reliability = FakeQosPolicy("RELIABLE")
         self.durability = FakeQosPolicy("VOLATILE")
@@ -67,11 +89,18 @@ class FakeReader:
 
 
 class FakeParticipant:
-    def __init__(self, publication_samples=(), subscription_samples=()):
+    def __init__(self, publication_samples=(), subscription_samples=(), participants=()):
         self.publication_reader = FakeReader(publication_samples)
         self.subscription_reader = FakeReader(subscription_samples)
+        self._participants = tuple(participants)
         self.close_contained_entities_called = False
         self.closed = False
+
+    def discovered_participants(self):
+        return tuple(range(len(self._participants)))
+
+    def discovered_participant_data(self, handle):
+        return self._participants[handle]
 
     def close_contained_entities(self):
         self.close_contained_entities_called = True
@@ -114,6 +143,34 @@ class TestRtiDiscoverySampleMapping(unittest.TestCase):
         self.assertEqual(endpoint.partitions, ("alpha", "beta"))
         self.assertTrue(endpoint.type_available)
         self.assertEqual(endpoint.qos["reliability"], "RELIABLE")
+
+    def test_endpoint_attaches_participant_identity_properties(self):
+        sample = (
+            FakeBuiltinData(
+                key=(10,),
+                participant_key=(4, 5, 6),
+                properties={"dds.sys_info.username": "operator"},
+            ),
+            FakeInfo(valid=True),
+        )
+
+        endpoint = endpoint_from_builtin_sample(
+            11,
+            EndpointDirection.WRITER,
+            sample,
+            {
+                "4:5:6": {
+                    "participant_name": "RecordingParticipant",
+                    "dds.sys_info.hostname": "dev-host",
+                    "dds.sys_info.process_id": "1234",
+                }
+            },
+        )
+
+        self.assertEqual(endpoint.participant_name, "RecordingParticipant")
+        self.assertEqual(endpoint.participant_properties["dds.sys_info.hostname"], "dev-host")
+        self.assertEqual(endpoint.participant_properties["dds.sys_info.process_id"], "1234")
+        self.assertEqual(endpoint.participant_properties["dds.sys_info.username"], "operator")
 
     def test_invalid_sample_without_key_is_ignored(self):
         endpoint = endpoint_from_builtin_sample(11, EndpointDirection.WRITER, (None, FakeInfo(False)))
@@ -173,6 +230,37 @@ class TestRtiTopicDiscoveryClient(unittest.IsolatedAsyncioTestCase):
             "TelemetryTopic",
             "rti/service/admin/command_request",
         ])
+
+    async def test_scan_preserves_participant_sys_info_on_endpoints(self):
+        participant = FakeParticipant(
+            publication_samples=[(
+                FakeBuiltinData(
+                    topic_name="TelemetryTopic",
+                    type_name="Telemetry",
+                    key=(1,),
+                    participant_key=(4, 5, 6),
+                ),
+                FakeInfo(True),
+            )],
+            participants=[FakeParticipantBuiltinData(
+                key=(4, 5, 6),
+                participant_name="RecordingParticipant",
+                properties={
+                    "dds.sys_info.hostname": "dev-host",
+                    "dds.sys_info.process_id": "4321",
+                    "dds.sys_info.executable_filepath": "/opt/rti/rtirecordingservice",
+                },
+            )],
+        )
+        client = RtiTopicDiscoveryClient(dds_module=FakeDdsModule({46: participant}))
+
+        await client.scan(46)
+        endpoints = client._sessions[46].inventory.endpoints(domain_id=46)
+
+        self.assertEqual(len(endpoints), 1)
+        self.assertEqual(endpoints[0].participant_name, "RecordingParticipant")
+        self.assertEqual(endpoints[0].participant_properties["dds.sys_info.hostname"], "dev-host")
+        self.assertEqual(endpoints[0].participant_properties["dds.sys_info.process_id"], "4321")
 
     async def test_invalid_sample_removes_endpoint_from_inventory(self):
         participant = FakeParticipant(

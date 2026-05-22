@@ -110,8 +110,15 @@ Milestone B initial implementation status:
 - Added fake-Connext adapter tests for monitoring reader setup, invalid sample
   filtering, config/event/periodic normalization, snapshot streaming, and
   cleanup.
-- Deferred live service fixtures and broader DDS runtime setup to later
-  Milestone B slices.
+- Added DDS-free discovery and type catalog models for topic inventory,
+  endpoint direction, local type availability, internal-topic filtering, and
+  persisted topic/field selections.
+- Added `app_core/rti_discovery.py` as the v2-owned Connext built-in topic
+  discovery adapter for publication and subscription built-in readers.
+- Added fake-Connext adapter tests for discovery sample normalization, endpoint
+  churn, internal-topic filtering, topic aggregation, and cleanup.
+- Deferred live service fixtures, local XML type registry loading, and broader
+  DDS runtime setup to later Milestone B/C slices.
 
 ## Milestone B: Service Admin and Monitoring Facades
 
@@ -219,6 +226,24 @@ Suggested PRs:
 3. Add tests for filtering, ambiguity, and missing type handling.
 4. Add a dedicated `rti_discovery.py` adapter that demonstrates built-in topic
    reader usage without leaking DDS objects into catalog models.
+
+Initial implementation status:
+
+- Added `app_core/discovery.py` with DDS-free endpoint, topic inventory,
+  discovery facade, fake discovery client, internal-topic filtering, and
+  persisted topic-selection DTOs.
+- Added `app_core/types.py` with a DDS-free `TypeCatalog` and `TypeResolution`
+  model that distinguishes available, missing, ambiguous, and unknown type
+  resolution states.
+- Added `app_core/rti_discovery.py` as a pull-based Connext adapter that reads
+  `DomainParticipant.publication_reader` and `subscription_reader`, maps
+  built-in publication/subscription samples to `DiscoveredEndpoint`, and closes
+  owned participants cleanly.
+- Added headless tests for type resolution, topic aggregation, internal-topic
+  hiding, persisted selections, fake discovery scans, built-in sample mapping,
+  endpoint removal, and adapter cleanup.
+- Deferred XML DynamicData type-provider scanning and live discovery fixtures to
+  the next Milestone C slice.
 
 Reference API checklist:
 

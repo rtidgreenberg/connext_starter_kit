@@ -1,6 +1,17 @@
 """Headless application core for rs_gui_v2."""
 
 from .events import AppCommand, AppEvent, CommandResult, CommandStatus, LifecyclePhase
+from .discovery import (
+    DiscoveredEndpoint,
+    DiscoveredTopic,
+    EndpointDirection,
+    FakeTopicDiscoveryClient,
+    TopicDiscoveryFacade,
+    TopicDiscoveryState,
+    TopicInventory,
+    TopicSelection,
+    TopicSelectionState,
+)
 from .runtime import AppRuntime, RuntimeConfig
 from .services import (
     AdminReadiness,
@@ -21,6 +32,7 @@ from .services import (
     ServiceStateSnapshot,
 )
 from .state import AppState
+from .types import TypeAvailabilityStatus, TypeCatalog, TypeResolution
 
 __all__ = [
     "AdminReadiness",
@@ -31,6 +43,10 @@ __all__ = [
     "AppState",
     "CommandResult",
     "CommandStatus",
+    "DiscoveredEndpoint",
+    "DiscoveredTopic",
+    "EndpointDirection",
+    "FakeTopicDiscoveryClient",
     "FakeServiceAdminClient",
     "FakeServiceMonitoringClient",
     "LifecyclePhase",
@@ -47,4 +63,12 @@ __all__ = [
     "ServiceMonitoringClient",
     "ServiceMonitoringFacade",
     "ServiceStateSnapshot",
+    "TopicDiscoveryFacade",
+    "TopicDiscoveryState",
+    "TopicInventory",
+    "TopicSelection",
+    "TopicSelectionState",
+    "TypeAvailabilityStatus",
+    "TypeCatalog",
+    "TypeResolution",
 ]

@@ -154,8 +154,8 @@ Rules for new modules:
 | Runtime setup | `DdsRuntime` or equivalent lifecycle owner | `app_core/dds_runtime.py` | `DomainParticipant`, `QosProvider`, participant shutdown, process-wide policy setup |
 | Service Admin | `ServiceAdminClient` implementation | `app_core/services/rti_admin.py` | Service Admin request/reply topics, command request/reply types, correlation, resource paths, reply timeout handling |
 | Service monitoring | `ServiceMonitoringClient` implementation | `app_core/services/rti_monitoring.py` | monitoring config/event/periodic topics, DynamicData readers, sample normalization |
-| Topic discovery | discovery catalog protocol | `app_core/rti_discovery.py` | built-in topic readers, endpoint metadata, discovery churn |
-| Type catalog | type registry API | `app_core/types.py` plus DDS runtime helpers | XML type loading, generated type files, DynamicData type lookup |
+| Topic discovery | `TopicDiscoveryFacade`, `TopicInventory`, `TopicSelectionState` | `app_core/rti_discovery.py` | publication/subscription built-in topic readers, endpoint metadata, discovery churn |
+| Type catalog | `TypeCatalog`, `TypeResolution` | `app_core/types.py` plus DDS runtime helpers | local type availability, ambiguous names, future XML type loading |
 | Data subscription | subscription manager protocol | `app_core/rti_subscriptions.py` | DynamicData topics/readers, `read`/`take`, sample info, instance state |
 | Replay visualization | normal topic subscription APIs | `app_core/rti_subscriptions.py` | replayed samples are just DDS data consumed by Topics/Plots |
 
@@ -238,6 +238,8 @@ The catalog should track:
 - whether local type information is available
 - whether a DynamicData reader can be created
 - whether numeric leaf fields are available for plotting
+- persisted topic and field selections as declarative user intent, separate from
+  DDS reader handles
 
 Filter internal topics by default, including `rti/*`, Service Admin topics, and
 infrastructure monitoring topics. Let advanced users opt into seeing them.
@@ -247,6 +249,8 @@ Reference example guidance:
 - Keep discovery metadata separate from local type availability.
 - Surface why a topic cannot be subscribed: unresolved type, ambiguous type,
   QoS mismatch, no matched writers, or internal-topic filtering.
+- Keep the built-in topic reader calls visible in `rti_discovery.py`; the
+  facade and persisted selection DTOs must remain importable without Connext.
 
 ### 4. Visualization Pipeline Layer
 

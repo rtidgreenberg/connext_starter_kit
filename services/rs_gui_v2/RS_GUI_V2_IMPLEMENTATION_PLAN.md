@@ -322,6 +322,31 @@ Reference API checklist:
   field behavior without requiring live DDS.
 - Sample-cache tests prove bounded memory and dropped/decimated sample counters.
 
+Initial implementation status:
+
+- Added `app_core/subscriptions.py` with DDS-free subscription requests,
+  subscription states, sample metadata snapshots, sample envelopes, stable
+  subscription keys, and a bounded `SampleCache` with dropped-sample counters.
+- Added `app_core/rti_subscriptions.py` as the v2-owned Connext DynamicData
+  subscription adapter. It resolves DynamicTypes through `RtiTypeRegistry`,
+  creates `DynamicData.Topic` and `DynamicData.DataReader`, maps valid and
+  invalid samples into `SampleEnvelope`, and closes owned readers and
+  participants.
+- Added headless tests for subscription DTO round trips, sample metadata,
+  bounded cache behavior, unresolved type handling, reader creation,
+  valid/invalid sample mapping, unsubscribe, and cleanup.
+- Verified a real smoke creates a DynamicData reader from generated v2 XML type
+  information on an unused domain and takes zero samples without a writer.
+- Added `app_core/extractors.py` with DDS-free `FieldPath`, `FieldPathStep`,
+  `FieldExtraction`, extraction status, value-kind classification, and helpers
+  for extracting selected paths from `SampleEnvelope` data.
+- Added headless extractor tests for nested mappings, object attributes,
+  DynamicData-like item access, sequence indexes, missing fields, null values,
+  invalid paths, invalid samples, and numeric/text/boolean/sequence
+  classification.
+- Deferred plot decimation, type-driven field catalogs, and live fixture
+  publishers to later Milestone D slices.
+
 ## Milestone E: UI Wireframes and Approval
 
 Goal: Approve the operator workflow and screen structure before writing

@@ -158,6 +158,7 @@ Rules for new modules:
 | Topic discovery | `TopicDiscoveryFacade`, `TopicInventory`, `TopicSelectionState` | `app_core/rti_discovery.py` | publication/subscription built-in topic readers, endpoint metadata, discovery churn |
 | Type catalog | `TypeCatalog`, `TypeResolution` | `app_core/types.py`, `app_core/rti_types.py` | XML type enumeration, local type availability, `QosProvider.type()` DynamicType lookup |
 | Data subscription | `TopicSubscriptionRequest`, `SampleEnvelope`, `SampleCache` | `app_core/subscriptions.py`, `app_core/rti_subscriptions.py` | DynamicData topics/readers, `take`, sample info, instance state, reader shutdown |
+| Field extraction | `FieldPath`, `FieldExtraction` | `app_core/extractors.py` | DDS-free extraction from mapping/object/DynamicData-like sample values |
 | Replay visualization | normal topic subscription APIs | `app_core/rti_subscriptions.py` | replayed samples are just DDS data consumed by Topics/Plots |
 
 Each adapter should make the Connext calls visible in one place. The facade
@@ -281,6 +282,9 @@ Reference example guidance:
   `rti_subscriptions.py`.
 - Show selected-field extraction as a reusable API rather than burying it inside
   chart code.
+- Keep field-path parsing and value classification DDS-free in `extractors.py`;
+  extract from mapping/object/DynamicData-like values but do not create readers
+  or plot series there.
 - Keep backpressure visible through dropped/decimated sample counters.
 
 ### 5. Workspace Persistence Layer

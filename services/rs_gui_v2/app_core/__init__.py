@@ -1,6 +1,15 @@
 """Headless application core for rs_gui_v2."""
 
 from .events import AppCommand, AppEvent, CommandResult, CommandStatus, LifecyclePhase
+from .extractors import (
+    FieldExtraction,
+    FieldExtractionStatus,
+    FieldPath,
+    FieldPathStep,
+    FieldValueKind,
+    extract_field,
+    extract_fields,
+)
 from .discovery import (
     DiscoveredEndpoint,
     DiscoveredTopic,
@@ -54,6 +63,13 @@ __all__ = [
     "DiscoveredEndpoint",
     "DiscoveredTopic",
     "EndpointDirection",
+    "extract_field",
+    "extract_fields",
+    "FieldExtraction",
+    "FieldExtractionStatus",
+    "FieldPath",
+    "FieldPathStep",
+    "FieldValueKind",
     "FakeTopicDiscoveryClient",
     "FakeServiceAdminClient",
     "FakeServiceMonitoringClient",

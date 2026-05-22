@@ -12,6 +12,9 @@ Run from `services/rs_gui_v2`:
 Current layers:
 
 - `test_events_and_state.py`: immutable command, event, result, and state DTOs
+- `test_field_extractors.py`: DDS-free field-path parsing, extraction from
+  mapping/object/DynamicData-like values, invalid sample handling, and value
+  classification
 - `test_discovery_catalog.py`: DDS-free topic inventory, type resolution,
   internal-topic filtering, and persisted topic-selection DTOs
 - `test_headless_entrypoint.py`: headless app entry point startup/shutdown
@@ -24,6 +27,9 @@ Current layers:
   endpoint churn, and cleanup using fake Connext modules
 - `test_rti_monitoring_adapter.py`: RTI service monitoring reader setup and
   config/event/periodic snapshot normalization using fake Connext modules
+- `test_rti_subscriptions_adapter.py`: RTI DynamicData topic/reader creation,
+  sample metadata mapping, unresolved type handling, and cleanup using fake
+  Connext modules
 - `test_rti_types_adapter.py`: RTI XML DynamicData type registry lookup and
   provider failure mapping using fake Connext modules
 - `test_runtime_lifecycle.py`: runtime lifecycle, bounded queues, and task
@@ -32,6 +38,9 @@ Current layers:
   deterministic fake clients
 - `test_services_models.py`: service references, readiness, command outcomes,
   monitoring snapshots, and service-state snapshots
+- `test_subscriptions.py`: DDS-free subscription requests, sample envelopes,
+  subscription state counters, and bounded sample cache behavior
 
-Future layers will add live adapter fixtures, DynamicData subscriptions,
-workspace file persistence, and GUI tests after the wireframe approval gate.
+Future layers will add live adapter fixtures, type-driven field catalogs,
+workspace file persistence, plotting, and GUI tests after the wireframe approval
+gate.

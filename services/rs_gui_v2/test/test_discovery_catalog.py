@@ -23,6 +23,7 @@ from app_core import (
     TypeCatalog,
     TypeResolution,
 )
+from app_core.types import type_sources_from_xml_text
 
 
 class TestTypeCatalog(unittest.TestCase):
@@ -51,6 +52,39 @@ class TestTypeCatalog(unittest.TestCase):
         )
 
         self.assertEqual(TypeResolution.from_dict(resolution.to_dict()), resolution)
+
+        def test_xml_type_sources_are_parsed_with_module_names(self):
+                xml_text = """
+                <dds>
+                    <types>
+                        <module name="RTI">
+                            <module name="Demo">
+                                <struct name="Pose"/>
+                                <enum name="Mode"/>
+                                <typedef name="Alias" type="int32"/>
+                            </module>
+                        </module>
+                    </types>
+                </dds>
+                """
+
+                sources = type_sources_from_xml_text(xml_text, source="fixture.xml")
+                catalog = TypeCatalog()
+                for source in sources:
+                        catalog.register_source(source)
+
+                self.assertEqual(
+                        [(source.type_name, source.kind) for source in sources],
+                        [
+                                ("RTI::Demo::Pose", "struct"),
+                                ("RTI::Demo::Mode", "enum"),
+                                ("RTI::Demo::Alias", "typedef"),
+                        ],
+                )
+                resolved = catalog.resolve("Pose")
+                self.assertTrue(resolved.available)
+                self.assertEqual(resolved.resolved_type_name, "RTI::Demo::Pose")
+                self.assertEqual(resolved.source, "fixture.xml")
 
 
 class TestTopicInventory(unittest.IsolatedAsyncioTestCase):

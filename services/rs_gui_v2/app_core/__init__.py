@@ -32,7 +32,7 @@ from .services import (
     ServiceStateSnapshot,
 )
 from .state import AppState
-from .types import TypeAvailabilityStatus, TypeCatalog, TypeResolution
+from .types import TypeAvailabilityStatus, TypeCatalog, TypeResolution, TypeSource
 
 __all__ = [
     "AdminReadiness",
@@ -71,4 +71,5 @@ __all__ = [
     "TypeAvailabilityStatus",
     "TypeCatalog",
     "TypeResolution",
+    "TypeSource",
 ]

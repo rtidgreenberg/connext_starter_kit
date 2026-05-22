@@ -24,6 +24,8 @@ Current layers:
   endpoint churn, and cleanup using fake Connext modules
 - `test_rti_monitoring_adapter.py`: RTI service monitoring reader setup and
   config/event/periodic snapshot normalization using fake Connext modules
+- `test_rti_types_adapter.py`: RTI XML DynamicData type registry lookup and
+  provider failure mapping using fake Connext modules
 - `test_runtime_lifecycle.py`: runtime lifecycle, bounded queues, and task
   supervision
 - `test_services_facades.py`: service admin and monitoring facades backed by
@@ -31,6 +33,5 @@ Current layers:
 - `test_services_models.py`: service references, readiness, command outcomes,
   monitoring snapshots, and service-state snapshots
 
-Future layers will add live adapter fixtures, XML DynamicData type-provider
-scanning, DynamicData subscriptions, workspace file persistence, and GUI tests
-after the wireframe approval gate.
+Future layers will add live adapter fixtures, DynamicData subscriptions,
+workspace file persistence, and GUI tests after the wireframe approval gate.

@@ -3,6 +3,7 @@ xml_types/
 
 # Runtime artifacts
 log_dir/
+test/test_output/
 
 # Python
 __pycache__/

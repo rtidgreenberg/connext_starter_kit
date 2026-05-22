@@ -117,8 +117,17 @@ Milestone B initial implementation status:
   discovery adapter for publication and subscription built-in readers.
 - Added fake-Connext adapter tests for discovery sample normalization, endpoint
   churn, internal-topic filtering, topic aggregation, and cleanup.
-- Deferred live service fixtures, local XML type registry loading, and broader
-  DDS runtime setup to later Milestone B/C slices.
+- Expanded `app_core/types.py` to enumerate generated XML type declarations and
+  preserve source XML, declaration kind, canonical name, short-name resolution,
+  and missing/ambiguous resolution messages without importing DDS.
+- Added `app_core/rti_types.py` as the v2-owned Connext XML DynamicData type
+  registry adapter that uses `QosProvider.type()` to load DynamicTypes from the
+  generated v2 XML files.
+- Added fake-Connext adapter tests for exact type lookup, short-name lookup,
+  missing catalog types, provider load failures, configured XML validation, and
+  workspace-local test XML cleanup.
+- Deferred live service fixtures and broader DDS runtime setup to later
+  Milestone B/C slices.
 
 ## Milestone B: Service Admin and Monitoring Facades
 
@@ -242,8 +251,16 @@ Initial implementation status:
 - Added headless tests for type resolution, topic aggregation, internal-topic
   hiding, persisted selections, fake discovery scans, built-in sample mapping,
   endpoint removal, and adapter cleanup.
-- Deferred XML DynamicData type-provider scanning and live discovery fixtures to
-  the next Milestone C slice.
+- Expanded `TypeCatalog` to parse generated XML files with structured XML
+  parsing, track `TypeSource` records, and resolve exact and short type names.
+- Added `app_core/rti_types.py` with `RtiTypeRegistry`, `DynamicTypeLookup`, and
+  `RtiTypeRegistryConfig` for Connext `QosProvider.type()` lookups behind the
+  DDS-free catalog API.
+- Added tests for XML type parsing, exact and short-name DynamicType lookup,
+  missing types, Connext provider failures, and configured XML file validation.
+- Verified the real registry loads the generated v2 XML catalog and resolves
+  Service Admin and Service Monitoring DynamicTypes.
+- Deferred live discovery fixtures to the next Milestone C slice.
 
 Reference API checklist:
 
@@ -251,6 +268,9 @@ Reference API checklist:
   endpoint count, and internal-topic classification.
 - Type catalog APIs identify whether local DynamicData type information exists
   and why a type is unresolved or ambiguous.
+- `rti_types.py` shows generated XML file enumeration, source validation, and
+  Connext `QosProvider.type()` lookup without leaking DynamicType handles into
+  pure catalog models.
 - Adapter tests include discovery churn and a topic with discovered metadata but
   missing local type information.
 

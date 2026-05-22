@@ -6,6 +6,7 @@ from typing import Iterable, Tuple
 from app_core import AppEvent, AppState, LifecyclePhase
 
 from .tabs.record_tab import RecordTabViewModel, build_mock_record_tab_view_model
+from .tabs.topics_tab import TopicsTabViewModel, build_mock_topics_tab_view_model
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ class ShellViewModel:
     active_tab: str
     status_items: Tuple[ShellStatusItem, ...] = field(default_factory=tuple)
     record_tab: RecordTabViewModel = field(default_factory=build_mock_record_tab_view_model)
+    topics_tab: TopicsTabViewModel = field(default_factory=build_mock_topics_tab_view_model)
     event_log: Tuple[EventLogEntry, ...] = field(default_factory=tuple)
     inspector_title: str = "Inspector"
     inspector_lines: Tuple[str, ...] = field(default_factory=tuple)
@@ -43,12 +45,14 @@ class ShellViewModel:
 def build_shell_view_model(
         app_state: AppState,
         record_tab: RecordTabViewModel,
+        topics_tab: TopicsTabViewModel = None,
         event_log: Iterable[EventLogEntry] = (),
         workspace_name: str = "Mock Workspace",
         unsaved: bool = False,
 ) -> ShellViewModel:
     """Build the first shell snapshot from app state and a Record tab view."""
 
+    topics_tab = topics_tab or build_mock_topics_tab_view_model()
     selected = record_tab.selected_candidate
     inspector_lines = (
         f"Target: {record_tab.target_label}",
@@ -60,8 +64,9 @@ def build_shell_view_model(
     return ShellViewModel(
         title=title,
         active_tab="Record",
-        status_items=_status_items(app_state, record_tab),
+        status_items=_status_items(app_state, record_tab, topics_tab),
         record_tab=record_tab,
+        topics_tab=topics_tab,
         event_log=tuple(event_log),
         inspector_title="Record Inspector",
         inspector_lines=inspector_lines,
@@ -85,6 +90,7 @@ def build_mock_shell_view_model(now: float = 120.0) -> ShellViewModel:
     return build_shell_view_model(
         app_state,
         build_mock_record_tab_view_model(now=now),
+        topics_tab=build_mock_topics_tab_view_model(now=now),
         event_log=event_log,
         workspace_name="Robot Run 03",
         unsaved=True,
@@ -111,7 +117,11 @@ def event_log_entry_from_event(event: AppEvent) -> EventLogEntry:
     )
 
 
-def _status_items(app_state: AppState, record_tab: RecordTabViewModel) -> Tuple[ShellStatusItem, ...]:
+def _status_items(
+        app_state: AppState,
+        record_tab: RecordTabViewModel,
+        topics_tab: TopicsTabViewModel,
+) -> Tuple[ShellStatusItem, ...]:
     error_count = len(app_state.recent_errors)
     return (
         ShellStatusItem("Runtime", app_state.lifecycle.value, _state_for_lifecycle(app_state.lifecycle)),
@@ -119,6 +129,7 @@ def _status_items(app_state: AppState, record_tab: RecordTabViewModel) -> Tuple[
         ShellStatusItem("Admin", "enabled" if app_state.admin_rpc_enabled else "off", "ok" if app_state.admin_rpc_enabled else "muted"),
         ShellStatusItem("Monitoring", "enabled" if app_state.monitoring_enabled else "off", "ok" if app_state.monitoring_enabled else "muted"),
         ShellStatusItem("Record", record_tab.observed_state, "ok" if record_tab.observed_state.lower() == "running" else "normal"),
+        ShellStatusItem("Topics", str(topics_tab.visible_topic_count), "ok" if topics_tab.visible_topic_count else "normal"),
         ShellStatusItem("Errors", str(error_count), "error" if error_count else "ok"),
     )
 

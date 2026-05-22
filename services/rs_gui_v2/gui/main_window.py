@@ -5,6 +5,7 @@ from typing import Callable, Optional
 from app_core import AppCommand
 
 from .tabs.record_tab import RecordTabViewModel, build_record_action_command
+from .tabs.topics_tab import TopicsTabViewModel
 from .view_models import ShellViewModel, build_mock_shell_view_model
 
 
@@ -83,7 +84,7 @@ def render_shell_view(
             with dpg.tab(label="Convert"):
                 dpg.add_text("No Converter job selected")
             with dpg.tab(label="Topics"):
-                dpg.add_text("No topic selected")
+                _render_topics_tab(dpg, view.topics_tab)
             with dpg.tab(label="Plots"):
                 dpg.add_text("No plot selected")
             with dpg.tab(label="Workspace"):
@@ -202,6 +203,75 @@ def _render_monitoring_summary(dpg, record: RecordTabViewModel) -> None:
     dpg.add_text("Monitoring Summary")
     for key, value in record.monitoring_summary:
         dpg.add_text(f"{key}: {value}")
+
+
+def _render_topics_tab(dpg, topics: TopicsTabViewModel) -> None:
+    dpg.add_text(
+        f"Domain: {topics.domain_id} | Filter: {topics.search_text or '(none)'} | "
+        f"Internal topics: {'shown' if topics.include_internal else 'hidden'}"
+    )
+    _render_topic_actions(dpg, topics)
+    _render_topic_table(dpg, topics)
+    _render_field_picker(dpg, topics)
+    _render_sample_inspector(dpg, topics)
+    for diagnostic in topics.diagnostics:
+        dpg.add_text(f"Diagnostic: {diagnostic}")
+
+
+def _render_topic_actions(dpg, topics: TopicsTabViewModel) -> None:
+    with dpg.group(horizontal=True):
+        for action in topics.actions:
+            dpg.add_button(label=action.label, enabled=action.enabled)
+            if action.reason and not action.enabled:
+                dpg.add_text(action.reason)
+
+
+def _render_topic_table(dpg, topics: TopicsTabViewModel) -> None:
+    dpg.add_text("Discovered Topics")
+    with dpg.table(header_row=True, borders_innerH=True, borders_outerH=True, borders_innerV=True):
+        for heading in (
+                "Selected", "Topic", "Type", "State", "Writers", "Readers",
+                "Subscription", "Samples", "Partitions", "Diagnostic"):
+            dpg.add_table_column(label=heading)
+        for row in topics.rows:
+            with dpg.table_row():
+                dpg.add_text("*" if row.selected else "")
+                dpg.add_text(row.topic_name)
+                dpg.add_text(row.type_name)
+                dpg.add_text(row.state)
+                dpg.add_text(str(row.writers))
+                dpg.add_text(str(row.readers))
+                dpg.add_text(row.subscription_status)
+                dpg.add_text(str(row.sample_count))
+                dpg.add_text(row.partitions)
+                dpg.add_text(row.diagnostic)
+
+
+def _render_field_picker(dpg, topics: TopicsTabViewModel) -> None:
+    dpg.add_text("Field Picker")
+    with dpg.table(header_row=True, borders_innerH=True, borders_outerH=True, borders_innerV=True):
+        for heading in ("Selected", "Plot", "Path", "Type", "Kind", "Plottable"):
+            dpg.add_table_column(label=heading)
+        for row in topics.fields:
+            with dpg.table_row():
+                dpg.add_text("*" if row.selected else "")
+                dpg.add_text("*" if row.plot_selected else "")
+                dpg.add_text(f"{'  ' * row.depth}{row.path}")
+                dpg.add_text(row.type_name)
+                dpg.add_text(row.scalar_kind)
+                dpg.add_text("yes" if row.plottable else "")
+
+
+def _render_sample_inspector(dpg, topics: TopicsTabViewModel) -> None:
+    dpg.add_text("Sample Inspector")
+    with dpg.table(header_row=True, borders_innerH=True, borders_outerH=True):
+        for heading in ("Path", "Value", "Kind"):
+            dpg.add_table_column(label=heading)
+        for row in topics.sample_rows:
+            with dpg.table_row():
+                dpg.add_text(row.path)
+                dpg.add_text(row.value)
+                dpg.add_text(row.value_kind)
 
 
 def _render_inspector(dpg, view: ShellViewModel) -> None:

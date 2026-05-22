@@ -10,6 +10,15 @@ from .record_tab import (
     build_record_action_command,
     build_record_tab_view_model,
 )
+from .topics_tab import (
+    SampleInspectorRow,
+    TopicActionView,
+    TopicFieldRow,
+    TopicRow,
+    TopicsTabViewModel,
+    build_mock_topics_tab_view_model,
+    build_topics_tab_view_model,
+)
 
 __all__ = [
     "RecordActionView",
@@ -18,7 +27,14 @@ __all__ = [
     "RecordTabController",
     "RecordTabControllerConfig",
     "RecordTabViewModel",
+    "SampleInspectorRow",
+    "TopicActionView",
+    "TopicFieldRow",
+    "TopicRow",
+    "TopicsTabViewModel",
     "build_mock_record_tab_view_model",
+    "build_mock_topics_tab_view_model",
     "build_record_action_command",
     "build_record_tab_view_model",
+    "build_topics_tab_view_model",
 ]

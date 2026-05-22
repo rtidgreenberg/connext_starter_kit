@@ -642,6 +642,17 @@ Suggested PRs:
 2. Wire topic list to discovery catalog.
 3. Wire sample inspector to subscription snapshots.
 
+Initial implementation status:
+
+- Added DDS-free Topics-tab view models for discovered topic rows, search and
+  internal-topic visibility state, type/subscription diagnostics, subscribe /
+  unsubscribe affordances, field picker rows, and flattened sample inspector
+  rows.
+- Added deterministic mocked Topics data to the shell and Dear PyGui renderer so
+  the first GUI surface shows realistic discovered topics, unresolved type
+  states, selected fields, plot-ready fields, and the latest sample values
+  without requiring live DDS entities.
+
 ## Milestone H: Plots Tab
 
 Goal: Plot selected numeric fields from live or replayed DynamicData streams

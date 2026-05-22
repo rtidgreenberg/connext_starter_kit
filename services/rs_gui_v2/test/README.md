@@ -27,6 +27,8 @@ Current layers:
   coverage without requiring a display
 - `test_gui_factory.py`: default GUI shell session assembly for mock and
   headless modes, including CLI mock GUI checks and fake-renderer coverage
+- `test_gui_topics_tab.py`: mocked Topics-tab discovery rows, field picker,
+  subscription/sample inspector state, and fake-renderer coverage
 - `test_gui_session.py`: runtime-backed GUI session wiring from app-core command
   queues through the Record controller into shell snapshots and event logs
 - `test_record_tab_controller.py`: Record tab wiring from the local process

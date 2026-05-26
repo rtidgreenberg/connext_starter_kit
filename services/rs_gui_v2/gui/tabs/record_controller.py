@@ -1,8 +1,10 @@
 """Record tab controller that wires app-core service snapshots to GUI views."""
 
 from dataclasses import dataclass, field, replace
+import os
 import time
-from typing import Iterable, Optional, Tuple
+import xml.etree.ElementTree as ET
+from typing import Iterable, Mapping, Optional, Tuple
 
 from app_core.events import CommandStatus
 from app_core.services import (
@@ -16,11 +18,14 @@ from app_core.services import (
     ServiceCommandRequest,
     ServiceInstanceRef,
     ServiceKind,
+    ServiceLaunchIntent,
     ServiceMonitoringFacade,
+    ServiceProcessLaunch,
+    ServiceProcessLaunchRequest,
     ServiceProcessManager,
 )
 
-from .record_tab import RecordTabViewModel, build_record_tab_view_model
+from .record_tab import RecordLaunchViewModel, RecordTabViewModel, build_record_tab_view_model
 
 
 @dataclass(frozen=True)
@@ -32,9 +37,27 @@ class RecordTabControllerConfig:
     local_hostnames: Tuple[str, ...] = field(default_factory=tuple)
     selected_candidate_id: str = ""
     tag_value: str = ""
+    launch_label: str = "Recording Service"
+    launch_config_paths: Tuple[str, ...] = (
+        "services/recording_service_config.xml",
+        "dds/qos/DDS_QOS_PROFILES.xml",
+    )
+    launch_config_name: str = "deploy"
+    launch_data_domain_id: int = 0
+    launch_admin_domain_id: int = 0
+    launch_monitoring_domain_id: int = 0
+    launch_verbosity: str = "ERROR:ERROR"
+    launch_executable: str = ""
+    launch_working_dir: str = ""
+    launch_extra_args: Tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "local_hostnames", tuple(str(name) for name in self.local_hostnames))
+        object.__setattr__(self, "launch_config_paths", tuple(str(path) for path in self.launch_config_paths if str(path).strip()))
+        object.__setattr__(self, "launch_data_domain_id", int(self.launch_data_domain_id))
+        object.__setattr__(self, "launch_admin_domain_id", int(self.launch_admin_domain_id))
+        object.__setattr__(self, "launch_monitoring_domain_id", int(self.launch_monitoring_domain_id))
+        object.__setattr__(self, "launch_extra_args", tuple(str(arg) for arg in self.launch_extra_args if str(arg).strip()))
 
 
 class RecordTabController:
@@ -101,8 +124,73 @@ class RecordTabController:
             local_hostnames=self._config.local_hostnames,
             graceful_shutdown_failed=self._graceful_shutdown_failed,
             tag_value=self._config.tag_value,
+            launch=self._launch_view(),
             now=self._clock(),
         )
+
+    def launch_recording(self, payload: Mapping[str, object]) -> ServiceProcessLaunch:
+        """Launch Recording Service from Record-tab operator fields."""
+
+        config_paths = _config_paths_from_value(
+            payload.get("config_paths", self._config.launch_config_paths)
+        )
+        label = str(payload.get("label", self._config.launch_label)).strip() or "Recording Service"
+        config_name = str(payload.get("config_name", self._config.launch_config_name)).strip()
+        data_domain_id = _int_payload(payload, "data_domain_id", self._config.launch_data_domain_id)
+        admin_domain_id = _int_payload(payload, "admin_domain_id", self._config.launch_admin_domain_id)
+        monitoring_domain_id = _int_payload(payload, "monitoring_domain_id", self._config.launch_monitoring_domain_id)
+        verbosity = str(payload.get("verbosity", self._config.launch_verbosity)).strip() or "ERROR:ERROR"
+        executable = str(payload.get("executable", self._config.launch_executable)).strip()
+        working_dir = str(payload.get("working_dir", self._config.launch_working_dir)).strip()
+        extra_args = _extra_args_from_value(payload.get("extra_args", self._config.launch_extra_args))
+        launch_extra_args = (
+            f"-DDOMAIN_ID={data_domain_id}",
+            f"-DADMIN_DOMAIN_ID={admin_domain_id}",
+        ) + extra_args
+        environment = {
+            "DOMAIN_ID": str(data_domain_id),
+            "ADMIN_DOMAIN_ID": str(admin_domain_id),
+        }
+        nddshome = os.environ.get("NDDSHOME", "")
+        if nddshome:
+            environment["NDDSHOME"] = nddshome
+        license_file = os.environ.get("RTI_LICENSE_FILE", "")
+        if license_file:
+            environment["RTI_LICENSE_FILE"] = license_file
+
+        request = ServiceProcessLaunchRequest(
+            intent=ServiceLaunchIntent(
+                kind=ServiceKind.RECORDING,
+                label=label,
+                admin_domain_id=admin_domain_id,
+                monitoring_domain_id=monitoring_domain_id,
+                config_paths=config_paths,
+            ),
+            config_name=config_name,
+            executable=executable,
+            working_dir=working_dir,
+            verbosity=verbosity,
+            environment=environment,
+            extra_args=launch_extra_args,
+        )
+        launch = self._process_manager.launch(request)
+        self._config = replace(
+            self._config,
+            launch_label=label,
+            launch_config_paths=config_paths,
+            launch_config_name=config_name,
+            launch_data_domain_id=data_domain_id,
+            launch_admin_domain_id=admin_domain_id,
+            launch_monitoring_domain_id=monitoring_domain_id,
+            launch_verbosity=verbosity,
+            launch_executable=executable,
+            launch_working_dir=working_dir,
+            launch_extra_args=extra_args,
+            selected_candidate_id=launch.launch_id,
+            service=launch.identity.service_ref,
+        )
+        self._graceful_shutdown_failed = False
+        return launch
 
     async def execute_action(
             self,
@@ -223,6 +311,21 @@ class RecordTabController:
             )
         return await self._admin_facade.readiness(service)
 
+    def _launch_view(self) -> RecordLaunchViewModel:
+        return RecordLaunchViewModel(
+            label=self._config.launch_label,
+            config_paths=self._config.launch_config_paths,
+            available_config_names=_recording_config_names(self._config.launch_config_paths),
+            config_name=self._config.launch_config_name,
+            data_domain_id=self._config.launch_data_domain_id,
+            admin_domain_id=self._config.launch_admin_domain_id,
+            monitoring_domain_id=self._config.launch_monitoring_domain_id,
+            verbosity=self._config.launch_verbosity,
+            executable=self._config.launch_executable,
+            working_dir=self._config.launch_working_dir,
+            extra_args=self._config.launch_extra_args,
+        )
+
 
 def _service_command_for_action(action_id: str) -> ServiceCommand:
     if action_id == "pause":
@@ -256,3 +359,49 @@ def _failed_outcome(
         status=CommandStatus.FAILED,
         message=message,
     )
+
+
+def _config_paths_from_value(value: object) -> Tuple[str, ...]:
+    if isinstance(value, str):
+        parts = value.replace("\n", ";").split(";")
+    else:
+        try:
+            parts = list(value)  # type: ignore[arg-type]
+        except TypeError:
+            parts = []
+    return tuple(str(part).strip() for part in parts if str(part).strip())
+
+
+def _extra_args_from_value(value: object) -> Tuple[str, ...]:
+    if isinstance(value, str):
+        return tuple(part.strip() for part in value.split() if part.strip())
+    try:
+        return tuple(str(part).strip() for part in value if str(part).strip())  # type: ignore[union-attr]
+    except TypeError:
+        return ()
+
+
+def _int_payload(payload: Mapping[str, object], key: str, default: int) -> int:
+    value = payload.get(key, default)
+    return int(str(value).strip())
+
+
+def _recording_config_names(config_paths: Iterable[str]) -> Tuple[str, ...]:
+    names = []
+    seen = set()
+    for path in config_paths:
+        if not path or not os.path.isfile(path):
+            continue
+        try:
+            root = ET.parse(path).getroot()
+        except (ET.ParseError, OSError):
+            continue
+        for element in root.iter():
+            tag = str(element.tag).split("}")[-1]
+            if tag != "recording_service":
+                continue
+            name = str(element.get("name", "")).strip()
+            if name and name not in seen:
+                names.append(name)
+                seen.add(name)
+    return tuple(names)

@@ -10,6 +10,8 @@ This directory currently includes:
 - App-core modules that keep DDS logic separated from the GUI layer
 - A growing test suite for headless runtime, GUI session wiring, adapters, and
   boundaries
+- Operator-facing Recording Service configure-and-launch controls in the Record
+  tab, backed by the same process launch path validated by live churn gates
 - A `setup.sh` tool that generates v2-owned XML DynamicData types from the
   active Connext installation
 
@@ -71,6 +73,10 @@ From `services/rs_gui_v2`:
 
 This defaults to `--gui` mode.
 
+Default GUI startup does not create mock/demo service candidates and does not
+launch Recording Service automatically. Use the Record tab launch controls to
+start a managed Recording Service process.
+
 Useful modes:
 
 ```bash
@@ -79,6 +85,9 @@ Useful modes:
 
 # Build mock GUI session-backed data and exit
 ./run_gui.sh --mock-gui-check
+
+# Run the GUI with explicit mock/demo data
+./run_gui.sh --mock-gui
 
 # Prepare DDS XML types first, then launch
 ./run_gui.sh --prepare-dds --gui
@@ -105,6 +114,7 @@ CLI options:
 
 - `--headless-check`
 - `--mock-gui-check`
+- `--mock-gui`
 - `--gui`
 
 ## Tests

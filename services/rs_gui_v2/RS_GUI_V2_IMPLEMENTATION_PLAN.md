@@ -527,6 +527,15 @@ Implemented:
   ids, optional domain offset, verbosity, config file list, and extra `-D`
   variables are modeled before any process is started.
 
+Implemented in the real Record tab:
+
+- The v1-style operator launch form now lets operators set Recording Service
+  XML config file paths, parse available `<recording_service name="...">`
+  entries, choose `-cfgName`, set data/admin/monitoring domains and verbosity,
+  preview the command, and launch Recording Service. The launch action feeds
+  `ServiceProcessLaunchRequest` through `ServiceProcessManager`, preserving the
+  generated `-appName` control identity used by Service Admin.
+
 Acceptance gates:
 
 - Fresh session GUIDs produce unique Service Admin control names.
@@ -604,11 +613,11 @@ Initial implementation status:
   Record-tab controller, shell view provider, and Dear PyGui command sink so
   Record button intents are queued and dispatched through app-core boundaries on
   the next GUI frame.
-- Added default GUI session assembly for `mock` and `headless` modes. The mock
-  mode creates a fake Recording Service process, fake admin/monitoring clients,
-  a controller-backed session, and a Dear PyGui shell provider without launching
-  real RTI services. The CLI `--mock-gui-check` and `--gui` paths now use this
-  assembled session instead of standalone mock view builders.
+- Added default GUI session assembly for clean live, `mock`, and `headless`
+  modes. The default `--gui` path opens without mock/demo candidates and without
+  launching real RTI services. The explicit mock mode creates a fake Recording
+  Service process, fake admin/monitoring clients, a controller-backed session,
+  and a Dear PyGui shell provider without launching real RTI services.
 
 ## Milestone G: Topics Tab
 
@@ -914,6 +923,9 @@ Initial implementation status:
 - Added deterministic local service restart/churn coverage proving repeated
   launches keep fresh Service Admin control identities while old exited process
   evidence remains selectable and non-live.
+- Added the real v2 Record tab configure-and-launch panel for Recording
+  Service, wired to `ServiceProcessManager` through the `service.launch_recording`
+  GUI command.
 - Added `test/live_soak.py`, an explicit live DDS smoke/soak gate with a
   built-in in-memory DynamicData telemetry fixture, bounded reader
   history/resource limits, runtime sample/drop counter capture, bounded
@@ -944,6 +956,10 @@ Phase review gaps still open:
   Recording Service process churn coverage are in place. Replay Service restart
   soak remains pending; deterministic DDS-free coverage is in place for the
   high-rate data path and local process restart model.
+- Record-tab operator launch workflow is now present for Recording Service:
+  config-file input/parsing, `-cfgName` selection, domain/verbosity inputs,
+  command preview, and launch action wiring are covered by headless tests. A
+  native file-picker dialog can still be added as a UI convenience later.
 - Startup diagnostics now cover stale XML, missing license, missing RTI Python
   API, missing RTI service executables, and GUI dependency failures. Runtime
   shell diagnostics now surface Service Admin no-match style states; live

@@ -6,7 +6,7 @@ import asyncio
 from typing import List, Optional
 
 from app_core import AppRuntime, LifecyclePhase
-from gui import GuiShellSessionFactoryConfig, build_default_gui_shell_session
+from gui import GuiShellSessionFactoryConfig, GuiShellSessionMode, build_default_gui_shell_session
 from gui.main_window import DearPyGuiShell, DearPyGuiUnavailable
 
 
@@ -31,9 +31,14 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="build the session-backed mock GUI shell, then exit",
     )
     parser.add_argument(
+        "--mock-gui",
+        action="store_true",
+        help="run the Dear PyGui shell with explicit mock/demo data",
+    )
+    parser.add_argument(
         "--gui",
         action="store_true",
-        help="run the Dear PyGui shell with session-backed mock data",
+        help="run the Dear PyGui shell without mock/demo data",
     )
     return parser.parse_args(argv)
 
@@ -44,12 +49,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         lifecycle = asyncio.run(run_headless_once())
         return 0 if lifecycle == LifecyclePhase.STOPPED else 1
     if args.mock_gui_check:
-        session = build_default_gui_shell_session(GuiShellSessionFactoryConfig())
+        session = build_default_gui_shell_session(GuiShellSessionFactoryConfig(
+            mode=GuiShellSessionMode.MOCK,
+        ))
         view = session.next_view()
         return 0 if view.record_tab.candidates else 1
-    if args.gui:
+    if args.gui or args.mock_gui:
         try:
-            session = build_default_gui_shell_session(GuiShellSessionFactoryConfig())
+            mode = GuiShellSessionMode.MOCK if args.mock_gui else GuiShellSessionMode.LIVE
+            session = build_default_gui_shell_session(GuiShellSessionFactoryConfig(mode=mode))
             DearPyGuiShell(
                 view_provider=session.next_view,
                 command_sink=session.command_sink,

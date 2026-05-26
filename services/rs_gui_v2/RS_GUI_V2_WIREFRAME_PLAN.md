@@ -82,10 +82,18 @@ Approval focus:
 
 ### 2. Record Tab
 
-Purpose: Provide the first operator workflow for Recording Service control,
-monitoring, command feedback, and tagging.
+Purpose: Provide the first operator workflow for Recording Service
+configuration, launch, control, monitoring, command feedback, and tagging. The
+v2 Record tab must recover the v1 configure-and-launch workflow, not just
+control services that already exist.
 
 ```text
++------------------------------------------------------------------------------+
+| Launch Recording Service                                                      |
+| Config files: services/recording_service_config.xml;dds/qos/DDS_QOS_PROFILES  |
+| Config: [deploy v] Data: 0 Admin: 0 Monitor: 0 Verbosity: ERROR              |
+| Command: rtirecordingservice -cfgName deploy -appName <generated> ...         |
+| [Launch Recording Service]                                                    |
 +------------------------------------------------------------------------------+
 | Recording target: [deploy_8f4f2a1c v] Admin domain: 0  Monitoring domain: 0   |
 | Readiness: request+reply matched State: RUNNING       Observed: STARTED       |
@@ -110,6 +118,8 @@ monitoring, command feedback, and tagging.
 
 Primary app-core inputs:
 
+- `ServiceProcessLaunchRequest` for launchable Recording Service config file
+  paths, XML config name, domain ids, verbosity, executable, and extra args.
 - `ServiceInstanceRef` for service kind, name, admin domain, and monitoring
   domain.
 - `AdminReadiness` for request/reply matching and service availability.

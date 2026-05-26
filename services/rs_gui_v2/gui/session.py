@@ -210,6 +210,9 @@ class GuiShellSession:
                 self._config = replace(self._config, unsaved=False)
             return result
 
+        if command.command_type == "service.launch_recording":
+            return self._record_controller.launch_recording(command.payload)
+
         action_id = _record_action_for_command(command.command_type)
         payload = dict(command.payload)
         candidate_id = str(payload.get("candidate_id", ""))

@@ -27,11 +27,13 @@ Launcher options:
 
 App modes:
     --gui                Launch the Dear PyGui shell (default)
+    --mock-gui           Launch the Dear PyGui shell with explicit mock/demo data
     --mock-gui-check     Build mock GUI session-backed data, then exit
     --headless-check     Start and stop app core only, then exit
 
 Examples:
 ./run_gui.sh
+./run_gui.sh --mock-gui
 ./run_gui.sh --mock-gui-check
 ./run_gui.sh --headless-check
 ./run_gui.sh --prepare-dds --gui

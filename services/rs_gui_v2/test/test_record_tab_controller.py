@@ -3,6 +3,7 @@
 
 import os
 import sys
+import tempfile
 import unittest
 
 
@@ -178,6 +179,73 @@ class TestRecordTabController(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(admin_client.requests[1].parameters["tag_name"], "night_run")
         self.assertEqual(len(controller.command_history), 2)
         self.assertEqual([row.command for row in view.command_history], ["pause", "tag"])
+
+    async def test_launch_recording_uses_operator_fields_and_selects_new_candidate(self):
+        spawner = FakeSpawner(FakeHandle(5001))
+        manager = ServiceProcessManager(
+            spawner=spawner,
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        controller = RecordTabController(
+            manager,
+            admin_facade=ServiceAdminFacade(FakeServiceAdminClient()),
+            config=RecordTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+
+        launch = controller.launch_recording({
+            "label": "Manual Recorder",
+            "config_paths": ["record.xml", "qos.xml"],
+            "config_name": "manual_deploy",
+            "data_domain_id": 63,
+            "admin_domain_id": 61,
+            "monitoring_domain_id": 62,
+            "verbosity": "WARN:WARN",
+            "executable": "/opt/rti/bin/rtirecordingservice",
+            "working_dir": "test_output/rs_gui_v2/manual",
+            "extra_args": ["-DDB_DIR=test_output/db"],
+        })
+        view = await controller.refresh_view()
+
+        self.assertEqual(launch.request.config_name, "manual_deploy")
+        self.assertEqual(launch.identity.intent.config_paths, ("record.xml", "qos.xml"))
+        self.assertEqual(launch.identity.intent.admin_domain_id, 61)
+        self.assertEqual(launch.identity.intent.monitoring_domain_id, 62)
+        self.assertIn("-appName", spawner.calls[0])
+        self.assertIn("-DDOMAIN_ID=63", spawner.calls[0])
+        self.assertIn("-DADMIN_DOMAIN_ID=61", spawner.calls[0])
+        self.assertIn("-DDB_DIR=test_output/db", spawner.calls[0])
+        self.assertEqual(view.selected_candidate_id, launch.launch_id)
+        self.assertEqual(view.selected_candidate.pid, "5001")
+        self.assertEqual(view.launch.config_name, "manual_deploy")
+        self.assertEqual(view.launch.data_domain_id, 63)
+
+    async def test_launch_view_parses_recording_service_names_from_xml(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as temp:
+            temp.write("<dds><recording_service name='alpha'/><recording_service name='beta'/></dds>")
+            config_path = temp.name
+        self.addCleanup(lambda: os.path.exists(config_path) and os.remove(config_path))
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(FakeHandle(5001)),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        controller = RecordTabController(
+            manager,
+            admin_facade=ServiceAdminFacade(FakeServiceAdminClient()),
+            config=RecordTabControllerConfig(
+                local_hostnames=("dev-host",),
+                launch_config_paths=(config_path,),
+                launch_config_name="alpha",
+            ),
+            clock=lambda: 12.0,
+        )
+
+        view = await controller.refresh_view()
+
+        self.assertEqual(view.launch.available_config_names, ("alpha", "beta"))
+        self.assertEqual(view.launch.config_paths, (config_path,))
 
     async def test_duplicate_live_candidates_disable_admin_actions(self):
         manager = ServiceProcessManager(

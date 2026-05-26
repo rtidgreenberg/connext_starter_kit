@@ -4,10 +4,11 @@ from dataclasses import dataclass, field
 from typing import Iterable, Tuple
 
 from app_core import AppEvent, AppState, LifecyclePhase
+from app_core.services import ServiceCandidateSelection
 
 from .tabs.convert_tab import ConvertTabViewModel, build_mock_convert_tab_view_model
 from .tabs.plots_tab import PlotsTabViewModel, build_mock_plots_tab_view_model
-from .tabs.record_tab import RecordTabViewModel, build_mock_record_tab_view_model
+from .tabs.record_tab import RecordTabViewModel, build_mock_record_tab_view_model, build_record_tab_view_model
 from .tabs.replay_tab import ReplayTabViewModel, build_mock_replay_tab_view_model
 from .tabs.topics_tab import TopicsTabViewModel, build_mock_topics_tab_view_model
 
@@ -41,11 +42,11 @@ class ShellViewModel:
     workspace_path: str = ""
     workspace_unsaved: bool = False
     status_items: Tuple[ShellStatusItem, ...] = field(default_factory=tuple)
-    convert_tab: ConvertTabViewModel = field(default_factory=build_mock_convert_tab_view_model)
-    record_tab: RecordTabViewModel = field(default_factory=build_mock_record_tab_view_model)
-    replay_tab: ReplayTabViewModel = field(default_factory=build_mock_replay_tab_view_model)
-    topics_tab: TopicsTabViewModel = field(default_factory=build_mock_topics_tab_view_model)
-    plots_tab: PlotsTabViewModel = field(default_factory=build_mock_plots_tab_view_model)
+    convert_tab: ConvertTabViewModel = field(default_factory=ConvertTabViewModel)
+    record_tab: RecordTabViewModel = field(default_factory=lambda: build_record_tab_view_model(ServiceCandidateSelection()))
+    replay_tab: ReplayTabViewModel = field(default_factory=ReplayTabViewModel)
+    topics_tab: TopicsTabViewModel = field(default_factory=TopicsTabViewModel)
+    plots_tab: PlotsTabViewModel = field(default_factory=PlotsTabViewModel)
     event_log: Tuple[EventLogEntry, ...] = field(default_factory=tuple)
     operator_diagnostics: Tuple[str, ...] = field(default_factory=tuple)
     inspector_title: str = "Inspector"
@@ -60,16 +61,16 @@ def build_shell_view_model(
         topics_tab: TopicsTabViewModel = None,
         plots_tab: PlotsTabViewModel = None,
         event_log: Iterable[EventLogEntry] = (),
-        workspace_name: str = "Mock Workspace",
+        workspace_name: str = "Workspace",
         workspace_path: str = "",
         unsaved: bool = False,
 ) -> ShellViewModel:
     """Build the first shell snapshot from app state and a Record tab view."""
 
-    convert_tab = convert_tab or build_mock_convert_tab_view_model()
-    replay_tab = replay_tab or build_mock_replay_tab_view_model()
-    topics_tab = topics_tab or build_mock_topics_tab_view_model()
-    plots_tab = plots_tab or build_mock_plots_tab_view_model()
+    convert_tab = convert_tab or ConvertTabViewModel()
+    replay_tab = replay_tab or ReplayTabViewModel()
+    topics_tab = topics_tab or TopicsTabViewModel()
+    plots_tab = plots_tab or PlotsTabViewModel()
     selected = record_tab.selected_candidate
     operator_diagnostics = _operator_diagnostics(app_state, record_tab)
     inspector_lines = (
@@ -123,6 +124,20 @@ def build_mock_shell_view_model(now: float = 120.0) -> ShellViewModel:
         workspace_name="Robot Run 03",
         workspace_path="services/rs_gui_v2/test_output/robot_run_03.json",
         unsaved=True,
+    )
+
+
+def build_empty_shell_view_model() -> ShellViewModel:
+    """Return a clean shell snapshot with no mock/demo service or DDS data."""
+
+    return build_shell_view_model(
+        AppState(),
+        build_record_tab_view_model(ServiceCandidateSelection()),
+        convert_tab=ConvertTabViewModel(),
+        replay_tab=ReplayTabViewModel(),
+        topics_tab=TopicsTabViewModel(),
+        plots_tab=PlotsTabViewModel(),
+        workspace_name="Workspace",
     )
 
 

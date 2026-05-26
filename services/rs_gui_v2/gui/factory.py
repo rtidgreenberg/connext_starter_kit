@@ -62,6 +62,7 @@ from .workspace import GuiWorkspaceController
 class GuiShellSessionMode(str, Enum):
     """Supported GUI assembly modes."""
 
+    LIVE = "live"
     MOCK = "mock"
     HEADLESS = "headless"
 
@@ -70,7 +71,7 @@ class GuiShellSessionMode(str, Enum):
 class GuiShellSessionFactoryConfig:
     """Configuration for assembling a default GUI shell session."""
 
-    mode: GuiShellSessionMode = GuiShellSessionMode.MOCK
+    mode: GuiShellSessionMode = GuiShellSessionMode.LIVE
     workspace_name: str = "Robot Run 03"
     unsaved: bool = False
     command_queue_max_size: int = 100

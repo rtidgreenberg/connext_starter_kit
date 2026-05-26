@@ -217,9 +217,10 @@ Core concepts:
   domain must be unique for controllable services so Service Admin requests can
   target exactly one service instance.
 - Generated identity: GUI-created services should keep a human-facing service
-  label plus a session-scoped GUID-backed control name. The control name, not
-  just metadata beside the service, must be the name used in the launched
-  service configuration and Service Admin target.
+  label plus a session-scoped GUID-backed control name. The generated control
+  name must be passed as the launched process `-appName` and used as Service
+  Admin `application_name`. XML resource paths remain rooted at the selected
+  service configuration name, for example `/recording_services/deploy`.
 - Discovered identity: store hostname, application/process id when available,
   participant key/GUID, participant name, and last-seen timestamps from DDS
   discovery/monitoring as candidate evidence. This identifies observed process
@@ -245,6 +246,11 @@ Reference example guidance:
 - The launch/configuration path should enforce unique service names before a
   service is started; restored workspaces and discovered external services
   should surface duplicate names as a validation conflict.
+- The Record tab must restore the v1 operator workflow for configuring and
+  launching Recording Service: enter/select `-cfgFile` values, parse available
+  `<recording_service name="...">` entries, select `-cfgName`, set data/admin/
+  monitoring domains, choose verbosity, preview the command, and then launch
+  through `ServiceProcessManager` with a fresh `-appName`.
 - For GUI-created services, generate a new service session GUID each time the
   GUI creates or restarts a service process, derive the admin control name from
   the human label and session GUID, and persist only the user-facing launch
@@ -459,13 +465,20 @@ for example:
 }
 ```
 
+Current implementation note: the Record tab exposes the v1-style
+configure-and-launch workflow through a launch form that creates a
+`ServiceProcessLaunchRequest`. The backend process model and live churn gates
+validate the same launch path used by the operator UI.
+
 ## UI Model
 
 ### Record Tab
 
 Primary workflows:
 
-- select or launch a Recording Service configuration
+- select an existing Recording Service candidate
+- configure and launch a new Recording Service process from XML config paths,
+  `-cfgName`, domain ids, and verbosity
 - view service state, sessions, topic groups, and throughput
 - pause, resume, tag, and shutdown
 - open recent recording databases

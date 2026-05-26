@@ -1,6 +1,7 @@
 """Record tab view models and command factories for rs_gui_v2."""
 
 from dataclasses import dataclass, field
+import shlex
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 from app_core.events import AppCommand, CommandStatus
@@ -62,6 +63,39 @@ class RecordCommandRow:
 
 
 @dataclass(frozen=True)
+class RecordLaunchViewModel:
+    """UI-facing Recording Service launch configuration."""
+
+    label: str = "Recording Service"
+    config_paths: Tuple[str, ...] = field(default_factory=tuple)
+    available_config_names: Tuple[str, ...] = field(default_factory=tuple)
+    config_name: str = "deploy"
+    data_domain_id: int = 0
+    admin_domain_id: int = 0
+    monitoring_domain_id: int = 0
+    verbosity: str = "ERROR:ERROR"
+    executable: str = ""
+    working_dir: str = ""
+    extra_args: Tuple[str, ...] = field(default_factory=tuple)
+    command_preview: str = ""
+    enabled: bool = True
+    disabled_reason: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "config_paths", tuple(str(path) for path in self.config_paths if str(path).strip()))
+        object.__setattr__(self, "available_config_names", tuple(str(name) for name in self.available_config_names if str(name).strip()))
+        object.__setattr__(self, "extra_args", tuple(str(arg) for arg in self.extra_args if str(arg).strip()))
+        object.__setattr__(self, "data_domain_id", int(self.data_domain_id))
+        object.__setattr__(self, "admin_domain_id", int(self.admin_domain_id))
+        object.__setattr__(self, "monitoring_domain_id", int(self.monitoring_domain_id))
+        if not self.command_preview:
+            object.__setattr__(self, "command_preview", _launch_command_preview(self))
+        if self.enabled and not self.config_name.strip():
+            object.__setattr__(self, "enabled", False)
+            object.__setattr__(self, "disabled_reason", "config name required")
+
+
+@dataclass(frozen=True)
 class RecordTabViewModel:
     """Immutable snapshot consumed by the Record tab renderer."""
 
@@ -77,6 +111,7 @@ class RecordTabViewModel:
     command_history: Tuple[RecordCommandRow, ...] = field(default_factory=tuple)
     monitoring_summary: Tuple[Tuple[str, str], ...] = field(default_factory=tuple)
     diagnostics: Tuple[str, ...] = field(default_factory=tuple)
+    launch: RecordLaunchViewModel = field(default_factory=RecordLaunchViewModel)
 
     @property
     def selected_candidate(self) -> Optional[RecordCandidateRow]:
@@ -97,6 +132,7 @@ def build_record_tab_view_model(
         local_hostnames: Iterable[str] = (),
         graceful_shutdown_failed: bool = False,
         tag_value: str = "",
+    launch: Optional[RecordLaunchViewModel] = None,
         now: float = 0.0,
 ) -> RecordTabViewModel:
     """Build a Record-tab snapshot from app-core service DTOs."""
@@ -133,6 +169,7 @@ def build_record_tab_view_model(
         command_history=tuple(_command_row(outcome) for outcome in command_history),
         monitoring_summary=_monitoring_summary(selected),
         diagnostics=diagnostics,
+        launch=launch or RecordLaunchViewModel(),
     )
 
 
@@ -168,6 +205,29 @@ def build_record_action_command(
         command_type=action_to_command[action_id],
         target=candidate.service.key,
         payload=payload,
+    )
+
+
+def build_record_launch_command(launch: RecordLaunchViewModel) -> AppCommand:
+    """Translate Record-tab launch fields into an app-core launch command."""
+
+    if not launch.config_name.strip():
+        raise ValueError("config_name is required for Record launch commands")
+    return AppCommand(
+        command_type="service.launch_recording",
+        target="recording",
+        payload={
+            "label": launch.label,
+            "config_paths": list(launch.config_paths),
+            "config_name": launch.config_name,
+            "data_domain_id": launch.data_domain_id,
+            "admin_domain_id": launch.admin_domain_id,
+            "monitoring_domain_id": launch.monitoring_domain_id,
+            "verbosity": launch.verbosity,
+            "executable": launch.executable,
+            "working_dir": launch.working_dir,
+            "extra_args": list(launch.extra_args),
+        },
     )
 
 
@@ -332,6 +392,24 @@ def _target_label(selected: Optional[ServiceProcessCandidate], service: ServiceI
 
 def _empty_recording_service() -> ServiceInstanceRef:
     return ServiceInstanceRef(ServiceKind.RECORDING, "", 0, 0)
+
+
+def _launch_command_preview(launch: RecordLaunchViewModel) -> str:
+    executable = launch.executable or "rtirecordingservice"
+    command = [
+        executable,
+        "-cfgName", launch.config_name or "<config>",
+        "-appName", "<generated>",
+        "-remoteAdministrationDomainId", str(launch.admin_domain_id),
+        "-remoteMonitoringDomainId", str(launch.monitoring_domain_id),
+    ]
+    if launch.verbosity:
+        command.extend(["-verbosity", launch.verbosity])
+    if launch.config_paths:
+        command.extend(["-cfgFile", ";".join(launch.config_paths)])
+    command.extend((f"-DDOMAIN_ID={launch.data_domain_id}", f"-DADMIN_DOMAIN_ID={launch.admin_domain_id}"))
+    command.extend(launch.extra_args)
+    return " ".join(shlex.quote(str(part)) for part in command)
 
 
 def _age_text(now: float, last_seen_at: float) -> str:

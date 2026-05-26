@@ -24,12 +24,25 @@ from app_core.services import (
 )
 from gui import UiFrameScheduler, build_mock_shell_view_model
 from gui.main_window import (
+    RECORD_LAUNCH_ADMIN_DOMAIN_TAG,
+    RECORD_LAUNCH_CONFIG_NAME_TAG,
+    RECORD_LAUNCH_CONFIG_PATHS_TAG,
+    RECORD_LAUNCH_DATA_DOMAIN_TAG,
+    RECORD_LAUNCH_EXTRA_ARGS_TAG,
+    RECORD_LAUNCH_LABEL_TAG,
+    RECORD_LAUNCH_MONITOR_DOMAIN_TAG,
+    RECORD_LAUNCH_VERBOSITY_TAG,
     WORKSPACE_NAME_INPUT_TAG,
     WORKSPACE_PATH_INPUT_TAG,
     DearPyGuiShell,
     build_workspace_action_command,
 )
-from gui.tabs.record_tab import build_record_action_command, build_record_tab_view_model
+from gui.tabs.record_tab import (
+    RecordLaunchViewModel,
+    build_record_action_command,
+    build_record_launch_command,
+    build_record_tab_view_model,
+)
 from rs_gui_v2_app import main
 
 
@@ -168,6 +181,31 @@ class TestMockShellViewModel(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_record_action_command("tag", candidate)
 
+    def test_record_launch_command_preserves_operator_fields(self):
+        command = build_record_launch_command(RecordLaunchViewModel(
+            label="Main Recorder",
+            config_paths=("services/recording_service_config.xml", "dds/qos/DDS_QOS_PROFILES.xml"),
+            config_name="deploy",
+            data_domain_id=63,
+            admin_domain_id=61,
+            monitoring_domain_id=62,
+            verbosity="WARN:WARN",
+            executable="/opt/rti/bin/rtirecordingservice",
+            working_dir="test_output/rs_gui_v2/manual",
+            extra_args=("-DDB_DIR=test_output/db",),
+        ))
+
+        self.assertEqual(command.command_type, "service.launch_recording")
+        self.assertEqual(command.payload["label"], "Main Recorder")
+        self.assertEqual(command.payload["config_paths"], [
+            "services/recording_service_config.xml",
+            "dds/qos/DDS_QOS_PROFILES.xml",
+        ])
+        self.assertEqual(command.payload["config_name"], "deploy")
+        self.assertEqual(command.payload["data_domain_id"], 63)
+        self.assertEqual(command.payload["admin_domain_id"], 61)
+        self.assertEqual(command.payload["monitoring_domain_id"], 62)
+
     def test_workspace_action_commands_preserve_file_intent(self):
         save = build_workspace_action_command(
             "save",
@@ -245,12 +283,17 @@ class TestDearPyGuiRenderer(unittest.TestCase):
         self.assertIn("window", call_names)
         self.assertIn("tab_bar", call_names)
         self.assertIn("add_button", call_names)
-        self.assertEqual(view.record_tab.selected_candidate.control_name, "recording_service_8f4f2a1c")
+        self.assertEqual(view.record_tab.candidates, ())
+        self.assertEqual(view.record_tab.target_label, "No Recording Service")
 
     def test_replay_buttons_dispatch_commands_when_sink_is_present(self):
         fake = FakeDpg()
         commands = []
-        shell = DearPyGuiShell(dpg_module=fake, command_sink=commands.append)
+        shell = DearPyGuiShell(
+            view_provider=build_mock_shell_view_model,
+            dpg_module=fake,
+            command_sink=commands.append,
+        )
 
         shell.render_once()
         _button_callback(fake, "Start")()
@@ -266,7 +309,11 @@ class TestDearPyGuiRenderer(unittest.TestCase):
     def test_convert_buttons_dispatch_commands_when_sink_is_present(self):
         fake = FakeDpg()
         commands = []
-        shell = DearPyGuiShell(dpg_module=fake, command_sink=commands.append)
+        shell = DearPyGuiShell(
+            view_provider=build_mock_shell_view_model,
+            dpg_module=fake,
+            command_sink=commands.append,
+        )
 
         shell.render_once()
         _button_callback(fake, "Run Conversion")()
@@ -279,6 +326,33 @@ class TestDearPyGuiRenderer(unittest.TestCase):
             convert_command.payload["output_storage"]["path"],
             "services/converter_output/robot_run_03_json",
         )
+
+    def test_record_launch_button_dispatches_current_form_values(self):
+        fake = FakeDpg()
+        commands = []
+        shell = DearPyGuiShell(dpg_module=fake, command_sink=commands.append)
+
+        shell.render_once()
+        fake.values[RECORD_LAUNCH_LABEL_TAG] = "Manual Recorder"
+        fake.values[RECORD_LAUNCH_CONFIG_PATHS_TAG] = "record.xml;qos.xml"
+        fake.values[RECORD_LAUNCH_CONFIG_NAME_TAG] = "manual_deploy"
+        fake.values[RECORD_LAUNCH_DATA_DOMAIN_TAG] = "63"
+        fake.values[RECORD_LAUNCH_ADMIN_DOMAIN_TAG] = "61"
+        fake.values[RECORD_LAUNCH_MONITOR_DOMAIN_TAG] = "62"
+        fake.values[RECORD_LAUNCH_VERBOSITY_TAG] = "WARN:WARN"
+        fake.values[RECORD_LAUNCH_EXTRA_ARGS_TAG] = "-DDB_DIR=test_output/db"
+        _button_callback(fake, "Launch Recording Service")()
+
+        self.assertTrue(any(command.command_type == "service.launch_recording" for command in commands))
+        launch_command = next(command for command in commands if command.command_type == "service.launch_recording")
+        self.assertEqual(launch_command.payload["label"], "Manual Recorder")
+        self.assertEqual(launch_command.payload["config_paths"], ["record.xml", "qos.xml"])
+        self.assertEqual(launch_command.payload["config_name"], "manual_deploy")
+        self.assertEqual(launch_command.payload["data_domain_id"], 63)
+        self.assertEqual(launch_command.payload["admin_domain_id"], 61)
+        self.assertEqual(launch_command.payload["monitoring_domain_id"], 62)
+        self.assertEqual(launch_command.payload["verbosity"], "WARN:WARN")
+        self.assertEqual(launch_command.payload["extra_args"], ["-DDB_DIR=test_output/db"])
 
     def test_workspace_buttons_dispatch_commands_from_inputs(self):
         fake = FakeDpg()

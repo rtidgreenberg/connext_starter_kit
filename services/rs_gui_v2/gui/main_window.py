@@ -6,7 +6,12 @@ from app_core import AppCommand
 
 from .tabs.convert_tab import ConvertTabViewModel, build_convert_action_command
 from .tabs.plots_tab import PlotsTabViewModel
-from .tabs.record_tab import RecordTabViewModel, build_record_action_command
+from .tabs.record_tab import (
+    RecordLaunchViewModel,
+    RecordTabViewModel,
+    build_record_action_command,
+    build_record_launch_command,
+)
 from .tabs.replay_tab import (
     ReplayTargetRow,
     ReplayTabViewModel,
@@ -20,11 +25,21 @@ from .tabs.topics_tab import (
     build_topic_field_command,
     build_topic_select_command,
 )
-from .view_models import ShellViewModel, build_mock_shell_view_model
+from .view_models import ShellViewModel, build_empty_shell_view_model
 
 
 WORKSPACE_NAME_INPUT_TAG = "rs_gui_v2_workspace_name"
 WORKSPACE_PATH_INPUT_TAG = "rs_gui_v2_workspace_path"
+RECORD_LAUNCH_LABEL_TAG = "rs_gui_v2_record_launch_label"
+RECORD_LAUNCH_CONFIG_PATHS_TAG = "rs_gui_v2_record_launch_config_paths"
+RECORD_LAUNCH_CONFIG_NAME_TAG = "rs_gui_v2_record_launch_config_name"
+RECORD_LAUNCH_DATA_DOMAIN_TAG = "rs_gui_v2_record_launch_data_domain"
+RECORD_LAUNCH_ADMIN_DOMAIN_TAG = "rs_gui_v2_record_launch_admin_domain"
+RECORD_LAUNCH_MONITOR_DOMAIN_TAG = "rs_gui_v2_record_launch_monitor_domain"
+RECORD_LAUNCH_VERBOSITY_TAG = "rs_gui_v2_record_launch_verbosity"
+RECORD_LAUNCH_EXECUTABLE_TAG = "rs_gui_v2_record_launch_executable"
+RECORD_LAUNCH_WORKING_DIR_TAG = "rs_gui_v2_record_launch_working_dir"
+RECORD_LAUNCH_EXTRA_ARGS_TAG = "rs_gui_v2_record_launch_extra_args"
 
 
 class DearPyGuiUnavailable(RuntimeError):
@@ -49,7 +64,7 @@ class DearPyGuiShell:
 
     def __init__(
             self,
-            view_provider: Callable[[], ShellViewModel] = build_mock_shell_view_model,
+            view_provider: Callable[[], ShellViewModel] = build_empty_shell_view_model,
             command_sink: Optional[Callable[[AppCommand], bool]] = None,
             dpg_module=None,
     ) -> None:
@@ -122,6 +137,8 @@ def _render_record_tab(
         record: RecordTabViewModel,
         command_sink: Optional[Callable[[AppCommand], bool]] = None,
 ) -> None:
+    _render_record_launch_controls(dpg, record, command_sink=command_sink)
+    dpg.add_separator()
     dpg.add_text(f"Recording target: {record.target_label}")
     dpg.add_text(
         f"Readiness: {record.readiness} | State: {record.observed_state} | "
@@ -134,6 +151,42 @@ def _render_record_tab(
     _render_record_actions(dpg, record, command_sink=command_sink)
     _render_command_history(dpg, record)
     _render_monitoring_summary(dpg, record)
+
+
+def _render_record_launch_controls(
+        dpg,
+        record: RecordTabViewModel,
+        command_sink: Optional[Callable[[AppCommand], bool]] = None,
+) -> None:
+    launch = record.launch
+    dpg.add_text("Launch Recording Service")
+    dpg.add_input_text(label="Label", default_value=launch.label, tag=RECORD_LAUNCH_LABEL_TAG)
+    dpg.add_input_text(
+        label="Config Files",
+        default_value=";".join(launch.config_paths),
+        tag=RECORD_LAUNCH_CONFIG_PATHS_TAG,
+    )
+    if launch.available_config_names:
+        dpg.add_text(f"Available configs: {', '.join(launch.available_config_names)}")
+    with dpg.group(horizontal=True):
+        dpg.add_input_text(label="Config", default_value=launch.config_name, tag=RECORD_LAUNCH_CONFIG_NAME_TAG)
+        dpg.add_input_text(label="Data", default_value=str(launch.data_domain_id), tag=RECORD_LAUNCH_DATA_DOMAIN_TAG)
+        dpg.add_input_text(label="Admin", default_value=str(launch.admin_domain_id), tag=RECORD_LAUNCH_ADMIN_DOMAIN_TAG)
+        dpg.add_input_text(label="Monitor", default_value=str(launch.monitoring_domain_id), tag=RECORD_LAUNCH_MONITOR_DOMAIN_TAG)
+        dpg.add_input_text(label="Verbosity", default_value=launch.verbosity, tag=RECORD_LAUNCH_VERBOSITY_TAG)
+    with dpg.group(horizontal=True):
+        dpg.add_input_text(label="Executable", default_value=launch.executable, tag=RECORD_LAUNCH_EXECUTABLE_TAG)
+        dpg.add_input_text(label="Working Dir", default_value=launch.working_dir, tag=RECORD_LAUNCH_WORKING_DIR_TAG)
+    dpg.add_input_text(label="Extra Args", default_value=" ".join(launch.extra_args), tag=RECORD_LAUNCH_EXTRA_ARGS_TAG)
+    dpg.add_text("Command Preview")
+    dpg.add_text(launch.command_preview)
+    dpg.add_button(
+        label="Launch Recording Service",
+        enabled=launch.enabled,
+        callback=_record_launch_callback(dpg, record, command_sink),
+    )
+    if launch.disabled_reason:
+        dpg.add_text(launch.disabled_reason)
 
 
 def _render_candidate_table(dpg, record: RecordTabViewModel) -> None:
@@ -184,6 +237,53 @@ def _record_action_callback(
         command = build_record_action_command(action_id, candidate, tag_name=record.tag_value)
         return command_sink(command)
     return _callback
+
+
+def _record_launch_callback(
+        dpg,
+        record: RecordTabViewModel,
+        command_sink: Optional[Callable[[AppCommand], bool]],
+):
+    def _callback(_sender=None, _app_data=None, _user_data=None):
+        if command_sink is None:
+            return False
+        launch = RecordLaunchViewModel(
+            label=_dpg_text_value(dpg, RECORD_LAUNCH_LABEL_TAG, record.launch.label),
+            config_paths=_config_paths_from_text(
+                _dpg_text_value(dpg, RECORD_LAUNCH_CONFIG_PATHS_TAG, ";".join(record.launch.config_paths))
+            ),
+            available_config_names=record.launch.available_config_names,
+            config_name=_dpg_text_value(dpg, RECORD_LAUNCH_CONFIG_NAME_TAG, record.launch.config_name),
+            data_domain_id=_int_text_value(dpg, RECORD_LAUNCH_DATA_DOMAIN_TAG, record.launch.data_domain_id),
+            admin_domain_id=_int_text_value(dpg, RECORD_LAUNCH_ADMIN_DOMAIN_TAG, record.launch.admin_domain_id),
+            monitoring_domain_id=_int_text_value(dpg, RECORD_LAUNCH_MONITOR_DOMAIN_TAG, record.launch.monitoring_domain_id),
+            verbosity=_dpg_text_value(dpg, RECORD_LAUNCH_VERBOSITY_TAG, record.launch.verbosity),
+            executable=_dpg_text_value(dpg, RECORD_LAUNCH_EXECUTABLE_TAG, record.launch.executable),
+            working_dir=_dpg_text_value(dpg, RECORD_LAUNCH_WORKING_DIR_TAG, record.launch.working_dir),
+            extra_args=_extra_args_from_text(_dpg_text_value(dpg, RECORD_LAUNCH_EXTRA_ARGS_TAG, " ".join(record.launch.extra_args))),
+        )
+        return command_sink(build_record_launch_command(launch))
+    return _callback
+
+
+def _dpg_text_value(dpg, tag: str, default: str = "") -> str:
+    value = dpg.get_value(tag)
+    if value is None:
+        return str(default)
+    return str(value)
+
+
+def _int_text_value(dpg, tag: str, default: int = 0) -> int:
+    value = _dpg_text_value(dpg, tag, str(default)).strip()
+    return int(value or default)
+
+
+def _config_paths_from_text(value: str):
+    return tuple(part.strip() for part in value.replace("\n", ";").split(";") if part.strip())
+
+
+def _extra_args_from_text(value: str):
+    return tuple(part.strip() for part in value.split() if part.strip())
 
 
 def _render_convert_tab(

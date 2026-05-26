@@ -83,7 +83,7 @@ def launch_request():
 def build_session(runtime=None, admin_client=None, convert_controller=None, replay_controller=None, topics_controller=None):
     runtime = runtime or AppRuntime()
     manager = ServiceProcessManager(
-        spawner=FakeSpawner(FakeHandle(4218)),
+        spawner=FakeSpawner(FakeHandle(4218), FakeHandle(5002)),
         hostname="dev-host",
         clock=lambda: 10.0,
     )
@@ -155,6 +155,35 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(view.record_tab.command_history[0].command, "pause")
         self.assertTrue(any(entry.message == "Queued service.pause" for entry in view.event_log))
         self.assertTrue(any(entry.message == "Dispatched service.pause" for entry in view.event_log))
+
+    async def test_launch_recording_command_dispatches_to_process_manager(self):
+        session, _admin_client, _launch = build_session()
+        await session.next_view_async(process_commands=False)
+        session.command_sink(AppCommand(
+            command_type="service.launch_recording",
+            target="recording",
+            payload={
+                "label": "Manual Recorder",
+                "config_paths": ["manual_record.xml", "manual_qos.xml"],
+                "config_name": "manual_deploy",
+                "data_domain_id": 63,
+                "admin_domain_id": 61,
+                "monitoring_domain_id": 62,
+                "verbosity": "WARN:WARN",
+                "executable": "/opt/rti/bin/rtirecordingservice",
+            },
+            command_id="launch-recording",
+            created_at=1.5,
+        ))
+
+        view = await session.next_view_async()
+
+        self.assertEqual(view.record_tab.selected_candidate.pid, "5002")
+        self.assertEqual(view.record_tab.launch.config_name, "manual_deploy")
+        self.assertEqual(view.record_tab.launch.data_domain_id, 63)
+        self.assertEqual(view.record_tab.admin_domain, 61)
+        self.assertEqual(view.record_tab.monitoring_domain, 62)
+        self.assertTrue(any(entry.message == "Dispatched service.launch_recording" for entry in view.event_log))
 
     async def test_tag_command_updates_controller_tag_state(self):
         session, admin_client, _launch = build_session()

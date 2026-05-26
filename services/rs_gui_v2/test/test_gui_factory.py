@@ -90,6 +90,7 @@ class FakeDpg:
 class TestGuiShellFactory(unittest.TestCase):
     def test_mock_assembly_builds_controller_backed_session(self):
         assembly = build_gui_shell_assembly(GuiShellSessionFactoryConfig(
+            mode=GuiShellSessionMode.MOCK,
             workspace_name="Factory Workspace",
             unsaved=True,
             start_runtime=True,
@@ -112,8 +113,10 @@ class TestGuiShellFactory(unittest.TestCase):
         self.assertEqual(view.plots_tab.total_point_count, 8)
         self.assertEqual(assembly.discovery_client.scans, [(0, False)])
 
-    def test_default_session_dispatches_commands_through_fake_admin(self):
-        assembly = build_gui_shell_assembly()
+    def test_mock_session_dispatches_commands_through_fake_admin(self):
+        assembly = build_gui_shell_assembly(GuiShellSessionFactoryConfig(
+            mode=GuiShellSessionMode.MOCK,
+        ))
         assembly.session.next_view()
         command = AppCommand(
             command_type="service.pause",
@@ -149,7 +152,7 @@ class TestGuiShellFactory(unittest.TestCase):
         self.assertEqual(view.topics_tab.rows, ())
         self.assertEqual(view.plots_tab.rows, ())
 
-    def test_default_session_convenience_returns_session_only(self):
+    def test_default_session_convenience_returns_clean_session_only(self):
         session = build_default_gui_shell_session(GuiShellSessionFactoryConfig(
             workspace_name="Session Only",
         ))
@@ -157,16 +160,19 @@ class TestGuiShellFactory(unittest.TestCase):
         view = session.next_view()
 
         self.assertIn("Session Only", view.title)
-        self.assertEqual(view.record_tab.selected_candidate_id, "launch-recording-main")
+        self.assertEqual(view.record_tab.selected_candidate_id, "")
+        self.assertEqual(view.record_tab.candidates, ())
+        self.assertEqual(view.record_tab.target_label, "No Recording Service")
 
-    def test_shell_can_render_factory_session_with_injected_dearpygui(self):
+    def test_shell_can_render_clean_factory_session_with_injected_dearpygui(self):
         assembly = build_gui_shell_assembly()
         fake = FakeDpg()
         shell = assembly.shell(dpg_module=fake)
 
         view = shell.render_once()
 
-        self.assertEqual(view.record_tab.selected_candidate_id, "launch-recording-main")
+        self.assertEqual(view.record_tab.selected_candidate_id, "")
+        self.assertEqual(view.record_tab.candidates, ())
         self.assertTrue(fake.context_created)
         self.assertTrue(fake.context_destroyed)
 
@@ -174,6 +180,11 @@ class TestGuiShellFactory(unittest.TestCase):
 class TestGuiFactoryEntrypoint(unittest.TestCase):
     def test_mock_gui_check_uses_factory_session(self):
         self.assertEqual(main(["--mock-gui-check"]), 0)
+
+    def test_default_gui_factory_config_is_clean_live_mode(self):
+        config = GuiShellSessionFactoryConfig()
+
+        self.assertEqual(config.mode, GuiShellSessionMode.LIVE)
 
 
 if __name__ == "__main__":

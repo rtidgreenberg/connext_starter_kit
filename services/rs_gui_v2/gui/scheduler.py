@@ -6,7 +6,9 @@ from app_core import AppEvent, AppRuntime, AppState
 
 from .tabs.convert_tab import ConvertTabViewModel
 from .tabs.plots_tab import PlotsTabViewModel
-from .tabs.record_tab import RecordTabViewModel, build_mock_record_tab_view_model
+from app_core.services import ServiceCandidateSelection
+
+from .tabs.record_tab import RecordTabViewModel, build_record_tab_view_model
 from .tabs.replay_tab import ReplayTabViewModel
 from .tabs.topics_tab import TopicsTabViewModel
 from .view_models import EventLogEntry, ShellViewModel, build_shell_view_model, event_log_entry_from_event
@@ -39,7 +41,7 @@ class UiFrameScheduler:
             replay_tab: ReplayTabViewModel = None,
             topics_tab: TopicsTabViewModel = None,
             plots_tab: PlotsTabViewModel = None,
-            workspace_name: str = "Mock Workspace",
+            workspace_name: str = "Workspace",
             workspace_path: str = "",
             unsaved: bool = False,
     ) -> ShellViewModel:
@@ -54,7 +56,7 @@ class UiFrameScheduler:
         )
         return self._view_builder(
             self._runtime.state,
-            record_tab or build_mock_record_tab_view_model(),
+            record_tab or build_record_tab_view_model(ServiceCandidateSelection()),
             convert_tab=convert_tab,
             replay_tab=replay_tab,
             topics_tab=topics_tab,

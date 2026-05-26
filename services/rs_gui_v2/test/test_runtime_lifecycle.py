@@ -90,7 +90,10 @@ class TestRuntimeQueues(unittest.TestCase):
         self.assertTrue(runtime.enqueue_command(first))
         self.assertTrue(runtime.enqueue_command(second))
         self.assertFalse(runtime.enqueue_command(third))
+        self.assertEqual(runtime.counters.commands_enqueued, 2)
+        self.assertEqual(runtime.counters.commands_dropped, 1)
         self.assertEqual(runtime.drain_commands(), [first, second])
+        self.assertEqual(runtime.counters.commands_drained, 2)
         self.assertEqual(runtime.drain_commands(), [])
 
     def test_event_queue_is_bounded_and_fifo(self):
@@ -102,7 +105,10 @@ class TestRuntimeQueues(unittest.TestCase):
         self.assertTrue(runtime.publish_event(first))
         self.assertTrue(runtime.publish_event(second))
         self.assertFalse(runtime.publish_event(third))
+        self.assertEqual(runtime.counters.events_published, 2)
+        self.assertEqual(runtime.counters.events_dropped, 1)
         self.assertEqual(runtime.drain_events(), [first, second])
+        self.assertEqual(runtime.counters.events_drained, 2)
 
     def test_drain_limit_preserves_remaining_items(self):
         runtime = AppRuntime()
@@ -112,6 +118,14 @@ class TestRuntimeQueues(unittest.TestCase):
 
         self.assertEqual(runtime.drain_events(limit=2), events[:2])
         self.assertEqual(runtime.drain_events(), events[2:])
+
+    def test_sample_counters_are_recorded(self):
+        runtime = AppRuntime()
+
+        runtime.record_samples(received=5, dropped=2)
+
+        self.assertEqual(runtime.counters.samples_received, 5)
+        self.assertEqual(runtime.counters.samples_dropped, 2)
 
 
 if __name__ == "__main__":

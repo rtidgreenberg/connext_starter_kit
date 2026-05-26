@@ -11,7 +11,7 @@ PARENT_DIR = os.path.dirname(SCRIPT_DIR)
 if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
-from app_core import AppEvent, AppRuntime, CommandStatus
+from app_core import AppEvent, AppRuntime, CommandStatus, OperatorDiagnostic
 from app_core.services import (
     ServiceCandidateSelection,
     ServiceCommand,
@@ -209,6 +209,27 @@ class TestUiFrameScheduler(unittest.TestCase):
         self.assertEqual(len(view.event_log), 1)
         self.assertEqual(view.event_log[0].message, "second")
         self.assertEqual(runtime.drain_events(), [])
+        self.assertEqual(runtime.counters.ui_frames_built, 1)
+        self.assertEqual(runtime.counters.ui_events_ingested, 2)
+        self.assertEqual(runtime.counters.ui_event_log_dropped, 1)
+
+    def test_shell_exposes_runtime_counters_and_operator_diagnostics(self):
+        runtime = AppRuntime()
+        runtime.record_samples(received=9, dropped=2)
+        runtime.set_operator_diagnostics((
+            OperatorDiagnostic("service_admin", "warning", "no admin match", "NO_MATCH"),
+        ))
+        scheduler = UiFrameScheduler(runtime)
+
+        view = scheduler.next_view()
+
+        status = {item.label: item for item in view.status_items}
+        self.assertEqual(status["Frames"].value, "1")
+        self.assertEqual(status["Drops"].value, "2")
+        self.assertEqual(status["Diagnostics"].value, "2")
+        self.assertIn("WARNING service_admin: no admin match", view.operator_diagnostics)
+        self.assertTrue(any("WARN record:" in item for item in view.operator_diagnostics))
+        self.assertTrue(any(line == "Samples: 9 received / 2 dropped" for line in view.inspector_lines))
 
 
 class TestDearPyGuiRenderer(unittest.TestCase):

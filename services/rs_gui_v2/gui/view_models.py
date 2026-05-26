@@ -47,6 +47,7 @@ class ShellViewModel:
     topics_tab: TopicsTabViewModel = field(default_factory=build_mock_topics_tab_view_model)
     plots_tab: PlotsTabViewModel = field(default_factory=build_mock_plots_tab_view_model)
     event_log: Tuple[EventLogEntry, ...] = field(default_factory=tuple)
+    operator_diagnostics: Tuple[str, ...] = field(default_factory=tuple)
     inspector_title: str = "Inspector"
     inspector_lines: Tuple[str, ...] = field(default_factory=tuple)
 
@@ -70,12 +71,13 @@ def build_shell_view_model(
     topics_tab = topics_tab or build_mock_topics_tab_view_model()
     plots_tab = plots_tab or build_mock_plots_tab_view_model()
     selected = record_tab.selected_candidate
+    operator_diagnostics = _operator_diagnostics(app_state, record_tab)
     inspector_lines = (
         f"Target: {record_tab.target_label}",
         f"Selected: {selected.candidate_id if selected else 'none'}",
         f"Readiness: {record_tab.readiness}",
         f"Observed: {record_tab.observed_state}",
-    ) + record_tab.diagnostics
+    ) + record_tab.diagnostics + _runtime_counter_lines(app_state)
     title = f"Workspace: {workspace_name}{' *' if unsaved else ''}"
     return ShellViewModel(
         title=title,
@@ -90,6 +92,7 @@ def build_shell_view_model(
         topics_tab=topics_tab,
         plots_tab=plots_tab,
         event_log=tuple(event_log),
+        operator_diagnostics=operator_diagnostics,
         inspector_title="Record Inspector",
         inspector_lines=inspector_lines,
     )
@@ -152,17 +155,51 @@ def _status_items(
         plots_tab: PlotsTabViewModel,
 ) -> Tuple[ShellStatusItem, ...]:
     error_count = len(app_state.recent_errors)
+    counter = app_state.runtime_counters
+    operator_diagnostics = _operator_diagnostics(app_state, record_tab)
+    drop_count = (
+        counter.commands_dropped
+        + counter.events_dropped
+        + counter.ui_event_log_dropped
+        + counter.samples_dropped
+    )
     return (
         ShellStatusItem("Runtime", app_state.lifecycle.value, _state_for_lifecycle(app_state.lifecycle)),
         ShellStatusItem("DDS", "enabled" if app_state.dds_enabled else "off", "ok" if app_state.dds_enabled else "muted"),
         ShellStatusItem("Admin", "enabled" if app_state.admin_rpc_enabled else "off", "ok" if app_state.admin_rpc_enabled else "muted"),
         ShellStatusItem("Monitoring", "enabled" if app_state.monitoring_enabled else "off", "ok" if app_state.monitoring_enabled else "muted"),
+        ShellStatusItem("Frames", str(counter.ui_frames_built), "normal"),
+        ShellStatusItem("Drops", str(drop_count), "error" if drop_count else "ok"),
+        ShellStatusItem("Diagnostics", str(len(operator_diagnostics)), "error" if error_count else ("busy" if operator_diagnostics else "ok")),
         ShellStatusItem("Record", record_tab.observed_state, "ok" if record_tab.observed_state.lower() == "running" else "normal"),
         ShellStatusItem("Replay", replay_tab.observed_state, "ok" if replay_tab.observed_state.lower() == "running" else "normal"),
         ShellStatusItem("Convert", str(len(convert_tab.jobs)), "ok" if convert_tab.jobs else "normal"),
         ShellStatusItem("Topics", str(topics_tab.visible_topic_count), "ok" if topics_tab.visible_topic_count else "normal"),
         ShellStatusItem("Plots", str(plots_tab.total_point_count), "ok" if plots_tab.total_point_count else "normal"),
         ShellStatusItem("Errors", str(error_count), "error" if error_count else "ok"),
+    )
+
+
+def _operator_diagnostics(app_state: AppState, record_tab: RecordTabViewModel) -> Tuple[str, ...]:
+    diagnostics = [
+        f"{diagnostic.severity.upper()} {diagnostic.source}: {diagnostic.message}"
+        for diagnostic in app_state.operator_diagnostics
+        if diagnostic.message
+    ]
+    diagnostics.extend(f"ERROR runtime: {message}" for message in app_state.recent_errors)
+    diagnostics.extend(f"WARN record: {message}" for message in record_tab.diagnostics)
+    if record_tab.readiness and record_tab.readiness not in ("request+reply matched", "not checked"):
+        diagnostics.append(f"WARN service_admin: {record_tab.readiness}")
+    return tuple(diagnostics)
+
+
+def _runtime_counter_lines(app_state: AppState) -> Tuple[str, ...]:
+    counter = app_state.runtime_counters
+    return (
+        f"Frames: {counter.ui_frames_built}",
+        f"Commands: {counter.commands_enqueued} queued / {counter.commands_drained} handled / {counter.commands_dropped} dropped",
+        f"Events: {counter.events_published} published / {counter.events_drained} drained / {counter.events_dropped} dropped",
+        f"Samples: {counter.samples_received} received / {counter.samples_dropped} dropped",
     )
 
 

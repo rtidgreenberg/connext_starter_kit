@@ -64,7 +64,7 @@ from .services import (
     ServiceMonitoringFacade,
     ServiceStateSnapshot,
 )
-from .state import AppState
+from .state import AppState, OperatorDiagnostic, RuntimeCounters
 from .subscriptions import (
     FakeTopicSubscriptionClient,
     SampleCache,
@@ -132,6 +132,8 @@ __all__ = [
     "PlotSeriesSnapshot",
     "PlotUpdateResult",
     "RuntimeConfig",
+    "RuntimeCounters",
+    "OperatorDiagnostic",
     "SampleCache",
     "SampleEnvelope",
     "SampleInfoSnapshot",

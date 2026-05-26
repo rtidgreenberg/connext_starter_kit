@@ -13,6 +13,7 @@ if PARENT_DIR not in sys.path:
 
 from app_core import SubscriptionStatus, TopicSubscriptionRequest
 from app_core.rti_subscriptions import (
+    RtiSubscriptionConfig,
     RtiSubscriptionClient,
     envelope_from_dynamic_sample,
     sample_info_snapshot,
@@ -59,6 +60,17 @@ class FakeInfo:
         self.sample_rank = 3
 
 
+class FakeRank:
+    def __init__(self, sample):
+        self.sample = sample
+
+
+class FakeRankInfo(FakeInfo):
+    def __init__(self):
+        super().__init__(valid=True)
+        self.sample_rank = FakeRank(4)
+
+
 class FakeReader:
     def __init__(self):
         self.samples = []
@@ -71,6 +83,20 @@ class FakeReader:
 
     def close(self):
         self.closed = True
+
+
+class FakeReaderSelector:
+    def __init__(self, reader):
+        self.reader = reader
+        self.limit = 0
+
+    def max_samples(self, limit):
+        self.limit = int(limit)
+        return self
+
+    def take(self):
+        samples = self.reader.take()
+        return samples[:self.limit]
 
 
 class FakeParticipant:
@@ -95,16 +121,42 @@ class FakeDynamicDataModule:
         self.topics.append(topic)
         return topic
 
-    def DataReader(self, participant, topic):
+    def DataReader(self, participant, topic, qos=None):
         reader = FakeReader()
-        self.readers.append({"participant": participant, "topic": topic, "reader": reader})
+        reader.select = lambda: FakeReaderSelector(reader)
+        self.readers.append({"participant": participant, "topic": topic, "reader": reader, "qos": qos})
         return reader
 
 
+class FakeHistoryQos:
+    def __init__(self):
+        self.kind = None
+        self.depth = 0
+
+
+class FakeResourceLimitsQos:
+    def __init__(self):
+        self.max_samples = 0
+        self.max_instances = 0
+        self.max_samples_per_instance = 0
+
+
+class FakeDataReaderQos:
+    def __init__(self):
+        self.history = FakeHistoryQos()
+        self.resource_limits = FakeResourceLimitsQos()
+
+
 class FakeDdsModule:
+    class HistoryQosPolicyKind:
+        KEEP_LAST_HISTORY_QOS = "keep_last"
+
     def __init__(self):
         self.DynamicData = FakeDynamicDataModule()
         self.participants = []
+
+    def DataReaderQos(self):
+        return FakeDataReaderQos()
 
     def DomainParticipant(self, domain_id):
         participant = FakeParticipant()
@@ -122,6 +174,11 @@ class TestSampleMapping(unittest.TestCase):
         self.assertEqual(snapshot.reception_timestamp, 11.25)
         self.assertEqual(snapshot.instance_state, "ALIVE")
         self.assertEqual(snapshot.rank, 3)
+
+        def test_sample_info_snapshot_accepts_connext_rank_object(self):
+            snapshot = sample_info_snapshot(FakeRankInfo())
+
+            self.assertEqual(snapshot.rank, 4)
 
     def test_envelope_maps_valid_and_invalid_samples(self):
         request = TopicSubscriptionRequest(4, "Telemetry", "TelemetryType")
@@ -193,6 +250,38 @@ class TestRtiSubscriptionClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.state.status, SubscriptionStatus.RECEIVING)
         self.assertEqual(session.state.received_samples, 1)
         self.assertEqual(session.state.invalid_samples, 1)
+
+    async def test_bounded_reader_qos_and_take_limit_are_applied_when_configured(self):
+        dds = FakeDdsModule()
+        client = RtiSubscriptionClient(
+            config=RtiSubscriptionConfig(
+                reader_history_depth=7,
+                reader_resource_max_samples=9,
+                reader_resource_max_instances=2,
+                reader_resource_max_samples_per_instance=8,
+                reader_take_max_samples=1,
+            ),
+            type_registry=FakeTypeRegistry(),
+            dds_module=dds,
+        )
+        request = TopicSubscriptionRequest(5, "Telemetry", "TelemetryType")
+        await client.subscribe(request)
+        reader_record = dds.DynamicData.readers[0]
+        reader = reader_record["reader"]
+        reader.samples.extend([
+            ({"x": 1}, FakeInfo(True)),
+            ({"x": 2}, FakeInfo(True)),
+        ])
+
+        samples = await client.take_available(request)
+        qos = reader_record["qos"]
+
+        self.assertEqual(qos.history.kind, "keep_last")
+        self.assertEqual(qos.history.depth, 7)
+        self.assertEqual(qos.resource_limits.max_samples, 9)
+        self.assertEqual(qos.resource_limits.max_instances, 2)
+        self.assertEqual(qos.resource_limits.max_samples_per_instance, 8)
+        self.assertEqual(len(samples), 1)
 
     async def test_unsubscribe_and_close_release_participants(self):
         dds = FakeDdsModule()

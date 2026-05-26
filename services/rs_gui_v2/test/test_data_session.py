@@ -12,6 +12,7 @@ if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
 from app_core import (
+    AppRuntime,
     DataSessionConfig,
     DataSessionCoordinator,
     FakeTopicSubscriptionClient,
@@ -170,6 +171,40 @@ class TestDataSessionCoordinator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot.plots[0].point_count, 0)
         self.assertEqual(snapshot.plots[0].series[0].skipped_samples, 1)
 
+    async def test_telemetry_burst_bounds_cache_plot_buffers_and_runtime_counters(self):
+        workspace = self._workspace(max_samples=32, plot_max_points=64, plot_history_seconds=1000.0)
+        client = FakeTopicSubscriptionClient()
+        runtime = AppRuntime()
+        session = DataSessionCoordinator(
+            workspace,
+            client,
+            type_catalog=self._type_catalog(),
+            config=DataSessionConfig(plot_min_interval_seconds=0.0),
+        )
+        await session.start()
+
+        update = session.apply_samples([
+            self._sample(index=index, value=float(index))
+            for index in range(500)
+        ])
+        runtime.record_data_session_update(update)
+        snapshot = session.snapshot()
+        state = snapshot.subscription_state("0:Telemetry:TelemetryType")
+        series = snapshot.plots[0].series[0]
+
+        self.assertEqual(update.sample_count, 500)
+        self.assertEqual(update.dropped_sample_count, 468)
+        self.assertEqual(runtime.counters.samples_received, 500)
+        self.assertEqual(runtime.counters.samples_dropped, 468)
+        self.assertEqual(state.received_samples, 500)
+        self.assertEqual(state.dropped_samples, 468)
+        self.assertEqual(len(snapshot.samples[state.request.key]), 32)
+        self.assertEqual(snapshot.plots[0].point_count, 64)
+        self.assertEqual(series.accepted_samples, 500)
+        self.assertEqual(series.dropped_points, 436)
+        self.assertEqual([sample.data["index"] for sample in snapshot.samples[state.request.key]][0], 468)
+        self.assertEqual(series.points[0].value, 436.0)
+
     async def test_config_default_max_samples_applies_to_derived_requests(self):
         selection = TopicSelection(
             domain_id=0,
@@ -205,7 +240,13 @@ class TestDataSessionCoordinator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([request.key for request in client.unsubscribed_requests], ["0:Telemetry:TelemetryType"])
         self.assertTrue(client.closed)
 
-    def _workspace(self, max_samples=4, include_missing=False):
+    def _workspace(
+            self,
+            max_samples=4,
+            include_missing=False,
+            plot_max_points=10,
+            plot_history_seconds=60.0,
+    ):
         selections = {}
         if include_missing:
             selection = TopicSelection(
@@ -227,8 +268,8 @@ class TestDataSessionCoordinator(unittest.IsolatedAsyncioTestCase):
             ),),
             plots=(WorkspacePlotDefinition(
                 name="Pose",
-                history_seconds=60.0,
-                max_points=10,
+                history_seconds=plot_history_seconds,
+                max_points=plot_max_points,
                 series=(WorkspacePlotSeries(
                     domain_id=0,
                     topic_name="Telemetry",

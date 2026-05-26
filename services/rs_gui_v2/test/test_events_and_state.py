@@ -11,7 +11,16 @@ PARENT_DIR = os.path.dirname(SCRIPT_DIR)
 if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
-from app_core import AppCommand, AppEvent, AppState, CommandResult, CommandStatus, LifecyclePhase
+from app_core import (
+    AppCommand,
+    AppEvent,
+    AppState,
+    CommandResult,
+    CommandStatus,
+    LifecyclePhase,
+    OperatorDiagnostic,
+    RuntimeCounters,
+)
 
 
 class TestAppCommand(unittest.TestCase):
@@ -80,12 +89,23 @@ class TestAppState(unittest.TestCase):
             lifecycle=LifecyclePhase.RUNNING,
             dds_enabled=True,
             services={"recording": "ok"},
+            runtime_counters=RuntimeCounters(commands_enqueued=2, samples_dropped=1),
+            operator_diagnostics=(OperatorDiagnostic("service_admin", "warning", "no match", "NO_MATCH"),),
             recent_errors=("one",),
         )
 
         restored = AppState.from_dict(state.to_dict())
 
         self.assertEqual(restored, state)
+
+    def test_runtime_counters_increment_immutably(self):
+        counters = RuntimeCounters(commands_enqueued=1)
+
+        updated = counters.increment(commands_enqueued=2, events_dropped=1)
+
+        self.assertEqual(counters.commands_enqueued, 1)
+        self.assertEqual(updated.commands_enqueued, 3)
+        self.assertEqual(updated.events_dropped, 1)
 
     def test_with_lifecycle_returns_new_state(self):
         state = AppState()

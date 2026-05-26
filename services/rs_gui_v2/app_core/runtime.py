@@ -3,10 +3,10 @@
 import asyncio
 from dataclasses import dataclass
 from queue import Empty, Full, Queue
-from typing import Awaitable, Dict, List, Optional
+from typing import Awaitable, Dict, Iterable, List, Optional
 
 from .events import AppCommand, AppEvent, LifecyclePhase
-from .state import AppState
+from .state import AppState, OperatorDiagnostic, RuntimeCounters
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,10 @@ class AppRuntime:
     @property
     def lifecycle(self) -> LifecyclePhase:
         return self._state.lifecycle
+
+    @property
+    def counters(self) -> RuntimeCounters:
+        return self._state.runtime_counters
 
     @property
     def task_names(self) -> List[str]:
@@ -85,22 +89,54 @@ class AppRuntime:
     def enqueue_command(self, command: AppCommand) -> bool:
         try:
             self._command_queue.put_nowait(command)
+            self._increment_counters(commands_enqueued=1)
             return True
         except Full:
+            self._increment_counters(commands_dropped=1)
             return False
 
     def drain_commands(self, limit: Optional[int] = None) -> List[AppCommand]:
-        return self._drain_queue(self._command_queue, limit)
+        commands = self._drain_queue(self._command_queue, limit)
+        if commands:
+            self._increment_counters(commands_drained=len(commands))
+        return commands
 
     def publish_event(self, event: AppEvent) -> bool:
         try:
             self._event_queue.put_nowait(event)
+            self._increment_counters(events_published=1)
             return True
         except Full:
+            self._increment_counters(events_dropped=1)
             return False
 
     def drain_events(self, limit: Optional[int] = None) -> List[AppEvent]:
-        return self._drain_queue(self._event_queue, limit)
+        events = self._drain_queue(self._event_queue, limit)
+        if events:
+            self._increment_counters(events_drained=len(events))
+        return events
+
+    def record_ui_frame(self, event_count: int = 0, dropped_log_entries: int = 0) -> None:
+        self._increment_counters(
+            ui_frames_built=1,
+            ui_events_ingested=max(0, int(event_count)),
+            ui_event_log_dropped=max(0, int(dropped_log_entries)),
+        )
+
+    def record_samples(self, received: int = 0, dropped: int = 0) -> None:
+        self._increment_counters(
+            samples_received=max(0, int(received)),
+            samples_dropped=max(0, int(dropped)),
+        )
+
+    def record_data_session_update(self, update) -> None:
+        self.record_samples(
+            received=getattr(update, "sample_count", 0),
+            dropped=getattr(update, "dropped_sample_count", 0),
+        )
+
+    def set_operator_diagnostics(self, diagnostics: Iterable[OperatorDiagnostic]) -> None:
+        self._state = self._state.with_operator_diagnostics(tuple(diagnostics))
 
     def spawn_task(
             self, name: str, awaitable: Awaitable[object], fatal: bool = True
@@ -142,6 +178,9 @@ class AppRuntime:
 
     def _set_lifecycle(self, lifecycle: LifecyclePhase) -> None:
         self._state = self._state.with_lifecycle(lifecycle)
+
+    def _increment_counters(self, **deltas: int) -> None:
+        self._state = self._state.increment_counters(**deltas)
 
     @staticmethod
     def _drain_queue(queue: Queue, limit: Optional[int]) -> List[object]:

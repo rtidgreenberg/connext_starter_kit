@@ -45,7 +45,13 @@ class UiFrameScheduler:
     ) -> ShellViewModel:
         """Drain pending events and return the next GUI-safe shell snapshot."""
 
-        self.ingest_events(self._runtime.drain_events(limit=self._event_drain_limit))
+        event_count, dropped_log_entries = self.ingest_events(
+            self._runtime.drain_events(limit=self._event_drain_limit)
+        )
+        self._runtime.record_ui_frame(
+            event_count=event_count,
+            dropped_log_entries=dropped_log_entries,
+        )
         return self._view_builder(
             self._runtime.state,
             record_tab or build_mock_record_tab_view_model(),
@@ -59,13 +65,17 @@ class UiFrameScheduler:
             unsaved=unsaved,
         )
 
-    def ingest_events(self, events: Iterable[AppEvent]) -> None:
+    def ingest_events(self, events: Iterable[AppEvent]) -> Tuple[int, int]:
         """Append app-core events to the bounded UI event log."""
 
         entries = tuple(event_log_entry_from_event(event) for event in events)
         if not entries:
-            return
-        self._event_log = (self._event_log + entries)[-self._max_event_log:]
+            return 0, 0
+        previous_count = len(self._event_log)
+        combined = self._event_log + entries
+        self._event_log = combined[-self._max_event_log:]
+        dropped = max(0, previous_count + len(entries) - len(self._event_log))
+        return len(entries), dropped
 
     @property
     def state(self) -> AppState:

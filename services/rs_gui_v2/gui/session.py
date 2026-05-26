@@ -188,7 +188,7 @@ class GuiShellSession:
         if command.command_type.startswith("convert."):
             if self._convert_controller is None:
                 raise ValueError(f"Unsupported GUI command type: {command.command_type}")
-            return self._convert_controller.handle_command(command)
+            return await self._convert_controller.handle_command(command)
         if command.command_type.startswith("topics."):
             if self._topics_controller is None:
                 raise ValueError(f"Unsupported GUI command type: {command.command_type}")

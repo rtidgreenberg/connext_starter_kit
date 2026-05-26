@@ -16,7 +16,7 @@ from gui.tabs.convert_controller import ConvertTabController, ConvertTabControll
 from gui.tabs.convert_tab import ConvertPresetView, build_mock_convert_tab_view_model
 
 
-class TestConvertTabController(unittest.TestCase):
+class TestConvertTabController(unittest.IsolatedAsyncioTestCase):
     def test_mock_controller_refreshes_seeded_convert_view(self):
         controller = ConvertTabController.mock()
 
@@ -41,7 +41,7 @@ class TestConvertTabController(unittest.TestCase):
         self.assertEqual(selected.preset_id, "json")
         self.assertEqual(controller.selected_preset_id, "json")
 
-    def test_run_conversion_creates_queued_job(self):
+    async def test_run_conversion_creates_queued_job(self):
         preset = ConvertPresetView(
             preset_id="json",
             label="JSON",
@@ -69,7 +69,7 @@ class TestConvertTabController(unittest.TestCase):
             },
         )
 
-        result = controller.handle_command(cmd)
+        result = await controller.handle_command(cmd)
 
         self.assertEqual(result.status, CommandStatus.ACKNOWLEDGED)
         self.assertIn("Queued conversion job", result.message)
@@ -78,7 +78,7 @@ class TestConvertTabController(unittest.TestCase):
         self.assertEqual(job.state, "queued")
         self.assertEqual(job.preset_id, "json_export")
 
-    def test_cancel_conversion_moves_job_to_cancel_requested(self):
+    async def test_cancel_conversion_moves_job_to_cancel_requested(self):
         job_id = "convert-1234"
         from gui.tabs.convert_tab import ConvertJobRow
         from app_core import AppCommand
@@ -102,14 +102,14 @@ class TestConvertTabController(unittest.TestCase):
             payload={"job_id": job_id},
         )
 
-        result = controller.handle_command(cmd)
+        result = await controller.handle_command(cmd)
 
         self.assertEqual(result.status, CommandStatus.ACKNOWLEDGED)
         self.assertIn("Requested cancellation", result.message)
         updated_job = controller._jobs[0]
         self.assertEqual(updated_job.state, "cancel_requested")
 
-    def test_open_output_requires_completed_job(self):
+    async def test_open_output_requires_completed_job(self):
         job_id = "convert-1234"
         from gui.tabs.convert_tab import ConvertJobRow
         from app_core import AppCommand
@@ -133,9 +133,9 @@ class TestConvertTabController(unittest.TestCase):
         )
 
         with self.assertRaises(ValueError):
-            controller.handle_command(cmd)
+            await controller.handle_command(cmd)
 
-    def test_open_output_succeeds_for_completed_job(self):
+    async def test_open_output_succeeds_for_completed_job(self):
         job_id = "convert-1234"
         from gui.tabs.convert_tab import ConvertJobRow
         from app_core import AppCommand
@@ -158,7 +158,7 @@ class TestConvertTabController(unittest.TestCase):
             payload={"job_id": job_id},
         )
 
-        result = controller.handle_command(cmd)
+        result = await controller.handle_command(cmd)
 
         self.assertEqual(result.status, CommandStatus.ACKNOWLEDGED)
         self.assertIn("Opening output directory", result.message)

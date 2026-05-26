@@ -11,7 +11,7 @@ from .convert_tab import (
     build_convert_tab_view_model,
     build_mock_convert_tab_view_model,
 )
-from .convert_controller import ConvertTabController, ConvertTabControllerConfig
+from .convert_controller import ConvertTabController, ConvertTabControllerConfig, ConvertJobSubmission
 from .convert_service_facade import ConverterServiceFacade, ConverterServiceConfig
 from .record_controller import RecordTabController, RecordTabControllerConfig
 from .record_tab import (

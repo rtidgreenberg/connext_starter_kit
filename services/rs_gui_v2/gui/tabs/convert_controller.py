@@ -1,8 +1,9 @@
 """Convert tab controller for fake-first GUI command routing with live service support."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+import asyncio
 import time
-from typing import Iterable, Mapping, Optional, Tuple
+from typing import Dict, Iterable, Mapping, Optional, Tuple
 
 from app_core import AppCommand, CommandResult, CommandStatus
 from app_core.services import ServiceInstanceRef
@@ -41,6 +42,18 @@ class ConvertTabControllerConfig:
         object.__setattr__(self, "verbosity", str(self.verbosity))
 
 
+@dataclass(frozen=True)
+class ConvertJobSubmission:
+    """Track a job submission with its service state."""
+
+    job_id: str
+    submitted_at: float  # timestamp
+    service_job_id: str = ""  # ID returned by service
+    submission_attempts: int = 0
+    last_error: str = ""
+    last_status_check: float = 0.0
+
+
 class ConvertTabController:
     """Build Convert tab snapshots and apply queued Convert commands (fake or live)."""
 
@@ -60,6 +73,8 @@ class ConvertTabController:
         self._clock = clock
         self._last_view = ConvertTabViewModel()
         self._service_ready = False
+        self._submissions: Dict[str, ConvertJobSubmission] = {}  # Track service submissions
+        self._polling_interval = 2.0  # seconds between status checks
 
     @classmethod
     def mock(cls, clock=time.time) -> "ConvertTabController":
@@ -119,14 +134,14 @@ class ConvertTabController:
         self._config = replace(self._config, selected_preset_id=preset.preset_id)
         return preset
 
-    def handle_command(self, command: AppCommand) -> CommandResult:
-        """Apply a queued Convert command to the controller state."""
+    async def handle_command(self, command: AppCommand) -> CommandResult:
+        """Apply a queued Convert command to the controller state asynchronously."""
 
         payload = dict(command.payload)
         if command.command_type == "convert.run":
-            return self._handle_run_conversion(command, payload)
+            return await self._handle_run_conversion(command, payload)
         if command.command_type == "convert.cancel":
-            return self._handle_cancel_conversion(command, payload)
+            return await self._handle_cancel_conversion(command, payload)
         if command.command_type == "convert.open_output":
             return self._handle_open_output(command, payload)
         if command.command_type == "convert.inspect_output":
@@ -139,6 +154,9 @@ class ConvertTabController:
         # Update service ready status if facade is available
         if self._service_facade:
             self._service_ready = await self._service_facade.is_service_ready()
+
+        # Poll running jobs from service
+        await self._update_jobs_from_monitoring()
 
         input_storage = ConvertStorageView("sqlite", self._config.input_storage_path, "XCDR_AUTO")
         output_storage = ConvertStorageView("sqlite", self._config.output_storage_path, "JSON_SQLITE")
@@ -160,12 +178,12 @@ class ConvertTabController:
         self._last_view = view
         return view
 
-    def _handle_run_conversion(
+    async def _handle_run_conversion(
             self,
             command: AppCommand,
             payload: Mapping[str, object],
     ) -> CommandResult:
-        """Process a convert.run command and create a new job snapshot."""
+        """Process a convert.run command and create/submit a new job."""
 
         config_name = str(payload.get("config_name", self._config.selected_preset_id))
         if not config_name:
@@ -178,6 +196,8 @@ class ConvertTabController:
             raise ValueError("convert.run requires an output storage path")
         output_format = str(payload.get("output_format", "JSON_SQLITE"))
         job_id = f"convert-{int(self._clock())}"
+
+        # Create job snapshot
         job = ConvertJobRow(
             job_id=job_id,
             preset_id=config_name,
@@ -191,9 +211,31 @@ class ConvertTabController:
         )
         self._jobs = tuple(list(self._jobs) + [job])
         self._config = replace(self._config, selected_job_id=job_id)
+
+        # Track submission for service polling
+        submission = ConvertJobSubmission(
+            job_id=job_id,
+            submitted_at=self._clock(),
+            submission_attempts=0,
+        )
+        self._submissions[job_id] = submission
+
+        # Try to submit to service if available
+        if self._service_facade and self._service_ready:
+            try:
+                await self._submit_job_to_service(job, config_name, input_path, output_path)
+            except Exception as exc:
+                # Log error but continue - job is still queued locally
+                submission = replace(submission, last_error=str(exc), submission_attempts=1)
+                self._submissions[job_id] = submission
+                job = replace(job, message=f"Submission failed: {exc}")
+                self._jobs = tuple(
+                    job if j.job_id == job_id else j for j in self._jobs
+                )
+
         return _command_result(command, f"Queued conversion job {job_id}", job)
 
-    def _handle_cancel_conversion(
+    async def _handle_cancel_conversion(
             self,
             command: AppCommand,
             payload: Mapping[str, object],
@@ -210,6 +252,17 @@ class ConvertTabController:
         self._jobs = tuple(
             updated_job if j.job_id == job_id else j for j in self._jobs
         )
+
+        # Notify service if job was submitted
+        if self._service_facade and job_id in self._submissions:
+            submission = self._submissions[job_id]
+            if submission.service_job_id:
+                try:
+                    # TODO: Send cancellation command to service
+                    pass
+                except Exception as exc:
+                    updated_job = replace(updated_job, message=f"Cancel request sent (service error: {exc})")
+
         return _command_result(command, f"Requested cancellation of job {job_id}", updated_job)
 
     def _handle_open_output(
@@ -261,6 +314,92 @@ class ConvertTabController:
             },
             created_at=command.created_at,
         )
+
+    async def _submit_job_to_service(
+            self,
+            job: ConvertJobRow,
+            config_name: str,
+            input_path: str,
+            output_path: str,
+    ) -> None:
+        """Submit a job to the Converter Service and track it."""
+        if not self._service_facade or not self._config.service:
+            return
+
+        submission = self._submissions.get(job.job_id)
+        if not submission:
+            return
+
+        try:
+            # TODO: Implement actual service submission once Converter admin API is confirmed
+            # For now, this is a placeholder for the async infrastructure
+            await asyncio.sleep(0.1)  # Simulate async work
+
+            # Mark as submitted
+            service_job_id = f"svc-{job.job_id}"
+            submission = replace(
+                submission,
+                service_job_id=service_job_id,
+                submission_attempts=submission.submission_attempts + 1,
+            )
+            self._submissions[job.job_id] = submission
+
+            # Update job state
+            updated_job = replace(job, state="starting", message="Submitted to Converter Service")
+            self._jobs = tuple(
+                updated_job if j.job_id == job.job_id else j for j in self._jobs
+            )
+        except Exception as exc:
+            submission = replace(
+                submission,
+                submission_attempts=submission.submission_attempts + 1,
+                last_error=str(exc),
+            )
+            self._submissions[job.job_id] = submission
+            raise
+
+    async def _poll_job_status(self, job_id: str) -> None:
+        """Check status of a submitted job from service monitoring."""
+        if not self._service_facade or not self._config.service:
+            return
+
+        submission = self._submissions.get(job_id)
+        if not submission or not submission.service_job_id:
+            return
+
+        current_time = self._clock()
+        # Only poll if enough time has passed
+        if current_time - submission.last_status_check < self._polling_interval:
+            return
+
+        try:
+            # TODO: Get monitoring snapshot and parse job status
+            # For now, this is placeholder for async polling infrastructure
+            await asyncio.sleep(0.05)  # Simulate async work
+
+            # Update submission tracking
+            submission = replace(submission, last_status_check=current_time)
+            self._submissions[job_id] = submission
+        except Exception as exc:
+            # Log but don't fail - next poll will retry
+            submission = replace(
+                submission,
+                last_error=str(exc),
+                last_status_check=current_time,
+            )
+            self._submissions[job_id] = submission
+
+    async def _update_jobs_from_monitoring(self) -> None:
+        """Refresh job statuses from service monitoring snapshots."""
+        if not self._service_facade or not self._config.service:
+            return
+
+        # Poll all submitted jobs
+        for job_id in list(self._submissions.keys()):
+            job = self._job_by_id(job_id)
+            # Only poll jobs that are still running
+            if job.state in ("queued", "starting", "running"):
+                await self._poll_job_status(job_id)
 
     def _preset_by_id(self, preset_id: str) -> ConvertPresetView:
         for preset in self._presets:

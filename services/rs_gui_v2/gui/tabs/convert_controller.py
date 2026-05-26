@@ -6,6 +6,7 @@ import subprocess
 import time
 from typing import Dict, Iterable, Mapping, Optional, Tuple
 
+import re
 from app_core import AppCommand, CommandResult, CommandStatus
 from app_core.services import ServiceInstanceRef
 
@@ -520,6 +521,76 @@ class ConvertTabController:
             "selected_preset": self._config.selected_preset_id,
             "service_available": self.is_service_available,
         }
+
+    def _parse_progress_from_output(self, output: str) -> str:
+        """Extract progress percentage from rticonverter output.
+        
+        Handles patterns like:
+        - "Progress: 75%"
+        - "record 150 of 300"
+        """
+        # Try explicit "Progress: X%" pattern first
+        match = re.search(r"Progress:\s*(\d+)%", output, re.IGNORECASE)
+        if match:
+            percent = int(match.group(1))
+            return f"{min(100, max(0, percent))}%"
+        
+        # Try "record N of M" pattern
+        match = re.search(r"record\s+(\d+)\s+of\s+(\d+)", output, re.IGNORECASE)
+        if match:
+            current = int(match.group(1))
+            total = int(match.group(2))
+            if total > 0:
+                percent = int(100 * current / total)
+                return f"{min(100, max(0, percent))}%"
+        
+        # Default fallback
+        return "50%"
+
+    def _parse_record_count_from_output(self, output: str) -> int:
+        """Extract record count from converter output."""
+        match = re.search(r"(\d+)\s+records", output, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+        return 0
+
+    def _parse_result_summary(self, output: str, elapsed_seconds: int) -> str:
+        """Build result summary string with stats."""
+        record_count = self._parse_record_count_from_output(output)
+        
+        if elapsed_seconds > 0 and record_count > 0:
+            throughput = record_count / elapsed_seconds
+            return f"Duration: {elapsed_seconds}s | Records: {record_count} | {throughput:.1f} records/sec"
+        elif record_count > 0:
+            return f"Records: {record_count}"
+        else:
+            return f"Duration: {elapsed_seconds}s"
+
+    def _handle_browse_input(self, command: AppCommand, payload: Mapping[str, object]) -> CommandResult:
+        """Handle convert.browse_input intent command."""
+        return CommandResult(
+            command_id=command.command_id,
+            status=CommandStatus.ACKNOWLEDGED,
+            message="Browse input storage",
+            payload={
+                "current_path": self._config.input_storage_path,
+                "storage_kind": "sqlite",
+            },
+            created_at=command.created_at,
+        )
+
+    def _handle_browse_output(self, command: AppCommand, payload: Mapping[str, object]) -> CommandResult:
+        """Handle convert.browse_output intent command."""
+        return CommandResult(
+            command_id=command.command_id,
+            status=CommandStatus.ACKNOWLEDGED,
+            message="Browse output storage",
+            payload={
+                "current_path": self._config.output_storage_path,
+                "storage_kind": "sqlite",
+            },
+            created_at=command.created_at,
+        )
 
     def apply_workspace_intent(self, metadata: Mapping[str, object]) -> None:
         """Restore Convert controller state from workspace metadata."""

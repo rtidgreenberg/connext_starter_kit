@@ -82,6 +82,13 @@ class ConvertJobRow:
     created_at: str = ""
     message: str = ""
 
+    # Phase 7: Result tracking fields
+    started_at: str = ""
+    completed_at: str = ""
+    elapsed_seconds: int = 0
+    record_count: int = 0
+    result_summary: str = ""
+
 
 @dataclass(frozen=True)
 class ConvertLogRow:

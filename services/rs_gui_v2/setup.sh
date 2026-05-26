@@ -6,6 +6,35 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 XML_OUT_DIR="$SCRIPT_DIR/xml_types"
 PREFERRED_CONNEXT_VERSION="${PREFERRED_CONNEXT_VERSION:-7.6.0}"
+INSTALL_PYTHON_DEPS=true
+
+usage() {
+    cat <<'EOF'
+Usage: ./setup.sh [--skip-python-deps]
+
+Options:
+  --skip-python-deps  Skip Python dependency installation
+  -h, --help          Show this help message
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --skip-python-deps)
+            INSTALL_PYTHON_DEPS=false
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "ERROR: Unknown option: $1"
+            usage
+            exit 1
+            ;;
+    esac
+done
 
 if [ -z "$NDDSHOME" ]; then
     PREFERRED_RTI="$HOME/rti_connext_dds-$PREFERRED_CONNEXT_VERSION"
@@ -107,3 +136,21 @@ CONNEXT_VERSION="${NDDSHOME_REAL##*-}"
 echo "Generated XML type files:"
 ls -1 "$XML_OUT_DIR"/*.xml
 echo "Wrote metadata stamp: $STAMP_FILE"
+
+if [ "$INSTALL_PYTHON_DEPS" = true ]; then
+    VENV_PYTHON="$SCRIPT_DIR/../../connext_dds_env/bin/python"
+    REQUIREMENTS_FILE="$SCRIPT_DIR/requirements.txt"
+
+    if [ -f "$REQUIREMENTS_FILE" ]; then
+        if [ -x "$VENV_PYTHON" ]; then
+            echo
+            echo "Installing rs_gui_v2 Python dependencies from: $REQUIREMENTS_FILE"
+            "$VENV_PYTHON" -m pip install -r "$REQUIREMENTS_FILE"
+        else
+            echo
+            echo "WARNING: Repository virtual environment not found at $VENV_PYTHON"
+            echo "Skipping Python dependency installation."
+            echo "Run apps/python/install.sh, then rerun ./setup.sh"
+        fi
+    fi
+fi

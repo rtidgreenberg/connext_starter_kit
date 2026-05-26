@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field, replace
 import asyncio
+import subprocess
 import time
 from typing import Dict, Iterable, Mapping, Optional, Tuple
 
@@ -44,14 +45,15 @@ class ConvertTabControllerConfig:
 
 @dataclass(frozen=True)
 class ConvertJobSubmission:
-    """Track a job submission with its service state."""
+    """Track a job submission with its subprocess state."""
 
     job_id: str
     submitted_at: float  # timestamp
-    service_job_id: str = ""  # ID returned by service
+    process_pid: int = 0  # subprocess process ID
     submission_attempts: int = 0
     last_error: str = ""
     last_status_check: float = 0.0
+    process_output: str = ""  # captured stdout/stderr for diagnostics
 
 
 class ConvertTabController:
@@ -73,7 +75,8 @@ class ConvertTabController:
         self._clock = clock
         self._last_view = ConvertTabViewModel()
         self._service_ready = False
-        self._submissions: Dict[str, ConvertJobSubmission] = {}  # Track service submissions
+        self._submissions: Dict[str, ConvertJobSubmission] = {}  # Track subprocess submissions
+        self._processes: Dict[int, subprocess.Popen] = {}  # Track active subprocesses by PID
         self._polling_interval = 2.0  # seconds between status checks
 
     @classmethod
@@ -256,7 +259,7 @@ class ConvertTabController:
         # Notify service if job was submitted
         if self._service_facade and job_id in self._submissions:
             submission = self._submissions[job_id]
-            if submission.service_job_id:
+            if submission.process_pid:
                 try:
                     # TODO: Send cancellation command to service
                     pass
@@ -322,8 +325,8 @@ class ConvertTabController:
             input_path: str,
             output_path: str,
     ) -> None:
-        """Submit a job to the Converter Service and track it."""
-        if not self._service_facade or not self._config.service:
+        """Submit a job to rticonverter as a subprocess and track it."""
+        if not self._service_facade or not self._config.service or not self._service_ready:
             return
 
         submission = self._submissions.get(job.job_id)
@@ -331,21 +334,42 @@ class ConvertTabController:
             return
 
         try:
-            # TODO: Implement actual service submission once Converter admin API is confirmed
-            # For now, this is a placeholder for the async infrastructure
-            await asyncio.sleep(0.1)  # Simulate async work
+            # Build rticonverter command line
+            # This assumes rticonverter is on PATH or specified via config
+            cmd = [
+                "rticonverter",
+                "-cfgFile", self._config.config_file,
+                "-cfgName", config_name,
+            ]
+
+            # Launch subprocess for conversion
+            # Use PIPE to capture output for diagnostics
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            process_pid = process.pid if process.pid else 0
+
+            # Track the process
+            if process_pid:
+                self._processes[process_pid] = process
 
             # Mark as submitted
-            service_job_id = f"svc-{job.job_id}"
             submission = replace(
                 submission,
-                service_job_id=service_job_id,
+                process_pid=process_pid,
                 submission_attempts=submission.submission_attempts + 1,
             )
             self._submissions[job.job_id] = submission
 
             # Update job state
-            updated_job = replace(job, state="starting", message="Submitted to Converter Service")
+            updated_job = replace(
+                job,
+                state="starting",
+                message=f"Converter process started (PID {process_pid})"
+            )
             self._jobs = tuple(
                 updated_job if j.job_id == job.job_id else j for j in self._jobs
             )
@@ -359,12 +383,12 @@ class ConvertTabController:
             raise
 
     async def _poll_job_status(self, job_id: str) -> None:
-        """Check status of a submitted job from service monitoring."""
-        if not self._service_facade or not self._config.service:
+        """Check status of a subprocess job and update job state."""
+        if not self._service_facade or not self._config.service or not self._service_ready:
             return
 
         submission = self._submissions.get(job_id)
-        if not submission or not submission.service_job_id:
+        if not submission or not submission.process_pid:
             return
 
         current_time = self._clock()
@@ -373,9 +397,56 @@ class ConvertTabController:
             return
 
         try:
-            # TODO: Get monitoring snapshot and parse job status
-            # For now, this is placeholder for async polling infrastructure
-            await asyncio.sleep(0.05)  # Simulate async work
+            process = self._processes.get(submission.process_pid)
+            if not process:
+                return
+
+            # Check if process is still running
+            poll_result = process.poll()
+
+            job = self._job_by_id(job_id)
+
+            if poll_result is None:
+                # Process still running
+                updated_job = replace(
+                    job,
+                    state="running",
+                    progress="50%",  # TODO: Parse progress from rticonverter output
+                    message="Conversion in progress"
+                )
+            else:
+                # Process completed
+                try:
+                    stdout, stderr = await process.communicate()
+                    output = (stdout.decode() if stdout else "") + (stderr.decode() if stderr else "")
+                    submission = replace(submission, process_output=output)
+                except Exception:
+                    output = ""
+
+                if poll_result == 0:
+                    # Success
+                    updated_job = replace(
+                        job,
+                        state="completed",
+                        progress="100%",
+                        message="Conversion completed successfully"
+                    )
+                else:
+                    # Failed
+                    updated_job = replace(
+                        job,
+                        state="failed",
+                        progress="0%",
+                        message=f"Conversion failed with exit code {poll_result}"
+                    )
+
+                # Clean up process tracking
+                if submission.process_pid in self._processes:
+                    del self._processes[submission.process_pid]
+
+            self._jobs = tuple(
+                updated_job if j.job_id == job_id else j for j in self._jobs
+            )
 
             # Update submission tracking
             submission = replace(submission, last_status_check=current_time)
@@ -391,7 +462,7 @@ class ConvertTabController:
 
     async def _update_jobs_from_monitoring(self) -> None:
         """Refresh job statuses from service monitoring snapshots."""
-        if not self._service_facade or not self._config.service:
+        if not self._service_facade or not self._config.service or not self._service_ready:
             return
 
         # Poll all submitted jobs

@@ -59,7 +59,7 @@ class TestConvertJobSubmission(unittest.IsolatedAsyncioTestCase):
         submission = controller._submissions[job_id]
         self.assertEqual(submission.job_id, job_id)
         self.assertEqual(submission.submission_attempts, 0)
-        self.assertEqual(submission.service_job_id, "")
+        self.assertEqual(submission.process_pid, 0)
 
     async def test_job_polling_interval_enforced(self):
         """Verify that polling respects the configured interval."""
@@ -67,7 +67,7 @@ class TestConvertJobSubmission(unittest.IsolatedAsyncioTestCase):
         submission = ConvertJobSubmission(
             job_id=job_id,
             submitted_at=100.0,
-            service_job_id="svc-1234",
+            process_pid=5678,
             submission_attempts=1,
             last_status_check=150.0,  # Just checked at 150
         )
@@ -105,7 +105,7 @@ class TestConvertJobSubmission(unittest.IsolatedAsyncioTestCase):
         submission = ConvertJobSubmission(
             job_id=job_id,
             submitted_at=100.0,
-            service_job_id="svc-1234",
+            process_pid=5678,
             submission_attempts=1,
         )
         controller._submissions[job_id] = submission
@@ -148,13 +148,20 @@ class TestConvertJobSubmission(unittest.IsolatedAsyncioTestCase):
         submission = ConvertJobSubmission(
             job_id=job_id,
             submitted_at=100.0,
-            service_job_id="svc-1234",
+            process_pid=5678,
             submission_attempts=1,
             last_status_check=0.0,  # Never checked
         )
         controller._submissions[job_id] = submission
         controller._config = ConvertTabControllerConfig(service=True)  # Mock service
         controller._service_ready = False  # Will be set by refresh_view
+
+        # Add a mock process to track
+        class MockProcess:
+            def poll(self):
+                return None  # Still running
+
+        controller._processes[5678] = MockProcess()
 
         # Call refresh_view which triggers polling
         await controller.refresh_view()

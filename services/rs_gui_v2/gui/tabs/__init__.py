@@ -11,6 +11,7 @@ from .convert_tab import (
     build_convert_tab_view_model,
     build_mock_convert_tab_view_model,
 )
+from .convert_controller import ConvertTabController, ConvertTabControllerConfig
 from .record_controller import RecordTabController, RecordTabControllerConfig
 from .record_tab import (
     RecordActionView,
@@ -70,6 +71,8 @@ __all__ = [
     "ConvertPresetView",
     "ConvertStorageView",
     "ConvertTabViewModel",
+    "ConvertTabController",
+    "ConvertTabControllerConfig",
     "RecordActionView",
     "RecordCandidateRow",
     "RecordCommandRow",
@@ -100,8 +103,8 @@ __all__ = [
     "topics_inputs_from_data_session_snapshot",
     "build_convert_action_command",
     "build_convert_tab_view_model",
-    "build_mock_plots_tab_view_model",
     "build_mock_convert_tab_view_model",
+    "build_mock_plots_tab_view_model",
     "build_mock_record_tab_view_model",
     "build_mock_replay_tab_view_model",
     "build_mock_topics_tab_view_model",

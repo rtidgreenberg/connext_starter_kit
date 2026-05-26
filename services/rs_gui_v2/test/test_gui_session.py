@@ -32,6 +32,7 @@ from app_core.services import (
 from gui import GuiShellSession, GuiShellSessionConfig, UiFrameScheduler
 from gui.main_window import DearPyGuiShell
 from gui.tabs import (
+    ConvertTabController,
     RecordTabController,
     RecordTabControllerConfig,
     ReplayTabController,
@@ -79,7 +80,7 @@ def launch_request():
     )
 
 
-def build_session(runtime=None, admin_client=None, replay_controller=None, topics_controller=None):
+def build_session(runtime=None, admin_client=None, convert_controller=None, replay_controller=None, topics_controller=None):
     runtime = runtime or AppRuntime()
     manager = ServiceProcessManager(
         spawner=FakeSpawner(FakeHandle(4218)),
@@ -102,6 +103,7 @@ def build_session(runtime=None, admin_client=None, replay_controller=None, topic
         runtime=runtime,
         scheduler=UiFrameScheduler(runtime, max_event_log=20),
         record_controller=controller,
+        convert_controller=convert_controller,
         replay_controller=replay_controller,
         topics_controller=topics_controller,
         config=GuiShellSessionConfig(workspace_name="Robot Run 03", unsaved=True),
@@ -260,6 +262,85 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(any(entry.level == "error" for entry in view.event_log))
         self.assertTrue(any("Unsupported GUI command type: topics.set_search" in entry.message for entry in view.event_log))
+
+    async def test_convert_commands_route_to_convert_controller(self):
+        convert_controller = ConvertTabController.mock()
+        session, _admin_client, _launch = build_session(convert_controller=convert_controller)
+        await session.next_view_async(process_commands=False)
+        initial_job_count = len(session.convert_controller.last_view.jobs)
+        session.command_sink(AppCommand(
+            command_type="convert.run",
+            payload={
+                "config_name": "sqlite_to_json",
+                "input_storage": {"path": "services/input"},
+                "output_storage": {"path": "services/output"},
+                "output_format": "JSON_SQLITE",
+            },
+            command_id="start-convert",
+            created_at=4.5,
+        ))
+
+        view = await session.next_view_async()
+
+        self.assertEqual(len(view.convert_tab.jobs), initial_job_count + 1)
+        new_job = view.convert_tab.jobs[-1]
+        self.assertEqual(new_job.state, "queued")
+        self.assertTrue(view.convert_tab.action_by_id["cancel"].enabled)
+        self.assertTrue(any(entry.message == "Dispatched convert.run" for entry in view.event_log))
+
+    async def test_convert_cancel_updates_job_state_in_next_view(self):
+        convert_controller = ConvertTabController.mock()
+        session, _admin_client, _launch = build_session(convert_controller=convert_controller)
+        await session.next_view_async(process_commands=False)
+
+        # Create a new job
+        session.command_sink(AppCommand(
+            command_type="convert.run",
+            payload={
+                "config_name": "sqlite_to_json",
+                "input_storage": {"path": "services/input"},
+                "output_storage": {"path": "services/output"},
+            },
+            command_id="start-convert",
+            created_at=4.5,
+        ))
+        view = await session.next_view_async()
+        new_job = view.convert_tab.jobs[-1]  # Get the last (newest) job
+        job_id = new_job.job_id
+        self.assertEqual(new_job.state, "queued")
+
+        # Cancel that specific job
+        session.command_sink(AppCommand(
+            command_type="convert.cancel",
+            payload={"job_id": job_id},
+            command_id="cancel-convert",
+            created_at=5.0,
+        ))
+        view = await session.next_view_async()
+
+        # Find the job again and verify state changed
+        cancelled_job = next((j for j in view.convert_tab.jobs if j.job_id == job_id), None)
+        self.assertIsNotNone(cancelled_job)
+        self.assertEqual(cancelled_job.state, "cancel_requested")
+        self.assertTrue(any(entry.message == "Dispatched convert.cancel" for entry in view.event_log))
+
+    async def test_convert_command_without_controller_reports_failure(self):
+        session, _admin_client, _launch = build_session()
+        session.command_sink(AppCommand(
+            command_type="convert.run",
+            payload={
+                "config_name": "sqlite_to_json",
+                "input_storage": {"path": "services/input"},
+                "output_storage": {"path": "services/output"},
+            },
+            command_id="convert-no-controller",
+            created_at=6.0,
+        ))
+
+        view = await session.next_view_async()
+
+        self.assertTrue(any(entry.level == "error" for entry in view.event_log))
+        self.assertTrue(any("Unsupported GUI command type: convert.run" in entry.message for entry in view.event_log))
 
     async def test_command_queue_backpressure_is_reported(self):
         runtime = AppRuntime(RuntimeConfig(command_queue_max_size=1, event_queue_max_size=10))

@@ -8,6 +8,7 @@ from app_core import AppCommand, AppEvent, AppRuntime
 
 from .scheduler import UiFrameScheduler
 from .tabs import (
+    ConvertTabController,
     PlotsTabController,
     RecordTabController,
     ReplayTabController,
@@ -40,6 +41,7 @@ class GuiShellSession:
             runtime: AppRuntime,
             scheduler: UiFrameScheduler,
             record_controller: RecordTabController,
+            convert_controller: Optional[ConvertTabController] = None,
             replay_controller: Optional[ReplayTabController] = None,
             topics_controller: Optional[TopicsTabController] = None,
             plots_controller: Optional[PlotsTabController] = None,
@@ -49,6 +51,7 @@ class GuiShellSession:
         self._runtime = runtime
         self._scheduler = scheduler
         self._record_controller = record_controller
+        self._convert_controller = convert_controller
         self._replay_controller = replay_controller
         self._topics_controller = topics_controller
         self._plots_controller = plots_controller
@@ -65,6 +68,10 @@ class GuiShellSession:
     @property
     def record_controller(self) -> RecordTabController:
         return self._record_controller
+
+    @property
+    def convert_controller(self) -> Optional[ConvertTabController]:
+        return self._convert_controller
 
     @property
     def replay_controller(self) -> Optional[ReplayTabController]:
@@ -117,6 +124,9 @@ class GuiShellSession:
         if process_commands:
             await self.process_pending_commands(limit=self._config.command_drain_limit)
         record_view = await self._record_controller.refresh_view()
+        convert_view = None
+        if self._convert_controller is not None:
+            convert_view = await self._convert_controller.refresh_view()
         replay_view = None
         if self._replay_controller is not None:
             replay_view = await self._replay_controller.refresh_view()
@@ -128,6 +138,7 @@ class GuiShellSession:
             plots_view = await self._plots_controller.refresh_view()
         return self._scheduler.next_view(
             record_tab=record_view,
+            convert_tab=convert_view,
             replay_tab=replay_view,
             topics_tab=topics_view,
             plots_tab=plots_view,
@@ -173,6 +184,10 @@ class GuiShellSession:
     async def dispatch_command(self, command: AppCommand):
         """Translate one queued app command into the matching GUI controller action."""
 
+        if command.command_type.startswith("convert."):
+            if self._convert_controller is None:
+                raise ValueError(f"Unsupported GUI command type: {command.command_type}")
+            return self._convert_controller.handle_command(command)
         if command.command_type.startswith("topics."):
             if self._topics_controller is None:
                 raise ValueError(f"Unsupported GUI command type: {command.command_type}")

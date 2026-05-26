@@ -57,6 +57,37 @@ Dynamic partition modification for environment isolation:
 - **Terminal Input**: Interactive partition switching
 - **Self-Ignore Pattern**: Filters own publications using dds::sub::ignore()
 
+### [`parameter_app/`](./parameter_app/) - ROS2-Style Parameter Management
+DDS-based parameter server/client using RTI Request-Reply:
+- **Server Mode**: Loads parameters from YAML, serves get/set/list requests
+- **Client Mode**: Sends parameter requests to a named server node
+- **Parameter Events**: Publishes parameter change notifications
+- **YAML Configuration**: Load initial parameters from file
+
+### [`foxglove_geojson/`](./foxglove_geojson/) - GeoJSON Map Visualization
+Publishes GeoJSON data for Foxglove Studio map panels:
+- **GeoJSON Publishing**: Geographic feature data at ~2 Hz
+- **Config Subscriber**: Runtime configuration via Config topic
+- **Foxglove Compatible**: Uses `foxglove::GeoJSON` OMG IDL schema
+
+### [`foxglove_rawimage/`](./foxglove_rawimage/) - Raw Image Streaming
+Publishes raw image data for Foxglove Studio image panels:
+- **High-Rate Publishing**: 640x480 RGB images at ~100 Hz
+- **~900 KB Payloads**: Uncompressed `rgb8` format
+- **Shared Memory**: Uses `LARGE_DATA_SHMEM` QoS for efficient transfer
+
+### [`foxglove_gstreamvideo_app/`](./foxglove_gstreamvideo_app/) - GStreamer H.264 Video
+Publishes compressed H.264 video for Foxglove Studio video panels:
+- **GStreamer Pipeline**: `videotestsrc` → H.264 encoder → DDS
+- **Compressed Video**: Uses `foxglove::CompressedVideo` type
+- **Requires GStreamer**: See [README](./foxglove_gstreamvideo_app/README.md) for install instructions
+
+### [`foxglove_pointcloud/`](./foxglove_pointcloud/) - 3D Point Cloud Visualization
+Publishes point cloud and frame transform data for Foxglove 3D panels:
+- **Point Cloud Data**: Simulated lidar at ~10 Hz
+- **Frame Transforms**: Publishes `world` → `lidar` transform
+- **Foxglove Compatible**: Uses `foxglove::PointCloud` and `foxglove::FrameTransform` schemas
+
 ## Creating New C++ DDS Applications
 
 ### Overview

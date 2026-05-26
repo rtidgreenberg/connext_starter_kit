@@ -252,6 +252,40 @@ class TestRtiServiceAdminClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(command_data["action"], ACTION_DELETE)
         self.assertEqual(command_data["resource_identifier"], "/recording_services/deploy")
 
+    async def test_shutdown_can_target_app_name_with_separate_xml_resource(self):
+        request_module = FakeRequestModule()
+        client = RtiServiceAdminClient(self.config, FakeDdsModule, request_module)
+        service = ServiceInstanceRef(ServiceKind.RECORDING, "rs_gui_v2_churn_1234", admin_domain_id=54)
+        request = ServiceCommandRequest(
+            service,
+            ServiceCommand.SHUTDOWN,
+            parameters={"admin_resource_name": "deploy"},
+        )
+
+        outcome = await client.send_command(request)
+
+        command_data = request_module.requesters[0].sent_requests[0]
+        self.assertTrue(outcome.ok)
+        self.assertEqual(command_data["application_name"], "rs_gui_v2_churn_1234")
+        self.assertEqual(command_data["resource_identifier"], "/recording_services/deploy")
+
+    async def test_pause_can_target_app_name_with_separate_xml_resource(self):
+        request_module = FakeRequestModule()
+        client = RtiServiceAdminClient(self.config, FakeDdsModule, request_module)
+        service = ServiceInstanceRef(ServiceKind.RECORDING, "rs_gui_v2_churn_1234", admin_domain_id=54)
+        request = ServiceCommandRequest(
+            service,
+            ServiceCommand.PAUSE,
+            parameters={"admin_resource_name": "deploy"},
+        )
+
+        outcome = await client.send_command(request)
+
+        command_data = request_module.requesters[0].sent_requests[0]
+        self.assertTrue(outcome.ok)
+        self.assertEqual(command_data["application_name"], "rs_gui_v2_churn_1234")
+        self.assertEqual(command_data["resource_identifier"], "/recording_services/deploy/state")
+
     async def test_tag_encodes_tag_resource_and_payload(self):
         request_module = FakeRequestModule()
         client = RtiServiceAdminClient(self.config, FakeDdsModule, request_module)

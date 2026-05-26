@@ -74,6 +74,11 @@ Current layers:
 - `test_rti_subscriptions_adapter.py`: RTI DynamicData topic/reader creation,
   sample metadata mapping, unresolved type handling, and cleanup using fake
   Connext modules
+- `test_live_soak.py`: unit coverage for the live soak gate configuration,
+  workspace bounds, pass/fail evaluation, and JSON report writing
+- `test_service_churn.py`: unit coverage for the live service churn gate
+  configuration, launch request construction, pass/fail evaluation, and JSON
+  report writing
 - `test_rti_types_adapter.py`: RTI XML DynamicData type registry lookup and
   provider failure mapping using fake Connext modules
 - `test_runtime_lifecycle.py`: runtime lifecycle, bounded queues, and task
@@ -87,6 +92,28 @@ Current layers:
 - `test_workspace.py`: DDS-free versioned workspace JSON persistence,
   migration, validation, and declarative topic/field/plot selection round trips
 
-Future layers will add live adapter fixtures and GUI rendering tests against a
-real Dear PyGui installation after the mocked shell is wired to live app-core
-snapshots.
+Live fixture gate:
+
+```bash
+../../connext_dds_env/bin/python test/live_soak.py --duration-sec 10 --publish-rate-hz 100
+```
+
+`live_soak.py` is intentionally not named `test_*.py`: it uses the real RTI
+Connext Python API, creates live DDS participants, and writes its report under
+`test_output/rs_gui_v2/`. The regular suite covers its deterministic logic;
+run the live gate explicitly when validating Milestone L soak behavior.
+
+```bash
+../../connext_dds_env/bin/python test/service_churn.py --iterations 2
+```
+
+`service_churn.py` is also explicit-only: it starts live Recording Service
+processes, verifies Service Admin endpoint readiness, attempts remote shutdown,
+and falls back to local process termination if shutdown does not reply. It sends
+Service Admin commands with `application_name` set to the launched `-appName`
+and command resource paths rooted at the XML recording-service name, such as
+`/recording_services/deploy`. Use `--require-admin-shutdown` when remote
+shutdown acknowledgment should be a hard pass/fail criterion.
+
+Future layers will add GUI rendering tests against a real Dear PyGui
+installation and broader live service restart/discovery churn fixtures.

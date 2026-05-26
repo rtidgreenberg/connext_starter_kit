@@ -440,6 +440,8 @@ def candidate_from_process_launch(launch: ServiceProcessLaunch) -> ServiceProces
     details = {
         "executable": launch.command_line[0] if launch.command_line else "",
         "command_line": list(launch.command_line),
+        "admin_resource_name": launch.request.config_name,
+        "config_name": launch.request.config_name,
         "working_dir": launch.request.working_dir,
         "launch_state": launch.state.value,
         "termination_requested": launch.termination_requested,

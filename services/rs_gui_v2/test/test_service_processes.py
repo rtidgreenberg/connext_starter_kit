@@ -58,6 +58,22 @@ class FakeSpawner:
         return self.handle
 
 
+class QueueSpawner:
+    def __init__(self, *handles):
+        self.handles = list(handles)
+        self.calls = []
+
+    def start(self, command_line, working_dir="", environment=None):
+        self.calls.append({
+            "command_line": tuple(command_line),
+            "working_dir": working_dir,
+            "environment": dict(environment or {}),
+        })
+        if not self.handles:
+            raise RuntimeError("no fake handles queued")
+        return self.handles.pop(0)
+
+
 class TestServiceProcessCommand(unittest.TestCase):
     def test_recording_command_uses_app_name_and_admin_domains(self):
         intent = ServiceLaunchIntent(
@@ -174,6 +190,8 @@ class TestServiceProcessManager(unittest.TestCase):
         self.assertTrue(candidate.owns_process)
         self.assertEqual(candidate.observed_state, ServiceProcessLaunchState.RUNNING.value)
         self.assertEqual(candidate.details["command_line"], list(spawner.calls[0]["command_line"]))
+        self.assertEqual(candidate.details["admin_resource_name"], "deploy")
+        self.assertEqual(candidate.details["config_name"], "deploy")
         self.assertEqual(candidate.details["working_dir"], "/workspace/services")
 
     def test_process_exit_updates_candidate_alive_state(self):
@@ -269,6 +287,44 @@ class TestServiceProcessManager(unittest.TestCase):
         self.assertEqual(launch.state, ServiceProcessLaunchState.START_FAILED)
         self.assertFalse(candidate.alive)
         self.assertEqual(candidate.details["message"], "missing executable")
+
+    def test_restart_churn_keeps_fresh_control_identity_and_old_exit_evidence(self):
+        first_handle = FakeHandle(pid=4321)
+        second_handle = FakeHandle(pid=4322)
+        manager = ServiceProcessManager(
+            spawner=QueueSpawner(first_handle, second_handle),
+            hostname="dev-host",
+            clock=iter(float(value) for value in range(1, 30)).__next__,
+        )
+
+        first = manager.launch(
+            self._request(),
+            launch_id="launch-old",
+            session_guid="11111111-2222-3333-4444-555555555555",
+        )
+        manager.refresh("launch-old")
+        first_handle.returncode = 0
+        exited = manager.refresh("launch-old")
+        second = manager.launch(
+            self._request(),
+            launch_id="launch-new",
+            session_guid="22222222-3333-4444-5555-666666666666",
+        )
+        manager.refresh("launch-new")
+
+        launches = {launch.launch_id: launch for launch in manager.launches()}
+        new_selection = manager.candidate_selection(second.identity.service_ref)
+        old_selection = manager.candidate_selection(first.identity.service_ref)
+
+        self.assertEqual(exited.state, ServiceProcessLaunchState.EXITED)
+        self.assertEqual(launches["launch-old"].state, ServiceProcessLaunchState.EXITED)
+        self.assertEqual(launches["launch-new"].state, ServiceProcessLaunchState.RUNNING)
+        self.assertNotEqual(first.identity.service_ref.name, second.identity.service_ref.name)
+        self.assertEqual(new_selection.selected_candidate.candidate_id, "launch-new")
+        self.assertTrue(new_selection.selected_candidate.alive)
+        self.assertEqual(old_selection.selected_candidate.candidate_id, "launch-old")
+        self.assertFalse(old_selection.selected_candidate.alive)
+        self.assertEqual(old_selection.selected_candidate.details["returncode"], 0)
 
 
 if __name__ == "__main__":

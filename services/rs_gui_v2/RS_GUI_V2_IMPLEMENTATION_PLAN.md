@@ -886,6 +886,70 @@ Acceptance gates:
 - Startup diagnostics identify stale XML, missing license, missing service admin,
   and no-match conditions.
 
+Initial implementation status:
+
+- Added `run_gui.sh` launcher support for startup diagnostics, diagnostics-only
+  mode, and temporary diagnostics bypass.
+- Added `preflight.py` startup checks for `NDDSHOME` detection, RTI Python API
+  importability, license discoverability, generated XML-type presence/stamp
+  validation, and RTI service executable presence.
+- Added `TROUBLESHOOTING.md` and README updates documenting startup diagnostics,
+  dependency installation, and remediation workflows.
+- Pinned the Dear PyGui dependency to the compatible workspace version and added
+  diagnostics for native-library import failures such as `GLIBCXX_*` ABI
+  mismatches.
+- Added preflight regression tests for successful GUI dependency checks and
+  actionable Dear PyGui ABI-failure messages.
+- Added immutable runtime counters for command/event queues, UI frame cadence,
+  UI event-log drops, and sample receive/drop totals. The runtime and UI
+  scheduler now update these counters as monotonic app-state data.
+- Surfaced runtime counters and top-level operator diagnostics in the shell
+  view model/status strip so Service Admin no-match and Record-tab diagnostic
+  states are visible outside individual tab internals.
+- Added regression tests for runtime counters, shell counter status, and
+  operator diagnostics surfacing.
+- Added deterministic telemetry burst/high-rate plateau coverage for the
+  DDS-free data session path: bounded sample cache retention, bounded plot
+  buffers, dropped-sample accounting, and runtime sample/drop counter wiring.
+- Added deterministic local service restart/churn coverage proving repeated
+  launches keep fresh Service Admin control identities while old exited process
+  evidence remains selectable and non-live.
+- Added `test/live_soak.py`, an explicit live DDS smoke/soak gate with a
+  built-in in-memory DynamicData telemetry fixture, bounded reader
+  history/resource limits, runtime sample/drop counter capture, bounded
+  cache/plot assertions, RSS-growth guardrails, and JSON reporting under
+  `test_output/rs_gui_v2/`.
+- Hardened the RTI DynamicData subscription adapter for live soak use with
+  optional bounded DataReader QoS, selector take limits, and Connext 7.6 Rank
+  metadata normalization.
+- Added `test/service_churn.py`, an explicit live Recording Service churn gate
+  that launches through `ServiceProcessManager`, assigns fresh `-appName`
+  values, checks Service Admin endpoint readiness, attempts remote shutdown,
+  falls back to guarded local termination/kill when shutdown does not reply,
+  and writes JSON reports under `test_output/rs_gui_v2/`.
+- Fixed live Service Admin command targeting so `application_name` remains the
+  launched `-appName` while `resource_identifier` uses the XML service resource
+  path, for example `/recording_services/deploy`. Strict
+  `--require-admin-shutdown` now passes on the local Connext 7.6.0 Recording
+  Service churn gate.
+
+Phase review gaps still open:
+
+- Initial live DDS telemetry burst/soak coverage and live Recording Service
+  process churn coverage are in place. Live discovery churn and Replay Service
+  restart soak remain pending; deterministic DDS-free coverage is in place for
+  the high-rate data path and local process restart model.
+- Startup diagnostics now cover stale XML, missing license, missing RTI Python
+  API, missing RTI service executables, and GUI dependency failures. Runtime
+  shell diagnostics now surface Service Admin no-match style states; live
+  fixture validation of those states remains pending.
+- Service Admin endpoint readiness and remote shutdown acknowledgment are
+  validated by the churn gate. The default mode still keeps the guarded fallback
+  cleanup path available for environments where Service Admin does not reply.
+- Longer-duration monitoring and plotting soak validation remains pending; the
+  live soak and service churn gates now provide repeatable harnesses for that
+  run.
+
 ## Suggested Sprint Grouping
 
 Sprint 1:

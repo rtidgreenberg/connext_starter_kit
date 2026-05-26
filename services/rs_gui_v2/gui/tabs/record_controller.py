@@ -137,19 +137,36 @@ class RecordTabController:
                 timeout_sec=timeout_sec,
             )
         elif action_id == "pause":
-            outcome = await self._admin_facade.pause(selected.service, timeout_sec=timeout_sec)
+            outcome = await self._admin_facade.execute(
+                selected.service,
+                ServiceCommand.PAUSE,
+                parameters=_admin_resource_parameters(selected),
+                timeout_sec=timeout_sec,
+            )
         elif action_id == "resume":
-            outcome = await self._admin_facade.resume(selected.service, timeout_sec=timeout_sec)
+            outcome = await self._admin_facade.execute(
+                selected.service,
+                ServiceCommand.RESUME,
+                parameters=_admin_resource_parameters(selected),
+                timeout_sec=timeout_sec,
+            )
         elif action_id == "shutdown":
-            outcome = await self._admin_facade.shutdown(selected.service, timeout_sec=timeout_sec)
+            outcome = await self._admin_facade.execute(
+                selected.service,
+                ServiceCommand.SHUTDOWN,
+                parameters=_admin_resource_parameters(selected),
+                timeout_sec=timeout_sec,
+            )
         elif action_id == "tag":
             tag = (tag_name or self._config.tag_value).strip()
             if not tag:
                 raise ValueError("tag_name is required for Record tag commands")
-            outcome = await self._admin_facade.tag(
+            parameters = dict(_admin_resource_parameters(selected))
+            parameters.update({"tag_name": tag, "description": description})
+            outcome = await self._admin_facade.execute(
                 selected.service,
-                tag_name=tag,
-                description=description,
+                ServiceCommand.TAG,
+                parameters=parameters,
                 timeout_sec=timeout_sec,
             )
         else:
@@ -217,6 +234,11 @@ def _service_command_for_action(action_id: str) -> ServiceCommand:
     if action_id == "tag":
         return ServiceCommand.TAG
     raise ValueError(f"Unsupported Record tab action: {action_id}")
+
+
+def _admin_resource_parameters(candidate) -> dict:
+    resource_name = str(candidate.details.get("admin_resource_name", ""))
+    return {"admin_resource_name": resource_name} if resource_name else {}
 
 
 def _failed_outcome(

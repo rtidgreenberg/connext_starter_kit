@@ -181,23 +181,23 @@ class RtiServiceAdminClient:
         if request.command == ServiceCommand.PAUSE:
             return (
                 ACTION_UPDATE,
-                recording_service_state_resource(request.service),
+                recording_service_state_resource(request.service, _admin_resource_name(request)),
                 "",
                 self._serialize_entity_state(types.entity_state_type, ENTITY_STATE_PAUSED),
             )
         if request.command == ServiceCommand.RESUME:
             return (
                 ACTION_UPDATE,
-                recording_service_state_resource(request.service),
+                recording_service_state_resource(request.service, _admin_resource_name(request)),
                 "",
                 self._serialize_entity_state(types.entity_state_type, ENTITY_STATE_RUNNING),
             )
         if request.command == ServiceCommand.SHUTDOWN:
-            return ACTION_DELETE, recording_service_resource(request.service), "", None
+            return ACTION_DELETE, recording_service_resource(request.service, _admin_resource_name(request)), "", None
         if request.command == ServiceCommand.TAG:
             return (
                 ACTION_UPDATE,
-                recording_service_tag_resource(request.service),
+                recording_service_tag_resource(request.service, _admin_resource_name(request)),
                 "",
                 self._serialize_tag_params(request, types.data_tag_type),
             )
@@ -410,16 +410,20 @@ def default_rti_service_admin_config() -> RtiServiceAdminConfig:
     )
 
 
-def recording_service_resource(service: ServiceInstanceRef) -> str:
-    return f"/recording_services/{service.name}"
+def recording_service_resource(service: ServiceInstanceRef, resource_name: str = "") -> str:
+    return f"/recording_services/{resource_name or service.name}"
 
 
-def recording_service_state_resource(service: ServiceInstanceRef) -> str:
-    return f"{recording_service_resource(service)}/state"
+def recording_service_state_resource(service: ServiceInstanceRef, resource_name: str = "") -> str:
+    return f"{recording_service_resource(service, resource_name)}/state"
 
 
-def recording_service_tag_resource(service: ServiceInstanceRef) -> str:
-    return f"{recording_service_resource(service)}/storage/sqlite:tag_timestamp"
+def recording_service_tag_resource(service: ServiceInstanceRef, resource_name: str = "") -> str:
+    return f"{recording_service_resource(service, resource_name)}/storage/sqlite:tag_timestamp"
+
+
+def _admin_resource_name(request: ServiceCommandRequest) -> str:
+    return str(request.parameters.get("admin_resource_name", ""))
 
 
 def cdr_buffer_to_octets(cdr_buffer) -> list:

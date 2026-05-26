@@ -76,6 +76,9 @@ Current layers:
   Connext modules
 - `test_live_soak.py`: unit coverage for the live soak gate configuration,
   workspace bounds, pass/fail evaluation, and JSON report writing
+- `test_discovery_churn.py`: unit coverage for the live discovery churn gate
+  configuration, namespace filtering, pass/fail evaluation, and JSON report
+  writing
 - `test_service_churn.py`: unit coverage for the live service churn gate
   configuration, launch request construction, pass/fail evaluation, and JSON
   report writing
@@ -104,6 +107,16 @@ Connext Python API, creates live DDS participants, and writes its report under
 run the live gate explicitly when validating Milestone L soak behavior.
 
 ```bash
+../../connext_dds_env/bin/python test/discovery_churn.py --iterations 3
+```
+
+`discovery_churn.py` is explicit-only: it creates unique live DynamicData topics
+with one writer and one reader, observes them through `RtiTopicDiscoveryClient`,
+closes the endpoints, and verifies the run namespace converges to zero live
+topics. It enables bounded stale-endpoint pruning because Connext 7.6 built-in
+readers in this environment may not deliver endpoint delete samples.
+
+```bash
 ../../connext_dds_env/bin/python test/service_churn.py --iterations 2
 ```
 
@@ -116,4 +129,4 @@ and command resource paths rooted at the XML recording-service name, such as
 shutdown acknowledgment should be a hard pass/fail criterion.
 
 Future layers will add GUI rendering tests against a real Dear PyGui
-installation and broader live service restart/discovery churn fixtures.
+installation and broader live service restart fixtures.

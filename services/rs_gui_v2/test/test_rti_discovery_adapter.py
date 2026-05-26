@@ -89,9 +89,10 @@ class FakeReader:
 
 
 class FakeParticipant:
-    def __init__(self, publication_samples=(), subscription_samples=(), participants=()):
+    def __init__(self, publication_samples=(), subscription_samples=(), participants=(), participant_samples=()):
         self.publication_reader = FakeReader(publication_samples)
         self.subscription_reader = FakeReader(subscription_samples)
+        self.participant_reader = FakeReader(participant_samples)
         self._participants = tuple(participants)
         self.close_contained_entities_called = False
         self.closed = False
@@ -277,6 +278,30 @@ class TestRtiTopicDiscoveryClient(unittest.IsolatedAsyncioTestCase):
             FakeInfo(False),
         ))
         second = await client.scan(43)
+
+        self.assertEqual([topic.topic_name for topic in first], ["TelemetryTopic"])
+        self.assertEqual(second, ())
+
+    async def test_participant_invalid_sample_removes_owned_endpoints(self):
+        participant = FakeParticipant(
+            publication_samples=[(
+                FakeBuiltinData(
+                    topic_name="TelemetryTopic",
+                    type_name="Telemetry",
+                    key=(1,),
+                    participant_key=(9, 9, 9),
+                ),
+                FakeInfo(True),
+            )],
+        )
+        client = RtiTopicDiscoveryClient(dds_module=FakeDdsModule({47: participant}))
+
+        first = await client.scan(47)
+        participant.participant_reader.samples.append((
+            FakeParticipantBuiltinData(key=(9, 9, 9)),
+            FakeInfo(False),
+        ))
+        second = await client.scan(47)
 
         self.assertEqual([topic.topic_name for topic in first], ["TelemetryTopic"])
         self.assertEqual(second, ())

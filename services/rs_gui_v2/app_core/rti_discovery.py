@@ -34,6 +34,7 @@ class RtiTopicDiscoveryConfig:
     """Timing inputs for the RTI built-in topic discovery adapter."""
 
     poll_interval_sec: float = DEFAULT_DISCOVERY_POLL_SEC
+    endpoint_stale_after_sec: float = 0.0
 
 
 @dataclass
@@ -118,7 +119,9 @@ class RtiTopicDiscoveryClient:
         return session
 
     def _take_builtin_samples(self, session: _DiscoverySession, domain_id: int) -> None:
-        participant_identity = _participant_identity_by_key(session.participant)
+        participant_identity, removed_participant_keys = _participant_changes_by_key(session.participant)
+        for participant_key in removed_participant_keys:
+            session.inventory.remove_participant(participant_key, domain_id=domain_id)
         for endpoint in _endpoints_from_reader(
                 getattr(session.participant, "publication_reader"),
                 domain_id,
@@ -133,6 +136,11 @@ class RtiTopicDiscoveryClient:
             participant_identity,
         ):
             session.inventory.apply(endpoint)
+        session.inventory.remove_stale(
+            time.time(),
+            self.config.endpoint_stale_after_sec,
+            domain_id=domain_id,
+        )
 
     def _load_connext_module(self) -> None:
         if self._dds is None:
@@ -207,9 +215,10 @@ def endpoint_from_builtin_sample(
     )
 
 
-def _participant_identity_by_key(participant: Any) -> Dict[str, Mapping[str, Any]]:
+def _participant_changes_by_key(participant: Any) -> Tuple[Dict[str, Mapping[str, Any]], Tuple[str, ...]]:
     identity: Dict[str, Mapping[str, Any]] = {}
-    for data in _participant_builtin_data(participant):
+    removed = []
+    for data in _discovered_participant_data(participant):
         key = _key_to_text(_field(data, "key", ""))
         if not key:
             continue
@@ -218,10 +227,24 @@ def _participant_identity_by_key(participant: Any) -> Dict[str, Mapping[str, Any
         if participant_name:
             values["participant_name"] = participant_name
         identity[key] = values
-    return identity
+    for data, info in _participant_builtin_samples(participant):
+        if data is None:
+            continue
+        key = _key_to_text(_field(data, "key", ""))
+        if bool(getattr(info, "valid", False)):
+            values = dict(_participant_properties(data))
+            participant_name = _participant_name(data)
+            if participant_name:
+                values["participant_name"] = participant_name
+            if key:
+                identity[key] = values
+            continue
+        if key:
+            removed.append(key)
+    return identity, tuple(removed)
 
 
-def _participant_builtin_data(participant: Any) -> Iterable[Any]:
+def _discovered_participant_data(participant: Any) -> Iterable[Any]:
     discovered = getattr(participant, "discovered_participants", None)
     data_for = getattr(participant, "discovered_participant_data", None)
     if callable(discovered) and callable(data_for):
@@ -232,13 +255,23 @@ def _participant_builtin_data(participant: Any) -> Iterable[Any]:
         except Exception:
             pass
 
-    reader = getattr(participant, "participant_reader", None)
-    if reader is None:
-        return
-    for sample in _reader_take(reader):
-        data, info = _sample_data_and_info(sample)
+    return ()
+
+
+def _participant_builtin_data(participant: Any) -> Iterable[Any]:
+    for data in _discovered_participant_data(participant):
+        yield data
+
+    for data, info in _participant_builtin_samples(participant):
         if data is not None and bool(getattr(info, "valid", False)):
             yield data
+
+
+def _participant_builtin_samples(participant: Any) -> Iterable[Tuple[Any, Any]]:
+    reader = getattr(participant, "participant_reader", None)
+    if reader is None:
+        return ()
+    return tuple(_sample_data_and_info(sample) for sample in _reader_take(reader))
 
 
 def _participant_name(data: Any) -> str:
@@ -280,8 +313,23 @@ def _sample_data_and_info(sample: Any) -> Tuple[Any, Any]:
 
 
 def _reader_take(reader: Any) -> Iterable[Any]:
+    select = getattr(reader, "select", None)
+    data_state = _any_data_state()
+    if callable(select) and data_state is not None:
+        try:
+            return select().state(data_state).take()
+        except Exception:
+            pass
     take = getattr(reader, "take")
     return take()
+
+
+def _any_data_state() -> Any:
+    try:
+        import rti.connextdds as dds
+        return getattr(getattr(dds, "DataState", None), "any", None)
+    except Exception:
+        return None
 
 
 def _field(data: Any, name: str, default: Any = None) -> Any:

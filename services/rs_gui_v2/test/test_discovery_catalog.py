@@ -131,6 +131,49 @@ class TestTopicInventory(unittest.IsolatedAsyncioTestCase):
         ])
         self.assertEqual(client.scans, [(7, False), (7, True)])
 
+    async def test_participant_invalid_sample_removes_owned_endpoints(self):
+        client = FakeTopicDiscoveryClient()
+        client.apply(DiscoveredEndpoint(
+            domain_id=47,
+            topic_name="TelemetryTopic",
+            type_name="Telemetry",
+            direction=EndpointDirection.WRITER,
+            endpoint_key="writer-1",
+            participant_key="9:9:9",
+        ))
+
+        first = await client.scan(47)
+        client.inventory.remove_participant("9:9:9", domain_id=47)
+        second = await client.scan(47)
+
+        self.assertEqual([topic.topic_name for topic in first], ["TelemetryTopic"])
+        self.assertEqual(second, ())
+
+    async def test_inventory_can_prune_stale_endpoints_by_domain(self):
+        client = FakeTopicDiscoveryClient()
+        client.apply(DiscoveredEndpoint(
+            domain_id=47,
+            topic_name="OldTopic",
+            type_name="Telemetry",
+            direction=EndpointDirection.WRITER,
+            endpoint_key="old-writer",
+            observed_at=10.0,
+        ))
+        client.apply(DiscoveredEndpoint(
+            domain_id=48,
+            topic_name="OtherDomainTopic",
+            type_name="Telemetry",
+            direction=EndpointDirection.WRITER,
+            endpoint_key="other-writer",
+            observed_at=10.0,
+        ))
+
+        removed = client.inventory.remove_stale(now=20.0, max_age_sec=5.0, domain_id=47)
+
+        self.assertEqual(removed, 1)
+        self.assertEqual(await client.scan(47), ())
+        self.assertEqual([topic.topic_name for topic in await client.scan(48)], ["OtherDomainTopic"])
+
     async def test_inventory_reports_unresolved_and_ambiguous_topics(self):
         client = FakeTopicDiscoveryClient()
         client.apply(DiscoveredEndpoint(

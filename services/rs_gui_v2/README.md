@@ -168,6 +168,31 @@ Useful options:
 ../../connext_dds_env/bin/python test/service_churn.py --admin-resource-name ''
 ```
 
+## Live Discovery Churn Gate
+
+Run a bounded live DDS discovery convergence gate:
+
+```bash
+../../connext_dds_env/bin/python test/discovery_churn.py --iterations 3
+```
+
+The gate creates unique DynamicData topics with one writer and one reader,
+observes them through the same `RtiTopicDiscoveryClient` path used by the GUI,
+closes the endpoints, and verifies the run namespace converges to zero live
+topics. On Connext 7.6, endpoint delete samples may not arrive through the
+built-in readers in this environment, so the gate enables bounded stale-endpoint
+pruning and records a JSON report under `test_output/rs_gui_v2/`.
+
+Useful options:
+
+```bash
+# Short development smoke
+../../connext_dds_env/bin/python test/discovery_churn.py --iterations 1 --settle-timeout-sec 8
+
+# Tune convergence for slower discovery environments
+../../connext_dds_env/bin/python test/discovery_churn.py --iterations 5 --stale-endpoint-sec 3 --settle-timeout-sec 10
+```
+
 ## Notes
 
 - `run_gui.sh --prepare-dds` uses `setup.sh` before launching.

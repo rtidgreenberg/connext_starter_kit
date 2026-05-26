@@ -932,13 +932,18 @@ Initial implementation status:
   path, for example `/recording_services/deploy`. Strict
   `--require-admin-shutdown` now passes on the local Connext 7.6.0 Recording
   Service churn gate.
+- Added `test/discovery_churn.py`, an explicit live DDS discovery churn gate
+  that creates unique DynamicData topics, observes writer/reader endpoints
+  through `RtiTopicDiscoveryClient`, closes them, and validates namespace
+  convergence with bounded stale-endpoint pruning when Connext built-in endpoint
+  delete samples are not delivered.
 
 Phase review gaps still open:
 
-- Initial live DDS telemetry burst/soak coverage and live Recording Service
-  process churn coverage are in place. Live discovery churn and Replay Service
-  restart soak remain pending; deterministic DDS-free coverage is in place for
-  the high-rate data path and local process restart model.
+- Initial live DDS telemetry burst/soak coverage, live discovery churn, and live
+  Recording Service process churn coverage are in place. Replay Service restart
+  soak remains pending; deterministic DDS-free coverage is in place for the
+  high-rate data path and local process restart model.
 - Startup diagnostics now cover stale XML, missing license, missing RTI Python
   API, missing RTI service executables, and GUI dependency failures. Runtime
   shell diagnostics now surface Service Admin no-match style states; live
@@ -947,8 +952,8 @@ Phase review gaps still open:
   validated by the churn gate. The default mode still keeps the guarded fallback
   cleanup path available for environments where Service Admin does not reply.
 - Longer-duration monitoring and plotting soak validation remains pending; the
-  live soak and service churn gates now provide repeatable harnesses for that
-  run.
+  live soak, discovery churn, and service churn gates now provide repeatable
+  harnesses for that run.
 
 ## Suggested Sprint Grouping
 

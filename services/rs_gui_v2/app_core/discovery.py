@@ -376,6 +376,31 @@ class TopicInventory:
         else:
             self._endpoints.pop(endpoint.endpoint_key, None)
 
+    def remove_participant(self, participant_key: str, domain_id: Optional[int] = None) -> None:
+        participant_key = str(participant_key)
+        if not participant_key:
+            return
+        for endpoint_key, endpoint in tuple(self._endpoints.items()):
+            if endpoint.participant_key != participant_key:
+                continue
+            if domain_id is not None and endpoint.domain_id != int(domain_id):
+                continue
+            self._endpoints.pop(endpoint_key, None)
+
+    def remove_stale(self, now: float, max_age_sec: float, domain_id: Optional[int] = None) -> int:
+        if max_age_sec <= 0.0:
+            return 0
+        removed = 0
+        deadline = float(now) - float(max_age_sec)
+        for endpoint_key, endpoint in tuple(self._endpoints.items()):
+            if domain_id is not None and endpoint.domain_id != int(domain_id):
+                continue
+            if endpoint.observed_at >= deadline:
+                continue
+            self._endpoints.pop(endpoint_key, None)
+            removed += 1
+        return removed
+
     def endpoints(self, domain_id: Optional[int] = None) -> Tuple[DiscoveredEndpoint, ...]:
         endpoints = tuple(
             endpoint for endpoint in self._endpoints.values()

@@ -1,10 +1,11 @@
-"""Convert tab controller for fake-first GUI command routing."""
+"""Convert tab controller for fake-first GUI command routing with live service support."""
 
 from dataclasses import dataclass, replace
 import time
-from typing import Iterable, Mapping, Tuple
+from typing import Iterable, Mapping, Optional, Tuple
 
 from app_core import AppCommand, CommandResult, CommandStatus
+from app_core.services import ServiceInstanceRef
 
 from .convert_tab import (
     ConvertJobRow,
@@ -14,6 +15,7 @@ from .convert_tab import (
     build_convert_tab_view_model,
     build_mock_convert_tab_view_model,
 )
+from .convert_service_facade import ConverterServiceFacade
 
 
 @dataclass(frozen=True)
@@ -27,6 +29,7 @@ class ConvertTabControllerConfig:
     output_storage_path: str = ""
     data_selection: str = "all"
     verbosity: str = "WARN"
+    service: Optional[ServiceInstanceRef] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "config_file", str(self.config_file))
@@ -39,21 +42,24 @@ class ConvertTabControllerConfig:
 
 
 class ConvertTabController:
-    """Build Convert tab snapshots and apply queued fake-first Convert commands."""
+    """Build Convert tab snapshots and apply queued Convert commands (fake or live)."""
 
     def __init__(
             self,
             presets: Iterable[ConvertPresetView] = (),
             diagnostics: Iterable[str] = (),
+            service_facade: Optional[ConverterServiceFacade] = None,
             config: ConvertTabControllerConfig = None,
             clock=time.time,
     ) -> None:
         self._presets = tuple(presets)
         self._jobs = ()
         self._diagnostics = tuple(str(item) for item in diagnostics)
+        self._service_facade = service_facade
         self._config = config or ConvertTabControllerConfig()
         self._clock = clock
         self._last_view = ConvertTabViewModel()
+        self._service_ready = False
 
     @classmethod
     def mock(cls, clock=time.time) -> "ConvertTabController":
@@ -78,6 +84,25 @@ class ConvertTabController:
         controller._jobs = view.jobs
         controller._last_view = view
         return controller
+
+    @classmethod
+    def from_service(
+            cls,
+            service: ServiceInstanceRef,
+            presets: Iterable[ConvertPresetView] = (),
+            service_facade: Optional[ConverterServiceFacade] = None,
+            config: ConvertTabControllerConfig = None,
+            clock=time.time,
+    ) -> "ConvertTabController":
+        """Create a controller wired to a live Converter Service instance."""
+        cfg = config or ConvertTabControllerConfig()
+        cfg = replace(cfg, service=service)
+        return cls(
+            presets=presets,
+            service_facade=service_facade,
+            config=cfg,
+            clock=clock,
+        )
 
     @property
     def selected_preset_id(self) -> str:
@@ -109,7 +134,11 @@ class ConvertTabController:
         raise ValueError(f"Unsupported Convert command type: {command.command_type}")
 
     async def refresh_view(self) -> ConvertTabViewModel:
-        """Return the next Convert-tab view from controller state."""
+        """Return the next Convert-tab view from controller state (with live service sync)."""
+
+        # Update service ready status if facade is available
+        if self._service_facade:
+            self._service_ready = await self._service_facade.is_service_ready()
 
         input_storage = ConvertStorageView("sqlite", self._config.input_storage_path, "XCDR_AUTO")
         output_storage = ConvertStorageView("sqlite", self._config.output_storage_path, "JSON_SQLITE")
@@ -124,7 +153,7 @@ class ConvertTabController:
             config_file=self._config.config_file,
             verbosity=self._config.verbosity,
             data_selection=self._config.data_selection,
-            diagnostics=self._diagnostics,
+            diagnostics=self._get_diagnostics(),
         )
         if view.selected_preset_id != self._config.selected_preset_id:
             self._config = replace(self._config, selected_preset_id=view.selected_preset_id)
@@ -244,6 +273,22 @@ class ConvertTabController:
             if job.job_id == job_id:
                 return job
         raise ValueError(f"Unknown Convert job: {job_id}")
+
+    def _get_diagnostics(self) -> Tuple[str, ...]:
+        """Build diagnostic messages including service status."""
+        msgs = list(self._diagnostics)
+        if self._service_facade:
+            if self._service_ready:
+                msgs.append("✓ Converter Service connected and ready")
+            else:
+                msgs.append("⚠ Converter Service not ready (using local mode)")
+        else:
+            msgs.append("ℹ Mock mode (no Converter Service facade)")
+        return tuple(msgs)
+
+    @property
+    def is_service_available(self) -> bool:
+        return self._service_facade is not None and self._service_ready
 
 
 def _command_result(

@@ -290,6 +290,41 @@ class ConvertTabController:
     def is_service_available(self) -> bool:
         return self._service_facade is not None and self._service_ready
 
+    def workspace_config(self) -> Mapping[str, object]:
+        """Export Convert controller state for workspace persistence."""
+        return {
+            "config_file": self._config.config_file,
+            "selected_preset_id": self._config.selected_preset_id,
+            "selected_job_id": self._config.selected_job_id,
+            "input_storage_path": self._config.input_storage_path,
+            "output_storage_path": self._config.output_storage_path,
+            "data_selection": self._config.data_selection,
+            "verbosity": self._config.verbosity,
+        }
+
+    def workspace_metadata(self) -> Mapping[str, object]:
+        """Export Convert metadata for workspace diagnostics."""
+        return {
+            "job_count": len(self._jobs),
+            "preset_count": len(self._presets),
+            "selected_preset": self._config.selected_preset_id,
+            "service_available": self.is_service_available,
+        }
+
+    def apply_workspace_intent(self, metadata: Mapping[str, object]) -> None:
+        """Restore Convert controller state from workspace metadata."""
+        config_dict = dict(metadata)
+        self._config = replace(
+            self._config,
+            config_file=str(config_dict.get("config_file", self._config.config_file)),
+            selected_preset_id=str(config_dict.get("selected_preset_id", self._config.selected_preset_id)),
+            selected_job_id=str(config_dict.get("selected_job_id", self._config.selected_job_id)),
+            input_storage_path=str(config_dict.get("input_storage_path", self._config.input_storage_path)),
+            output_storage_path=str(config_dict.get("output_storage_path", self._config.output_storage_path)),
+            data_selection=str(config_dict.get("data_selection", self._config.data_selection)),
+            verbosity=str(config_dict.get("verbosity", self._config.verbosity)),
+        )
+
 
 def _command_result(
         command: AppCommand,

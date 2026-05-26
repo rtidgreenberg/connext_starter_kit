@@ -244,6 +244,7 @@ def build_gui_shell_assembly(
         workspace_controller=GuiWorkspaceController(
             topics_controller=topics_controller,
             plots_controller=plots_controller,
+            convert_controller=convert_controller,
         ),
         config=GuiShellSessionConfig(
             workspace_name=config.workspace_name,

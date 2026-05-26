@@ -15,7 +15,7 @@ from app_core import (
     save_workspace,
 )
 
-from .tabs import PlotsTabController, TopicsTabController
+from .tabs import ConvertTabController, PlotsTabController, TopicsTabController
 
 
 GUI_WORKSPACE_METADATA_KEY = "gui"
@@ -35,9 +35,11 @@ class GuiWorkspaceController:
             self,
             topics_controller: Optional[TopicsTabController] = None,
             plots_controller: Optional[PlotsTabController] = None,
+            convert_controller: Optional[ConvertTabController] = None,
             config: Optional[GuiWorkspaceControllerConfig] = None,
             clock=time.time,
     ) -> None:
+        self._convert_controller = convert_controller
         self._topics_controller = topics_controller
         self._plots_controller = plots_controller
         self._config = config or GuiWorkspaceControllerConfig()
@@ -83,6 +85,10 @@ class GuiWorkspaceController:
         """Restore GUI controller intent from a loaded workspace document."""
 
         gui_metadata = dict(document.metadata.get(GUI_WORKSPACE_METADATA_KEY, {}))
+        if self._convert_controller is not None:
+            self._convert_controller.apply_workspace_intent(
+                metadata=gui_metadata.get("convert", {}),
+            )
         if self._topics_controller is not None:
             self._topics_controller.apply_workspace_intent(
                 document.topic_selections,
@@ -159,6 +165,8 @@ class GuiWorkspaceController:
 
     def _gui_metadata(self) -> Mapping[str, Any]:
         metadata = {"saved_at": self._clock()}
+        if self._convert_controller is not None:
+            metadata["convert"] = dict(self._convert_controller.workspace_config())
         if self._topics_controller is not None:
             metadata["topics"] = dict(self._topics_controller.workspace_metadata())
         if self._plots_controller is not None:

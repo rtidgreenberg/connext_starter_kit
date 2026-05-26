@@ -59,6 +59,7 @@ class GuiShellSession:
         self._workspace_controller = workspace_controller or GuiWorkspaceController(
             topics_controller=topics_controller,
             plots_controller=plots_controller,
+            convert_controller=convert_controller,
         )
 
     @property

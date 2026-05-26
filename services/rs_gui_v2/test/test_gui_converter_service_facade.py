@@ -17,7 +17,7 @@ from gui.tabs.convert_controller import ConvertTabController, ConvertTabControll
 from gui.tabs.convert_tab import ConvertPresetView
 
 
-class TestConverterServiceFacade(unittest.TestCase):
+class TestConverterServiceFacade(unittest.IsolatedAsyncioTestCase):
     def test_facade_initializes_without_service(self):
         facade = ConverterServiceFacade()
 

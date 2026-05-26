@@ -368,6 +368,9 @@ Primary app-core inputs:
   outputs.
 - Service admin/monitoring facades can be reused later if deployments treat
   Converter Service as a continuously running service.
+- The mocked v2 tab now captures the batch workflow as immutable Converter
+  configuration/job snapshots and emits `convert.*` intents only; live
+  Converter execution is intentionally outside the current renderer boundary.
 
 States to show:
 
@@ -385,6 +388,9 @@ Approval focus:
 - Treat conversion as a batch job in the MVP.
 - Keep logs visible in the primary tab; do not hide them behind a modal.
 - Keep converted output inspection separate from live DDS visualization.
+- Preserve Converter-specific concepts in the mock model: `config_file`, named
+  `<converter>`/`config_name`, structured input/output storage, data selection,
+  verbosity, XML preview, and CLI preview.
 
 ### 5. Topics Tab
 
@@ -640,6 +646,8 @@ Must show:
 - run, cancel, retry controls
 - job status, logs, and recent outputs
 - invalid path/configuration states
+- mocked batch-job state that emits `convert.*` intents without coupling to a
+  live Converter backend
 
 Approval questions:
 

@@ -5,6 +5,7 @@ from typing import Iterable, Tuple
 
 from app_core import AppEvent, AppState, LifecyclePhase
 
+from .tabs.convert_tab import ConvertTabViewModel, build_mock_convert_tab_view_model
 from .tabs.plots_tab import PlotsTabViewModel, build_mock_plots_tab_view_model
 from .tabs.record_tab import RecordTabViewModel, build_mock_record_tab_view_model
 from .tabs.replay_tab import ReplayTabViewModel, build_mock_replay_tab_view_model
@@ -40,6 +41,7 @@ class ShellViewModel:
     workspace_path: str = ""
     workspace_unsaved: bool = False
     status_items: Tuple[ShellStatusItem, ...] = field(default_factory=tuple)
+    convert_tab: ConvertTabViewModel = field(default_factory=build_mock_convert_tab_view_model)
     record_tab: RecordTabViewModel = field(default_factory=build_mock_record_tab_view_model)
     replay_tab: ReplayTabViewModel = field(default_factory=build_mock_replay_tab_view_model)
     topics_tab: TopicsTabViewModel = field(default_factory=build_mock_topics_tab_view_model)
@@ -52,6 +54,7 @@ class ShellViewModel:
 def build_shell_view_model(
         app_state: AppState,
         record_tab: RecordTabViewModel,
+    convert_tab: ConvertTabViewModel = None,
         replay_tab: ReplayTabViewModel = None,
         topics_tab: TopicsTabViewModel = None,
         plots_tab: PlotsTabViewModel = None,
@@ -62,6 +65,7 @@ def build_shell_view_model(
 ) -> ShellViewModel:
     """Build the first shell snapshot from app state and a Record tab view."""
 
+    convert_tab = convert_tab or build_mock_convert_tab_view_model()
     replay_tab = replay_tab or build_mock_replay_tab_view_model()
     topics_tab = topics_tab or build_mock_topics_tab_view_model()
     plots_tab = plots_tab or build_mock_plots_tab_view_model()
@@ -79,7 +83,8 @@ def build_shell_view_model(
         workspace_name=workspace_name,
         workspace_path=workspace_path,
         workspace_unsaved=unsaved,
-        status_items=_status_items(app_state, record_tab, replay_tab, topics_tab, plots_tab),
+        status_items=_status_items(app_state, record_tab, convert_tab, replay_tab, topics_tab, plots_tab),
+        convert_tab=convert_tab,
         record_tab=record_tab,
         replay_tab=replay_tab,
         topics_tab=topics_tab,
@@ -107,6 +112,7 @@ def build_mock_shell_view_model(now: float = 120.0) -> ShellViewModel:
     return build_shell_view_model(
         app_state,
         build_mock_record_tab_view_model(now=now),
+        convert_tab=build_mock_convert_tab_view_model(now=now),
         replay_tab=build_mock_replay_tab_view_model(),
         topics_tab=build_mock_topics_tab_view_model(now=now),
         plots_tab=build_mock_plots_tab_view_model(now=now),
@@ -140,6 +146,7 @@ def event_log_entry_from_event(event: AppEvent) -> EventLogEntry:
 def _status_items(
         app_state: AppState,
         record_tab: RecordTabViewModel,
+        convert_tab: ConvertTabViewModel,
         replay_tab: ReplayTabViewModel,
         topics_tab: TopicsTabViewModel,
         plots_tab: PlotsTabViewModel,
@@ -152,6 +159,7 @@ def _status_items(
         ShellStatusItem("Monitoring", "enabled" if app_state.monitoring_enabled else "off", "ok" if app_state.monitoring_enabled else "muted"),
         ShellStatusItem("Record", record_tab.observed_state, "ok" if record_tab.observed_state.lower() == "running" else "normal"),
         ShellStatusItem("Replay", replay_tab.observed_state, "ok" if replay_tab.observed_state.lower() == "running" else "normal"),
+        ShellStatusItem("Convert", str(len(convert_tab.jobs)), "ok" if convert_tab.jobs else "normal"),
         ShellStatusItem("Topics", str(topics_tab.visible_topic_count), "ok" if topics_tab.visible_topic_count else "normal"),
         ShellStatusItem("Plots", str(plots_tab.total_point_count), "ok" if plots_tab.total_point_count else "normal"),
         ShellStatusItem("Errors", str(error_count), "error" if error_count else "ok"),

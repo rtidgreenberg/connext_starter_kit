@@ -4,6 +4,7 @@ from typing import Callable, Iterable, Tuple
 
 from app_core import AppEvent, AppRuntime, AppState
 
+from .tabs.convert_tab import ConvertTabViewModel
 from .tabs.plots_tab import PlotsTabViewModel
 from .tabs.record_tab import RecordTabViewModel, build_mock_record_tab_view_model
 from .tabs.replay_tab import ReplayTabViewModel
@@ -34,6 +35,7 @@ class UiFrameScheduler:
     def next_view(
             self,
             record_tab: RecordTabViewModel = None,
+            convert_tab: ConvertTabViewModel = None,
             replay_tab: ReplayTabViewModel = None,
             topics_tab: TopicsTabViewModel = None,
             plots_tab: PlotsTabViewModel = None,
@@ -47,6 +49,7 @@ class UiFrameScheduler:
         return self._view_builder(
             self._runtime.state,
             record_tab or build_mock_record_tab_view_model(),
+            convert_tab=convert_tab,
             replay_tab=replay_tab,
             topics_tab=topics_tab,
             plots_tab=plots_tab,

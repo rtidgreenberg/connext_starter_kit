@@ -1,5 +1,16 @@
 """View-model builders for rs_gui_v2 tabs."""
 
+from .convert_tab import (
+    ConvertActionView,
+    ConvertJobRow,
+    ConvertLogRow,
+    ConvertPresetView,
+    ConvertStorageView,
+    ConvertTabViewModel,
+    build_convert_action_command,
+    build_convert_tab_view_model,
+    build_mock_convert_tab_view_model,
+)
 from .record_controller import RecordTabController, RecordTabControllerConfig
 from .record_tab import (
     RecordActionView,
@@ -53,6 +64,12 @@ from .topics_tab import (
 )
 
 __all__ = [
+    "ConvertActionView",
+    "ConvertJobRow",
+    "ConvertLogRow",
+    "ConvertPresetView",
+    "ConvertStorageView",
+    "ConvertTabViewModel",
     "RecordActionView",
     "RecordCandidateRow",
     "RecordCommandRow",
@@ -81,7 +98,10 @@ __all__ = [
     "TopicsTabViewModel",
     "plots_inputs_from_data_session_snapshot",
     "topics_inputs_from_data_session_snapshot",
+    "build_convert_action_command",
+    "build_convert_tab_view_model",
     "build_mock_plots_tab_view_model",
+    "build_mock_convert_tab_view_model",
     "build_mock_record_tab_view_model",
     "build_mock_replay_tab_view_model",
     "build_mock_topics_tab_view_model",

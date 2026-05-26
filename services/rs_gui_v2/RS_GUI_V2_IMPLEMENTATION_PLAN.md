@@ -853,6 +853,18 @@ Suggested PRs:
 2. Add Convert tab with validation and logs.
 3. Add live conversion fixture test.
 
+Initial implementation status:
+
+- Added a DDS-free mocked Convert-tab view model with named Converter presets,
+  structured input/output storage, selected job snapshots, service-style log
+  rows, validation diagnostics, and generated CLI/XML previews.
+- Rendered the mocked Convert tab in the Dear PyGui shell with config, storage,
+  data-selection, preset, job, log, and preview sections. The renderer emits
+  `convert.run`, `convert.cancel`, `convert.open_output`, and
+  `convert.inspect_output` command intents only.
+- Kept live Converter execution, workspace persistence for conversion presets,
+  and converted-output inspection as future work behind a separate job facade.
+
 ## Milestone L: Hardening, Packaging, and Soak
 
 Goal: Make the tool durable enough for repeated operator use.

@@ -4,6 +4,7 @@ from typing import Callable, Optional
 
 from app_core import AppCommand
 
+from .tabs.convert_tab import ConvertTabViewModel, build_convert_action_command
 from .tabs.plots_tab import PlotsTabViewModel
 from .tabs.record_tab import RecordTabViewModel, build_record_action_command
 from .tabs.replay_tab import (
@@ -99,7 +100,7 @@ def render_shell_view(
             with dpg.tab(label="Replay"):
                 _render_replay_tab(dpg, view.replay_tab, command_sink=command_sink)
             with dpg.tab(label="Convert"):
-                dpg.add_text("No Converter job selected")
+                _render_convert_tab(dpg, view.convert_tab, command_sink=command_sink)
             with dpg.tab(label="Topics"):
                 _render_topics_tab(dpg, view.topics_tab, command_sink=command_sink)
             with dpg.tab(label="Plots"):
@@ -182,6 +183,107 @@ def _record_action_callback(
         candidate = _candidate_from_record_row(record, selected_row.candidate_id)
         command = build_record_action_command(action_id, candidate, tag_name=record.tag_value)
         return command_sink(command)
+    return _callback
+
+
+def _render_convert_tab(
+        dpg,
+        convert: ConvertTabViewModel,
+        command_sink: Optional[Callable[[AppCommand], bool]] = None,
+) -> None:
+    preset = convert.selected_preset
+    dpg.add_text(
+        f"Preset: {preset.label if preset else '(none)'} | "
+        f"Format: {preset.output_format if preset else convert.output_storage.storage_format} | "
+        f"Verbosity: {convert.verbosity}"
+    )
+    dpg.add_input_text(label="Config File", default_value=convert.config_file)
+    dpg.add_input_text(label="Input Storage", default_value=convert.input_storage.path)
+    dpg.add_input_text(label="Output Storage", default_value=convert.output_storage.path)
+    dpg.add_input_text(label="Data Selection", default_value=convert.data_selection)
+    _render_convert_actions(dpg, convert, command_sink=command_sink)
+    _render_convert_presets(dpg, convert)
+    _render_convert_jobs(dpg, convert)
+    _render_convert_logs(dpg, convert)
+    dpg.add_text("CLI Preview")
+    dpg.add_text(convert.cli_preview)
+    dpg.add_text("XML Preview")
+    dpg.add_text(convert.xml_preview)
+    for diagnostic in convert.diagnostics:
+        dpg.add_text(f"Diagnostic: {diagnostic}")
+
+
+def _render_convert_actions(
+        dpg,
+        convert: ConvertTabViewModel,
+        command_sink: Optional[Callable[[AppCommand], bool]] = None,
+) -> None:
+    with dpg.group(horizontal=True):
+        for action in convert.actions:
+            dpg.add_button(
+                label=action.label,
+                enabled=action.enabled,
+                callback=_convert_action_callback(convert, action.action_id, command_sink),
+            )
+            if action.reason and not action.enabled:
+                dpg.add_text(action.reason)
+
+
+def _render_convert_presets(dpg, convert: ConvertTabViewModel) -> None:
+    dpg.add_text("Converter Presets")
+    with dpg.table(header_row=True, borders_innerH=True, borders_outerH=True, borders_innerV=True):
+        for heading in ("Selected", "Preset", "Config Name", "Output Format", "Description"):
+            dpg.add_table_column(label=heading)
+        for row in convert.presets:
+            with dpg.table_row():
+                dpg.add_text("*" if row.preset_id == convert.selected_preset_id else "")
+                dpg.add_text(row.label)
+                dpg.add_text(row.config_name)
+                dpg.add_text(row.output_format)
+                dpg.add_text(row.description)
+
+
+def _render_convert_jobs(dpg, convert: ConvertTabViewModel) -> None:
+    dpg.add_text("Conversion Jobs")
+    with dpg.table(header_row=True, borders_innerH=True, borders_outerH=True, borders_innerV=True):
+        for heading in ("Selected", "Job", "Preset", "Input", "Output", "Format", "State", "Progress", "Message"):
+            dpg.add_table_column(label=heading)
+        for row in convert.jobs:
+            with dpg.table_row():
+                dpg.add_text("*" if row.job_id == convert.selected_job_id else "")
+                dpg.add_text(row.job_id)
+                dpg.add_text(row.preset_id)
+                dpg.add_text(row.input_path)
+                dpg.add_text(row.output_path)
+                dpg.add_text(row.output_format)
+                dpg.add_text(row.state)
+                dpg.add_text(row.progress)
+                dpg.add_text(row.message)
+
+
+def _render_convert_logs(dpg, convert: ConvertTabViewModel) -> None:
+    dpg.add_text("Job Log")
+    with dpg.table(header_row=True, borders_innerH=True, borders_outerH=True):
+        for heading in ("Time", "Severity", "Source", "Job", "Message"):
+            dpg.add_table_column(label=heading)
+        for row in convert.logs:
+            with dpg.table_row():
+                dpg.add_text(row.timestamp)
+                dpg.add_text(row.severity)
+                dpg.add_text(row.source)
+                dpg.add_text(row.job_id)
+                dpg.add_text(row.message)
+
+
+def _convert_action_callback(
+        convert: ConvertTabViewModel,
+        action_id: str,
+        command_sink: Optional[Callable[[AppCommand], bool]],
+):
+    def _callback(_sender=None, _app_data=None, _user_data=None):
+        if command_sink is None:
+            return False
+        return command_sink(build_convert_action_command(action_id, convert))
     return _callback
 
 

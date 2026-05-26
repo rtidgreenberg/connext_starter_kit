@@ -113,6 +113,7 @@ class TestMockShellViewModel(unittest.TestCase):
         self.assertIn("Robot Run 03", view.title)
         self.assertEqual(view.record_tab.selected_candidate.control_name, "recording_service_8f4f2a1c")
         self.assertEqual(view.replay_tab.selected_target.control_name, "replay_service_2d91c4a0")
+        self.assertEqual(view.convert_tab.selected_preset.config_name, "sqlite_to_json")
         self.assertEqual(len(view.record_tab.candidates), 2)
         self.assertEqual(view.record_tab.command_history[0].command_id, "pause-21")
         self.assertTrue(view.record_tab.action_by_id["pause"].enabled)
@@ -239,6 +240,23 @@ class TestDearPyGuiRenderer(unittest.TestCase):
         self.assertEqual(
             replay_command.payload["database_path"],
             "services/replay_input/robot_run_03",
+        )
+
+    def test_convert_buttons_dispatch_commands_when_sink_is_present(self):
+        fake = FakeDpg()
+        commands = []
+        shell = DearPyGuiShell(dpg_module=fake, command_sink=commands.append)
+
+        shell.render_once()
+        _button_callback(fake, "Run Conversion")()
+
+        self.assertTrue(any(command.command_type == "convert.run" for command in commands))
+        convert_command = next(command for command in commands if command.command_type == "convert.run")
+        self.assertEqual(convert_command.target, "convert-robot-run-03")
+        self.assertEqual(convert_command.payload["config_name"], "sqlite_to_json")
+        self.assertEqual(
+            convert_command.payload["output_storage"]["path"],
+            "services/converter_output/robot_run_03_json",
         )
 
     def test_workspace_buttons_dispatch_commands_from_inputs(self):

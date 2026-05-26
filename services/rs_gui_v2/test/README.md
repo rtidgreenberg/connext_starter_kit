@@ -23,8 +23,9 @@ Current layers:
   internal-topic filtering, and persisted topic-selection DTOs
 - `test_headless_entrypoint.py`: headless app entry point startup/shutdown
 - `test_gui_shell.py`: mocked Dear PyGui shell snapshots, Record-tab selector
-  view models, workspace save/load command intents, event-log scheduling, and
-  fake-renderer smoke coverage without requiring a display
+  view models, Convert/Replay command intents, workspace save/load command
+  intents, event-log scheduling, and fake-renderer smoke coverage without
+  requiring a display
 - `test_gui_factory.py`: default GUI shell session assembly for mock and
   headless modes, including Topics/Plots snapshot wiring, CLI mock GUI checks,
   and fake-renderer coverage
@@ -33,6 +34,9 @@ Current layers:
 - `test_gui_plots_controller.py`: Plots-tab controller wiring from
   data-session plot snapshots into shell snapshots, including provider
   failures and headless degraded states
+- `test_gui_convert_tab.py`: mocked Convert-tab Converter presets, structured
+  input/output storage, job snapshots, log rows, XML/CLI previews, action
+  enablement, and `convert.*` command intents
 - `test_gui_replay_tab.py`: mocked Replay-tab service candidates, database
   selection state, start/pause/resume/stop/shutdown affordances, timeline rows,
   duplicate-target diagnostics, and command intents

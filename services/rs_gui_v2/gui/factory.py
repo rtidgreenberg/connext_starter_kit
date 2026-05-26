@@ -44,6 +44,10 @@ from app_core.services import (
 from .scheduler import UiFrameScheduler
 from .session import GuiShellSession, GuiShellSessionConfig
 from .tabs import (
+    ConvertTabController,
+    ConvertTabControllerConfig,
+    ConverterServiceFacade,
+    ConverterServiceConfig,
     PlotsTabController,
     PlotsTabControllerConfig,
     RecordTabController,
@@ -116,6 +120,7 @@ class GuiShellAssembly:
     runtime: AppRuntime
     process_manager: ServiceProcessManager
     record_controller: RecordTabController
+    convert_controller: Optional[ConvertTabController]
     replay_controller: ReplayTabController
     topics_controller: TopicsTabController
     plots_controller: PlotsTabController
@@ -213,6 +218,16 @@ def build_gui_shell_assembly(
         ReplayTabController.mock()
         if config.mode == GuiShellSessionMode.MOCK else ReplayTabController()
     )
+    convert_controller = (
+        ConvertTabController.mock()
+        if config.mode == GuiShellSessionMode.MOCK
+        else ConvertTabController(
+            service_facade=ConverterServiceFacade(
+                admin_facade=admin_facade,
+                monitoring_facade=monitoring_facade,
+            ),
+        )
+    )
     scheduler = UiFrameScheduler(
         runtime,
         max_event_log=config.event_log_max_size,
@@ -222,6 +237,7 @@ def build_gui_shell_assembly(
         runtime=runtime,
         scheduler=scheduler,
         record_controller=controller,
+        convert_controller=convert_controller,
         replay_controller=replay_controller,
         topics_controller=topics_controller,
         plots_controller=plots_controller,
@@ -241,6 +257,7 @@ def build_gui_shell_assembly(
         runtime=runtime,
         process_manager=process_manager,
         record_controller=controller,
+        convert_controller=convert_controller,
         replay_controller=replay_controller,
         topics_controller=topics_controller,
         plots_controller=plots_controller,

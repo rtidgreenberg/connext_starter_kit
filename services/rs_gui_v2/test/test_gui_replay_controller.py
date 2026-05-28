@@ -36,6 +36,9 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
                 "playback_rate": 2.0,
                 "loop": True,
                 "time_window": "00:00:00 - 00:01:00",
+                "qos_file_path": "dds/qos/custom_qos.xml",
+                "participant_qos_profile": "MyLib::MyParticipant",
+                "writer_qos_profile": "MyLib::MyWriter",
             },
             command_id="start-replay",
             created_at=1.0,
@@ -47,6 +50,9 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(running_view.observed_state, "RUNNING")
         self.assertEqual(running_view.playback_rate, 2.0)
         self.assertTrue(running_view.loop)
+        self.assertEqual(running_view.qos_file_path, "dds/qos/custom_qos.xml")
+        self.assertEqual(running_view.participant_qos_profile, "MyLib::MyParticipant")
+        self.assertEqual(running_view.writer_qos_profile, "MyLib::MyWriter")
         self.assertTrue(running_view.action_by_id["pause"].enabled)
 
         pause = controller.handle_command(AppCommand("replay.pause", command_id="pause-replay", created_at=2.0))

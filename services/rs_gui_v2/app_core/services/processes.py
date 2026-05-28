@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field, replace
 from enum import Enum
 import os
+import signal
 import socket
 import subprocess
 import time
@@ -117,6 +118,8 @@ class ServiceProcessLaunch:
     updated_at: float = field(default_factory=time.time)
     termination_requested: bool = False
     message: str = ""
+    output_path: str = ""
+    output_tail: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.state, ServiceProcessLaunchState):
@@ -150,6 +153,8 @@ class ServiceProcessLaunch:
             "updated_at": self.updated_at,
             "termination_requested": self.termination_requested,
             "message": self.message,
+            "output_path": self.output_path,
+            "output_tail": self.output_tail,
         }
 
     @classmethod
@@ -167,6 +172,8 @@ class ServiceProcessLaunch:
             updated_at=float(data.get("updated_at", time.time())),
             termination_requested=bool(data.get("termination_requested", False)),
             message=str(data.get("message", "")),
+            output_path=str(data.get("output_path", "")),
+            output_tail=str(data.get("output_tail", "")),
         )
 
 
@@ -179,6 +186,8 @@ class ServiceProcessTerminationOutcome:
     launch_id: str = ""
     pid: Optional[int] = None
     message: str = ""
+    output_path: str = ""
+    output_tail: str = ""
     requested_at: float = field(default_factory=time.time)
 
     def __post_init__(self) -> None:
@@ -190,6 +199,18 @@ class ServiceProcessTerminationOutcome:
     @property
     def requested(self) -> bool:
         return self.status == ServiceProcessTerminationStatus.REQUESTED
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "status": self.status.value,
+            "candidate_id": self.candidate_id,
+            "launch_id": self.launch_id,
+            "pid": self.pid,
+            "message": self.message,
+            "output_path": self.output_path,
+            "output_tail": self.output_tail,
+            "requested_at": self.requested_at,
+        }
 
 
 class ServiceProcessHandle(Protocol):
@@ -219,6 +240,9 @@ class ServiceProcessSpawner(Protocol):
 class SubprocessServiceProcessSpawner:
     """Standard-library spawner used by production wiring."""
 
+    def __init__(self, log_dir: str = "services/rs_gui_v2/service_logs") -> None:
+        self._log_dir = _workspace_relative_path(str(log_dir))
+
     def start(
             self,
             command_line: Sequence[str],
@@ -227,14 +251,49 @@ class SubprocessServiceProcessSpawner:
     ) -> ServiceProcessHandle:
         env = os.environ.copy()
         env.update(dict(environment or {}))
-        return subprocess.Popen(
-            list(command_line),
-            cwd=working_dir or None,
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        os.makedirs(self._log_dir, exist_ok=True)
+        output_path = os.path.join(self._log_dir, _service_log_filename(command_line))
+        output_file = open(output_path, "ab", buffering=0)
+        try:
+            handle = subprocess.Popen(
+                list(command_line),
+                cwd=working_dir or None,
+                env=env,
+                stdout=output_file,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        except Exception:
+            output_file.close()
+            raise
+        return _SubprocessServiceProcessHandle(handle, output_file, output_path)
+
+
+class _SubprocessServiceProcessHandle:
+    def __init__(self, handle, output_file, output_path: str) -> None:
+        self._handle = handle
+        self._output_file = output_file
+        self.output_path = str(output_path)
+
+    @property
+    def pid(self) -> int:
+        return int(self._handle.pid)
+
+    def poll(self) -> Optional[int]:
+        returncode = self._handle.poll()
+        if returncode is not None:
+            self._close_output()
+        return returncode
+
+    def terminate(self) -> None:
+        try:
+            os.killpg(os.getpgid(self._handle.pid), signal.SIGTERM)
+        except Exception:
+            self._handle.terminate()
+
+    def _close_output(self) -> None:
+        if not self._output_file.closed:
+            self._output_file.close()
 
 
 class ServiceProcessManager:
@@ -272,6 +331,7 @@ class ServiceProcessManager:
                 working_dir=request.working_dir,
                 environment=request.environment,
             )
+            output_path = str(getattr(handle, "output_path", ""))
         except Exception as exc:
             launch = ServiceProcessLaunch(
                 launch_id=actual_launch_id,
@@ -298,6 +358,7 @@ class ServiceProcessManager:
             state=ServiceProcessLaunchState.STARTING,
             started_at=started_at,
             updated_at=started_at,
+            output_path=output_path,
         )
         self._handles[actual_launch_id] = handle
         self._launches[actual_launch_id] = launch
@@ -313,18 +374,22 @@ class ServiceProcessManager:
         returncode = handle.poll()
         state = launch.state
         message = launch.message
+        output_tail = _read_tail(launch.output_path)
         if returncode is None:
             if state == ServiceProcessLaunchState.STARTING:
                 state = ServiceProcessLaunchState.RUNNING
         else:
             state = ServiceProcessLaunchState.EXITED
             message = f"process exited with return code {returncode}"
+            if output_tail:
+                message = f"{message}; see {launch.output_path}"
         updated = replace(
             launch,
             state=state,
             returncode=returncode,
             updated_at=self._clock(),
             message=message,
+            output_tail=output_tail,
         )
         self._launches[launch_id] = updated
         return updated
@@ -378,6 +443,8 @@ class ServiceProcessManager:
             local_hostnames=tuple(local_hostnames) or (self._hostname,),
             graceful_shutdown_failed=graceful_shutdown_failed,
         )
+        output_path = str(selected.details.get("output_path", ""))
+        output_tail = str(selected.details.get("output_tail", ""))
         if not availability.process_terminate_enabled:
             return ServiceProcessTerminationOutcome(
                 ServiceProcessTerminationStatus.NOT_ALLOWED,
@@ -385,6 +452,8 @@ class ServiceProcessManager:
                 launch_id=selected.launch_id,
                 pid=selected.pid,
                 message="; ".join(availability.reasons),
+                output_path=output_path,
+                output_tail=output_tail,
                 requested_at=self._clock(),
             )
 
@@ -397,15 +466,22 @@ class ServiceProcessManager:
                 launch_id=launch_id,
                 pid=selected.pid,
                 message="local process handle not found",
+                output_path=output_path,
+                output_tail=output_tail,
                 requested_at=self._clock(),
             )
         returncode = handle.poll()
         if returncode is not None:
+            launch = self._launches[launch_id]
+            output_path = output_path or launch.output_path
+            output_tail = output_tail or _read_tail(output_path)
             self._launches[launch_id] = replace(
-                self._launches[launch_id],
+                launch,
                 state=ServiceProcessLaunchState.EXITED,
                 returncode=returncode,
                 updated_at=self._clock(),
+                message=f"process exited with return code {returncode}",
+                output_tail=output_tail,
             )
             return ServiceProcessTerminationOutcome(
                 ServiceProcessTerminationStatus.ALREADY_EXITED,
@@ -413,6 +489,8 @@ class ServiceProcessManager:
                 launch_id=launch_id,
                 pid=selected.pid,
                 message=f"process already exited with return code {returncode}",
+                output_path=output_path,
+                output_tail=output_tail,
                 requested_at=self._clock(),
             )
 
@@ -430,6 +508,8 @@ class ServiceProcessManager:
             launch_id=launch_id,
             pid=selected.pid,
             message="local termination requested",
+            output_path=output_path,
+            output_tail=output_tail,
             requested_at=self._clock(),
         )
 
@@ -446,6 +526,10 @@ def candidate_from_process_launch(launch: ServiceProcessLaunch) -> ServiceProces
         "launch_state": launch.state.value,
         "termination_requested": launch.termination_requested,
     }
+    if launch.output_path:
+        details["output_path"] = launch.output_path
+    if launch.output_tail:
+        details["output_tail"] = launch.output_tail
     if launch.returncode is not None:
         details["returncode"] = launch.returncode
     if launch.message:
@@ -510,6 +594,34 @@ def default_service_executable(kind: ServiceKind, nddshome: str = "") -> str:
     if home:
         return os.path.join(home, "bin", binary)
     return binary
+
+
+def _service_log_filename(command_line: Sequence[str]) -> str:
+    executable = os.path.basename(str(command_line[0])) if command_line else "service"
+    safe_executable = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in executable)
+    return f"{safe_executable}_{int(time.time() * 1000)}_{os.getpid()}.log"
+
+
+def _workspace_relative_path(path: str) -> str:
+    if os.path.isabs(path):
+        return path
+    root = os.path.abspath(os.path.dirname(__file__))
+    for _ in range(4):
+        root = os.path.dirname(root)
+    return os.path.join(root, path)
+
+
+def _read_tail(path: str, max_bytes: int = 8192) -> str:
+    if not path or not os.path.isfile(path):
+        return ""
+    try:
+        with open(path, "rb") as file:
+            file.seek(0, os.SEEK_END)
+            size = file.tell()
+            file.seek(max(0, size - int(max_bytes)), os.SEEK_SET)
+            return file.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
 
 
 def _supports_app_name(kind: ServiceKind) -> bool:

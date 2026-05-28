@@ -156,6 +156,7 @@ def build_service_candidate_selection(
             candidates = _merge_candidate(
                 candidates,
                 candidate_from_monitoring_snapshot(snapshot, display_label=display_label),
+                allow_unique_service_target=True,
             )
     for candidate in candidates_from_discovered_endpoints(
             service,
@@ -182,12 +183,23 @@ def build_service_candidate_selection(
 def _merge_candidate(
         candidates: Iterable[ServiceProcessCandidate],
         incoming: ServiceProcessCandidate,
+        allow_unique_service_target: bool = False,
 ) -> list:
     merged = list(candidates)
     incoming_keys = _identity_keys(incoming)
     for index, existing in enumerate(merged):
         if incoming_keys.intersection(_identity_keys(existing)):
             merged[index] = _combine_candidates(existing, incoming)
+            return merged
+    if allow_unique_service_target:
+        target_indexes = [
+            index for index, existing in enumerate(merged)
+            if _same_service_target(existing.service, incoming.service)
+            and existing.source == ServiceCandidateSource.GUI_LAUNCH
+        ]
+        if len(target_indexes) == 1:
+            index = target_indexes[0]
+            merged[index] = _combine_candidates(merged[index], incoming)
             return merged
     merged.append(incoming)
     return merged

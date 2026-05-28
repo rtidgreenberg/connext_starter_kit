@@ -1,0 +1,33 @@
+{
+  "preset_id": "record_all",
+  "label": "Record All Topics (XCDR)",
+  "description": "Capture all non-internal topics to XCDR_AUTO storage.",
+  "config_name": "record_all",
+  "required_variables": [
+    "REC_DOMAIN_ID",
+    "REC_WORKSPACE_DIR",
+    "REC_EXEC_DIR_EXPR",
+    "REC_FILENAME_EXPR",
+    "REC_SESSION_NAME"
+  ],
+  "basic_variables": {
+    "REC_DOMAIN_ID": 0,
+    "REC_WORKSPACE_DIR": "log_dir",
+    "REC_EXEC_DIR_EXPR": "recording_%ts%",
+    "REC_FILENAME_EXPR": "data_%auto:0-9%.db",
+    "REC_SESSION_NAME": "record_all_default",
+    "REC_TOPIC_DENY": "rti/*",
+    "REC_STORAGE_FORMAT": "XCDR_AUTO"
+  },
+  "advanced_variables": {
+    "REC_ADMIN_DOMAIN_ID": 0,
+    "REC_MON_DOMAIN_ID": 0,
+    "REC_DP_QOS": "DPLibrary::DefaultParticipant",
+    "REC_SUB_QOS": "BuiltinQosLib::Generic.Common",
+    "REC_DR_QOS": "BuiltinQosLib::Generic.Common",
+    "REC_STATUS_PERIOD_SEC": 1,
+    "REC_STATS_PERIOD_NSEC": 500000000,
+    "REC_ROLLOVER_ENABLED": false,
+    "REC_ROLLOVER_MB": 1024
+  }
+}

@@ -1,7 +1,7 @@
 """Immutable shell view models for the rs_gui_v2 Dear PyGui layer."""
 
 from dataclasses import dataclass, field
-from typing import Iterable, Tuple
+from typing import Iterable, Mapping, Tuple
 
 from app_core import AppEvent, AppState, LifecyclePhase
 from app_core.services import ServiceCandidateSelection
@@ -30,6 +30,9 @@ class EventLogEntry:
     level: str
     source: str
     message: str
+    event_type: str = ""
+    event_id: str = ""
+    payload: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -158,6 +161,9 @@ def event_log_entry_from_event(event: AppEvent) -> EventLogEntry:
         level=level,
         source=event.source,
         message=message,
+        event_type=event.event_type,
+        event_id=event.event_id,
+        payload=dict(event.payload),
     )
 
 

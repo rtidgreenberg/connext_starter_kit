@@ -45,6 +45,14 @@ class TestServiceChurnConfig(unittest.TestCase):
         self.assertTrue(config.require_admin_shutdown)
         self.assertEqual(config.admin_resource_name, "deploy")
 
+    def test_default_output_lives_under_rs_gui_live_reports(self):
+        config = parse_args([])
+
+        self.assertEqual(
+            config.output_path,
+            os.path.join(PARENT_DIR, "live_reports", "service_churn_report.json"),
+        )
+
     def test_launch_request_uses_service_configs_domains_and_unique_label(self):
         config = ServiceChurnConfig(admin_domain_id=81, monitoring_domain_id=82, data_domain_id=83)
 

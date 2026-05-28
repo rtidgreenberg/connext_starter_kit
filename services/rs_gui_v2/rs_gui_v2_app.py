@@ -6,8 +6,13 @@ import asyncio
 from typing import List, Optional
 
 from app_core import AppRuntime, LifecyclePhase
-from gui import GuiShellSessionFactoryConfig, GuiShellSessionMode, build_default_gui_shell_session
-from gui.main_window import DearPyGuiShell, DearPyGuiUnavailable
+from gui import (
+    GuiShellSessionFactoryConfig,
+    GuiShellSessionMode,
+    build_default_gui_shell_session,
+    build_gui_shell_assembly,
+)
+from gui.main_window import DearPyGuiUnavailable
 
 
 async def run_headless_once() -> LifecyclePhase:
@@ -57,11 +62,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.gui or args.mock_gui:
         try:
             mode = GuiShellSessionMode.MOCK if args.mock_gui else GuiShellSessionMode.LIVE
-            session = build_default_gui_shell_session(GuiShellSessionFactoryConfig(mode=mode))
-            DearPyGuiShell(
-                view_provider=session.next_view,
-                command_sink=session.command_sink,
-            ).run()
+            assembly = build_gui_shell_assembly(GuiShellSessionFactoryConfig(mode=mode))
+            assembly.shell().run()
             return 0
         except DearPyGuiUnavailable as exc:
             print(str(exc))

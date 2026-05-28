@@ -138,7 +138,7 @@ Run a bounded live DynamicData smoke/soak using the built-in telemetry fixture:
 The gate creates a live DynamicData reader and optional fixture publisher,
 applies bounded reader history/resource limits, feeds the same data-session and
 plot-buffer path used by the GUI, and writes a JSON report under
-`test_output/rs_gui_v2/`.
+`services/rs_gui_v2/live_reports/`.
 
 Useful options:
 
@@ -163,7 +163,7 @@ The gate launches `rtirecordingservice` through the same
 each iteration, checks Service Admin endpoint readiness, attempts remote
 shutdown using the launched app name plus the XML recording-service resource
 name, falls back to local process termination when shutdown does not reply, and
-writes a JSON report under `test_output/rs_gui_v2/`.
+writes a JSON report under `services/rs_gui_v2/live_reports/`.
 
 Useful options:
 
@@ -191,7 +191,7 @@ observes them through the same `RtiTopicDiscoveryClient` path used by the GUI,
 closes the endpoints, and verifies the run namespace converges to zero live
 topics. On Connext 7.6, endpoint delete samples may not arrive through the
 built-in readers in this environment, so the gate enables bounded stale-endpoint
-pruning and records a JSON report under `test_output/rs_gui_v2/`.
+pruning and records a JSON report under `services/rs_gui_v2/live_reports/`.
 
 Useful options:
 

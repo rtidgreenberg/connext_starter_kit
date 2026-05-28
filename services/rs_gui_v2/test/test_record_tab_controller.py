@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -146,6 +147,106 @@ class TestRecordTabController(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(view.action_by_id["pause"].enabled)
         self.assertTrue(view.action_by_id["resume"].enabled)
 
+    async def test_monitoring_updates_merge_into_gui_launch_and_retain_latest_kinds(self):
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(FakeHandle(4218)),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        launch = manager.launch(
+            launch_request(),
+            launch_id="launch-main",
+            session_guid="11111111-2222-3333-4444-555555555555",
+        )
+        monitoring_client = FakeServiceMonitoringClient()
+        monitoring_client.push_snapshot(MonitoringSnapshot(
+            service=launch.identity.service_ref,
+            kind=MonitoringSnapshotKind.CONFIG,
+            state="configured",
+            details={
+                "application_guid": "app-guid-1",
+                "process_id": 9001,
+                "host_name": "dev-host",
+            },
+            observed_at=20.0,
+        ))
+        monitoring_client.push_snapshot(MonitoringSnapshot(
+            service=launch.identity.service_ref,
+            kind=MonitoringSnapshotKind.PERIODIC,
+            state="observed",
+            metrics={"cpu_percent": 3.5},
+            details={"db_file": "log_dir/recording/data_0.db"},
+            observed_at=21.0,
+        ))
+        controller = RecordTabController(
+            manager,
+            admin_facade=ServiceAdminFacade(FakeServiceAdminClient()),
+            monitoring_facade=ServiceMonitoringFacade(monitoring_client),
+            config=RecordTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 22.0,
+        )
+
+        first_view = await controller.refresh_view()
+        first_update_count = len(controller.last_monitoring_updates)
+        second_view = await controller.refresh_view()
+
+        self.assertEqual(len(first_view.candidates), 1)
+        self.assertEqual(first_view.selected_candidate_id, "launch-main")
+        self.assertEqual(first_view.selected_candidate.pid, "4218")
+        self.assertEqual(first_view.observed_state, "observed")
+        self.assertIn(("cpu_percent", "3.5"), first_view.monitoring_summary)
+        self.assertEqual(first_update_count, 2)
+        self.assertEqual(len(controller.last_monitoring_updates), 0)
+        self.assertEqual(second_view.selected_candidate_id, "launch-main")
+        self.assertIn(("cpu_percent", "3.5"), second_view.monitoring_summary)
+
+    async def test_monitoring_updates_are_taken_for_each_spawned_recording_service(self):
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(FakeHandle(4218), FakeHandle(4219)),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        first = manager.launch(
+            launch_request(label="Recorder A"),
+            launch_id="launch-a",
+            session_guid="11111111-2222-3333-4444-555555555555",
+        )
+        second = manager.launch(
+            launch_request(label="Recorder B"),
+            launch_id="launch-b",
+            session_guid="22222222-3333-4444-5555-666666666666",
+        )
+        monitoring_client = FakeServiceMonitoringClient()
+        monitoring_client.push_snapshot(MonitoringSnapshot(
+            service=first.identity.service_ref,
+            kind=MonitoringSnapshotKind.PERIODIC,
+            state="observed",
+            metrics={"cpu_percent": 1.0},
+            observed_at=20.0,
+        ))
+        monitoring_client.push_snapshot(MonitoringSnapshot(
+            service=second.identity.service_ref,
+            kind=MonitoringSnapshotKind.PERIODIC,
+            state="observed",
+            metrics={"cpu_percent": 2.0},
+            observed_at=21.0,
+        ))
+        controller = RecordTabController(
+            manager,
+            admin_facade=ServiceAdminFacade(FakeServiceAdminClient()),
+            monitoring_facade=ServiceMonitoringFacade(monitoring_client),
+            config=RecordTabControllerConfig(local_hostnames=("dev-host",), selected_candidate_id="launch-a"),
+            clock=lambda: 22.0,
+        )
+
+        await controller.refresh_view()
+
+        updated_services = {snapshot.service.name for snapshot in controller.last_monitoring_updates}
+        self.assertEqual(updated_services, {
+            first.identity.service_ref.name,
+            second.identity.service_ref.name,
+        })
+
     async def test_service_admin_actions_update_command_history(self):
         manager = ServiceProcessManager(
             spawner=FakeSpawner(FakeHandle(4218)),
@@ -203,8 +304,8 @@ class TestRecordTabController(unittest.IsolatedAsyncioTestCase):
             "monitoring_domain_id": 62,
             "verbosity": "WARN:WARN",
             "executable": "/opt/rti/bin/rtirecordingservice",
-            "working_dir": "test_output/rs_gui_v2/manual",
-            "extra_args": ["-DDB_DIR=test_output/db"],
+            "working_dir": "services/rs_gui_v2/manual",
+            "extra_args": ["-DDB_DIR=test_output/db", "-DREC_SESSION_NAME=Manual Recorder Session"],
         })
         view = await controller.refresh_view()
 
@@ -216,10 +317,38 @@ class TestRecordTabController(unittest.IsolatedAsyncioTestCase):
         self.assertIn("-DDOMAIN_ID=63", spawner.calls[0])
         self.assertIn("-DADMIN_DOMAIN_ID=61", spawner.calls[0])
         self.assertIn("-DDB_DIR=test_output/db", spawner.calls[0])
+        self.assertIn("-DREC_SESSION_NAME=Manual_Recorder_Session", spawner.calls[0])
+        self.assertNotIn("-DREC_SESSION_NAME=Manual Recorder Session", spawner.calls[0])
         self.assertEqual(view.selected_candidate_id, launch.launch_id)
         self.assertEqual(view.selected_candidate.pid, "5001")
         self.assertEqual(view.launch.config_name, "manual_deploy")
         self.assertEqual(view.launch.data_domain_id, 63)
+
+    async def test_launch_recording_uses_detected_nddshome_when_environment_is_unset(self):
+        spawner = FakeSpawner(FakeHandle(5001))
+        manager = ServiceProcessManager(
+            spawner=spawner,
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        controller = RecordTabController(
+            manager,
+            admin_facade=ServiceAdminFacade(FakeServiceAdminClient()),
+            config=RecordTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+
+        with patch.dict(os.environ, {"NDDSHOME": "", "RTI_LICENSE_FILE": ""}, clear=False), \
+                patch("gui.tabs.record_controller.detect_nddshome", return_value="/opt/rti"), \
+                patch("gui.tabs.record_controller.ensure_rti_license", return_value="/opt/rti/rti_license.dat"):
+            launch = controller.launch_recording({
+                "config_paths": ["record.xml"],
+                "config_name": "manual_deploy",
+            })
+
+        self.assertEqual(launch.request.environment["NDDSHOME"], "/opt/rti")
+        self.assertEqual(launch.request.environment["RTI_LICENSE_FILE"], "/opt/rti/rti_license.dat")
+        self.assertEqual(spawner.calls[0][0], "/opt/rti/bin/rtirecordingservice")
 
     async def test_launch_view_parses_recording_service_names_from_xml(self):
         with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as temp:

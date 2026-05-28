@@ -24,6 +24,9 @@ class ReplayTabControllerConfig:
     playback_rate: float = 1.0
     loop: bool = False
     time_window: str = ""
+    qos_file_path: str = ""
+    participant_qos_profile: str = ""
+    writer_qos_profile: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "selected_target_id", str(self.selected_target_id))
@@ -31,6 +34,9 @@ class ReplayTabControllerConfig:
         object.__setattr__(self, "playback_rate", float(self.playback_rate))
         object.__setattr__(self, "loop", bool(self.loop))
         object.__setattr__(self, "time_window", str(self.time_window))
+        object.__setattr__(self, "qos_file_path", str(self.qos_file_path))
+        object.__setattr__(self, "participant_qos_profile", str(self.participant_qos_profile))
+        object.__setattr__(self, "writer_qos_profile", str(self.writer_qos_profile))
 
 
 class ReplayTabController:
@@ -65,6 +71,9 @@ class ReplayTabController:
                 playback_rate=view.playback_rate,
                 loop=view.loop,
                 time_window=view.time_window,
+                qos_file_path=view.qos_file_path,
+                participant_qos_profile=view.participant_qos_profile,
+                writer_qos_profile=view.writer_qos_profile,
             ),
             clock=clock,
         )
@@ -144,6 +153,9 @@ class ReplayTabController:
             playback_rate=self._config.playback_rate,
             loop=self._config.loop,
             time_window=self._config.time_window,
+            qos_file_path=self._config.qos_file_path,
+            participant_qos_profile=self._config.participant_qos_profile,
+            writer_qos_profile=self._config.writer_qos_profile,
             timeline=self._timeline,
             diagnostics=self._diagnostics,
         )
@@ -162,12 +174,20 @@ class ReplayTabController:
         playback_rate = float(payload.get("playback_rate", self._config.playback_rate))
         loop = bool(payload.get("loop", self._config.loop))
         time_window = str(payload.get("time_window") or self._config.time_window)
+        qos_file_path = str(payload.get("qos_file_path") or self._config.qos_file_path)
+        participant_qos_profile = str(
+            payload.get("participant_qos_profile") or self._config.participant_qos_profile
+        )
+        writer_qos_profile = str(payload.get("writer_qos_profile") or self._config.writer_qos_profile)
         self._config = replace(
             self._config,
             database_path=database_path,
             playback_rate=playback_rate,
             loop=loop,
             time_window=time_window,
+            qos_file_path=qos_file_path,
+            participant_qos_profile=participant_qos_profile,
+            writer_qos_profile=writer_qos_profile,
         )
         return self._selected_target()
 

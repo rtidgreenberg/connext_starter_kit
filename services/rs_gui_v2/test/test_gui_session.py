@@ -14,6 +14,7 @@ if PARENT_DIR not in sys.path:
 from app_core import (
     AppCommand,
     AppRuntime,
+    CommandStatus,
     FieldCatalog,
     FieldDescriptor,
     RuntimeConfig,
@@ -22,10 +23,16 @@ from app_core import (
 )
 from app_core.services import (
     FakeServiceAdminClient,
+    FakeServiceMonitoringClient,
+    MonitoringSnapshot,
+    MonitoringSnapshotKind,
     ServiceAdminFacade,
     ServiceCommand,
+    ServiceCommandOutcome,
+    ServiceCommandRequest,
     ServiceKind,
     ServiceLaunchIntent,
+    ServiceMonitoringFacade,
     ServiceProcessLaunchRequest,
     ServiceProcessManager,
 )
@@ -39,6 +46,7 @@ from gui.tabs import (
     TopicsTabController,
     TopicsTabControllerConfig,
 )
+from gui.tabs.record_tab import build_record_launch_command
 from test_gui_shell import FakeDpg
 from test_gui_topics_controller import _fake_discovery_client
 
@@ -137,6 +145,46 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(view.record_tab.selected_candidate.control_name, launch.identity.service_ref.name)
         self.assertTrue(any(entry.message == "Lifecycle stopped -> starting" for entry in view.event_log))
 
+    async def test_next_view_publishes_live_monitoring_update_events(self):
+        runtime = AppRuntime()
+        runtime.start()
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(FakeHandle(4218)),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        launch = manager.launch(
+            launch_request(),
+            launch_id="launch-main",
+            session_guid="11111111-2222-3333-4444-555555555555",
+        )
+        monitoring_client = FakeServiceMonitoringClient()
+        monitoring_client.push_snapshot(MonitoringSnapshot(
+            service=launch.identity.service_ref,
+            kind=MonitoringSnapshotKind.PERIODIC,
+            state="observed",
+            metrics={"cpu_percent": 2.0},
+            details={"db_file": "data_0.db"},
+            observed_at=20.0,
+        ))
+        controller = RecordTabController(
+            manager,
+            admin_facade=ServiceAdminFacade(FakeServiceAdminClient()),
+            monitoring_facade=ServiceMonitoringFacade(monitoring_client),
+            config=RecordTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 21.0,
+        )
+        session = GuiShellSession(
+            runtime=runtime,
+            scheduler=UiFrameScheduler(runtime, max_event_log=20),
+            record_controller=controller,
+        )
+
+        view = await session.next_view_async()
+
+        monitoring_entry = next(entry for entry in view.event_log if entry.event_type == "service.monitoring_update")
+        self.assertEqual(monitoring_entry.message, "Recording Service monitoring periodic: observed")
+
     async def test_command_sink_queues_and_dispatches_pause(self):
         session, admin_client, _launch = build_session()
         await session.next_view_async(process_commands=False)
@@ -153,7 +201,8 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([request.command for request in admin_client.requests], [ServiceCommand.PAUSE])
         self.assertEqual(view.record_tab.command_history[0].command, "pause")
-        self.assertTrue(any(entry.message == "Queued service.pause" for entry in view.event_log))
+        queued = next(entry for entry in view.event_log if entry.message == "Queued service.pause")
+        self.assertEqual(queued.payload["command"]["payload"]["candidate_id"], "launch-main")
         self.assertTrue(any(entry.message == "Dispatched service.pause" for entry in view.event_log))
 
     async def test_launch_recording_command_dispatches_to_process_manager(self):
@@ -184,6 +233,122 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(view.record_tab.admin_domain, 61)
         self.assertEqual(view.record_tab.monitoring_domain, 62)
         self.assertTrue(any(entry.message == "Dispatched service.launch_recording" for entry in view.event_log))
+
+    async def test_spawned_recording_process_exit_updates_next_gui_view(self):
+        runtime = AppRuntime()
+        handle = FakeHandle(4218)
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(handle),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        controller = RecordTabController(
+            manager,
+            admin_facade=ServiceAdminFacade(FakeServiceAdminClient()),
+            config=RecordTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+        session = GuiShellSession(
+            runtime=runtime,
+            scheduler=UiFrameScheduler(runtime, max_event_log=20),
+            record_controller=controller,
+        )
+        session.command_sink(AppCommand(
+            command_type="service.launch_recording",
+            target="recording",
+            payload={
+                "label": "Manual Recorder",
+                "config_paths": ["manual_record.xml", "manual_qos.xml"],
+                "config_name": "manual_deploy",
+                "data_domain_id": 63,
+                "admin_domain_id": 61,
+                "monitoring_domain_id": 62,
+                "verbosity": "WARN:WARN",
+                "executable": "/opt/rti/bin/rtirecordingservice",
+            },
+            command_id="launch-recording",
+            created_at=1.5,
+        ))
+
+        running_view = await session.next_view_async()
+        handle.returncode = -15
+        exited_view = await session.next_view_async(process_commands=False)
+
+        self.assertEqual(running_view.record_tab.selected_candidate.pid, "4218")
+        self.assertEqual(running_view.record_tab.observed_state, "running")
+        self.assertEqual(exited_view.record_tab.selected_candidate.pid, "4218")
+        self.assertEqual(exited_view.record_tab.observed_state, "exited")
+        exit_event = next(
+            entry for entry in exited_view.event_log
+            if entry.message == "Recording Service process observed: exited"
+        )
+        self.assertEqual(exit_event.level, "error")
+        self.assertEqual(exit_event.payload["candidate"]["details"]["returncode"], -15)
+
+    async def test_default_launch_command_populates_record_dropdown_model(self):
+        session, _admin_client, _launch = build_session()
+        initial_view = await session.next_view_async(process_commands=False)
+
+        session.command_sink(build_record_launch_command(initial_view.record_tab.launch))
+        view = await session.next_view_async()
+
+        self.assertTrue(view.record_tab.candidates)
+        self.assertEqual(view.record_tab.selected_candidate.pid, "5002")
+        self.assertEqual(view.record_tab.selected_candidate_id, view.record_tab.selected_candidate.candidate_id)
+        self.assertTrue(any(entry.message == "Dispatched service.launch_recording" for entry in view.event_log))
+
+    async def test_close_request_leave_running_does_not_shutdown_services(self):
+        session, admin_client, _launch = build_session()
+        await session.next_view_async(process_commands=False)
+
+        await session.handle_close_request_async("leave_running", ())
+
+        self.assertEqual(admin_client.requests, [])
+
+    async def test_close_request_shutdowns_selected_gui_launched_recording(self):
+        session, admin_client, _launch = build_session()
+        await session.next_view_async(process_commands=False)
+
+        await session.handle_close_request_async("shutdown_gui_launched", ("record:launch-main",))
+
+        self.assertEqual([request.command for request in admin_client.requests], [ServiceCommand.SHUTDOWN])
+
+    async def test_close_request_terminates_local_process_after_shutdown_failure(self):
+        handle = FakeHandle(4218)
+        runtime = AppRuntime()
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(handle),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        launch = manager.launch(
+            launch_request(),
+            launch_id="launch-main",
+            session_guid="11111111-2222-3333-4444-555555555555",
+        )
+        admin_client = FakeServiceAdminClient()
+        admin_client.queue_outcome(ServiceCommandOutcome(
+            request=ServiceCommandRequest(launch.identity.service_ref, ServiceCommand.SHUTDOWN),
+            status=CommandStatus.TIMEOUT,
+            message="admin unavailable",
+        ))
+        controller = RecordTabController(
+            manager,
+            admin_facade=ServiceAdminFacade(admin_client),
+            config=RecordTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+        session = GuiShellSession(
+            runtime=runtime,
+            scheduler=UiFrameScheduler(runtime, max_event_log=20),
+            record_controller=controller,
+        )
+        await session.next_view_async(process_commands=False)
+
+        await session.handle_close_request_async("shutdown_gui_launched", ("record:launch-main",))
+
+        self.assertEqual([request.command for request in admin_client.requests], [ServiceCommand.SHUTDOWN])
+        self.assertEqual(handle.terminate_calls, 1)
 
     async def test_tag_command_updates_controller_tag_state(self):
         session, admin_client, _launch = build_session()
@@ -221,6 +386,84 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(admin_client.requests, [])
         self.assertTrue(any(entry.level == "error" for entry in view.event_log))
         self.assertTrue(any("Unsupported GUI command type" in entry.message for entry in view.event_log))
+
+    async def test_failed_controller_result_reports_error_console_event(self):
+        runtime = AppRuntime()
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(FakeHandle(4218)),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        manager.launch(
+            launch_request(),
+            launch_id="launch-main",
+            session_guid="11111111-2222-3333-4444-555555555555",
+        )
+        controller = RecordTabController(
+            manager,
+            admin_facade=None,
+            config=RecordTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+        session = GuiShellSession(
+            runtime=runtime,
+            scheduler=UiFrameScheduler(runtime, max_event_log=20),
+            record_controller=controller,
+        )
+
+        session.command_sink(AppCommand(
+            command_type="service.shutdown",
+            target="recording",
+            payload={"candidate_id": "launch-main"},
+            command_id="shutdown-without-admin",
+            created_at=3.0,
+        ))
+        view = await session.next_view_async()
+
+        failure = next(entry for entry in view.event_log if entry.event_type == "gui.command_failed")
+        self.assertEqual(failure.level, "error")
+        self.assertIn("No Service Admin facade", failure.message)
+        self.assertEqual(failure.payload["result"]["status"], "failed")
+
+    async def test_process_exit_refresh_reports_console_event_with_log_tail(self):
+        output_dir = os.path.join("test_output", "rs_gui_v2", "gui_session_tests")
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, "recording_exit.log")
+        with open(output_path, "w", encoding="utf-8") as output_file:
+            output_file.write("startup failed in service\n")
+        handle = FakeHandle(4218)
+        handle.output_path = output_path
+        runtime = AppRuntime()
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(handle),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        manager.launch(
+            launch_request(),
+            launch_id="launch-main",
+            session_guid="11111111-2222-3333-4444-555555555555",
+        )
+        controller = RecordTabController(
+            manager,
+            admin_facade=ServiceAdminFacade(FakeServiceAdminClient()),
+            config=RecordTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+        session = GuiShellSession(
+            runtime=runtime,
+            scheduler=UiFrameScheduler(runtime, max_event_log=20),
+            record_controller=controller,
+        )
+        await session.next_view_async(process_commands=False)
+
+        handle.returncode = 7
+        view = await session.next_view_async(process_commands=False)
+
+        exit_event = next(entry for entry in view.event_log if entry.message == "Recording Service process observed: exited")
+        self.assertEqual(exit_event.level, "error")
+        self.assertEqual(exit_event.payload["candidate"]["details"]["output_path"], output_path)
+        self.assertIn("startup failed", exit_event.payload["candidate"]["details"]["output_tail"])
 
     async def test_topics_commands_route_to_topics_controller(self):
         session, _admin_client, _launch = build_session(topics_controller=build_topics_controller())

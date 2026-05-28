@@ -4,6 +4,7 @@
 import os
 import sys
 import unittest
+from dataclasses import replace
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,6 +25,8 @@ from app_core.services import (
 )
 from gui import UiFrameScheduler, build_mock_shell_view_model
 from gui.main_window import (
+    CONSOLE_OUTPUT_TAG,
+    DOMAIN_ID_INPUT_WIDTH,
     RECORD_LAUNCH_ADMIN_DOMAIN_TAG,
     RECORD_LAUNCH_CONFIG_NAME_TAG,
     RECORD_LAUNCH_CONFIG_PATHS_TAG,
@@ -32,9 +35,18 @@ from gui.main_window import (
     RECORD_LAUNCH_LABEL_TAG,
     RECORD_LAUNCH_MONITOR_DOMAIN_TAG,
     RECORD_LAUNCH_VERBOSITY_TAG,
+    RECORD_VAR_EXEC_DIR_EXPR_TAG,
+    RECORD_VAR_FILENAME_BASE_TAG,
+    RECORD_VAR_FILENAME_EXPR_TAG,
+    RECORD_VAR_ROLLOVER_ENABLED_TAG,
+    RECORD_VAR_ROLLOVER_MB_TAG,
+    RECORD_VAR_SESSION_NAME_TAG,
+    RECORD_VAR_STORAGE_PATH_EXPR_TAG,
+    RECORD_VAR_WORKSPACE_DIR_TAG,
     WORKSPACE_NAME_INPUT_TAG,
     WORKSPACE_PATH_INPUT_TAG,
     DearPyGuiShell,
+    _refresh_record_tab,
     build_workspace_action_command,
 )
 from gui.tabs.record_tab import (
@@ -58,8 +70,12 @@ class FakeDpg:
     def __init__(self):
         self.calls = []
         self.values = {}
+        self.clipboard_text = ""
         self.context_created = False
         self.context_destroyed = False
+        self.stopped = False
+        self.exit_callback = None
+        self.viewport_close_callback = None
 
     def create_context(self):
         self.context_created = True
@@ -68,6 +84,32 @@ class FakeDpg:
     def destroy_context(self):
         self.context_destroyed = True
         self.calls.append(("destroy_context", (), {}))
+
+    def stop_dearpygui(self):
+        self.stopped = True
+        self.calls.append(("stop_dearpygui", (), {}))
+
+    def create_viewport(self, *args, **kwargs):
+        self.calls.append(("create_viewport", args, kwargs))
+
+    def set_exit_callback(self, callback):
+        self.exit_callback = callback
+        self.calls.append(("set_exit_callback", (callback,), {}))
+
+    def set_viewport_close_callback(self, callback):
+        self.viewport_close_callback = callback
+        self.calls.append(("set_viewport_close_callback", (callback,), {}))
+
+    def setup_dearpygui(self):
+        self.calls.append(("setup_dearpygui", (), {}))
+
+    def show_viewport(self):
+        self.calls.append(("show_viewport", (), {}))
+
+    def start_dearpygui(self):
+        self.calls.append(("start_dearpygui", (), {}))
+        if self.exit_callback is not None:
+            self.exit_callback()
 
     def window(self, *args, **kwargs):
         self.calls.append(("window", args, kwargs))
@@ -82,6 +124,9 @@ class FakeDpg:
         return FakeContext()
 
     def group(self, *args, **kwargs):
+        tag = kwargs.get("tag")
+        if tag:
+            self.values[tag] = ""
         self.calls.append(("group", args, kwargs))
         return FakeContext()
 
@@ -93,10 +138,17 @@ class FakeDpg:
         self.calls.append(("table_row", args, kwargs))
         return FakeContext()
 
+    def collapsing_header(self, *args, **kwargs):
+        self.calls.append(("collapsing_header", args, kwargs))
+        return FakeContext()
+
     def add_text(self, *args, **kwargs):
         self.calls.append(("add_text", args, kwargs))
 
     def add_combo(self, *args, **kwargs):
+        tag = kwargs.get("tag")
+        if tag:
+            self.values[tag] = kwargs.get("default_value", "")
         self.calls.append(("add_combo", args, kwargs))
 
     def add_button(self, *args, **kwargs):
@@ -107,6 +159,35 @@ class FakeDpg:
         if tag:
             self.values[tag] = kwargs.get("default_value", "")
         self.calls.append(("add_input_text", args, kwargs))
+
+    def add_checkbox(self, *args, **kwargs):
+        tag = kwargs.get("tag")
+        if tag:
+            self.values[tag] = kwargs.get("default_value", False)
+        self.calls.append(("add_checkbox", args, kwargs))
+
+    def set_value(self, tag, value):
+        self.values[tag] = value
+        self.calls.append(("set_value", (tag, value), {}))
+
+    def set_clipboard_text(self, value):
+        self.clipboard_text = value
+        self.calls.append(("set_clipboard_text", (value,), {}))
+
+    def configure_item(self, tag, **kwargs):
+        self.calls.append(("configure_item", (tag,), kwargs))
+
+    def does_item_exist(self, tag):
+        return tag in self.values
+
+    def delete_item(self, tag, **kwargs):
+        self.calls.append(("delete_item", (tag,), kwargs))
+
+    def push_container_stack(self, tag):
+        self.calls.append(("push_container_stack", (tag,), {}))
+
+    def pop_container_stack(self):
+        self.calls.append(("pop_container_stack", (), {}))
 
     def get_value(self, tag):
         return self.values.get(tag)
@@ -191,7 +272,7 @@ class TestMockShellViewModel(unittest.TestCase):
             monitoring_domain_id=62,
             verbosity="WARN:WARN",
             executable="/opt/rti/bin/rtirecordingservice",
-            working_dir="test_output/rs_gui_v2/manual",
+            working_dir="services/rs_gui_v2/manual",
             extra_args=("-DDB_DIR=test_output/db",),
         ))
 
@@ -286,6 +367,104 @@ class TestDearPyGuiRenderer(unittest.TestCase):
         self.assertEqual(view.record_tab.candidates, ())
         self.assertEqual(view.record_tab.target_label, "No Recording Service")
 
+    def test_console_tab_renders_full_event_output(self):
+        fake = FakeDpg()
+        shell = DearPyGuiShell(
+            view_provider=build_mock_shell_view_model,
+            dpg_module=fake,
+        )
+
+        shell.render_once()
+
+        self.assertIn(CONSOLE_OUTPUT_TAG, fake.values)
+        console = fake.values[CONSOLE_OUTPUT_TAG]
+        self.assertIn("=== Events ===", console)
+        self.assertIn("payload:", console)
+        self.assertIn("Monitoring active on domain 0", console)
+
+    def test_console_copy_button_copies_full_output(self):
+        fake = FakeDpg()
+        shell = DearPyGuiShell(
+            view_provider=build_mock_shell_view_model,
+            dpg_module=fake,
+        )
+
+        shell.render_once()
+        _button_callback(fake, "Copy Console")()
+
+        self.assertIn("=== Events ===", fake.clipboard_text)
+        self.assertIn("Monitoring active on domain 0", fake.clipboard_text)
+
+    def test_record_refresh_rebuilds_action_callbacks_for_selected_service(self):
+        fake = FakeDpg()
+        commands = []
+        shell = DearPyGuiShell(dpg_module=fake, command_sink=commands.append)
+        shell.render_once()
+
+        _refresh_record_tab(fake, build_mock_shell_view_model(), commands.append)
+        _latest_button_callback(fake, "Shutdown")()
+
+        self.assertTrue(any(command.command_type == "service.shutdown" for command in commands))
+        shutdown = next(command for command in commands if command.command_type == "service.shutdown")
+        self.assertEqual(shutdown.payload["candidate_id"], "launch-recording-main")
+
+    def test_all_command_buttons_dispatch_expected_command_types(self):
+        expected = {
+            "Launch Recording Service": {"service.launch_recording"},
+            "Pause": {"service.pause"},
+            "Apply Tag": {"service.tag"},
+            "Shutdown": {"service.shutdown", "replay.shutdown"},
+            "Start": {"replay.start"},
+            "Select": {"replay.select_target", "topics.select"},
+            "Run Conversion": {"convert.run"},
+            "Open Output": {"convert.open_output"},
+            "Inspect Output": {"convert.inspect_output"},
+            "Unsubscribe": {"topics.unsubscribe"},
+            "Toggle Internal": {"topics.set_include_internal"},
+            "Plot": {"topics.set_plot_field_selected"},
+            "Save Workspace": {"workspace.save"},
+            "Load Workspace": {"workspace.load"},
+        }
+
+        for label, expected_types in expected.items():
+            fake = FakeDpg()
+            commands = []
+            shell = DearPyGuiShell(
+                view_provider=build_mock_shell_view_model,
+                dpg_module=fake,
+                command_sink=commands.append,
+            )
+            shell.render_once()
+
+            for callback in _enabled_button_callbacks(fake, label):
+                callback()
+
+            emitted = {command.command_type for command in commands}
+            self.assertTrue(
+                emitted & expected_types,
+                f"{label!r} emitted {sorted(emitted)}; expected one of {sorted(expected_types)}",
+            )
+
+    def test_every_enabled_callback_button_is_invokable(self):
+        fake = FakeDpg()
+        commands = []
+        shell = DearPyGuiShell(
+            view_provider=build_mock_shell_view_model,
+            dpg_module=fake,
+            command_sink=commands.append,
+        )
+        shell.render_once()
+
+        invoked = []
+        for label, callback in _enabled_callback_buttons(fake):
+            with self.subTest(button=label):
+                callback()
+                invoked.append(label)
+
+        self.assertIn("Launch Recording Service", invoked)
+        self.assertIn("Copy Console", invoked)
+        self.assertTrue(any(command.command_type == "service.launch_recording" for command in commands))
+
     def test_replay_buttons_dispatch_commands_when_sink_is_present(self):
         fake = FakeDpg()
         commands = []
@@ -340,6 +519,12 @@ class TestDearPyGuiRenderer(unittest.TestCase):
         fake.values[RECORD_LAUNCH_ADMIN_DOMAIN_TAG] = "61"
         fake.values[RECORD_LAUNCH_MONITOR_DOMAIN_TAG] = "62"
         fake.values[RECORD_LAUNCH_VERBOSITY_TAG] = "WARN:WARN"
+        fake.values[RECORD_VAR_SESSION_NAME_TAG] = "Manual Recorder Session"
+        fake.values[RECORD_VAR_WORKSPACE_DIR_TAG] = "test_output/recordings"
+        fake.values[RECORD_VAR_EXEC_DIR_EXPR_TAG] = "manual_%ts%"
+        fake.values[RECORD_VAR_FILENAME_EXPR_TAG] = "capture_%auto:0-9%.db"
+        fake.values[RECORD_VAR_ROLLOVER_ENABLED_TAG] = "yes"
+        fake.values[RECORD_VAR_ROLLOVER_MB_TAG] = "2048"
         fake.values[RECORD_LAUNCH_EXTRA_ARGS_TAG] = "-DDB_DIR=test_output/db"
         _button_callback(fake, "Launch Recording Service")()
 
@@ -352,7 +537,200 @@ class TestDearPyGuiRenderer(unittest.TestCase):
         self.assertEqual(launch_command.payload["admin_domain_id"], 61)
         self.assertEqual(launch_command.payload["monitoring_domain_id"], 62)
         self.assertEqual(launch_command.payload["verbosity"], "WARN:WARN")
-        self.assertEqual(launch_command.payload["extra_args"], ["-DDB_DIR=test_output/db"])
+        self.assertIn("-DDB_DIR=test_output/db", launch_command.payload["extra_args"])
+        self.assertIn("-DREC_DOMAIN_ID=63", launch_command.payload["extra_args"])
+        self.assertIn("-DREC_ADMIN_DOMAIN_ID=61", launch_command.payload["extra_args"])
+        self.assertIn("-DREC_MON_DOMAIN_ID=62", launch_command.payload["extra_args"])
+        self.assertIn("-DREC_SESSION_NAME=Manual_Recorder_Session", launch_command.payload["extra_args"])
+        self.assertIn("-DREC_WORKSPACE_DIR=test_output/recordings", launch_command.payload["extra_args"])
+        self.assertIn("-DREC_EXEC_DIR_EXPR=manual_%ts%", launch_command.payload["extra_args"])
+        self.assertIn("-DREC_FILENAME_EXPR=capture_%auto:0-9%.db", launch_command.payload["extra_args"])
+        self.assertIn("-DREC_ROLLOVER_ENABLED=true", launch_command.payload["extra_args"])
+        self.assertIn("-DREC_ROLLOVER_MB=2048", launch_command.payload["extra_args"])
+        self.assertNotIn("-DREC_SESSION_NAME=Manual Recorder Session", launch_command.payload["extra_args"])
+
+    def test_record_launch_domain_fields_render_before_advanced_fields(self):
+        fake = FakeDpg()
+        shell = DearPyGuiShell(dpg_module=fake, command_sink=lambda _command: True)
+
+        shell.render_once()
+
+        text_labels = [args[0] for name, args, _kwargs in fake.calls if name == "add_text" and args]
+        self.assertLess(text_labels.index("Domain IDs"), text_labels.index("Storage Naming"))
+        self.assertLess(text_labels.index("Domain IDs"), text_labels.index("Logging Verbosity"))
+        self.assertIn("Output Root Directory", text_labels)
+        self.assertIn("Execution Subdirectory", text_labels)
+        self.assertIn("File Name", text_labels)
+        self.assertIn("Filename Template", text_labels)
+        self.assertIn("Derived Storage Expression", text_labels)
+        self.assertIn("Enable Rollover", text_labels)
+        self.assertIn("Rollover Size MB", text_labels)
+        input_kwargs_by_tag = {
+            kwargs.get("tag"): kwargs
+            for name, _args, kwargs in fake.calls
+            if name == "add_input_text" and kwargs.get("tag")
+        }
+        self.assertEqual(input_kwargs_by_tag[RECORD_LAUNCH_DATA_DOMAIN_TAG]["width"], DOMAIN_ID_INPUT_WIDTH)
+        self.assertEqual(input_kwargs_by_tag[RECORD_LAUNCH_ADMIN_DOMAIN_TAG]["width"], DOMAIN_ID_INPUT_WIDTH)
+        self.assertEqual(input_kwargs_by_tag[RECORD_LAUNCH_MONITOR_DOMAIN_TAG]["width"], DOMAIN_ID_INPUT_WIDTH)
+        self.assertTrue(input_kwargs_by_tag[RECORD_VAR_STORAGE_PATH_EXPR_TAG]["readonly"])
+        self.assertEqual(
+            fake.values[RECORD_VAR_STORAGE_PATH_EXPR_TAG],
+            "log_dir/recording_%ts%/data_%auto:0-9%.db",
+        )
+
+    def test_record_launch_naming_fields_generate_syntax(self):
+        fake = FakeDpg()
+        shell = DearPyGuiShell(dpg_module=fake, command_sink=lambda _command: True)
+
+        shell.render_once()
+        fake.values[RECORD_VAR_WORKSPACE_DIR_TAG] = "test_output/recordings"
+        fake.values[RECORD_VAR_EXEC_DIR_EXPR_TAG] = "custom"
+        fake.values[RECORD_VAR_FILENAME_BASE_TAG] = "robot run"
+        _input_callback(fake, RECORD_VAR_FILENAME_BASE_TAG)()
+
+        self.assertEqual(fake.values[RECORD_VAR_FILENAME_EXPR_TAG], "robot_run_%auto:0-9%.db")
+        self.assertEqual(
+            fake.values[RECORD_VAR_STORAGE_PATH_EXPR_TAG],
+            "test_output/recordings/custom/robot_run_%auto:0-9%.db",
+        )
+        fake.values[RECORD_VAR_EXEC_DIR_EXPR_TAG] = "recording_%ts%"
+        _input_callback(fake, RECORD_VAR_EXEC_DIR_EXPR_TAG)()
+
+        self.assertEqual(
+            fake.values[RECORD_VAR_STORAGE_PATH_EXPR_TAG],
+            "test_output/recordings/recording_%ts%/robot_run_%auto:0-9%.db",
+        )
+        fake.values[RECORD_VAR_FILENAME_EXPR_TAG] = "manual_%ts%.db"
+        _input_callback(fake, RECORD_VAR_FILENAME_EXPR_TAG)()
+
+        self.assertEqual(
+            fake.values[RECORD_VAR_STORAGE_PATH_EXPR_TAG],
+            "test_output/recordings/recording_%ts%/manual_%ts%.db",
+        )
+        button_labels = [
+            kwargs.get("label") or (args[0] if args else "")
+            for name, args, kwargs in fake.calls
+            if name == "add_button"
+        ]
+        self.assertNotIn("Add Timestamp Dir", button_labels)
+        self.assertNotIn("Apply Filename", button_labels)
+        self.assertNotIn("Timestamp Filename", button_labels)
+
+    def test_record_details_render_in_collapsed_section(self):
+        fake = FakeDpg()
+        base_view = build_mock_shell_view_model()
+        view = replace(
+            base_view,
+            record_tab=replace(
+                base_view.record_tab,
+                diagnostics=("duplicate service admin target", "admin not matched"),
+            ),
+        )
+        shell = DearPyGuiShell(view_provider=lambda: view, dpg_module=fake, command_sink=lambda _command: True)
+
+        shell.render_once()
+
+        header_index = next(
+            index for index, (name, _args, kwargs) in enumerate(fake.calls)
+            if name == "collapsing_header" and kwargs.get("label") == "Record Details (2 diagnostics)"
+        )
+        diagnostic_index = next(
+            index for index, (name, args, _kwargs) in enumerate(fake.calls)
+            if name == "add_text" and args and args[0] == "Diagnostic: duplicate service admin target"
+        )
+        history_index = next(
+            index for index, (name, args, _kwargs) in enumerate(fake.calls)
+            if name == "add_text" and args and args[0] == "Command History"
+        )
+        monitoring_index = next(
+            index for index, (name, args, _kwargs) in enumerate(fake.calls)
+            if name == "add_text" and args and args[0] == "Monitoring Summary"
+        )
+        headers = [kwargs for name, _args, kwargs in fake.calls if name == "collapsing_header"]
+        record_header = next(kwargs for kwargs in headers if kwargs.get("label") == "Record Details (2 diagnostics)")
+        self.assertFalse(record_header["default_open"])
+        self.assertLess(header_index, diagnostic_index)
+        self.assertLess(header_index, history_index)
+        self.assertLess(header_index, monitoring_index)
+
+    def test_close_prompt_uses_window_close_callback_with_detected_processes(self):
+        fake = FakeDpg()
+        close_requests = []
+        shell = DearPyGuiShell(
+            view_provider=build_mock_shell_view_model,
+            dpg_module=fake,
+            close_handler=lambda action, item_ids: close_requests.append((action, item_ids)) or True,
+        )
+
+        shell.render_once()
+        shell._close_prompt_callback(fake)()
+
+        text_labels = [args[0] for name, args, _kwargs in fake.calls if name == "add_text" and args]
+        self.assertIn("Detected RTI service processes", text_labels)
+        self.assertTrue(any("Recording Service" in label and "launched by this GUI" in label for label in text_labels))
+        self.assertTrue(any("detected externally" in label for label in text_labels))
+        self.assertEqual(close_requests, [])
+        button_labels = [
+            kwargs.get("label") or (args[0] if args else "")
+            for name, args, kwargs in fake.calls
+            if name == "add_button"
+        ]
+        self.assertNotIn("Close App", button_labels)
+
+    def test_close_prompt_shutdown_button_targets_only_gui_launched_items(self):
+        fake = FakeDpg()
+        close_requests = []
+        shell = DearPyGuiShell(
+            view_provider=build_mock_shell_view_model,
+            dpg_module=fake,
+            close_handler=lambda action, item_ids: close_requests.append((action, item_ids)) or True,
+        )
+
+        shell.render_once()
+        shell._close_prompt_callback(fake)()
+        _button_callback(fake, "Shutdown GUI-Launched")()
+
+        self.assertTrue(fake.stopped)
+        self.assertEqual(close_requests[0][0], "shutdown_gui_launched")
+        self.assertIn("record:launch-recording-main", close_requests[0][1])
+        self.assertFalse(any("discovery:recording:old" in item_id for item_id in close_requests[0][1]))
+
+    def test_native_window_close_shuts_down_gui_launched_items(self):
+        fake = FakeDpg()
+        close_requests = []
+        shell = DearPyGuiShell(
+            view_provider=build_mock_shell_view_model,
+            dpg_module=fake,
+            close_handler=lambda action, item_ids: close_requests.append((action, item_ids)) or True,
+        )
+
+        shell.run()
+
+        self.assertTrue(any(name == "set_exit_callback" for name, _args, _kwargs in fake.calls))
+        self.assertTrue(any(name == "set_viewport_close_callback" for name, _args, _kwargs in fake.calls))
+        viewport_calls = [kwargs for name, _args, kwargs in fake.calls if name == "create_viewport"]
+        self.assertEqual(viewport_calls[0].get("disable_close"), False)
+        self.assertEqual(close_requests[0][0], "shutdown_gui_launched")
+        self.assertIn("record:launch-recording-main", close_requests[0][1])
+        self.assertFalse(any("discovery:recording:old" in item_id for item_id in close_requests[0][1]))
+
+    def test_close_dialog_action_is_not_replayed_by_exit_cleanup(self):
+        fake = FakeDpg()
+        close_requests = []
+        shell = DearPyGuiShell(
+            view_provider=build_mock_shell_view_model,
+            dpg_module=fake,
+            close_handler=lambda action, item_ids: close_requests.append((action, item_ids)) or True,
+        )
+
+        shell.render_once()
+        shell._close_prompt_callback(fake)()
+        _button_callback(fake, "Shutdown GUI-Launched")()
+        shell._exit_cleanup_callback()()
+
+        self.assertEqual(len(close_requests), 1)
+        self.assertEqual(close_requests[0][0], "shutdown_gui_launched")
 
     def test_workspace_buttons_dispatch_commands_from_inputs(self):
         fake = FakeDpg()
@@ -384,6 +762,50 @@ def _button_callback(fake: FakeDpg, label: str):
         if button_label == label:
             return kwargs["callback"]
     raise AssertionError(f"Button not rendered: {label}")
+
+
+def _input_callback(fake: FakeDpg, tag: str):
+    for name, _args, kwargs in fake.calls:
+        if name == "add_input_text" and kwargs.get("tag") == tag:
+            return kwargs["callback"]
+    raise AssertionError(f"Input callback not rendered: {tag}")
+
+
+def _latest_button_callback(fake: FakeDpg, label: str):
+    for name, args, kwargs in reversed(fake.calls):
+        if name != "add_button":
+            continue
+        button_label = kwargs.get("label") or (args[0] if args else "")
+        if button_label == label:
+            return kwargs["callback"]
+    raise AssertionError(f"Button not rendered: {label}")
+
+
+def _enabled_button_callbacks(fake: FakeDpg, label: str):
+    callbacks = []
+    for name, args, kwargs in fake.calls:
+        if name != "add_button" or not kwargs.get("enabled", True):
+            continue
+        button_label = kwargs.get("label") or (args[0] if args else "")
+        callback = kwargs.get("callback")
+        if button_label == label and callback is not None:
+            callbacks.append(callback)
+    if not callbacks:
+        raise AssertionError(f"Enabled button not rendered: {label}")
+    return callbacks
+
+
+def _enabled_callback_buttons(fake: FakeDpg):
+    buttons = []
+    for name, args, kwargs in fake.calls:
+        if name != "add_button" or not kwargs.get("enabled", True):
+            continue
+        callback = kwargs.get("callback")
+        if callback is None:
+            continue
+        button_label = kwargs.get("label") or (args[0] if args else "")
+        buttons.append((button_label, callback))
+    return buttons
 
 
 if __name__ == "__main__":

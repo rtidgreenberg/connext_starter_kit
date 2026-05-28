@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
+import os
 import socket
 import time
 from typing import Mapping, Optional, Tuple
@@ -33,9 +34,13 @@ from app_core.services import (
     FakeServiceMonitoringClient,
     MonitoringSnapshot,
     MonitoringSnapshotKind,
+    RtiServiceAdminClient,
+    RtiServiceMonitoringClient,
     ServiceAdminFacade,
+    ServiceAdminClient,
     ServiceKind,
     ServiceLaunchIntent,
+    ServiceMonitoringClient,
     ServiceMonitoringFacade,
     ServiceProcessLaunchRequest,
     ServiceProcessManager,
@@ -79,13 +84,15 @@ class GuiShellSessionFactoryConfig:
     event_log_max_size: int = 200
     event_drain_limit: int = 50
     command_drain_limit: Optional[int] = 20
+    app_log_dir: str = "services/rs_gui_v2/rs_gui_logs"
     local_hostnames: Tuple[str, ...] = field(default_factory=tuple)
     recording_label: str = "Recording Service"
-    recording_config_name: str = "deploy"
+    recording_config_name: str = "record_selected"
     recording_config_paths: Tuple[str, ...] = (
-        "services/recording_service_config.xml",
+        "dds/qos/recording_service.xml",
         "dds/qos/DDS_QOS_PROFILES.xml",
     )
+    recording_working_dir: str = ""
     admin_domain_id: int = 0
     monitoring_domain_id: int = 0
     topics_domain_id: int = 0
@@ -104,8 +111,10 @@ class GuiShellSessionFactoryConfig:
         object.__setattr__(self, "event_drain_limit", int(self.event_drain_limit))
         if self.command_drain_limit is not None:
             object.__setattr__(self, "command_drain_limit", int(self.command_drain_limit))
+        object.__setattr__(self, "app_log_dir", str(self.app_log_dir).strip())
         object.__setattr__(self, "local_hostnames", tuple(str(name) for name in self.local_hostnames))
         object.__setattr__(self, "recording_config_paths", tuple(str(path) for path in self.recording_config_paths))
+        object.__setattr__(self, "recording_working_dir", str(self.recording_working_dir).strip())
         object.__setattr__(self, "admin_domain_id", int(self.admin_domain_id))
         object.__setattr__(self, "monitoring_domain_id", int(self.monitoring_domain_id))
         object.__setattr__(self, "topics_domain_id", int(self.topics_domain_id))
@@ -126,8 +135,8 @@ class GuiShellAssembly:
     topics_controller: TopicsTabController
     plots_controller: PlotsTabController
     workspace_controller: GuiWorkspaceController
-    admin_client: Optional[FakeServiceAdminClient] = None
-    monitoring_client: Optional[FakeServiceMonitoringClient] = None
+    admin_client: Optional[ServiceAdminClient] = None
+    monitoring_client: Optional[ServiceMonitoringClient] = None
     discovery_client: Optional[FakeTopicDiscoveryClient] = None
 
     def shell(self, dpg_module=None):
@@ -137,6 +146,7 @@ class GuiShellAssembly:
         return DearPyGuiShell(
             view_provider=self.session.next_view,
             command_sink=self.session.command_sink,
+            close_handler=self.session.handle_close_request,
             dpg_module=dpg_module,
         )
 
@@ -158,13 +168,14 @@ def build_gui_shell_assembly(
     runtime = AppRuntime(RuntimeConfig(
         command_queue_max_size=config.command_queue_max_size,
         event_queue_max_size=config.event_queue_max_size,
+        app_log_dir=config.app_log_dir,
     ))
     if config.start_runtime:
         runtime.start()
 
     local_hostnames = config.local_hostnames or _default_local_hostnames(config)
-    admin_client = FakeServiceAdminClient() if config.mode == GuiShellSessionMode.MOCK else None
-    monitoring_client = FakeServiceMonitoringClient() if config.mode == GuiShellSessionMode.MOCK else None
+    admin_client = _admin_client_for_mode(config)
+    monitoring_client = _monitoring_client_for_mode(config)
     admin_facade = ServiceAdminFacade(admin_client) if admin_client is not None else None
     monitoring_facade = ServiceMonitoringFacade(monitoring_client) if monitoring_client is not None else None
     discovery_client = _mock_discovery_client(config) if config.mode == GuiShellSessionMode.MOCK else None
@@ -198,6 +209,7 @@ def build_gui_shell_assembly(
         config=RecordTabControllerConfig(
             display_label=config.recording_label,
             local_hostnames=local_hostnames,
+            launch_working_dir=config.recording_working_dir or _repo_root(),
         ),
     )
     topics_controller = TopicsTabController(
@@ -305,6 +317,22 @@ def _mock_recording_launch_request(config: GuiShellSessionFactoryConfig) -> Serv
         config_name=config.recording_config_name,
         executable="rtirecordingservice",
     )
+
+
+def _admin_client_for_mode(config: GuiShellSessionFactoryConfig) -> Optional[ServiceAdminClient]:
+    if config.mode == GuiShellSessionMode.MOCK:
+        return FakeServiceAdminClient()
+    if config.mode == GuiShellSessionMode.LIVE:
+        return RtiServiceAdminClient()
+    return None
+
+
+def _monitoring_client_for_mode(config: GuiShellSessionFactoryConfig) -> Optional[ServiceMonitoringClient]:
+    if config.mode == GuiShellSessionMode.MOCK:
+        return FakeServiceMonitoringClient()
+    if config.mode == GuiShellSessionMode.LIVE:
+        return RtiServiceMonitoringClient()
+    return None
 
 
 def _mock_monitoring_snapshot(
@@ -512,3 +540,7 @@ def _default_local_hostnames(config: GuiShellSessionFactoryConfig) -> Tuple[str,
     if fqdn:
         names.add(fqdn)
     return tuple(sorted(name for name in names if name))
+
+
+def _repo_root() -> str:
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))

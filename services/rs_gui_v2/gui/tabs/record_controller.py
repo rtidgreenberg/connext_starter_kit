@@ -2,15 +2,18 @@
 
 from dataclasses import dataclass, field, replace
 import os
+import re
 import time
 import xml.etree.ElementTree as ET
-from typing import Iterable, Mapping, Optional, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
 from app_core.events import CommandStatus
+from app_core.connext_environment import detect_nddshome, ensure_rti_license
 from app_core.services import (
     AdminReadiness,
     AdminReadinessStatus,
     MonitoringSnapshot,
+    MonitoringSnapshotKind,
     ServiceAdminFacade,
     ServiceCandidateSelection,
     ServiceCommand,
@@ -39,10 +42,10 @@ class RecordTabControllerConfig:
     tag_value: str = ""
     launch_label: str = "Recording Service"
     launch_config_paths: Tuple[str, ...] = (
-        "services/recording_service_config.xml",
+        "dds/qos/recording_service.xml",
         "dds/qos/DDS_QOS_PROFILES.xml",
     )
-    launch_config_name: str = "deploy"
+    launch_config_name: str = "record_selected"
     launch_data_domain_id: int = 0
     launch_admin_domain_id: int = 0
     launch_monitoring_domain_id: int = 0
@@ -77,7 +80,9 @@ class RecordTabController:
         self._config = config or RecordTabControllerConfig()
         self._clock = clock
         self._command_history: Tuple[ServiceCommandOutcome, ...] = ()
+        self._latest_monitoring_by_service: Dict[str, Dict[MonitoringSnapshotKind, MonitoringSnapshot]] = {}
         self._latest_monitoring: Tuple[MonitoringSnapshot, ...] = ()
+        self._last_monitoring_updates: Tuple[MonitoringSnapshot, ...] = ()
         self._last_selection = ServiceCandidateSelection()
         self._last_readiness: Optional[AdminReadiness] = None
         self._graceful_shutdown_failed = False
@@ -94,6 +99,14 @@ class RecordTabController:
     def tag_value(self) -> str:
         return self._config.tag_value
 
+    @property
+    def last_selection(self) -> ServiceCandidateSelection:
+        return self._last_selection
+
+    @property
+    def last_monitoring_updates(self) -> Tuple[MonitoringSnapshot, ...]:
+        return self._last_monitoring_updates
+
     def set_tag_value(self, value: str) -> None:
         self._config = replace(self._config, tag_value=str(value))
 
@@ -107,8 +120,10 @@ class RecordTabController:
         """Collect latest app-core snapshots and return a Record-tab view."""
 
         service = self._target_service()
-        monitoring_snapshot = await self._latest_monitoring_snapshot(service)
-        monitoring_snapshots = (monitoring_snapshot,) if monitoring_snapshot else ()
+        monitoring_updates = await self._take_monitoring_updates(self._monitoring_services(service))
+        self._last_monitoring_updates = monitoring_updates
+        self._cache_monitoring_updates(monitoring_updates)
+        monitoring_snapshots = self._monitoring_snapshots_for_service(service)
         self._latest_monitoring = monitoring_snapshots
         readiness = await self._readiness(service)
         self._last_readiness = readiness
@@ -143,18 +158,37 @@ class RecordTabController:
         executable = str(payload.get("executable", self._config.launch_executable)).strip()
         working_dir = str(payload.get("working_dir", self._config.launch_working_dir)).strip()
         extra_args = _extra_args_from_value(payload.get("extra_args", self._config.launch_extra_args))
+        # Emit REC_* overrides for the variable-driven template and keep legacy
+        # DOMAIN_* flags for backward compatibility with older configs.
+        managed_arg_prefixes = (
+            "-DREC_DOMAIN_ID=",
+            "-DREC_ADMIN_DOMAIN_ID=",
+            "-DREC_MON_DOMAIN_ID=",
+            "-DDOMAIN_ID=",
+            "-DADMIN_DOMAIN_ID=",
+        )
+        operator_extra_args = tuple(
+            _normalize_record_extra_arg(arg) for arg in extra_args
+            if not any(arg.startswith(prefix) for prefix in managed_arg_prefixes)
+        )
         launch_extra_args = (
+            f"-DREC_DOMAIN_ID={data_domain_id}",
+            f"-DREC_ADMIN_DOMAIN_ID={admin_domain_id}",
+            f"-DREC_MON_DOMAIN_ID={monitoring_domain_id}",
             f"-DDOMAIN_ID={data_domain_id}",
             f"-DADMIN_DOMAIN_ID={admin_domain_id}",
-        ) + extra_args
+        ) + operator_extra_args
         environment = {
+            "REC_DOMAIN_ID": str(data_domain_id),
+            "REC_ADMIN_DOMAIN_ID": str(admin_domain_id),
+            "REC_MON_DOMAIN_ID": str(monitoring_domain_id),
             "DOMAIN_ID": str(data_domain_id),
             "ADMIN_DOMAIN_ID": str(admin_domain_id),
         }
-        nddshome = os.environ.get("NDDSHOME", "")
+        nddshome = os.environ.get("NDDSHOME", "") or detect_nddshome()
         if nddshome:
             environment["NDDSHOME"] = nddshome
-        license_file = os.environ.get("RTI_LICENSE_FILE", "")
+        license_file = os.environ.get("RTI_LICENSE_FILE", "") or ensure_rti_license(nddshome)
         if license_file:
             environment["RTI_LICENSE_FILE"] = license_file
 
@@ -185,7 +219,7 @@ class RecordTabController:
             launch_verbosity=verbosity,
             launch_executable=executable,
             launch_working_dir=working_dir,
-            launch_extra_args=extra_args,
+            launch_extra_args=operator_extra_args,
             selected_candidate_id=launch.launch_id,
             service=launch.identity.service_ref,
         )
@@ -291,13 +325,42 @@ class RecordTabController:
             display_label=self._config.display_label,
         )
 
-    async def _latest_monitoring_snapshot(
+    def _monitoring_services(self, service: ServiceInstanceRef) -> Tuple[ServiceInstanceRef, ...]:
+        services: List[ServiceInstanceRef] = []
+        if service.name:
+            services.append(service)
+        for launch in self._process_manager.launches():
+            if launch.identity.intent.kind == ServiceKind.RECORDING:
+                services.append(launch.identity.service_ref)
+        unique: Dict[str, ServiceInstanceRef] = {}
+        for item in services:
+            unique.setdefault(item.key, item)
+        return tuple(unique.values())
+
+    async def _take_monitoring_updates(
             self,
-            service: ServiceInstanceRef,
-    ) -> Optional[MonitoringSnapshot]:
-        if self._monitoring_facade is None or not service.name:
-            return None
-        return await self._monitoring_facade.latest_snapshot(service)
+            services: Iterable[ServiceInstanceRef],
+    ) -> Tuple[MonitoringSnapshot, ...]:
+        if self._monitoring_facade is None:
+            return ()
+        updates: List[MonitoringSnapshot] = []
+        for service in services:
+            if service.name:
+                updates.extend(await self._monitoring_facade.take_available(service))
+        return tuple(updates)
+
+    def _cache_monitoring_updates(self, updates: Iterable[MonitoringSnapshot]) -> None:
+        for snapshot in updates:
+            by_kind = self._latest_monitoring_by_service.setdefault(snapshot.service.key, {})
+            current = by_kind.get(snapshot.kind)
+            if current is None or snapshot.observed_at >= current.observed_at:
+                by_kind[snapshot.kind] = snapshot
+
+    def _monitoring_snapshots_for_service(self, service: ServiceInstanceRef) -> Tuple[MonitoringSnapshot, ...]:
+        by_kind = self._latest_monitoring_by_service.get(service.key, {})
+        return tuple(
+            snapshot for kind, snapshot in sorted(by_kind.items(), key=lambda item: item[0].value)
+        )
 
     async def _readiness(self, service: ServiceInstanceRef) -> Optional[AdminReadiness]:
         if not service.name:
@@ -379,6 +442,16 @@ def _extra_args_from_value(value: object) -> Tuple[str, ...]:
         return tuple(str(part).strip() for part in value if str(part).strip())  # type: ignore[union-attr]
     except TypeError:
         return ()
+
+
+def _normalize_record_extra_arg(arg: str) -> str:
+    prefix = "-DREC_SESSION_NAME="
+    text = str(arg).strip()
+    if not text.startswith(prefix):
+        return text
+    session_name = re.sub(r"[^0-9A-Za-z_]+", "_", text[len(prefix):].strip())
+    session_name = re.sub(r"_+", "_", session_name).strip("_") or "recording_session"
+    return f"{prefix}{session_name}"
 
 
 def _int_payload(payload: Mapping[str, object], key: str, default: int) -> int:

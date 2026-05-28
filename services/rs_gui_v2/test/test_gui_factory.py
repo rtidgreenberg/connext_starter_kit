@@ -12,7 +12,7 @@ if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
 from app_core import AppCommand, LifecyclePhase
-from app_core.services import ServiceCommand
+from app_core.services import RtiServiceAdminClient, RtiServiceMonitoringClient, ServiceCommand
 from gui import (
     GuiShellSessionFactoryConfig,
     GuiShellSessionMode,
@@ -79,6 +79,9 @@ class FakeDpg:
 
     def add_input_text(self, *args, **kwargs):
         self.calls.append(("add_input_text", args, kwargs))
+
+    def add_checkbox(self, *args, **kwargs):
+        self.calls.append(("add_checkbox", args, kwargs))
 
     def add_separator(self, *args, **kwargs):
         self.calls.append(("add_separator", args, kwargs))
@@ -152,6 +155,20 @@ class TestGuiShellFactory(unittest.TestCase):
         self.assertEqual(view.topics_tab.rows, ())
         self.assertEqual(view.plots_tab.rows, ())
 
+    def test_live_assembly_wires_rti_service_admin_and_monitoring_clients(self):
+        assembly = build_gui_shell_assembly(GuiShellSessionFactoryConfig(
+            mode=GuiShellSessionMode.LIVE,
+            workspace_name="Live Wiring",
+        ))
+
+        view = assembly.session.next_view()
+
+        self.assertIsInstance(assembly.admin_client, RtiServiceAdminClient)
+        self.assertIsInstance(assembly.monitoring_client, RtiServiceMonitoringClient)
+        self.assertIsNone(assembly.discovery_client)
+        self.assertEqual(view.record_tab.candidates, ())
+        self.assertEqual(view.record_tab.target_label, "No Recording Service")
+
     def test_default_session_convenience_returns_clean_session_only(self):
         session = build_default_gui_shell_session(GuiShellSessionFactoryConfig(
             workspace_name="Session Only",
@@ -163,6 +180,17 @@ class TestGuiShellFactory(unittest.TestCase):
         self.assertEqual(view.record_tab.selected_candidate_id, "")
         self.assertEqual(view.record_tab.candidates, ())
         self.assertEqual(view.record_tab.target_label, "No Recording Service")
+
+    def test_live_launch_defaults_use_repository_root_working_dir(self):
+        assembly = build_gui_shell_assembly(GuiShellSessionFactoryConfig(
+            mode=GuiShellSessionMode.LIVE,
+        ))
+
+        view = assembly.session.next_view()
+
+        repo_root = os.path.abspath(os.path.join(PARENT_DIR, "..", ".."))
+        self.assertEqual(view.record_tab.launch.working_dir, repo_root)
+        self.assertTrue(os.path.isfile(os.path.join(repo_root, "dds/qos/recording_service.xml")))
 
     def test_shell_can_render_clean_factory_session_with_injected_dearpygui(self):
         assembly = build_gui_shell_assembly()
@@ -185,6 +213,9 @@ class TestGuiFactoryEntrypoint(unittest.TestCase):
         config = GuiShellSessionFactoryConfig()
 
         self.assertEqual(config.mode, GuiShellSessionMode.LIVE)
+
+    def test_default_gui_entrypoint_uses_assembly_shell(self):
+        self.assertTrue(callable(build_gui_shell_assembly().shell))
 
 
 if __name__ == "__main__":

@@ -2,7 +2,10 @@
 
 import asyncio
 from dataclasses import dataclass
+import json
+import os
 from queue import Empty, Full, Queue
+import time
 from typing import Awaitable, Dict, Iterable, List, Optional
 
 from .events import AppCommand, AppEvent, LifecyclePhase
@@ -15,6 +18,7 @@ class RuntimeConfig:
 
     command_queue_max_size: int = 100
     event_queue_max_size: int = 500
+    app_log_dir: str = ""
 
 
 @dataclass(frozen=True)
@@ -33,6 +37,7 @@ class AppRuntime:
         self._event_queue = Queue(maxsize=self.config.event_queue_max_size)
         self._state = AppState()
         self._tasks: Dict[str, _ManagedTask] = {}
+        self._event_log_writer = _EventLogWriter(self.config.app_log_dir) if self.config.app_log_dir else None
 
     @property
     def state(self) -> AppState:
@@ -102,6 +107,8 @@ class AppRuntime:
         return commands
 
     def publish_event(self, event: AppEvent) -> bool:
+        if self._event_log_writer is not None:
+            self._event_log_writer.write(event)
         try:
             self._event_queue.put_nowait(event)
             self._increment_counters(events_published=1)
@@ -191,3 +198,29 @@ class AppRuntime:
             except Empty:
                 break
         return drained
+
+
+class _EventLogWriter:
+    def __init__(self, log_dir: str) -> None:
+        self._log_dir = _workspace_relative_path(str(log_dir))
+        self.path = os.path.join(
+            self._log_dir,
+            f"rs_gui_{time.strftime('%Y%m%d_%H%M%S')}_{os.getpid()}.jsonl",
+        )
+
+    def write(self, event: AppEvent) -> None:
+        try:
+            os.makedirs(self._log_dir, exist_ok=True)
+            with open(self.path, "a", encoding="utf-8") as log_file:
+                log_file.write(json.dumps(event.to_dict(), default=str, sort_keys=True) + "\n")
+        except OSError:
+            pass
+
+
+def _workspace_relative_path(path: str) -> str:
+    if os.path.isabs(path):
+        return path
+    root = os.path.abspath(os.path.dirname(__file__))
+    for _ in range(3):
+        root = os.path.dirname(root)
+    return os.path.join(root, path)

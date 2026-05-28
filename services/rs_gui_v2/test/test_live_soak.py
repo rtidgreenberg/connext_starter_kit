@@ -42,6 +42,14 @@ class TestLiveSoakConfig(unittest.TestCase):
         self.assertEqual(config.plot_max_points, 32)
         self.assertFalse(config.start_publisher)
 
+    def test_default_output_lives_under_rs_gui_live_reports(self):
+        config = parse_args([])
+
+        self.assertEqual(
+            config.output_path,
+            os.path.join(PARENT_DIR, "live_reports", "live_soak_report.json"),
+        )
+
     def test_workspace_uses_bounded_subscription_and_plot_limits(self):
         config = LiveSoakConfig(max_samples=12, plot_max_points=34, duration_sec=2.0)
 

@@ -2,7 +2,9 @@
 """Pure unit tests for the rs_gui_v2 headless runtime."""
 
 import asyncio
+import json
 import os
+import shutil
 import sys
 import unittest
 
@@ -109,6 +111,29 @@ class TestRuntimeQueues(unittest.TestCase):
         self.assertEqual(runtime.counters.events_dropped, 1)
         self.assertEqual(runtime.drain_events(), [first, second])
         self.assertEqual(runtime.counters.events_drained, 2)
+
+    def test_runtime_writes_app_events_to_configured_log_dir(self):
+        log_dir = "services/rs_gui_v2/rs_gui_logs/runtime_unit"
+        absolute_log_dir = os.path.abspath(os.path.join(PARENT_DIR, "..", "..", log_dir))
+        shutil.rmtree(absolute_log_dir, ignore_errors=True)
+        runtime = AppRuntime(RuntimeConfig(app_log_dir=log_dir))
+        event = AppEvent(
+            "test.event",
+            source="unit",
+            payload={"level": "info", "message": "hello"},
+        )
+
+        try:
+            self.assertTrue(runtime.publish_event(event))
+
+            log_files = [name for name in os.listdir(absolute_log_dir) if name.endswith(".jsonl")]
+            self.assertEqual(len(log_files), 1)
+            with open(os.path.join(absolute_log_dir, log_files[0]), "r", encoding="utf-8") as log_file:
+                lines = [json.loads(line) for line in log_file if line.strip()]
+            self.assertEqual(lines[0]["event_type"], "test.event")
+            self.assertEqual(lines[0]["payload"]["message"], "hello")
+        finally:
+            shutil.rmtree(absolute_log_dir, ignore_errors=True)
 
     def test_drain_limit_preserves_remaining_items(self):
         runtime = AppRuntime()

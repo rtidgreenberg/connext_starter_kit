@@ -72,6 +72,12 @@ class FakeServiceMonitoringClient:
             return None
         return snapshots[-1]
 
+    async def take_available(self, service: ServiceInstanceRef) -> List[MonitoringSnapshot]:
+        snapshots = self._snapshots.get(service.key, deque())
+        available = list(snapshots)
+        snapshots.clear()
+        return available
+
     async def snapshots(self, service: ServiceInstanceRef):
         snapshots = self._snapshots.get(service.key, deque())
         while snapshots:

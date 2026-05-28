@@ -94,6 +94,15 @@ class Preflight:
                 "Activate connext_dds_env and install the RTI Python package for this interpreter.",
             )
 
+        if self._check_import("rti.request"):
+            self._record("INFO", "RTI_REQUEST_IMPORT", "Python RTI request/reply import check passed")
+        else:
+            self._record_connext(
+                "RTI_REQUEST_IMPORT_FAILED",
+                "Cannot import rti.request in the active Python environment.",
+                "Live Recording Service Admin control requires RTI Python request/reply support.",
+            )
+
         if self.require_dearpygui:
             import_error = self._import_error("dearpygui.dearpygui")
             if not import_error:

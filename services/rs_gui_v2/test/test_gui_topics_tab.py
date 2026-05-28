@@ -97,6 +97,9 @@ class FakeDpg:
     def add_input_text(self, *args, **kwargs):
         self.calls.append(("add_input_text", args, kwargs))
 
+    def add_checkbox(self, *args, **kwargs):
+        self.calls.append(("add_checkbox", args, kwargs))
+
     def add_separator(self, *args, **kwargs):
         self.calls.append(("add_separator", args, kwargs))
 

@@ -43,6 +43,16 @@ from .processes import (
     candidate_from_process_launch,
     default_service_executable,
 )
+from .rti_admin import (
+    RtiServiceAdminClient,
+    RtiServiceAdminConfig,
+    default_rti_service_admin_config,
+)
+from .rti_monitoring import (
+    RtiServiceMonitoringClient,
+    RtiServiceMonitoringConfig,
+    default_rti_service_monitoring_config,
+)
 
 __all__ = [
     "AdminReadiness",
@@ -74,6 +84,10 @@ __all__ = [
     "ServiceProcessTerminationStatus",
     "ServiceStateSnapshot",
     "SubprocessServiceProcessSpawner",
+    "RtiServiceAdminClient",
+    "RtiServiceAdminConfig",
+    "RtiServiceMonitoringClient",
+    "RtiServiceMonitoringConfig",
     "build_service_candidate_selection",
     "build_service_process_command",
     "candidate_from_control_identity",
@@ -81,6 +95,8 @@ __all__ = [
     "candidate_from_process_launch",
     "candidates_from_discovered_endpoints",
     "default_service_executable",
+    "default_rti_service_admin_config",
+    "default_rti_service_monitoring_config",
     "service_admin_target_key",
     "service_label_prefix",
 ]

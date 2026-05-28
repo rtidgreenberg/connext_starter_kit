@@ -103,7 +103,7 @@ Live fixture gate:
 
 `live_soak.py` is intentionally not named `test_*.py`: it uses the real RTI
 Connext Python API, creates live DDS participants, and writes its report under
-`test_output/rs_gui_v2/`. The regular suite covers its deterministic logic;
+`services/rs_gui_v2/live_reports/`. The regular suite covers its deterministic logic;
 run the live gate explicitly when validating Milestone L soak behavior.
 
 ```bash

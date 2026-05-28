@@ -27,6 +27,9 @@ class TestReplayTabViewModel(unittest.TestCase):
         self.assertEqual(view.selected_target_id, "launch-replay-main")
         self.assertEqual(view.selected_target.control_name, "replay_service_2d91c4a0")
         self.assertEqual(view.database_path, "services/replay_input/robot_run_03")
+        self.assertEqual(view.qos_file_path, "dds/qos/DDS_QOS_PROFILES.xml")
+        self.assertEqual(view.participant_qos_profile, "DPLibrary::DefaultParticipant")
+        self.assertEqual(view.writer_qos_profile, "BuiltinQosLib::Generic.Common")
         self.assertEqual(view.observed_state, "STOPPED")
         self.assertEqual(view.target_count, 2)
         self.assertEqual(view.timeline[0].label, "Robot run")
@@ -106,6 +109,15 @@ class TestReplayTabViewModel(unittest.TestCase):
         self.assertEqual(command.payload["playback_rate"], 1.0)
         self.assertFalse(command.payload["loop"])
         self.assertEqual(command.payload["time_window"], "00:00:10 - 00:02:30")
+        self.assertEqual(command.payload["qos_file_path"], "dds/qos/DDS_QOS_PROFILES.xml")
+        self.assertEqual(
+            command.payload["participant_qos_profile"],
+            "DPLibrary::DefaultParticipant",
+        )
+        self.assertEqual(
+            command.payload["writer_qos_profile"],
+            "BuiltinQosLib::Generic.Common",
+        )
         with self.assertRaises(ValueError):
             build_replay_action_command("rewind", view)
 

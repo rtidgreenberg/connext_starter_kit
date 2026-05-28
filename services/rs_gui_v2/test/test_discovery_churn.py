@@ -56,6 +56,14 @@ class TestDiscoveryChurnConfig(unittest.TestCase):
         self.assertEqual(config.min_observed_ratio, 0.75)
         self.assertEqual(config.output_path, "test_output/custom.json")
 
+    def test_default_output_lives_under_rs_gui_live_reports(self):
+        config = parse_args([])
+
+        self.assertEqual(
+            config.output_path,
+            os.path.join(PARENT_DIR, "live_reports", "discovery_churn_report.json"),
+        )
+
     def test_config_clamps_bounds(self):
         config = DiscoveryChurnConfig(
             iterations=0,

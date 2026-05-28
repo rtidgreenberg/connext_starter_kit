@@ -16,7 +16,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = os.path.dirname(SCRIPT_DIR)
 REPO_ROOT = os.path.normpath(os.path.join(APP_DIR, "..", ".."))
 VENV_PYTHON = os.path.join(REPO_ROOT, "connext_dds_env", "bin", "python")
-DEFAULT_OUTPUT = os.path.join(REPO_ROOT, "test_output", "rs_gui_v2", "discovery_churn_report.json")
+DEFAULT_OUTPUT = os.path.join(APP_DIR, "live_reports", "discovery_churn_report.json")
 
 
 def _reexec_with_repo_venv() -> None:

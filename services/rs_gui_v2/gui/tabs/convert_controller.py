@@ -269,6 +269,27 @@ class ConvertTabController:
 
         return _command_result(command, f"Requested cancellation of job {job_id}", updated_job)
 
+    def terminate_gui_launched_jobs(self, job_ids: Iterable[str]) -> Tuple[int, ...]:
+        """Request local termination for active converter subprocesses owned by this GUI."""
+
+        terminated = []
+        for job_id in tuple(str(value) for value in job_ids):
+            submission = self._submissions.get(job_id)
+            if submission is None or not submission.process_pid:
+                continue
+            process = self._processes.get(submission.process_pid)
+            if process is None or process.poll() is not None:
+                continue
+            process.terminate()
+            terminated.append(submission.process_pid)
+            try:
+                job = self._job_by_id(job_id)
+            except ValueError:
+                continue
+            updated_job = replace(job, state="cancel_requested", message="Local converter termination requested")
+            self._jobs = tuple(updated_job if item.job_id == job_id else item for item in self._jobs)
+        return tuple(terminated)
+
     def _handle_open_output(
             self,
             command: AppCommand,

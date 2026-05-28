@@ -930,7 +930,7 @@ Initial implementation status:
   built-in in-memory DynamicData telemetry fixture, bounded reader
   history/resource limits, runtime sample/drop counter capture, bounded
   cache/plot assertions, RSS-growth guardrails, and JSON reporting under
-  `test_output/rs_gui_v2/`.
+  `services/rs_gui_v2/live_reports/`.
 - Hardened the RTI DynamicData subscription adapter for live soak use with
   optional bounded DataReader QoS, selector take limits, and Connext 7.6 Rank
   metadata normalization.
@@ -938,7 +938,7 @@ Initial implementation status:
   that launches through `ServiceProcessManager`, assigns fresh `-appName`
   values, checks Service Admin endpoint readiness, attempts remote shutdown,
   falls back to guarded local termination/kill when shutdown does not reply,
-  and writes JSON reports under `test_output/rs_gui_v2/`.
+  and writes JSON reports under `services/rs_gui_v2/live_reports/`.
 - Fixed live Service Admin command targeting so `application_name` remains the
   launched `-appName` while `resource_identifier` uses the XML service resource
   path, for example `/recording_services/deploy`. Strict

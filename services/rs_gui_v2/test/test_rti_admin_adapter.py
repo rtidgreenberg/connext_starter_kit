@@ -342,6 +342,24 @@ class TestRtiServiceAdminClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outcome.status, CommandStatus.TIMEOUT)
         self.assertIn("Timed out waiting for Service Admin endpoints", outcome.message)
 
+    async def test_request_timeout_caps_admin_readiness_wait(self):
+        config = RtiServiceAdminConfig(
+            xml_types_dir=self.temp_dir.name,
+            qos_file=self.qos_file,
+            discovery_timeout_sec=60.0,
+            discovery_poll_sec=0.001,
+            reply_timeout_sec=7.0,
+        )
+        request_module = FakeRequestModule(match_count=0)
+        client = RtiServiceAdminClient(config, FakeDdsModule, request_module)
+        request = ServiceCommandRequest(self.service, ServiceCommand.SHUTDOWN, timeout_sec=0.0)
+
+        outcome = await client.send_command(request)
+
+        self.assertEqual(outcome.status, CommandStatus.TIMEOUT)
+        self.assertIn("after 0.0s", outcome.message)
+        self.assertEqual(request_module.requesters[0].sent_requests, [])
+
     async def test_close_releases_requesters_and_participants(self):
         request_module = FakeRequestModule()
         client = RtiServiceAdminClient(self.config, FakeDdsModule, request_module)

@@ -69,7 +69,7 @@ class RecordLaunchViewModel:
     label: str = "Recording Service"
     config_paths: Tuple[str, ...] = field(default_factory=tuple)
     available_config_names: Tuple[str, ...] = field(default_factory=tuple)
-    config_name: str = "deploy"
+    config_name: str = "record_selected"
     data_domain_id: int = 0
     admin_domain_id: int = 0
     monitoring_domain_id: int = 0
@@ -239,7 +239,10 @@ def build_mock_record_tab_view_model(now: float = 120.0) -> RecordTabViewModel:
         label="Recording Service",
         admin_domain_id=0,
         monitoring_domain_id=0,
-        config_paths=("services/recording_service_config.xml", "dds/qos/DDS_QOS_PROFILES.xml"),
+        config_paths=(
+            "dds/qos/recording_service.xml",
+            "dds/qos/DDS_QOS_PROFILES.xml",
+        ),
     )
     identity = ServiceControlIdentity(
         intent=intent,
@@ -367,7 +370,7 @@ def _monitoring_summary(selected: Optional[ServiceProcessCandidate]) -> Tuple[Tu
     for key in ("cpu_percent", "memory_mb", "throughput"):
         if key in selected.metrics:
             rows.append((key, str(selected.metrics[key])))
-    for key in ("sessions", "topics", "last_event"):
+    for key in ("sessions", "topics", "last_event", "message", "output_path"):
         if key in selected.details:
             rows.append((key, str(selected.details[key])))
     return tuple(rows)

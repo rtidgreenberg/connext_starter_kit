@@ -25,14 +25,16 @@ from app_core.services import (
     ServiceProcessTerminationStatus,
     build_service_process_command,
     candidate_from_process_launch,
+    SubprocessServiceProcessSpawner,
 )
 
 
 class FakeHandle:
-    def __init__(self, pid=4321):
+    def __init__(self, pid=4321, output_path=""):
         self.pid = pid
         self.returncode = None
         self.terminate_calls = 0
+        self.output_path = output_path
 
     def poll(self):
         return self.returncode
@@ -146,6 +148,15 @@ class TestServiceProcessCommand(unittest.TestCase):
 
 
 class TestServiceProcessManager(unittest.TestCase):
+    def test_default_spawner_logs_under_rs_gui_service_logs(self):
+        spawner = SubprocessServiceProcessSpawner()
+        repo_root = os.path.dirname(os.path.dirname(PARENT_DIR))
+
+        self.assertEqual(
+            spawner._log_dir,
+            os.path.join(repo_root, "services", "rs_gui_v2", "service_logs"),
+        )
+
     def _request(self):
         return ServiceProcessLaunchRequest(
             intent=ServiceLaunchIntent(
@@ -194,8 +205,36 @@ class TestServiceProcessManager(unittest.TestCase):
         self.assertEqual(candidate.details["config_name"], "deploy")
         self.assertEqual(candidate.details["working_dir"], "/workspace/services")
 
+    def test_launch_records_process_output_path_for_console_payloads(self):
+        output_dir = os.path.join("services", "rs_gui_v2", "service_logs", "service_process_tests")
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, "recording.log")
+        with open(output_path, "w", encoding="utf-8") as output_file:
+            output_file.write("startup line\n")
+        handle = FakeHandle(pid=4321, output_path=output_path)
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(handle=handle),
+            hostname="dev-host",
+            clock=iter((10.0, 11.0, 12.0, 13.0)).__next__,
+        )
+
+        launch = manager.launch(
+            self._request(),
+            launch_id="launch-1",
+            session_guid="11111111-2222-3333-4444-555555555555",
+        )
+        candidate = candidate_from_process_launch(launch)
+
+        self.assertEqual(launch.to_dict()["output_path"], output_path)
+        self.assertEqual(candidate.details["output_path"], output_path)
+
     def test_process_exit_updates_candidate_alive_state(self):
-        handle = FakeHandle(pid=4321)
+        output_dir = os.path.join("services", "rs_gui_v2", "service_logs", "service_process_tests")
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, "early_exit.log")
+        with open(output_path, "w", encoding="utf-8") as output_file:
+            output_file.write("service startup failed\nmissing config\n")
+        handle = FakeHandle(pid=4321, output_path=output_path)
         spawner = FakeSpawner(handle=handle)
         manager = ServiceProcessManager(
             spawner=spawner,
@@ -216,6 +255,9 @@ class TestServiceProcessManager(unittest.TestCase):
         self.assertEqual(refreshed.returncode, 7)
         self.assertFalse(candidate.alive)
         self.assertEqual(candidate.details["returncode"], 7)
+        self.assertEqual(candidate.details["output_path"], output_path)
+        self.assertIn("missing config", candidate.details["output_tail"])
+        self.assertIn(output_path, refreshed.message)
 
     def test_local_termination_requires_failed_graceful_shutdown(self):
         handle = FakeHandle(pid=4321)
@@ -248,6 +290,37 @@ class TestServiceProcessManager(unittest.TestCase):
         self.assertTrue(allowed.requested)
         self.assertEqual(handle.terminate_calls, 1)
         self.assertEqual(manager.refresh("launch-1").state, ServiceProcessLaunchState.TERMINATE_REQUESTED)
+
+    def test_local_termination_not_allowed_includes_output_tail(self):
+        output_dir = os.path.join("services", "rs_gui_v2", "service_logs", "service_process_tests")
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, "terminated_before_button.log")
+        with open(output_path, "w", encoding="utf-8") as output_file:
+            output_file.write("startup failed before admin endpoint\n")
+        handle = FakeHandle(pid=4321, output_path=output_path)
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(handle=handle),
+            hostname="dev-host",
+            clock=iter((1.0, 2.0, 3.0, 4.0, 5.0)).__next__,
+        )
+        launch = manager.launch(
+            self._request(),
+            launch_id="launch-1",
+            session_guid="11111111-2222-3333-4444-555555555555",
+        )
+        handle.returncode = 7
+        selection = manager.candidate_selection(launch.identity.service_ref)
+
+        outcome = manager.request_local_termination(
+            selection,
+            graceful_shutdown_failed=True,
+            local_hostnames=("dev-host",),
+        )
+
+        self.assertEqual(outcome.status, ServiceProcessTerminationStatus.NOT_ALLOWED)
+        self.assertIn("candidate is not alive", outcome.message)
+        self.assertEqual(outcome.to_dict()["output_path"], output_path)
+        self.assertIn("startup failed", outcome.to_dict()["output_tail"])
 
     def test_remote_discovered_candidate_cannot_be_terminated(self):
         manager = ServiceProcessManager(hostname="dev-host")

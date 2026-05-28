@@ -58,6 +58,9 @@ class ReplayTabViewModel:
     playback_rate: float = 1.0
     loop: bool = False
     time_window: str = ""
+    qos_file_path: str = ""
+    participant_qos_profile: str = ""
+    writer_qos_profile: str = ""
     targets: Tuple[ReplayTargetRow, ...] = field(default_factory=tuple)
     timeline: Tuple[ReplayTimelineRow, ...] = field(default_factory=tuple)
     actions: Tuple[ReplayActionView, ...] = field(default_factory=tuple)
@@ -95,6 +98,9 @@ def build_replay_tab_view_model(
         playback_rate: float = 1.0,
         loop: bool = False,
         time_window: str = "",
+    qos_file_path: str = "",
+    participant_qos_profile: str = "",
+    writer_qos_profile: str = "",
         timeline: Iterable[ReplayTimelineRow] = (),
         diagnostics: Iterable[str] = (),
 ) -> ReplayTabViewModel:
@@ -120,6 +126,9 @@ def build_replay_tab_view_model(
         playback_rate=playback_rate,
         loop=loop,
         time_window=str(time_window),
+        qos_file_path=str(qos_file_path),
+        participant_qos_profile=str(participant_qos_profile),
+        writer_qos_profile=str(writer_qos_profile),
         targets=targets,
         timeline=tuple(timeline),
         actions=_replay_actions(selected_target, database_path, observed_state),
@@ -159,6 +168,9 @@ def build_mock_replay_tab_view_model() -> ReplayTabViewModel:
         playback_rate=1.0,
         loop=False,
         time_window="00:00:10 - 00:02:30",
+        qos_file_path="dds/qos/DDS_QOS_PROFILES.xml",
+        participant_qos_profile="DPLibrary::DefaultParticipant",
+        writer_qos_profile="BuiltinQosLib::Generic.Common",
         timeline=(
             ReplayTimelineRow("Robot run", "00:00:10", "00:02:30"),
             ReplayTimelineRow("Tag: e2e_tag_beta", "00:01:05", "00:01:25"),
@@ -189,6 +201,9 @@ def build_replay_action_command(
         "playback_rate": replay.playback_rate,
         "loop": replay.loop,
         "time_window": replay.time_window,
+        "qos_file_path": replay.qos_file_path,
+        "participant_qos_profile": replay.participant_qos_profile,
+        "writer_qos_profile": replay.writer_qos_profile,
     }
     return AppCommand(
         command_type=action_to_command[action_id],

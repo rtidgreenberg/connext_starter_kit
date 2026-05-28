@@ -124,7 +124,11 @@ class RtiServiceAdminClient:
     def _send_command_sync(self, request: ServiceCommandRequest) -> ServiceCommandOutcome:
         try:
             session = self._session_for_domain(request.service.admin_domain_id)
-            readiness = self._wait_for_readiness(request.service, session)
+            readiness = self._wait_for_readiness(
+                request.service,
+                session,
+                timeout_sec=request.timeout_sec,
+            )
             if not readiness.ready:
                 return ServiceCommandOutcome(
                     request=request,
@@ -232,9 +236,15 @@ class RtiServiceAdminClient:
         return cdr_buffer_to_octets(tag_data.to_cdr_buffer())
 
     def _wait_for_readiness(
-            self, service: ServiceInstanceRef, session: _AdminSession
+            self,
+            service: ServiceInstanceRef,
+            session: _AdminSession,
+            timeout_sec: Optional[float] = None,
     ) -> AdminReadiness:
-        deadline = time.time() + self.config.discovery_timeout_sec
+        discovery_timeout_sec = self.config.discovery_timeout_sec
+        if timeout_sec is not None:
+            discovery_timeout_sec = min(discovery_timeout_sec, max(0.0, float(timeout_sec)))
+        deadline = time.time() + discovery_timeout_sec
         readiness = self._readiness_from_session(service, session)
         while not readiness.ready and time.time() < deadline:
             time.sleep(self.config.discovery_poll_sec)
@@ -246,7 +256,7 @@ class RtiServiceAdminClient:
             status=AdminReadinessStatus.TIMEOUT,
             matched_request_writers=readiness.matched_request_writers,
             matched_reply_readers=readiness.matched_reply_readers,
-            message=self._discovery_timeout_message(service, session, readiness),
+            message=self._discovery_timeout_message(service, session, readiness, discovery_timeout_sec),
         )
 
     def _readiness_from_session(
@@ -380,10 +390,12 @@ class RtiServiceAdminClient:
             service: ServiceInstanceRef,
             session: _AdminSession,
             readiness: AdminReadiness,
+            timeout_sec: Optional[float] = None,
     ) -> str:
+        effective_timeout_sec = self.config.discovery_timeout_sec if timeout_sec is None else float(timeout_sec)
         return "\n".join((
             f"Timed out waiting for Service Admin endpoints after "
-            f"{self.config.discovery_timeout_sec:.1f}s.",
+            f"{effective_timeout_sec:.1f}s.",
             f"service_name: {service.name}",
             f"admin_domain_id: {service.admin_domain_id}",
             f"request_topic: {COMMAND_REQUEST_TOPIC_NAME}",

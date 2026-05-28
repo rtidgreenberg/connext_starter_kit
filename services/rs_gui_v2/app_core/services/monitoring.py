@@ -1,6 +1,6 @@
 """DDS-free service monitoring protocols and facade for rs_gui_v2."""
 
-from typing import AsyncIterator, Optional, Protocol
+from typing import AsyncIterator, List, Optional, Protocol
 
 from .models import MonitoringSnapshot, ServiceInstanceRef, ServiceStateSnapshot
 
@@ -10,6 +10,9 @@ class ServiceMonitoringClient(Protocol):
 
     async def latest_snapshot(self, service: ServiceInstanceRef) -> Optional[MonitoringSnapshot]:
         """Return the latest normalized monitoring snapshot, if one is available."""
+
+    async def take_available(self, service: ServiceInstanceRef) -> List[MonitoringSnapshot]:
+        """Return all currently available normalized monitoring snapshots."""
 
     async def snapshots(self, service: ServiceInstanceRef) -> AsyncIterator[MonitoringSnapshot]:
         """Yield normalized monitoring snapshots for a service."""
@@ -25,6 +28,13 @@ class ServiceMonitoringFacade:
             self, service: ServiceInstanceRef
     ) -> Optional[MonitoringSnapshot]:
         return await self._client.latest_snapshot(service)
+
+    async def take_available(self, service: ServiceInstanceRef) -> List[MonitoringSnapshot]:
+        take_available = getattr(self._client, "take_available", None)
+        if take_available is not None:
+            return list(await take_available(service))
+        snapshot = await self._client.latest_snapshot(service)
+        return [snapshot] if snapshot is not None else []
 
     async def latest_state(self, service: ServiceInstanceRef) -> ServiceStateSnapshot:
         state = ServiceStateSnapshot(service=service)

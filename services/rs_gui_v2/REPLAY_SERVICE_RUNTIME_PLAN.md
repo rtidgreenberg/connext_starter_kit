@@ -907,7 +907,9 @@ Manual/live validation required.
 
 ### Slice 16 - Final Documentation and Status Pass
 
-Status: `not-started`
+Status: `done`
+
+Evidence: Updated operator-facing Replay documentation in `services/rs_gui_v2/README.md` with Replay launch defaults, close behavior, and the explicit `test/replay_service_churn.py` gate. Added troubleshooting guidance in `services/rs_gui_v2/TROUBLESHOOTING.md` for invalid replay database paths, missing admin readiness, missing monitoring evidence, and per-process service logs. Plan statuses now reflect completed Replay slices through Slice 16.
 
 Goal: Update docs and mark implementation status after code slices land.
 

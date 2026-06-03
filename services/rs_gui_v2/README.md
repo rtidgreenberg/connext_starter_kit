@@ -178,6 +178,48 @@ Useful options:
 ../../connext_dds_env/bin/python test/service_churn.py --admin-resource-name ''
 ```
 
+## Replay Service Operator Notes
+
+Replay launch and close behavior now follows the same GUI-managed session path
+used by Recording Service, but Replay needs an existing database directory as
+input.
+
+Current Replay defaults used by the GUI/controller path:
+
+- Config name: `xcdr`
+- Topic allow filter: `*`
+- Topic deny filter: `rti/*`
+- Close action: `shutdown_gui_launched`, which tries Replay admin shutdown first
+  and falls back to local termination when admin endpoints are unavailable
+
+When launching Replay from the GUI or from the explicit gate below, prefer an
+absolute database path or a path relative to the rs_gui_v2 working directory.
+
+## Live Replay Churn Gate
+
+Run the explicit Replay Service GUI-session gate:
+
+```bash
+../../connext_dds_env/bin/python test/replay_service_churn.py --database-dir ../../log_dir/recording_1780085154
+```
+
+The gate launches `rtireplayservice` through `GuiShellSession`, waits for the
+Replay target to appear in GUI controller/session state, checks for Replay
+monitoring identity when available, then closes via the normal
+`shutdown_gui_launched` path and verifies the spawned process exits. The gate
+writes a JSON report under `services/rs_gui_v2/live_reports/` unless `--output`
+overrides it.
+
+Useful options:
+
+```bash
+# Write the report into workspace test output
+../../connext_dds_env/bin/python test/replay_service_churn.py --database-dir /abs/path/to/recording_dir --output ../../test_output/rs_gui_v2/replay_service_churn_live.json
+
+# Allow missing monitoring evidence when debugging startup only
+../../connext_dds_env/bin/python test/replay_service_churn.py --database-dir /abs/path/to/recording_dir --allow-missing-monitoring
+```
+
 ## Live Discovery Churn Gate
 
 Run a bounded live DDS discovery convergence gate:
@@ -211,5 +253,8 @@ Useful options:
 - XML types are local generated artifacts in `xml_types/`.
 - `run_gui.sh` includes preflight startup diagnostics for environment,
   dependencies, generated XML metadata, and RTI service executables.
+- Replay close cleanup may report local termination fallback when Service Admin
+  endpoints are not ready; the important end-state is that the spawned process
+  exits and no orphan `rtireplayservice` remains.
 
 See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common startup issues.

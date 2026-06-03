@@ -62,6 +62,66 @@ Diagnostics checks for:
 Expected location is `NDDSHOME/bin/`. Install a full RTI Connext host package if
 binaries are missing.
 
+### Replay launch fails with `No valid metadata file found in directory`
+
+Replay Service needs a valid recording directory containing at least
+`metadata.db` and `data_0.db`.
+
+Checks:
+
+- Confirm the selected replay input directory is a real recording output
+- Prefer an absolute path when launching from explicit scripts such as
+	`test/replay_service_churn.py`
+- If using a relative path, resolve it from `services/rs_gui_v2/`
+
+Example:
+
+```bash
+../../connext_dds_env/bin/python test/replay_service_churn.py --database-dir /abs/path/to/log_dir/recording_1780085154
+```
+
+### Replay admin readiness times out
+
+If Replay starts but GUI close cleanup reports a timeout waiting for Service
+Admin endpoints, check these first:
+
+- `<administration>` is enabled in `services/replay_service_config.xml`
+- The admin domain id used by the launch matches `REPLAY_ADMIN_DOMAIN_ID`
+- The process stayed alive long enough to create the admin endpoints
+
+If the process exits early, fix that startup failure first. GUI close cleanup
+can fall back to local termination, but that should be treated as degraded
+behavior rather than a substitute for a healthy admin path.
+
+### Replay monitoring evidence does not appear
+
+Replay monitoring depends on a healthy service instance plus the configured
+monitoring domain.
+
+Checks:
+
+- `<monitoring>` is enabled in `services/replay_service_config.xml`
+- The monitoring domain id used by the launch matches `REPLAY_MON_DOMAIN_ID`
+- The replay input directory contains data for the selected session/topics
+
+Expected monitoring identities are rooted under `/replay_services/<config>` and
+extend to session/topic resources, for example:
+
+- `/replay_services/xcdr`
+- `/replay_services/xcdr/sessions/DefaultSession`
+- `/replay_services/xcdr/sessions/DefaultSession/topics/DefaultTopicGroup@Square`
+
+### Replay or Recording process exits unexpectedly
+
+Per-process logs are written under `services/rs_gui_v2/service_logs/`.
+
+Useful checks:
+
+- Inspect the newest `rtireplayservice_*.log` or `rtirecordingservice_*.log`
+- Re-run the explicit live gates with `--output` pointing into `test_output/`
+- Compare the reported config paths, domain ids, and database path with the
+	service XML variables
+
 ## Bypass Diagnostics Temporarily
 
 Use this only for short-term local debugging:

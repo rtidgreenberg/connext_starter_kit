@@ -8,6 +8,7 @@ from typing import Iterable, Mapping, Optional, Tuple
 from app_core import AppCommand, CommandResult, CommandStatus
 from app_core.connext_environment import detect_nddshome, ensure_rti_license
 from app_core.services import (
+    MonitoringSnapshot,
     ServiceAdminFacade,
     ServiceCandidateSelection,
     ServiceCommand,
@@ -102,6 +103,7 @@ class ReplayTabController:
         self._clock = clock
         self._last_view = ReplayTabViewModel()
         self._last_selection = ServiceCandidateSelection()
+        self._latest_monitoring: Tuple[MonitoringSnapshot, ...] = ()
         self._graceful_shutdown_failed = False
 
     @classmethod
@@ -333,7 +335,9 @@ class ReplayTabController:
     async def refresh_view(self) -> ReplayTabViewModel:
         """Return the next Replay-tab view from controller state."""
 
-        runtime_targets = self._runtime_targets()
+        service = self._target_service()
+        self._latest_monitoring = await self._take_monitoring_updates(self._monitoring_services(service))
+        runtime_targets = self._runtime_targets(service, self._latest_monitoring)
         targets = runtime_targets + self._targets
         view = build_replay_tab_view_model(
             targets=targets,
@@ -354,19 +358,56 @@ class ReplayTabController:
         self._last_view = view
         return view
 
-    def _runtime_targets(self) -> Tuple[ReplayTargetRow, ...]:
-        if self._process_manager is None:
-            self._last_selection = ServiceCandidateSelection()
-            return ()
-        service = self._config.service or ServiceInstanceRef(
+    def _target_service(self) -> ServiceInstanceRef:
+        if self._config.service is not None:
+            return self._config.service
+        if self._process_manager is not None:
+            for launch in self._process_manager.launches():
+                if launch.identity.intent.kind == ServiceKind.REPLAY:
+                    return launch.identity.service_ref
+        return ServiceInstanceRef(
             ServiceKind.REPLAY,
             "",
             admin_domain_id=self._config.launch_admin_domain_id,
             monitoring_domain_id=self._config.launch_monitoring_domain_id,
             config_paths=self._config.launch_config_paths,
         )
+
+    def _monitoring_services(self, service: ServiceInstanceRef) -> Tuple[ServiceInstanceRef, ...]:
+        services = []
+        if service.name:
+            services.append(service)
+        if self._process_manager is not None:
+            for launch in self._process_manager.launches():
+                if launch.identity.intent.kind == ServiceKind.REPLAY:
+                    services.append(launch.identity.service_ref)
+        if not services and service.monitoring_domain_id:
+            services.append(service)
+        unique = {}
+        for item in services:
+            unique.setdefault(item.key, item)
+        return tuple(unique.values())
+
+    async def _take_monitoring_updates(self, services: Tuple[ServiceInstanceRef, ...]) -> Tuple[MonitoringSnapshot, ...]:
+        if self._monitoring_facade is None:
+            return ()
+        updates = []
+        for service in services:
+            updates.extend(await self._monitoring_facade.take_available(service))
+        return tuple(updates)
+
+    def _runtime_targets(
+            self,
+            service: Optional[ServiceInstanceRef] = None,
+            monitoring_snapshots: Iterable[MonitoringSnapshot] = (),
+    ) -> Tuple[ReplayTargetRow, ...]:
+        if self._process_manager is None:
+            self._last_selection = ServiceCandidateSelection()
+            return ()
+        service = service or self._target_service()
         selection = self._process_manager.candidate_selection(
             service,
+            monitoring_snapshots=monitoring_snapshots,
             selected_candidate_id=self._config.selected_target_id,
             display_label=self._config.display_label,
         )

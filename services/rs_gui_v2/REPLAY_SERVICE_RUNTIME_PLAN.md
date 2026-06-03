@@ -801,7 +801,9 @@ Manual/live validation required.
 
 ### Slice 13 - Replay Monitoring Normalization
 
-Status: `not-started`
+Status: `done`
+
+Evidence: `RtiServiceMonitoringClient` now exposes Replay aliases for the confirmed monitoring discriminators, extracts `resource_id` and `admin_resource_name` from `/replay_services/...` monitoring resources, and normalizes Replay service/topic config, event, and periodic samples through the same confirmed monitoring branches. `ReplayTabController.refresh_view()` now takes Replay monitoring snapshots and merges them with GUI launch candidates while preserving the launch id for local control. Tests cover Replay sample normalization, multi-Replay routing on one monitoring domain, and GUI-launch/monitoring merge behavior.
 
 Goal: Normalize Replay Service monitoring samples into `MonitoringSnapshot` values and merge them into Replay candidates.
 

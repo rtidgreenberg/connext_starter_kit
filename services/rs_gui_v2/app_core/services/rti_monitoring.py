@@ -18,7 +18,7 @@ from ..connext_environment import (
     validate_generated_types,
 )
 from ..debug_log import dbg, dbg_exc
-from .models import MonitoringSnapshot, MonitoringSnapshotKind, ServiceInstanceRef
+from .models import MonitoringSnapshot, MonitoringSnapshotKind, ServiceInstanceRef, ServiceKind
 
 
 MONITORING_CONFIG_TOPIC = "rti/service/monitoring/config"
@@ -34,7 +34,14 @@ EVENT_QOS_PROFILE = "RecordingServiceMonitorProfiles::event_Profile"
 PERIODIC_QOS_PROFILE = "RecordingServiceMonitorProfiles::periodic_Profile"
 
 RESOURCE_RECORDING_SERVICE = 20000
+RESOURCE_RECORDING_SESSION = 20001
+RESOURCE_RECORDING_TOPIC_GROUP = 20002
 RESOURCE_RECORDING_TOPIC = 20003
+
+RESOURCE_REPLAY_SERVICE = RESOURCE_RECORDING_SERVICE
+RESOURCE_REPLAY_SESSION = RESOURCE_RECORDING_SESSION
+RESOURCE_REPLAY_TOPIC_GROUP = RESOURCE_RECORDING_TOPIC_GROUP
+RESOURCE_REPLAY_TOPIC = RESOURCE_RECORDING_TOPIC
 
 ENTITY_STATE_NAMES = {
     0: "INVALID",
@@ -358,6 +365,7 @@ def _parse_config_sample(service: ServiceInstanceRef, data: Any) -> Optional[Mon
             "service_name": _to_text(_field(recording_service, "application_name", service.name)),
         }
         details.update(_resource_guid_details(data))
+        details.update(_resource_id_details(recording_service, service.kind))
         application_guid = _guid_to_text(_field(recording_service, "application_guid", None))
         if application_guid:
             details["application_guid"] = application_guid
@@ -396,6 +404,7 @@ def _parse_config_sample(service: ServiceInstanceRef, data: Any) -> Optional[Mon
                 "resource_kind": resource_kind,
                 "service_detected": True,
                 "topics": [_to_text(_field(topic, "topic_name", ""))],
+                **_resource_id_details(topic, service.kind),
             },
         )
     return None
@@ -487,6 +496,20 @@ def _resource_guid_details(data: Any) -> Dict[str, str]:
     owner_guid = _guid_to_text(_field(data, "owner_guid", None))
     if owner_guid:
         details["owner_guid"] = owner_guid
+    return details
+
+
+def _resource_id_details(resource: Any, service_kind: ServiceKind) -> Dict[str, str]:
+    resource_id = _to_text(_field(resource, "resource_id", ""))
+    if not resource_id:
+        return {}
+    details = {"resource_id": resource_id}
+    prefix = f"/{service_kind.value}_services/"
+    if resource_id.startswith(prefix):
+        remainder = resource_id[len(prefix):]
+        resource_name = remainder.split("/", 1)[0]
+        if resource_name:
+            details["admin_resource_name"] = resource_name
     return details
 
 

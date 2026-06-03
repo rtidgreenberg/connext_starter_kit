@@ -15,7 +15,16 @@ if PARENT_DIR not in sys.path:
 from app_core import AppCommand
 from app_core import CommandStatus
 from app_core.services import ServiceCommandOutcome
-from app_core.services import ServiceAdminFacade, ServiceCommand, ServiceKind, ServiceProcessManager
+from app_core.services import (
+    FakeServiceMonitoringClient,
+    MonitoringSnapshot,
+    MonitoringSnapshotKind,
+    ServiceAdminFacade,
+    ServiceCommand,
+    ServiceKind,
+    ServiceMonitoringFacade,
+    ServiceProcessManager,
+)
 from gui.tabs import (
     ReplayLaunchViewModel,
     ReplayTabController,
@@ -268,6 +277,49 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(admin_client.requests[0].service, launch.identity.service_ref)
         self.assertEqual(admin_client.requests[0].parameters["admin_resource_name"], "xcdr")
         self.assertEqual(admin_client.requests[0].timeout_sec, 2.0)
+
+    async def test_refresh_merges_replay_monitoring_with_gui_launch(self):
+        handle = FakeHandle(7007)
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(handle),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        monitoring_client = FakeServiceMonitoringClient()
+        controller = ReplayTabController(
+            process_manager=manager,
+            monitoring_facade=ServiceMonitoringFacade(monitoring_client),
+            config=ReplayTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+        launch = controller.launch_replay({
+            "config_name": "xcdr",
+            "admin_domain_id": 61,
+            "monitoring_domain_id": 62,
+            "executable": "/opt/rti/bin/rtireplayservice",
+        })
+        monitoring_client.push_snapshot(MonitoringSnapshot(
+            service=launch.identity.service_ref,
+            kind=MonitoringSnapshotKind.CONFIG,
+            state="configured",
+            details={
+                "application_guid": "abc123",
+                "admin_resource_name": "xcdr",
+                "resource_id": "/replay_services/xcdr",
+                "process_id": 7007,
+                "host_name": "dev-host",
+                "db_directory": "log_dir/recording_1780085154",
+            },
+        ))
+
+        view = await controller.refresh_view()
+
+        self.assertEqual(len(view.targets), 1)
+        self.assertEqual(view.selected_target.pid, "7007")
+        self.assertEqual(view.selected_target.confidence, "1.00")
+        self.assertTrue(view.selected_target_id.startswith("monitoring:replay:"))
+        self.assertEqual(controller.last_selection.selected_candidate.launch_id, launch.launch_id)
+        self.assertEqual(controller.last_selection.selected_candidate.details["resource_id"], "/replay_services/xcdr")
 
 
 if __name__ == "__main__":

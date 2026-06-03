@@ -16,6 +16,7 @@ from ..connext_environment import (
     license_setup_message,
     validate_generated_types,
 )
+from ..debug_log import dbg, dbg_exc
 from ..events import CommandStatus
 from .models import (
     AdminReadiness,
@@ -118,10 +119,14 @@ class RtiServiceAdminClient:
         return await loop.run_in_executor(None, lambda: function(*args))
 
     def _check_readiness_sync(self, service: ServiceInstanceRef) -> AdminReadiness:
+        dbg("admin", f"check_readiness service={service.name!r} admin_domain={service.admin_domain_id}")
         session = self._session_for_domain(service.admin_domain_id)
-        return self._readiness_from_session(service, session)
+        result = self._readiness_from_session(service, session)
+        dbg("admin", f"readiness result={result.status.value} msg={result.message!r}")
+        return result
 
     def _send_command_sync(self, request: ServiceCommandRequest) -> ServiceCommandOutcome:
+        dbg("admin", f"send_command service={request.service.name!r} cmd={request.command.value} timeout={request.timeout_sec}")
         try:
             session = self._session_for_domain(request.service.admin_domain_id)
             readiness = self._wait_for_readiness(

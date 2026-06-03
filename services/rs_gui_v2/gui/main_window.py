@@ -4,6 +4,7 @@ from contextlib import nullcontext
 from dataclasses import replace
 import json
 import re
+import time
 from typing import Callable, Mapping, Optional, Tuple
 
 from app_core import AppCommand
@@ -57,6 +58,7 @@ RECORD_VAR_STORAGE_PATH_EXPR_TAG = "rs_gui_v2_record_var_storage_path_expr"
 RECORD_VAR_ROLLOVER_ENABLED_TAG = "rs_gui_v2_record_var_rollover_enabled"
 RECORD_VAR_ROLLOVER_MB_TAG = "rs_gui_v2_record_var_rollover_mb"
 RECORD_TAB_CONTENT_TAG = "rs_gui_v2_record_tab_content"
+RECORD_TAB_DYNAMIC_TAG = "rs_gui_v2_record_tab_dynamic"
 RECORD_CANDIDATE_COMBO_TAG = "rs_gui_v2_record_candidate_combo"
 REPLAY_DATABASE_PATH_TAG = "rs_gui_v2_replay_database_path"
 REPLAY_PLAYBACK_RATE_TAG = "rs_gui_v2_replay_playback_rate"
@@ -66,11 +68,15 @@ REPLAY_PARTICIPANT_QOS_TAG = "rs_gui_v2_replay_participant_qos"
 REPLAY_WRITER_QOS_TAG = "rs_gui_v2_replay_writer_qos"
 CONSOLE_OUTPUT_TAG = "rs_gui_v2_console_output"
 APP_CLOSE_MODAL_TAG = "rs_gui_v2_close_modal"
+APP_CLOSE_STATUS_TAG = "rs_gui_v2_close_status"
+CLOSE_POLICY_NOTE_TAG = "rs_gui_v2_close_policy_note"
+CLOSE_POLICY_NOTE_TEXT = "Closing this app will shut down all derived/spawned processes."
 PRIMARY_BUTTON_WIDTH = 220
 ACTION_BUTTON_WIDTH = 170
 COMPACT_BUTTON_WIDTH = 90
 DOMAIN_ID_INPUT_WIDTH = 72
 STORAGE_PATH_INPUT_WIDTH = 640
+FRAME_REFRESH_INTERVAL_SEC = 0.5
 TIMESTAMP_DIR_EXPR = "recording_%ts%"
 DEFAULT_FILENAME_BASE = "data"
 AUTO_FILENAME_TOKEN = "%auto:0-9%"
@@ -109,6 +115,7 @@ class DearPyGuiShell:
         self._close_handler = close_handler
         self._dpg = dpg_module
         self._close_handled = False
+        self._exit_requested = False
 
     def render_once(self) -> ShellViewModel:
         """Render one snapshot into a new Dear PyGui context."""
@@ -132,6 +139,7 @@ class DearPyGuiShell:
         dpg = self._dpg or load_dearpygui()
         dpg.create_context()
         self._close_handled = False
+        self._exit_requested = False
         try:
             dpg.create_viewport(title="rs_gui_v2", width=1400, height=900, disable_close=False)
             command_sink = self._interactive_command_sink(dpg)
@@ -145,12 +153,61 @@ class DearPyGuiShell:
                     set_viewport_close_callback(close_callback)
                 set_exit_callback = getattr(dpg, "set_exit_callback", None)
                 if callable(set_exit_callback):
-                    set_exit_callback(self._exit_cleanup_callback())
+                    set_exit_callback(self._exit_request_callback())
             dpg.setup_dearpygui()
             dpg.show_viewport()
-            dpg.start_dearpygui()
+            if _supports_frame_callbacks(dpg):
+                self._schedule_frame_refresh(dpg, command_sink)
+                dpg.start_dearpygui()
+            elif _supports_manual_frame_loop(dpg):
+                self._run_manual_frame_loop(dpg, command_sink)
+            else:
+                dpg.start_dearpygui()
         finally:
-            dpg.destroy_context()
+            try:
+                self._handle_deferred_app_close()
+            finally:
+                dpg.destroy_context()
+
+    def _schedule_frame_refresh(self, dpg, command_sink) -> None:
+        set_frame_callback = getattr(dpg, "set_frame_callback")
+        get_frame_count = getattr(dpg, "get_frame_count")
+        last_refresh = {"value": 0.0}
+
+        def _callback(_sender=None, _app_data=None, _user_data=None):
+            if self._exit_requested:
+                return
+            try:
+                now = time.monotonic()
+                if now - last_refresh["value"] >= FRAME_REFRESH_INTERVAL_SEC:
+                    view = self._view_provider()
+                    _refresh_record_tab(dpg, view, command_sink)
+                    _refresh_console_output(dpg, view)
+                    last_refresh["value"] = now
+            except Exception:
+                pass
+            try:
+                set_frame_callback(get_frame_count() + 1, _callback)
+            except Exception:
+                return
+
+        set_frame_callback(get_frame_count() + 1, _callback)
+
+    def _run_manual_frame_loop(self, dpg, command_sink) -> None:
+        is_running = getattr(dpg, "is_dearpygui_running")
+        render_frame = getattr(dpg, "render_dearpygui_frame")
+        last_refresh = 0.0
+        while is_running():
+            now = time.monotonic()
+            if now - last_refresh >= FRAME_REFRESH_INTERVAL_SEC:
+                try:
+                    view = self._view_provider()
+                    _refresh_record_tab(dpg, view, command_sink)
+                    _refresh_console_output(dpg, view)
+                    last_refresh = now
+                except Exception:
+                    last_refresh = now
+            render_frame()
 
     def _interactive_command_sink(self, dpg):
         if self._command_sink is None:
@@ -161,6 +218,7 @@ class DearPyGuiShell:
             view = self._view_provider()
             _refresh_record_tab(dpg, view, _sink)
             _refresh_console_output(dpg, view)
+            _render_one_frame_if_possible(dpg)
             return accepted
         return _sink
 
@@ -172,6 +230,14 @@ class DearPyGuiShell:
                     stop()
                 return True
             view = self._view_provider()
+            close_items = _close_process_items(view)
+            if not any(item.get("active") for item in close_items):
+                if self._handle_close_action("leave_running", ()):
+                    stop = getattr(dpg, "stop_dearpygui", None)
+                    if callable(stop):
+                        stop()
+                    return True
+                return False
             _show_close_prompt(dpg, view, self._handle_close_action)
             return False
         return _callback
@@ -186,6 +252,18 @@ class DearPyGuiShell:
             self._handle_close_action(action, item_ids)
             return True
         return _callback
+
+    def _exit_request_callback(self):
+        def _callback(_sender=None, _app_data=None, _user_data=None):
+            self._exit_requested = True
+            return True
+        return _callback
+
+    def _handle_deferred_app_close(self) -> None:
+        if self._close_handler is None or self._close_handled:
+            return
+        action, item_ids = _default_close_policy(self._view_provider())
+        self._handle_close_action(action, item_ids)
 
     def _handle_close_action(self, action: str, item_ids: Tuple[str, ...]) -> bool:
         if self._close_handler is None:
@@ -207,30 +285,31 @@ def render_shell_view(
     """Render the first rs_gui_v2 shell snapshot with Dear PyGui calls."""
 
     _apply_button_theme_if_supported(dpg)
-    with dpg.window(label=view.title, tag="rs_gui_v2_main_window", width=1380, height=860):
-        _render_status_strip(dpg, view)
+    with dpg.window(label=view.title, tag="rs_gui_v2_main_window", width=1380, height=860, no_close=True):
         with dpg.tab_bar(tag="rs_gui_v2_tabs"):
             with dpg.tab(label="Record"):
                 with dpg.group(tag=RECORD_TAB_CONTENT_TAG):
-                    _render_record_tab(dpg, view.record_tab, command_sink=command_sink)
+                    _render_record_tab(
+                        dpg,
+                        view.record_tab,
+                        command_sink=command_sink,
+                        status_items=view.status_items,
+                    )
             with dpg.tab(label="Replay"):
                 _render_replay_tab(dpg, view.replay_tab, command_sink=command_sink)
             with dpg.tab(label="Convert"):
                 _render_convert_tab(dpg, view.convert_tab, command_sink=command_sink)
-            with dpg.tab(label="Topics"):
-                _render_topics_tab(dpg, view.topics_tab, command_sink=command_sink)
-            with dpg.tab(label="Plots"):
-                _render_plots_tab(dpg, view.plots_tab)
+            # Topics and Plots tabs moved to standalone rti_view project
+            # with dpg.tab(label="Topics"):
+            #     _render_topics_tab(dpg, view.topics_tab, command_sink=command_sink)
+            # with dpg.tab(label="Plots"):
+            #     _render_plots_tab(dpg, view.plots_tab)
             with dpg.tab(label="Workspace"):
                 _render_workspace_tab(dpg, view, command_sink=command_sink)
             with dpg.tab(label="Console"):
                 _render_console_tab(dpg, view)
-
-
-def _render_status_strip(dpg, view: ShellViewModel) -> None:
-    with dpg.group(horizontal=True):
-        for item in view.status_items:
-            dpg.add_text(f"{item.label}: {item.value}")
+        dpg.add_separator()
+        dpg.add_text(CLOSE_POLICY_NOTE_TEXT, tag=CLOSE_POLICY_NOTE_TAG)
 
 
 def _show_close_prompt(
@@ -265,6 +344,7 @@ def _show_close_prompt(
         else:
             dpg.add_text("No Recording Service or Converter processes are currently detected by this GUI.")
         dpg.add_separator()
+        dpg.add_text("", tag=APP_CLOSE_STATUS_TAG)
         with dpg.group(horizontal=True):
             _add_action_button(
                 dpg,
@@ -351,13 +431,44 @@ def _close_dialog_action_callback(
         item_ids: Tuple[str, ...],
 ):
     def _callback(_sender=None, _app_data=None, _user_data=None):
+        _set_close_status(dpg, _close_action_status(action))
+        _render_one_frame_if_possible(dpg)
         if close_handler(action, tuple(item_ids)):
+            _set_close_status(dpg, "Cleanup complete. Closing...")
+            _render_one_frame_if_possible(dpg)
             stop = getattr(dpg, "stop_dearpygui", None)
             if callable(stop):
                 stop()
             return True
+        _set_close_status(dpg, "Close canceled or failed.")
         return False
     return _callback
+
+
+def _close_action_status(action: str) -> str:
+    if action == "shutdown_gui_launched":
+        return "Shutting down GUI-launched services..."
+    if action == "leave_running":
+        return "Leaving detected services running..."
+    return "Closing..."
+
+
+def _set_close_status(dpg, message: str) -> None:
+    set_value = getattr(dpg, "set_value", None)
+    if callable(set_value):
+        try:
+            set_value(APP_CLOSE_STATUS_TAG, str(message))
+        except Exception:
+            pass
+
+
+def _render_one_frame_if_possible(dpg) -> None:
+    render_frame = getattr(dpg, "render_dearpygui_frame", None)
+    if callable(render_frame):
+        try:
+            render_frame()
+        except Exception:
+            pass
 
 
 def _close_dialog_cancel_callback(dpg):
@@ -377,7 +488,7 @@ def _refresh_record_tab(
         view: ShellViewModel,
         command_sink: Optional[Callable[[AppCommand], bool]] = None,
 ) -> None:
-    if not _has_item(dpg, RECORD_TAB_CONTENT_TAG):
+    if not _has_item(dpg, RECORD_TAB_DYNAMIC_TAG):
         return
     delete_item = getattr(dpg, "delete_item", None)
     push_container_stack = getattr(dpg, "push_container_stack", None)
@@ -386,10 +497,15 @@ def _refresh_record_tab(
         _refresh_record_candidate_combo(dpg, view)
         return
     try:
-        delete_item(RECORD_TAB_CONTENT_TAG, children_only=True)
-        push_container_stack(RECORD_TAB_CONTENT_TAG)
+        delete_item(RECORD_TAB_DYNAMIC_TAG, children_only=True)
+        push_container_stack(RECORD_TAB_DYNAMIC_TAG)
         try:
-            _render_record_tab(dpg, view.record_tab, command_sink=command_sink)
+            _render_record_dynamic_section(
+                dpg,
+                view.record_tab,
+                command_sink=command_sink,
+                status_items=view.status_items,
+            )
         finally:
             pop_container_stack()
     except Exception:
@@ -422,6 +538,18 @@ def _has_item(dpg, tag: str) -> bool:
     return False
 
 
+def _supports_manual_frame_loop(dpg) -> bool:
+    return callable(getattr(dpg, "is_dearpygui_running", None)) and callable(
+        getattr(dpg, "render_dearpygui_frame", None)
+    )
+
+
+def _supports_frame_callbacks(dpg) -> bool:
+    return callable(getattr(dpg, "set_frame_callback", None)) and callable(
+        getattr(dpg, "get_frame_count", None)
+    )
+
+
 def _record_candidate_labels(record: RecordTabViewModel):
     return [row.control_name for row in record.candidates] or ["No Recording Service"]
 
@@ -434,9 +562,20 @@ def _render_record_tab(
         dpg,
         record: RecordTabViewModel,
         command_sink: Optional[Callable[[AppCommand], bool]] = None,
+    status_items: Tuple[object, ...] = (),
 ) -> None:
     _render_record_launch_controls(dpg, record, command_sink=command_sink)
     dpg.add_separator()
+    with dpg.group(tag=RECORD_TAB_DYNAMIC_TAG):
+        _render_record_dynamic_section(dpg, record, command_sink=command_sink, status_items=status_items)
+
+
+def _render_record_dynamic_section(
+        dpg,
+        record: RecordTabViewModel,
+        command_sink: Optional[Callable[[AppCommand], bool]] = None,
+        status_items: Tuple[object, ...] = (),
+) -> None:
     dpg.add_text(f"Recording target: {record.target_label}")
     dpg.add_text(
         f"Readiness: {record.readiness} | State: {record.observed_state} | "
@@ -453,7 +592,7 @@ def _render_record_tab(
     )
     _render_candidate_table(dpg, record)
     _render_record_actions(dpg, record, command_sink=command_sink)
-    _render_record_details(dpg, record)
+    _render_record_details(dpg, record, status_items=status_items)
 
 
 def _render_record_launch_controls(
@@ -668,7 +807,7 @@ def _render_record_launch_controls(
 
 def _render_candidate_table(dpg, record: RecordTabViewModel) -> None:
     with dpg.table(header_row=True, borders_innerH=True, borders_outerH=True, borders_innerV=True):
-        for heading in ("Selected", "Control Name", "Source", "Host", "PID", "State", "Age", "Confidence"):
+        for heading in ("Selected", "Control Name", "Source", "Host", "PID", "State", "Current File", "Age", "Confidence"):
             dpg.add_table_column(label=heading)
         for row in record.candidates:
             with dpg.table_row():
@@ -678,6 +817,7 @@ def _render_candidate_table(dpg, record: RecordTabViewModel) -> None:
                 dpg.add_text(row.hostname)
                 dpg.add_text(row.pid)
                 dpg.add_text(row.state)
+                dpg.add_text(row.current_file)
                 dpg.add_text(row.age)
                 dpg.add_text(row.confidence)
 
@@ -699,13 +839,19 @@ def _render_record_actions(
     _add_labeled_input_text(dpg, "Command Tag", "##record_command_tag", default_value=record.tag_value)
 
 
-def _render_record_details(dpg, record: RecordTabViewModel) -> None:
-    if not (record.diagnostics or record.command_history or record.monitoring_summary):
+def _render_record_details(
+        dpg,
+        record: RecordTabViewModel,
+        status_items: Tuple[object, ...] = (),
+) -> None:
+    if not (record.diagnostics or record.command_history or record.monitoring_summary or status_items):
         return
     label = "Record Details"
     if record.diagnostics:
         label = f"Record Details ({len(record.diagnostics)} diagnostics)"
     with _collapsible_section(dpg, label, default_open=False):
+        if status_items:
+            _render_debug_status(dpg, status_items)
         if record.diagnostics:
             dpg.add_text("Diagnostics")
             for diagnostic in record.diagnostics:
@@ -714,6 +860,15 @@ def _render_record_details(dpg, record: RecordTabViewModel) -> None:
             _render_command_history(dpg, record)
         if record.monitoring_summary:
             _render_monitoring_summary(dpg, record)
+
+
+def _render_debug_status(dpg, status_items: Tuple[object, ...]) -> None:
+    dpg.add_text("Debug")
+    for item in status_items:
+        label = str(getattr(item, "label", ""))
+        value = str(getattr(item, "value", ""))
+        if label:
+            dpg.add_text(f"{label}: {value}")
 
 
 def _record_action_callback(
@@ -941,6 +1096,8 @@ def _record_variable_args(
         f"-DREC_DOMAIN_ID={int(data_domain_id)}",
         f"-DREC_ADMIN_DOMAIN_ID={int(admin_domain_id)}",
         f"-DREC_MON_DOMAIN_ID={int(monitoring_domain_id)}",
+        "-DREC_STATUS_PERIOD_SEC=0",
+        "-DREC_STATUS_PERIOD_NSEC=500000000",
         f"-DREC_SESSION_NAME={_safe_record_session_name(session_name)}",
         f"-DREC_TOPIC_ALLOW={str(topic_allow).strip()}",
         f"-DREC_TOPIC_DENY={str(topic_deny).strip()}",
@@ -958,6 +1115,8 @@ def _merge_record_variable_args(existing_args, managed_args):
         "REC_DOMAIN_ID",
         "REC_ADMIN_DOMAIN_ID",
         "REC_MON_DOMAIN_ID",
+        "REC_STATUS_PERIOD_SEC",
+        "REC_STATUS_PERIOD_NSEC",
         "REC_SESSION_NAME",
         "REC_TOPIC_ALLOW",
         "REC_TOPIC_DENY",

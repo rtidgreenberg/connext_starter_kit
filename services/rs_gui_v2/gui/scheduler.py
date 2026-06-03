@@ -77,6 +77,15 @@ class UiFrameScheduler:
         combined = self._event_log + entries
         self._event_log = combined[-self._max_event_log:]
         dropped = max(0, previous_count + len(entries) - len(self._event_log))
+        if dropped > 0:
+            warning = EventLogEntry(
+                timestamp="",
+                level="warning",
+                source="scheduler",
+                message=f"{dropped} event log entries dropped (log capped at {self._max_event_log})",
+                event_type="scheduler.log_overflow",
+            )
+            self._event_log = self._event_log[1:] + (warning,)
         return len(entries), dropped
 
     @property

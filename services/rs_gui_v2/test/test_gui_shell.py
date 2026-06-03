@@ -5,6 +5,7 @@ import os
 import sys
 import unittest
 from dataclasses import replace
+from unittest.mock import patch
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,6 +28,8 @@ from gui import UiFrameScheduler, build_mock_shell_view_model
 from gui.main_window import (
     CONSOLE_OUTPUT_TAG,
     DOMAIN_ID_INPUT_WIDTH,
+    CLOSE_POLICY_NOTE_TAG,
+    CLOSE_POLICY_NOTE_TEXT,
     RECORD_LAUNCH_ADMIN_DOMAIN_TAG,
     RECORD_LAUNCH_CONFIG_NAME_TAG,
     RECORD_LAUNCH_CONFIG_PATHS_TAG,
@@ -49,6 +52,7 @@ from gui.main_window import (
     _refresh_record_tab,
     build_workspace_action_command,
 )
+from gui.view_models import build_empty_shell_view_model
 from gui.tabs.record_tab import (
     RecordLaunchViewModel,
     build_record_action_command,
@@ -56,147 +60,40 @@ from gui.tabs.record_tab import (
     build_record_tab_view_model,
 )
 from rs_gui_v2_app import main
+from fakes import FakeContext, FakeDpg, NoViewportCloseFakeDpg, ManualFrameFakeDpg
 
 
-class FakeContext:
-    def __enter__(self):
-        return self
+class FrameCallbackFakeDpg(FakeDpg):
+    def __init__(self, frame_count=2, call_exit_callback=True):
+        super().__init__()
+        self.frame_count = int(frame_count)
+        self.call_exit_callback = bool(call_exit_callback)
+        self.current_frame = 0
+        self.frame_callbacks = {}
 
-    def __exit__(self, exc_type, exc, tb):
-        return False
+    def get_frame_count(self):
+        return self.current_frame
 
+    def set_frame_callback(self, frame, callback, **kwargs):
+        self.frame_callbacks[int(frame)] = callback
+        self.calls.append(("set_frame_callback", (frame, callback), kwargs))
 
-class FakeDpg:
-    def __init__(self):
-        self.calls = []
-        self.values = {}
-        self.clipboard_text = ""
-        self.context_created = False
-        self.context_destroyed = False
-        self.stopped = False
-        self.exit_callback = None
-        self.viewport_close_callback = None
+    def is_dearpygui_running(self):
+        return True
 
-    def create_context(self):
-        self.context_created = True
-        self.calls.append(("create_context", (), {}))
-
-    def destroy_context(self):
-        self.context_destroyed = True
-        self.calls.append(("destroy_context", (), {}))
-
-    def stop_dearpygui(self):
-        self.stopped = True
-        self.calls.append(("stop_dearpygui", (), {}))
-
-    def create_viewport(self, *args, **kwargs):
-        self.calls.append(("create_viewport", args, kwargs))
-
-    def set_exit_callback(self, callback):
-        self.exit_callback = callback
-        self.calls.append(("set_exit_callback", (callback,), {}))
-
-    def set_viewport_close_callback(self, callback):
-        self.viewport_close_callback = callback
-        self.calls.append(("set_viewport_close_callback", (callback,), {}))
-
-    def setup_dearpygui(self):
-        self.calls.append(("setup_dearpygui", (), {}))
-
-    def show_viewport(self):
-        self.calls.append(("show_viewport", (), {}))
+    def render_dearpygui_frame(self):
+        self.calls.append(("render_dearpygui_frame", (), {}))
 
     def start_dearpygui(self):
         self.calls.append(("start_dearpygui", (), {}))
-        if self.exit_callback is not None:
+        for frame in range(1, self.frame_count + 1):
+            self.current_frame = frame
+            callback = self.frame_callbacks.pop(frame, None)
+            if callback is not None:
+                callback()
+        if self.call_exit_callback and self.exit_callback is not None:
             self.exit_callback()
-
-    def window(self, *args, **kwargs):
-        self.calls.append(("window", args, kwargs))
-        return FakeContext()
-
-    def tab_bar(self, *args, **kwargs):
-        self.calls.append(("tab_bar", args, kwargs))
-        return FakeContext()
-
-    def tab(self, *args, **kwargs):
-        self.calls.append(("tab", args, kwargs))
-        return FakeContext()
-
-    def group(self, *args, **kwargs):
-        tag = kwargs.get("tag")
-        if tag:
-            self.values[tag] = ""
-        self.calls.append(("group", args, kwargs))
-        return FakeContext()
-
-    def table(self, *args, **kwargs):
-        self.calls.append(("table", args, kwargs))
-        return FakeContext()
-
-    def table_row(self, *args, **kwargs):
-        self.calls.append(("table_row", args, kwargs))
-        return FakeContext()
-
-    def collapsing_header(self, *args, **kwargs):
-        self.calls.append(("collapsing_header", args, kwargs))
-        return FakeContext()
-
-    def add_text(self, *args, **kwargs):
-        self.calls.append(("add_text", args, kwargs))
-
-    def add_combo(self, *args, **kwargs):
-        tag = kwargs.get("tag")
-        if tag:
-            self.values[tag] = kwargs.get("default_value", "")
-        self.calls.append(("add_combo", args, kwargs))
-
-    def add_button(self, *args, **kwargs):
-        self.calls.append(("add_button", args, kwargs))
-
-    def add_input_text(self, *args, **kwargs):
-        tag = kwargs.get("tag")
-        if tag:
-            self.values[tag] = kwargs.get("default_value", "")
-        self.calls.append(("add_input_text", args, kwargs))
-
-    def add_checkbox(self, *args, **kwargs):
-        tag = kwargs.get("tag")
-        if tag:
-            self.values[tag] = kwargs.get("default_value", False)
-        self.calls.append(("add_checkbox", args, kwargs))
-
-    def set_value(self, tag, value):
-        self.values[tag] = value
-        self.calls.append(("set_value", (tag, value), {}))
-
-    def set_clipboard_text(self, value):
-        self.clipboard_text = value
-        self.calls.append(("set_clipboard_text", (value,), {}))
-
-    def configure_item(self, tag, **kwargs):
-        self.calls.append(("configure_item", (tag,), kwargs))
-
-    def does_item_exist(self, tag):
-        return tag in self.values
-
-    def delete_item(self, tag, **kwargs):
-        self.calls.append(("delete_item", (tag,), kwargs))
-
-    def push_container_stack(self, tag):
-        self.calls.append(("push_container_stack", (tag,), {}))
-
-    def pop_container_stack(self):
-        self.calls.append(("pop_container_stack", (), {}))
-
-    def get_value(self, tag):
-        return self.values.get(tag)
-
-    def add_separator(self, *args, **kwargs):
-        self.calls.append(("add_separator", args, kwargs))
-
-    def add_table_column(self, *args, **kwargs):
-        self.calls.append(("add_table_column", args, kwargs))
+        self.calls.append(("start_dearpygui_returned", (), {}))
 
 
 class TestMockShellViewModel(unittest.TestCase):
@@ -326,11 +223,42 @@ class TestUiFrameScheduler(unittest.TestCase):
         view = scheduler.next_view()
 
         self.assertEqual(len(view.event_log), 1)
-        self.assertEqual(view.event_log[0].message, "second")
+        self.assertEqual(view.event_log[0].source, "scheduler")
+        self.assertIn("1 event log entries dropped", view.event_log[0].message)
+        self.assertEqual(view.event_log[0].level, "warning")
         self.assertEqual(runtime.drain_events(), [])
         self.assertEqual(runtime.counters.ui_frames_built, 1)
         self.assertEqual(runtime.counters.ui_events_ingested, 2)
         self.assertEqual(runtime.counters.ui_event_log_dropped, 1)
+
+    def test_scheduler_overflow_warning_accumulates_across_frames(self):
+        runtime = AppRuntime()
+        scheduler = UiFrameScheduler(runtime, max_event_log=2)
+
+        # First batch: 4 events, cap=2 → 2 dropped
+        for i in range(4):
+            runtime.publish_event(AppEvent(
+                event_type="test.event",
+                source="test",
+                payload={"message": f"msg{i}", "level": "info"},
+                created_at=float(i),
+            ))
+        view = scheduler.next_view()
+        self.assertEqual(len(view.event_log), 2)
+        self.assertEqual(view.event_log[-1].source, "scheduler")
+        self.assertIn("2 event log entries dropped", view.event_log[-1].message)
+        self.assertEqual(runtime.counters.ui_event_log_dropped, 2)
+
+        # Second batch: 1 event, fits within cap, no new warning
+        runtime.publish_event(AppEvent(
+            event_type="test.event",
+            source="test",
+            payload={"message": "fits", "level": "info"},
+            created_at=10.0,
+        ))
+        view2 = scheduler.next_view()
+        # Previous 2 entries + new event = 3, cap=2, so 1 more dropped
+        self.assertEqual(runtime.counters.ui_event_log_dropped, 3)  # 2 + 1
 
     def test_shell_exposes_runtime_counters_and_operator_diagnostics(self):
         runtime = AppRuntime()
@@ -408,6 +336,61 @@ class TestDearPyGuiRenderer(unittest.TestCase):
         shutdown = next(command for command in commands if command.command_type == "service.shutdown")
         self.assertEqual(shutdown.payload["candidate_id"], "launch-recording-main")
 
+    def test_record_refresh_renders_current_file_for_selected_service(self):
+        fake = FakeDpg()
+        shell = DearPyGuiShell(dpg_module=fake, command_sink=lambda _command: True)
+        shell.render_once()
+        identity = ServiceControlIdentity(
+            ServiceLaunchIntent(ServiceKind.RECORDING, "Recorder"),
+            session_guid="11111111-2222-3333-4444-555555555555",
+        )
+        candidate = candidate_from_control_identity(
+            identity,
+            launch_id="launch-1",
+            pid=100,
+            hostname="dev-host",
+            observed_state="RUNNING",
+            details={"current_file": "log_dir/recording_123/data_0.db"},
+            observed_at=1.0,
+        )
+        record = build_record_tab_view_model(
+            ServiceCandidateSelection(candidates=(candidate,), selected_candidate_id="launch-1"),
+            now=2.0,
+        )
+        view = replace(build_empty_shell_view_model(), record_tab=record)
+
+        _refresh_record_tab(fake, view, lambda _command: True)
+
+        rendered_text = [args[0] for name, args, _kwargs in fake.calls if name == "add_text" and args]
+        self.assertIn("log_dir/recording_123/data_0.db", rendered_text)
+
+    def test_interactive_command_sink_paints_refreshed_record_frame(self):
+        fake = ManualFrameFakeDpg(frame_count=0)
+        views = (build_empty_shell_view_model(), build_mock_shell_view_model())
+        view_calls = []
+        commands = []
+
+        def _view_provider():
+            index = min(len(view_calls), len(views) - 1)
+            view_calls.append(index)
+            return views[index]
+
+        shell = DearPyGuiShell(
+            view_provider=_view_provider,
+            dpg_module=fake,
+            command_sink=lambda command: commands.append(command) or True,
+        )
+        shell.render_once()
+
+        shell._interactive_command_sink(fake)(build_record_launch_command(views[1].record_tab.launch))
+
+        self.assertTrue(commands)
+        self.assertTrue(any(
+            name == "add_text" and args and str(args[0]).startswith("Recording target: Recording Service")
+            for name, args, _kwargs in fake.calls
+        ))
+        self.assertTrue(any(name == "render_dearpygui_frame" for name, _args, _kwargs in fake.calls))
+
     def test_all_command_buttons_dispatch_expected_command_types(self):
         expected = {
             "Launch Recording Service": {"service.launch_recording"},
@@ -415,13 +398,10 @@ class TestDearPyGuiRenderer(unittest.TestCase):
             "Apply Tag": {"service.tag"},
             "Shutdown": {"service.shutdown", "replay.shutdown"},
             "Start": {"replay.start"},
-            "Select": {"replay.select_target", "topics.select"},
+            "Select": {"replay.select_target"},
             "Run Conversion": {"convert.run"},
             "Open Output": {"convert.open_output"},
             "Inspect Output": {"convert.inspect_output"},
-            "Unsubscribe": {"topics.unsubscribe"},
-            "Toggle Internal": {"topics.set_include_internal"},
-            "Plot": {"topics.set_plot_field_selected"},
             "Save Workspace": {"workspace.save"},
             "Load Workspace": {"workspace.load"},
         }
@@ -647,12 +627,27 @@ class TestDearPyGuiRenderer(unittest.TestCase):
             index for index, (name, args, _kwargs) in enumerate(fake.calls)
             if name == "add_text" and args and args[0] == "Monitoring Summary"
         )
+        debug_index = next(
+            index for index, (name, args, _kwargs) in enumerate(fake.calls)
+            if name == "add_text" and args and args[0] == "Debug"
+        )
+        runtime_index = next(
+            index for index, (name, args, _kwargs) in enumerate(fake.calls)
+            if name == "add_text" and args and args[0].startswith("Runtime: ")
+        )
+        dds_index = next(
+            index for index, (name, args, _kwargs) in enumerate(fake.calls)
+            if name == "add_text" and args and args[0].startswith("DDS: ")
+        )
         headers = [kwargs for name, _args, kwargs in fake.calls if name == "collapsing_header"]
         record_header = next(kwargs for kwargs in headers if kwargs.get("label") == "Record Details (2 diagnostics)")
         self.assertFalse(record_header["default_open"])
         self.assertLess(header_index, diagnostic_index)
         self.assertLess(header_index, history_index)
         self.assertLess(header_index, monitoring_index)
+        self.assertLess(header_index, debug_index)
+        self.assertLess(debug_index, runtime_index)
+        self.assertLess(debug_index, dds_index)
 
     def test_close_prompt_uses_window_close_callback_with_detected_processes(self):
         fake = FakeDpg()
@@ -678,6 +673,22 @@ class TestDearPyGuiRenderer(unittest.TestCase):
         ]
         self.assertNotIn("Close App", button_labels)
 
+    def test_main_window_hides_internal_close_button(self):
+        fake = FakeDpg()
+        shell = DearPyGuiShell(
+            view_provider=build_empty_shell_view_model,
+            dpg_module=fake,
+        )
+
+        shell.render_once()
+
+        main_window = next(
+            kwargs for name, _args, kwargs in fake.calls
+            if name == "window" and kwargs.get("tag") == "rs_gui_v2_main_window"
+        )
+        self.assertTrue(main_window["no_close"])
+        self.assertEqual(fake.values[CLOSE_POLICY_NOTE_TAG], CLOSE_POLICY_NOTE_TEXT)
+
     def test_close_prompt_shutdown_button_targets_only_gui_launched_items(self):
         fake = FakeDpg()
         close_requests = []
@@ -695,6 +706,112 @@ class TestDearPyGuiRenderer(unittest.TestCase):
         self.assertEqual(close_requests[0][0], "shutdown_gui_launched")
         self.assertIn("record:launch-recording-main", close_requests[0][1])
         self.assertFalse(any("discovery:recording:old" in item_id for item_id in close_requests[0][1]))
+
+    def test_native_window_close_exits_when_no_active_processes_remain(self):
+        fake = FakeDpg()
+        close_requests = []
+        shell = DearPyGuiShell(
+            view_provider=build_empty_shell_view_model,
+            dpg_module=fake,
+            close_handler=lambda action, item_ids: close_requests.append((action, item_ids)) or True,
+        )
+
+        shell.render_once()
+        result = shell._close_prompt_callback(fake)()
+
+        self.assertTrue(result)
+        self.assertTrue(fake.stopped)
+        self.assertEqual(close_requests, [("leave_running", ())])
+        self.assertFalse(any(
+            name == "window" and kwargs.get("tag") == "rs_gui_v2_close_modal"
+            for name, _args, kwargs in fake.calls
+        ))
+
+    def test_manual_frame_loop_refreshes_record_tab_snapshots(self):
+        fake = ManualFrameFakeDpg(frame_count=2)
+        initial_view = build_mock_shell_view_model()
+        exited_rows = tuple(
+            replace(row, state="exited") if row.selected else row
+            for row in initial_view.record_tab.candidates
+        )
+        exited_view = replace(
+            initial_view,
+            record_tab=replace(
+                initial_view.record_tab,
+                observed_state="exited",
+                candidates=exited_rows,
+            ),
+        )
+        views = [initial_view, exited_view]
+        view_calls = []
+
+        def _view_provider():
+            index = min(len(view_calls), len(views) - 1)
+            view_calls.append(index)
+            return views[index]
+
+        shell = DearPyGuiShell(view_provider=_view_provider, dpg_module=fake)
+
+        shell.run()
+
+        self.assertGreaterEqual(len(view_calls), 2)
+        self.assertTrue(any(name == "render_dearpygui_frame" for name, _args, _kwargs in fake.calls))
+        self.assertTrue(any(
+            name == "delete_item"
+            and args == ("rs_gui_v2_record_tab_dynamic",)
+            and kwargs.get("children_only") is True
+            for name, args, kwargs in fake.calls
+        ))
+        self.assertTrue(any(
+            name == "add_text" and args and args[0] == "exited"
+            for name, args, _kwargs in fake.calls
+        ))
+
+    def test_frame_callback_survives_view_provider_exception(self):
+        fake = FrameCallbackFakeDpg(frame_count=4)
+        call_count = {"value": 0}
+
+        def _failing_then_ok_provider():
+            call_count["value"] += 1
+            if call_count["value"] in (2, 3):
+                raise RuntimeError("transient error")
+            return build_mock_shell_view_model()
+
+        shell = DearPyGuiShell(view_provider=_failing_then_ok_provider, dpg_module=fake)
+        shell.run()
+
+        # Frame callback should have been re-registered after exceptions
+        self.assertGreaterEqual(call_count["value"], 4)
+        # The successful calls should have rendered content
+        self.assertTrue(any(
+            name == "add_text"
+            for name, _args, _kwargs in fake.calls
+        ))
+
+    def test_frame_callback_refresh_uses_half_second_cadence(self):
+        fake = FrameCallbackFakeDpg(frame_count=6)
+        view_calls = []
+
+        def _view_provider():
+            view_calls.append(len(view_calls))
+            return build_mock_shell_view_model()
+
+        shell = DearPyGuiShell(view_provider=_view_provider, dpg_module=fake)
+
+        with patch(
+                "gui.main_window.time.monotonic",
+                side_effect=(0.10, 0.49, 0.50, 0.75, 0.99, 1.00),
+        ):
+            shell.run()
+
+        # Initial render plus refreshes at 0.50s and 1.00s only.
+        self.assertEqual(len(view_calls), 3)
+        self.assertEqual(sum(
+            1 for name, args, kwargs in fake.calls
+            if name == "delete_item"
+            and args == ("rs_gui_v2_record_tab_dynamic",)
+            and kwargs.get("children_only") is True
+        ), 2)
 
     def test_native_window_close_shuts_down_gui_launched_items(self):
         fake = FakeDpg()
@@ -714,6 +831,92 @@ class TestDearPyGuiRenderer(unittest.TestCase):
         self.assertEqual(close_requests[0][0], "shutdown_gui_launched")
         self.assertIn("record:launch-recording-main", close_requests[0][1])
         self.assertFalse(any("discovery:recording:old" in item_id for item_id in close_requests[0][1]))
+
+    def test_native_window_close_fallback_cleans_up_when_viewport_callback_is_unavailable(self):
+        fake = NoViewportCloseFakeDpg()
+        close_requests = []
+        shell = DearPyGuiShell(
+            view_provider=build_mock_shell_view_model,
+            dpg_module=fake,
+            close_handler=lambda action, item_ids: close_requests.append((action, item_ids)) or True,
+        )
+
+        shell.run()
+
+        self.assertTrue(any(name == "set_exit_callback" for name, _args, _kwargs in fake.calls))
+        self.assertFalse(any(name == "set_viewport_close_callback" for name, _args, _kwargs in fake.calls))
+        self.assertEqual(close_requests[0][0], "shutdown_gui_launched")
+        self.assertIn("record:launch-recording-main", close_requests[0][1])
+
+    def test_native_exit_cleanup_is_deferred_until_dearpygui_loop_returns(self):
+        fake = FrameCallbackFakeDpg(frame_count=2)
+        close_request_call_count = []
+
+        def _close_handler(action, item_ids):
+            close_request_call_count.append((action, item_ids, len(fake.calls)))
+            return True
+
+        shell = DearPyGuiShell(
+            view_provider=build_mock_shell_view_model,
+            dpg_module=fake,
+            close_handler=_close_handler,
+        )
+
+        shell.run()
+
+        self.assertEqual(close_request_call_count[0][0], "shutdown_gui_launched")
+        returned_index = next(
+            index for index, (name, _args, _kwargs) in enumerate(fake.calls)
+            if name == "start_dearpygui_returned"
+        )
+        destroy_index = next(
+            index for index, (name, _args, _kwargs) in enumerate(fake.calls)
+            if name == "destroy_context"
+        )
+        self.assertGreater(close_request_call_count[0][2], returned_index)
+        self.assertEqual(close_request_call_count[0][2], destroy_index)
+        self.assertTrue(any(name == "set_frame_callback" for name, _args, _kwargs in fake.calls))
+        self.assertFalse(any(name == "render_dearpygui_frame" for name, _args, _kwargs in fake.calls))
+
+    def test_dearpygui_loop_return_triggers_cleanup_without_exit_callback(self):
+        fake = FrameCallbackFakeDpg(frame_count=2, call_exit_callback=False)
+        close_requests = []
+        shell = DearPyGuiShell(
+            view_provider=build_mock_shell_view_model,
+            dpg_module=fake,
+            close_handler=lambda action, item_ids: close_requests.append((action, item_ids)) or True,
+        )
+
+        shell.run()
+
+        self.assertEqual(close_requests[0][0], "shutdown_gui_launched")
+        self.assertIn("record:launch-recording-main", close_requests[0][1])
+        returned_index = next(
+            index for index, (name, _args, _kwargs) in enumerate(fake.calls)
+            if name == "start_dearpygui_returned"
+        )
+        destroy_index = next(
+            index for index, (name, _args, _kwargs) in enumerate(fake.calls)
+            if name == "destroy_context"
+        )
+        self.assertLess(returned_index, destroy_index)
+
+    def test_close_policy_note_replaces_explicit_exit_button(self):
+        fake = ManualFrameFakeDpg(frame_count=0)
+        shell = DearPyGuiShell(
+            view_provider=build_mock_shell_view_model,
+            dpg_module=fake,
+        )
+
+        shell.run()
+
+        button_labels = [
+            kwargs.get("label") or (args[0] if args else "")
+            for name, args, kwargs in fake.calls
+            if name == "add_button"
+        ]
+        self.assertNotIn("Exit", button_labels)
+        self.assertEqual(fake.values[CLOSE_POLICY_NOTE_TAG], CLOSE_POLICY_NOTE_TEXT)
 
     def test_close_dialog_action_is_not_replayed_by_exit_cleanup(self):
         fake = FakeDpg()

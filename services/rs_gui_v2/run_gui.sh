@@ -24,6 +24,7 @@ Launcher options:
     --prepare-dds        Run setup.sh before launch and require Connext checks
     --diagnostics-only   Run startup diagnostics, then exit
     --skip-diagnostics   Launch without startup diagnostics
+    --debug              Enable debug logging to debug_logs/rs_gui_debug_<pid>.log
 
 App modes:
     --gui                Launch the Dear PyGui shell (default)
@@ -37,6 +38,7 @@ Examples:
 ./run_gui.sh --mock-gui-check
 ./run_gui.sh --headless-check
 ./run_gui.sh --prepare-dds --gui
+./run_gui.sh --debug --prepare-dds --gui
 ./run_gui.sh --diagnostics-only --gui
 ./run_gui.sh --skip-diagnostics --gui
 EOF
@@ -53,6 +55,9 @@ for arg in "$@"; do
             ;;
         --diagnostics-only)
             DIAGNOSTICS_ONLY=true
+            ;;
+        --debug)
+            export RS_GUI_DEBUG=1
             ;;
         -h|--help)
             usage
@@ -76,6 +81,17 @@ fi
 
 export PYTHONNOUSERSITE=1
 export PATH="$(dirname "$VENV_PYTHON"):$PATH"
+
+# Pin NDDSHOME to 7.6.0 — the minimum version for RS GUI admin/monitoring.
+export NDDSHOME="${NDDSHOME:-/home/rti/rti_connext_dds-7.6.0}"
+
+# Work around VMware SVGA / Mesa driver issues that can cause GLFW segfaults
+# when the hardware GL context fails to initialize properly.
+if [[ -z "${LIBGL_ALWAYS_SOFTWARE:-}" ]]; then
+    if lspci 2>/dev/null | grep -qi "VMware SVGA"; then
+        export LIBGL_ALWAYS_SOFTWARE=1
+    fi
+fi
 
 if [[ "$PREPARE_DDS" == true ]]; then
     echo "Preparing DDS XML types using setup.sh..."

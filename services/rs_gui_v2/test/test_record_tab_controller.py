@@ -32,31 +32,7 @@ from app_core.services import (
     ServiceProcessManager,
 )
 from gui.tabs.record_controller import RecordTabController, RecordTabControllerConfig
-
-
-class FakeHandle:
-    def __init__(self, pid):
-        self.pid = pid
-        self.returncode = None
-        self.terminate_calls = 0
-
-    def poll(self):
-        return self.returncode
-
-    def terminate(self):
-        self.terminate_calls += 1
-
-
-class FakeSpawner:
-    def __init__(self, *handles):
-        self.handles = list(handles)
-        self.calls = []
-
-    def start(self, command_line, working_dir="", environment=None):
-        self.calls.append(tuple(command_line))
-        if not self.handles:
-            raise RuntimeError("no fake handles queued")
-        return self.handles.pop(0)
+from fakes import FakeHandle, FakeSpawner
 
 
 def launch_request(label="Recording Service"):
@@ -191,13 +167,15 @@ class TestRecordTabController(unittest.IsolatedAsyncioTestCase):
         second_view = await controller.refresh_view()
 
         self.assertEqual(len(first_view.candidates), 1)
-        self.assertEqual(first_view.selected_candidate_id, "launch-main")
-        self.assertEqual(first_view.selected_candidate.pid, "4218")
+        self.assertTrue(first_view.selected_candidate_id.startswith("monitoring:"))
+        self.assertEqual(first_view.selected_candidate.pid, "9001")
         self.assertEqual(first_view.observed_state, "observed")
+        self.assertEqual(first_view.selected_candidate.current_file, "log_dir/recording/data_0.db")
+        self.assertIn(("current_file", "log_dir/recording/data_0.db"), first_view.monitoring_summary)
         self.assertIn(("cpu_percent", "3.5"), first_view.monitoring_summary)
         self.assertEqual(first_update_count, 2)
         self.assertEqual(len(controller.last_monitoring_updates), 0)
-        self.assertEqual(second_view.selected_candidate_id, "launch-main")
+        self.assertEqual(second_view.selected_candidate_id, first_view.selected_candidate_id)
         self.assertIn(("cpu_percent", "3.5"), second_view.monitoring_summary)
 
     async def test_monitoring_updates_are_taken_for_each_spawned_recording_service(self):
@@ -316,6 +294,8 @@ class TestRecordTabController(unittest.IsolatedAsyncioTestCase):
         self.assertIn("-appName", spawner.calls[0])
         self.assertIn("-DDOMAIN_ID=63", spawner.calls[0])
         self.assertIn("-DADMIN_DOMAIN_ID=61", spawner.calls[0])
+        self.assertIn("-DREC_STATUS_PERIOD_SEC=0", spawner.calls[0])
+        self.assertIn("-DREC_STATUS_PERIOD_NSEC=500000000", spawner.calls[0])
         self.assertIn("-DDB_DIR=test_output/db", spawner.calls[0])
         self.assertIn("-DREC_SESSION_NAME=Manual_Recorder_Session", spawner.calls[0])
         self.assertNotIn("-DREC_SESSION_NAME=Manual Recorder Session", spawner.calls[0])

@@ -93,7 +93,7 @@ class ReplayTabController:
         self._config = replace(self._config, selected_target_id=target.target_id)
         return target
 
-    def handle_command(self, command: AppCommand) -> CommandResult:
+    async def handle_command(self, command: AppCommand) -> CommandResult:
         """Apply a queued Replay command to the controller state."""
 
         payload = dict(command.payload)

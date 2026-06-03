@@ -4,6 +4,8 @@
 import os
 import sys
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -46,14 +48,16 @@ from gui.tabs import (
     TopicsTabController,
     TopicsTabControllerConfig,
 )
+from gui.tabs.convert_controller import ConvertJobSubmission
+from gui.tabs.convert_tab import ConvertJobRow
 from gui.tabs.record_tab import build_record_launch_command
-from test_gui_shell import FakeDpg
+from test_gui_shell import FakeDpg, NoViewportCloseFakeDpg
 from test_gui_topics_controller import _fake_discovery_client
+from fakes import FakeHandle, FakeSpawner
 
 
-class FakeHandle:
-    def __init__(self, pid):
-        self.pid = pid
+class FakeTerminatingConvertProcess:
+    def __init__(self):
         self.returncode = None
         self.terminate_calls = 0
 
@@ -62,16 +66,18 @@ class FakeHandle:
 
     def terminate(self):
         self.terminate_calls += 1
+        self.returncode = -15
 
 
-class FakeSpawner:
-    def __init__(self, *handles):
-        self.handles = list(handles)
+class ShutdownExitingAdminClient(FakeServiceAdminClient):
+    def __init__(self, handle):
+        super().__init__()
+        self._handle = handle
 
-    def start(self, command_line, working_dir="", environment=None):
-        if not self.handles:
-            raise RuntimeError("no fake handles queued")
-        return self.handles.pop(0)
+    async def send_command(self, request):
+        if request.command == ServiceCommand.SHUTDOWN:
+            self._handle.returncode = 0
+        return await super().send_command(request)
 
 
 def launch_request():
@@ -114,7 +120,11 @@ def build_session(runtime=None, admin_client=None, convert_controller=None, repl
         convert_controller=convert_controller,
         replay_controller=replay_controller,
         topics_controller=topics_controller,
-        config=GuiShellSessionConfig(workspace_name="Robot Run 03", unsaved=True),
+        config=GuiShellSessionConfig(
+            workspace_name="Robot Run 03",
+            unsaved=True,
+            close_shutdown_exit_timeout_sec=0.0,
+        ),
     )
     return session, admin_client, launch
 
@@ -129,6 +139,53 @@ def build_topics_controller():
         config=TopicsTabControllerConfig(domain_id=7, selected_topic_key="7:RobotTelemetry"),
         clock=lambda: 20.0,
     )
+
+
+class TestGuiShellSessionBridge(unittest.TestCase):
+    def test_shell_exit_callback_invokes_session_close_cleanup_without_viewport_callback(self):
+        runtime = AppRuntime()
+        handle = FakeHandle(4218)
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(handle),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        manager.launch(
+            launch_request(),
+            launch_id="launch-main",
+            session_guid="11111111-2222-3333-4444-555555555555",
+        )
+        admin_client = FakeServiceAdminClient()
+        controller = RecordTabController(
+            manager,
+            admin_facade=ServiceAdminFacade(admin_client),
+            config=RecordTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+        session = GuiShellSession(
+            runtime=runtime,
+            scheduler=UiFrameScheduler(runtime, max_event_log=20),
+            record_controller=controller,
+            config=GuiShellSessionConfig(close_shutdown_exit_timeout_sec=0.0),
+        )
+        fake = NoViewportCloseFakeDpg()
+        shell = DearPyGuiShell(
+            view_provider=session.next_view,
+            dpg_module=fake,
+            close_handler=session.handle_close_request,
+        )
+
+        shell.run()
+
+        self.assertTrue(any(name == "set_exit_callback" for name, _args, _kwargs in fake.calls))
+        self.assertFalse(any(name == "set_viewport_close_callback" for name, _args, _kwargs in fake.calls))
+        self.assertEqual([request.command for request in admin_client.requests], [ServiceCommand.SHUTDOWN])
+        self.assertEqual(handle.terminate_calls, 1)
+        events = runtime.drain_events()
+        close_completed = next(event for event in events if event.event_type == "gui.close_completed")
+        self.assertEqual(close_completed.payload["action"], "shutdown_gui_launched")
+        self.assertEqual(close_completed.payload["cleanup_results"][0]["candidate_id"], "launch-main")
+        self.assertIsNotNone(close_completed.payload["cleanup_results"][0]["local_termination"])
 
 
 class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
@@ -285,6 +342,50 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exit_event.level, "error")
         self.assertEqual(exit_event.payload["candidate"]["details"]["returncode"], -15)
 
+    async def test_spawned_recording_exit_wins_over_stale_monitoring_update(self):
+        runtime = AppRuntime()
+        handle = FakeHandle(4218)
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(handle),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        launch = manager.launch(
+            launch_request(),
+            launch_id="launch-main",
+            session_guid="11111111-2222-3333-4444-555555555555",
+        )
+        monitoring_client = FakeServiceMonitoringClient()
+        controller = RecordTabController(
+            manager,
+            admin_facade=ServiceAdminFacade(FakeServiceAdminClient()),
+            monitoring_facade=ServiceMonitoringFacade(monitoring_client),
+            config=RecordTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+        session = GuiShellSession(
+            runtime=runtime,
+            scheduler=UiFrameScheduler(runtime, max_event_log=20),
+            record_controller=controller,
+        )
+        await session.next_view_async(process_commands=False)
+        monitoring_client.push_snapshot(MonitoringSnapshot(
+            service=launch.identity.service_ref,
+            kind=MonitoringSnapshotKind.PERIODIC,
+            state="observed",
+            metrics={"cpu_percent": 2.0},
+            details={"process_id": 4218, "host_name": "dev-host"},
+            observed_at=20.0,
+        ))
+
+        handle.returncode = 0
+        view = await session.next_view_async(process_commands=False)
+
+        self.assertEqual(view.record_tab.selected_candidate.pid, "4218")
+        self.assertEqual(view.record_tab.observed_state, "exited")
+        exit_event = next(entry for entry in view.event_log if entry.message == "Recording Service process observed: exited")
+        self.assertEqual(exit_event.level, "error")
+
     async def test_default_launch_command_populates_record_dropdown_model(self):
         session, _admin_client, _launch = build_session()
         initial_view = await session.next_view_async(process_commands=False)
@@ -349,6 +450,104 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([request.command for request in admin_client.requests], [ServiceCommand.SHUTDOWN])
         self.assertEqual(handle.terminate_calls, 1)
+
+    async def test_close_request_prints_verified_recording_shutdown_summary(self):
+        runtime = AppRuntime()
+        handle = FakeHandle(4218)
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(handle),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        manager.launch(
+            launch_request(),
+            launch_id="launch-main",
+            session_guid="11111111-2222-3333-4444-555555555555",
+        )
+        controller = RecordTabController(
+            manager,
+            admin_facade=ServiceAdminFacade(ShutdownExitingAdminClient(handle)),
+            config=RecordTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+        session = GuiShellSession(
+            runtime=runtime,
+            scheduler=UiFrameScheduler(runtime, max_event_log=20),
+            record_controller=controller,
+            config=GuiShellSessionConfig(close_shutdown_exit_timeout_sec=0.0),
+        )
+        await session.next_view_async(process_commands=False)
+        output = StringIO()
+
+        with redirect_stdout(output):
+            await session.handle_close_request_async("shutdown_gui_launched", ("record:launch-main",))
+
+        text = output.getvalue()
+        self.assertIn("[INFO] SHUTDOWN_RECORDING: Recording Service launch-main exited", text)
+        self.assertIn("[INFO] SHUTDOWN_SUMMARY: All GUI-spawned local processes have exited (1 process(es))", text)
+
+    async def test_close_request_verifies_converter_process_exit(self):
+        job_id = "convert-1234"
+        process = FakeTerminatingConvertProcess()
+        convert_controller = ConvertTabController()
+        convert_controller._jobs = (ConvertJobRow(
+            job_id=job_id,
+            preset_id="json",
+            input_path="services/input",
+            output_path="services/output",
+            output_format="JSON_SQLITE",
+            state="running",
+            progress="42%",
+        ),)
+        convert_controller._submissions[job_id] = ConvertJobSubmission(
+            job_id=job_id,
+            submitted_at=0.0,
+            process_pid=4321,
+        )
+        convert_controller._processes[4321] = process
+        runtime = AppRuntime()
+        session, _admin_client, _launch = build_session(runtime=runtime, convert_controller=convert_controller)
+
+        await session.handle_close_request_async("shutdown_gui_launched", (f"convert:{job_id}",))
+
+        self.assertEqual(process.terminate_calls, 1)
+        events = runtime.drain_events()
+        close_completed = next(event for event in events if event.event_type == "gui.close_completed")
+        cleanup = close_completed.payload["cleanup_results"][0]
+        self.assertEqual(cleanup["kind"], "convert")
+        self.assertEqual(cleanup["job_id"], job_id)
+        self.assertEqual(cleanup["process_pid"], 4321)
+        self.assertTrue(cleanup["process_exit_observed"])
+        self.assertNotIn(4321, convert_controller._processes)
+
+    async def test_close_request_prints_verified_converter_shutdown_summary(self):
+        job_id = "convert-1234"
+        process = FakeTerminatingConvertProcess()
+        convert_controller = ConvertTabController()
+        convert_controller._jobs = (ConvertJobRow(
+            job_id=job_id,
+            preset_id="json",
+            input_path="services/input",
+            output_path="services/output",
+            output_format="JSON_SQLITE",
+            state="running",
+            progress="42%",
+        ),)
+        convert_controller._submissions[job_id] = ConvertJobSubmission(
+            job_id=job_id,
+            submitted_at=0.0,
+            process_pid=4321,
+        )
+        convert_controller._processes[4321] = process
+        session, _admin_client, _launch = build_session(convert_controller=convert_controller)
+        output = StringIO()
+
+        with redirect_stdout(output):
+            await session.handle_close_request_async("shutdown_gui_launched", (f"convert:{job_id}",))
+
+        text = output.getvalue()
+        self.assertIn("[INFO] SHUTDOWN_CONVERTER: Converter job convert-1234 pid 4321 exited", text)
+        self.assertIn("[INFO] SHUTDOWN_SUMMARY: All GUI-spawned local processes have exited (1 process(es))", text)
 
     async def test_tag_command_updates_controller_tag_state(self):
         session, admin_client, _launch = build_session()

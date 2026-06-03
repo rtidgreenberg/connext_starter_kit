@@ -76,6 +76,17 @@ class FakeServiceMonitoringClient:
         snapshots = self._snapshots.get(service.key, deque())
         available = list(snapshots)
         snapshots.clear()
+        # Discovery probe: when service name is empty, return all snapshots on
+        # the same monitoring domain (mimics DDS reader receiving all samples).
+        if not service.name:
+            for key, queue in list(self._snapshots.items()):
+                if not queue:
+                    continue
+                sample = queue[0]
+                if (sample.service.monitoring_domain_id == service.monitoring_domain_id
+                        and sample.service.kind == service.kind):
+                    available.extend(queue)
+                    queue.clear()
         return available
 
     async def snapshots(self, service: ServiceInstanceRef):

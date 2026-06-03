@@ -4,6 +4,7 @@
 import os
 import sys
 import unittest
+from dataclasses import replace
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -174,8 +175,10 @@ class TestCandidateComposition(unittest.TestCase):
 
         self.assertEqual(len(selection.candidates), 1)
         candidate = selection.selected_candidate
-        self.assertEqual(candidate.candidate_id, "launch-1")
-        self.assertEqual(candidate.observed_state, "discovered")
+        self.assertTrue(candidate.candidate_id.startswith("monitoring:"))
+        self.assertEqual(candidate.launch_id, "launch-1")
+        self.assertEqual(candidate.source, ServiceCandidateSource.MONITORING)
+        self.assertEqual(candidate.observed_state, "RUNNING")
         self.assertEqual(candidate.metrics["memory_kb"], 2048)
         self.assertEqual(candidate.application_guid, "app-guid-1")
         self.assertEqual(candidate.participant_key, "participant-1")
@@ -199,6 +202,85 @@ class TestCandidateComposition(unittest.TestCase):
         selection = build_service_candidate_selection(target, monitoring_snapshots=(snapshot,))
 
         self.assertEqual(selection.candidates, ())
+
+    def test_exited_gui_launch_wins_over_stale_monitoring_state(self):
+        identity = ServiceControlIdentity(
+            intent=ServiceLaunchIntent(ServiceKind.RECORDING, "Record Main"),
+            session_guid="11111111-2222-3333-4444-555555555555",
+            created_at=1.0,
+        )
+        launch_candidate = candidate_from_control_identity(
+            identity,
+            launch_id="launch-1",
+            pid=100,
+            hostname="dev-host",
+            observed_state="exited",
+            details={"returncode": 0, "launch_state": "exited"},
+            observed_at=20.0,
+        )
+        launch_candidate = replace(launch_candidate, alive=False)
+        stale_monitoring = MonitoringSnapshot(
+            service=identity.service_ref,
+            kind=MonitoringSnapshotKind.PERIODIC,
+            state="observed",
+            metrics={"cpu_percent": 2.0},
+            details={"process_id": 100, "host_name": "dev-host"},
+            observed_at=21.0,
+        )
+
+        selection = build_service_candidate_selection(
+            identity.service_ref,
+            launch_candidates=(launch_candidate,),
+            monitoring_snapshots=(stale_monitoring,),
+            display_label="Record Main",
+        )
+
+        self.assertEqual(len(selection.candidates), 1)
+        candidate = selection.selected_candidate
+        self.assertTrue(candidate.candidate_id.startswith("monitoring:"))
+        self.assertEqual(candidate.launch_id, "launch-1")
+        self.assertEqual(candidate.source, ServiceCandidateSource.MONITORING)
+        self.assertEqual(candidate.observed_state, "exited")
+        self.assertFalse(candidate.alive)
+        self.assertEqual(candidate.metrics["cpu_percent"], 2.0)
+        self.assertEqual(candidate.details["returncode"], 0)
+
+    def test_lifecycle_monitoring_state_wins_over_periodic_observed_state(self):
+        service = ServiceInstanceRef(ServiceKind.RECORDING, "record_main_11111111")
+        event_snapshot = MonitoringSnapshot(
+            service=service,
+            kind=MonitoringSnapshotKind.EVENT,
+            state="RUNNING",
+            details={
+                "application_guid": "app-guid-1",
+                "process_id": 100,
+                "host_name": "dev-host",
+            },
+            observed_at=20.0,
+        )
+        periodic_snapshot = MonitoringSnapshot(
+            service=service,
+            kind=MonitoringSnapshotKind.PERIODIC,
+            state="observed",
+            metrics={"cpu_percent": 3.0},
+            details={
+                "application_guid": "app-guid-1",
+                "process_id": 100,
+                "host_name": "dev-host",
+            },
+            observed_at=21.0,
+        )
+
+        selection = build_service_candidate_selection(
+            service,
+            monitoring_snapshots=(event_snapshot, periodic_snapshot),
+            display_label="Record Main",
+        )
+
+        self.assertEqual(len(selection.candidates), 1)
+        candidate = selection.selected_candidate
+        self.assertEqual(candidate.observed_state, "RUNNING")
+        self.assertEqual(candidate.metrics["cpu_percent"], 3.0)
 
 
 if __name__ == "__main__":

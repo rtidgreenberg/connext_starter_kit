@@ -2,9 +2,11 @@
 
 from dataclasses import dataclass, field, replace
 import asyncio
+import os
+import signal
 import subprocess
 import time
-from typing import Dict, Iterable, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 import re
 from app_core import AppCommand, CommandResult, CommandStatus
@@ -278,9 +280,9 @@ class ConvertTabController:
             if submission is None or not submission.process_pid:
                 continue
             process = self._processes.get(submission.process_pid)
-            if process is None or process.poll() is not None:
+            if process is None or _process_returncode(process) is not None:
                 continue
-            process.terminate()
+            _terminate_process(process)
             terminated.append(submission.process_pid)
             try:
                 job = self._job_by_id(job_id)
@@ -289,6 +291,72 @@ class ConvertTabController:
             updated_job = replace(job, state="cancel_requested", message="Local converter termination requested")
             self._jobs = tuple(updated_job if item.job_id == job_id else item for item in self._jobs)
         return tuple(terminated)
+
+    async def terminate_gui_launched_jobs_and_wait(
+            self,
+            job_ids: Iterable[str],
+            timeout_sec: float = 3.0,
+            poll_sec: float = 0.1,
+    ) -> Tuple[Mapping[str, object], ...]:
+        """Terminate GUI-owned converter subprocesses and verify process exit."""
+
+        results = []
+        for job_id in tuple(str(value) for value in job_ids):
+            result = {
+                "kind": "convert",
+                "job_id": job_id,
+                "process_pid": 0,
+                "local_termination": "not_started",
+                "process_exit_observed": True,
+            }
+            submission = self._submissions.get(job_id)
+            if submission is None or not submission.process_pid:
+                results.append(result)
+                continue
+
+            process_pid = int(submission.process_pid)
+            result["process_pid"] = process_pid
+            process = self._processes.get(process_pid)
+            if process is None:
+                result["local_termination"] = "process_handle_not_found"
+                result["process_exit_observed"] = False
+                results.append(result)
+                continue
+
+            if _process_returncode(process) is None:
+                _terminate_process(process)
+                result["local_termination"] = "requested"
+                self._mark_job_termination_requested(job_id)
+                observed = await _wait_for_process_exit(process, timeout_sec, poll_sec)
+                if not observed and _kill_process(process):
+                    result["local_termination"] = "kill_requested"
+                    observed = await _wait_for_process_exit(process, timeout_sec, poll_sec)
+            else:
+                result["local_termination"] = "already_exited"
+                observed = True
+
+            result["process_exit_observed"] = bool(observed)
+            if observed:
+                self._processes.pop(process_pid, None)
+                self._mark_job_terminated(job_id)
+            results.append(result)
+        return tuple(results)
+
+    def _mark_job_termination_requested(self, job_id: str) -> None:
+        try:
+            job = self._job_by_id(job_id)
+        except ValueError:
+            return
+        updated_job = replace(job, state="cancel_requested", message="Local converter termination requested")
+        self._jobs = tuple(updated_job if item.job_id == job_id else item for item in self._jobs)
+
+    def _mark_job_terminated(self, job_id: str) -> None:
+        try:
+            job = self._job_by_id(job_id)
+        except ValueError:
+            return
+        updated_job = replace(job, state="terminated", progress="0%", message="Local converter termination verified")
+        self._jobs = tuple(updated_job if item.job_id == job_id else item for item in self._jobs)
 
     def _handle_open_output(
             self,
@@ -370,6 +438,7 @@ class ConvertTabController:
                 *cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                start_new_session=True,
             )
 
             process_pid = process.pid if process.pid else 0
@@ -424,7 +493,7 @@ class ConvertTabController:
                 return
 
             # Check if process is still running
-            poll_result = process.poll()
+            poll_result = _process_returncode(process)
 
             job = self._job_by_id(job_id)
 
@@ -654,3 +723,64 @@ def _timestamp(value: float) -> str:
     minutes = (seconds % 3600) // 60
     sec = seconds % 60
     return f"{hours:02d}:{minutes:02d}:{sec:02d}"
+
+
+def _process_returncode(process: Any) -> Optional[int]:
+    poll = getattr(process, "poll", None)
+    if callable(poll):
+        return poll()
+    return getattr(process, "returncode", None)
+
+
+def _terminate_process(process: Any) -> None:
+    if _signal_process_group(process, signal.SIGTERM):
+        return
+    terminate = getattr(process, "terminate", None)
+    if callable(terminate):
+        terminate()
+
+
+def _kill_process(process: Any) -> bool:
+    if _signal_process_group(process, signal.SIGKILL):
+        return True
+    kill = getattr(process, "kill", None)
+    if not callable(kill):
+        return False
+    kill()
+    return True
+
+
+def _signal_process_group(process: Any, sig: int) -> bool:
+    if callable(getattr(process, "poll", None)):
+        return False
+    pid = getattr(process, "pid", None)
+    if not pid:
+        return False
+    try:
+        os.killpg(os.getpgid(int(pid)), sig)
+        return True
+    except Exception:
+        return False
+
+
+async def _wait_for_process_exit(process: Any, timeout_sec: float, poll_sec: float) -> bool:
+    loop = asyncio.get_running_loop()
+    timeout = max(0.0, float(timeout_sec))
+    poll = getattr(process, "poll", None)
+    wait = getattr(process, "wait", None)
+    if not callable(poll) and callable(wait):
+        try:
+            await asyncio.wait_for(wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return _process_returncode(process) is not None
+        except Exception:
+            pass
+    deadline = loop.time() + timeout
+    interval = max(0.01, float(poll_sec))
+    while True:
+        if _process_returncode(process) is not None:
+            return True
+        if loop.time() >= deadline:
+            return False
+        await asyncio.sleep(interval)

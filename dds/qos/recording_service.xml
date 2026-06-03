@@ -32,7 +32,8 @@
       <element><name>REC_SUB_QOS</name><value>BuiltinQosLib::Generic.Common</value></element>
       <element><name>REC_DR_QOS</name><value>BuiltinQosLib::Generic.Common</value></element>
 
-      <element><name>REC_STATUS_PERIOD_SEC</name><value>1</value></element>
+      <element><name>REC_STATUS_PERIOD_SEC</name><value>0</value></element>
+      <element><name>REC_STATUS_PERIOD_NSEC</name><value>500000000</value></element>
       <element><name>REC_STATS_PERIOD_NSEC</name><value>500000000</value></element>
 
       <element><name>REC_ROLLOVER_ENABLED</name><value>false</value></element>
@@ -52,7 +53,7 @@
       <domain_id>$(REC_MON_DOMAIN_ID)</domain_id>
       <status_publication_period>
         <sec>$(REC_STATUS_PERIOD_SEC)</sec>
-        <nanosec>0</nanosec>
+        <nanosec>$(REC_STATUS_PERIOD_NSEC)</nanosec>
       </status_publication_period>
       <statistics_sampling_period>
         <sec>0</sec>
@@ -102,7 +103,7 @@
       <domain_id>$(REC_MON_DOMAIN_ID)</domain_id>
       <status_publication_period>
         <sec>$(REC_STATUS_PERIOD_SEC)</sec>
-        <nanosec>0</nanosec>
+        <nanosec>$(REC_STATUS_PERIOD_NSEC)</nanosec>
       </status_publication_period>
       <statistics_sampling_period>
         <sec>0</sec>
@@ -152,7 +153,7 @@
       <domain_id>$(REC_MON_DOMAIN_ID)</domain_id>
       <status_publication_period>
         <sec>$(REC_STATUS_PERIOD_SEC)</sec>
-        <nanosec>0</nanosec>
+        <nanosec>$(REC_STATUS_PERIOD_NSEC)</nanosec>
       </status_publication_period>
       <statistics_sampling_period>
         <sec>0</sec>

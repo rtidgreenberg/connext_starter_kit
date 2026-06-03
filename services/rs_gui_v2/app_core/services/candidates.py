@@ -145,12 +145,39 @@ def build_service_candidate_selection(
         selected_candidate_id: str = "",
         display_label: str = "",
 ) -> ServiceCandidateSelection:
-    """Merge available evidence into a selector snapshot for one logical service."""
+    """Merge available evidence into a selector snapshot for one logical service.
+
+    Candidate Merge Heuristics
+    --------------------------
+    Evidence arrives from three independent sources, processed in this order:
+
+    1. Monitoring — primary authority for instance name, state, PID, and metrics.
+    2. Discovery — supplies participant identity and endpoint-level details.
+    3. GUI launch — enriches matching rows with ownership and local process state.
+
+    Two candidates are considered the same process if they share ANY identity
+    key: launch_id, host+PID pair, participant_key, or application_guid
+    (see ``_identity_keys``).
+
+    Field precedence when combining (``_combine_candidates``):
+    - PID, launch_id, config_paths: prefer the first non-None source.
+        - observed_state: local exit wins unconditionally; otherwise monitoring
+            lifecycle states win over generic monitoring/discovery/local process
+            states; otherwise the most-recent non-"unknown" value wins.
+    - alive: False if ANY evidence reports a locally-owned exit.
+    - confidence: max of all sources.
+    - metrics/details: dict-merge; later sources overwrite earlier keys.
+    - timestamps: first_seen_at = min, last_seen_at = max across all evidence.
+
+    If evidence has no overlapping identity keys but exactly one candidate for
+    the same service target exists, it is merged into that row
+    (``allow_unique_service_target`` fallback).
+
+    Final ordering: alive first, then descending confidence, descending
+    last_seen_at, then candidate_id for stability.
+    """
 
     candidates = []
-    for candidate in launch_candidates:
-        if _same_service_target(candidate.service, service):
-            candidates = _merge_candidate(candidates, candidate)
     for snapshot in monitoring_snapshots:
         if _same_service_target(snapshot.service, service):
             candidates = _merge_candidate(
@@ -164,6 +191,13 @@ def build_service_candidate_selection(
             display_label=display_label,
     ):
         candidates = _merge_candidate(candidates, candidate)
+    for candidate in launch_candidates:
+        if _same_service_target(candidate.service, service):
+            candidates = _merge_candidate(
+                candidates,
+                candidate,
+                allow_unique_service_target=True,
+            )
 
     ordered = tuple(sorted(
         candidates,
@@ -195,7 +229,10 @@ def _merge_candidate(
         target_indexes = [
             index for index, existing in enumerate(merged)
             if _same_service_target(existing.service, incoming.service)
-            and existing.source == ServiceCandidateSource.GUI_LAUNCH
+            and not (
+                existing.source == ServiceCandidateSource.GUI_LAUNCH
+                and incoming.source == ServiceCandidateSource.GUI_LAUNCH
+            )
         ]
         if len(target_indexes) == 1:
             index = target_indexes[0]
@@ -210,6 +247,8 @@ def _combine_candidates(
         incoming: ServiceProcessCandidate,
 ) -> ServiceProcessCandidate:
     latest = incoming if incoming.last_seen_at >= existing.last_seen_at else existing
+    local_exit = _local_exit_candidate(existing, incoming)
+    monitoring_state = _monitoring_state_candidate(existing, incoming)
     metrics = dict(existing.metrics)
     metrics.update(dict(incoming.metrics))
     details = dict(existing.details)
@@ -231,18 +270,57 @@ def _combine_candidates(
         application_guid=existing.application_guid or incoming.application_guid,
         config_paths=existing.config_paths or incoming.config_paths,
         observed_state=(
+            local_exit.observed_state
+            if local_exit is not None
+            else
+            monitoring_state.observed_state
+            if monitoring_state is not None
+            else
             latest.observed_state
             if latest.observed_state != "unknown"
             else existing.observed_state
         ),
         metrics=metrics,
         details=details,
-        alive=latest.alive,
+        alive=False if local_exit is not None else latest.alive,
         owns_process=existing.owns_process or incoming.owns_process,
         confidence=max(existing.confidence, incoming.confidence),
         first_seen_at=min(existing.first_seen_at, incoming.first_seen_at),
         last_seen_at=max(existing.last_seen_at, incoming.last_seen_at),
     )
+
+
+def _local_exit_candidate(
+        existing: ServiceProcessCandidate,
+        incoming: ServiceProcessCandidate,
+) -> Optional[ServiceProcessCandidate]:
+    for candidate in (incoming, existing):
+        if candidate.owns_process and not candidate.alive:
+            return candidate
+    return None
+
+
+def _monitoring_state_candidate(
+        existing: ServiceProcessCandidate,
+        incoming: ServiceProcessCandidate,
+) -> Optional[ServiceProcessCandidate]:
+    candidates = tuple(
+        candidate for candidate in (existing, incoming)
+        if candidate.source == ServiceCandidateSource.MONITORING
+        and _state_rank(candidate.observed_state) > 0
+    )
+    if not candidates:
+        return None
+    return max(candidates, key=lambda candidate: (_state_rank(candidate.observed_state), candidate.last_seen_at))
+
+
+def _state_rank(state: str) -> int:
+    normalized = str(state).strip().upper()
+    if normalized in {"ENABLED", "STARTED", "RUNNING", "PAUSED", "STOPPED", "DISABLED", "INVALID"}:
+        return 2
+    if normalized in {"CONFIGURED", "OBSERVED"}:
+        return 1
+    return 0
 
 
 def _identity_keys(candidate: ServiceProcessCandidate) -> set:

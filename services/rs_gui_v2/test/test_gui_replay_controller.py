@@ -28,7 +28,7 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
     async def test_start_pause_resume_and_stop_update_replay_state(self):
         controller = ReplayTabController.mock(clock=lambda: 10.0)
 
-        start = controller.handle_command(AppCommand(
+        start = await controller.handle_command(AppCommand(
             command_type="replay.start",
             payload={
                 "target_id": "launch-replay-main",
@@ -55,11 +55,11 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(running_view.writer_qos_profile, "MyLib::MyWriter")
         self.assertTrue(running_view.action_by_id["pause"].enabled)
 
-        pause = controller.handle_command(AppCommand("replay.pause", command_id="pause-replay", created_at=2.0))
+        pause = await controller.handle_command(AppCommand("replay.pause", command_id="pause-replay", created_at=2.0))
         paused_view = await controller.refresh_view()
-        resume = controller.handle_command(AppCommand("replay.resume", command_id="resume-replay", created_at=3.0))
+        resume = await controller.handle_command(AppCommand("replay.resume", command_id="resume-replay", created_at=3.0))
         resumed_view = await controller.refresh_view()
-        stop = controller.handle_command(AppCommand("replay.stop", command_id="stop-replay", created_at=4.0))
+        stop = await controller.handle_command(AppCommand("replay.stop", command_id="stop-replay", created_at=4.0))
         stopped_view = await controller.refresh_view()
 
         self.assertEqual(pause.payload["state"], "PAUSED")
@@ -72,7 +72,7 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
     async def test_select_target_updates_selected_row(self):
         controller = ReplayTabController.mock(clock=lambda: 10.0)
 
-        result = controller.handle_command(AppCommand(
+        result = await controller.handle_command(AppCommand(
             command_type="replay.select_target",
             payload={"target_id": "discovery:replay:archive"},
             command_id="select-replay",
@@ -102,7 +102,7 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "recording database path"):
-            controller.handle_command(AppCommand("replay.start"))
+            await controller.handle_command(AppCommand("replay.start"))
 
 
 if __name__ == "__main__":

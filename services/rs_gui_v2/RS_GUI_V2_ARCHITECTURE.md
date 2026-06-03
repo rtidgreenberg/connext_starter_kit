@@ -295,6 +295,39 @@ Reference example guidance:
   they are separate RTI service interfaces and should remain separately
   teachable.
 
+#### Candidate Merge Heuristics
+
+When the GUI presents a single row per service instance, it merges evidence from
+three independent sources (processed in order):
+
+1. **GUI launch** — the process was started by this GUI session; provides PID,
+   config paths, launch ID, and `owns_process=True`.
+2. **Monitoring** — an RTI monitoring config sample reports a matching service;
+   provides observed state, metrics, participant key, and application GUID.
+3. **Discovery** — DDS participant discovery finds matching endpoints; provides
+   hostname, participant name, and application GUID.
+
+Two candidates are treated as the **same process** if they share any identity
+key: `launch_id`, `host:pid` pair, `participant_key`, or `application_guid`.
+
+Field-level precedence when combining:
+
+| Field | Rule |
+|-------|------|
+| PID, launch_id, config_paths | First non-None value (usually GUI launch) |
+| observed_state | Local exit wins; else most-recent non-"unknown"; else existing |
+| alive | `False` if any evidence reports a locally-owned exit |
+| confidence | Maximum across all evidence sources |
+| metrics / details | Dict-merge; later sources overwrite earlier keys |
+| first_seen_at / last_seen_at | min / max across all evidence |
+
+If a monitoring candidate has no overlapping identity keys but shares the same
+service admin target as a single existing GUI_LAUNCH candidate, it is merged
+into that candidate as a fallback heuristic.
+
+Implementation: `app_core/services/candidates.py` —
+`build_service_candidate_selection`, `_merge_candidate`, `_combine_candidates`.
+
 ### 3. Discovery and Type Catalog Layer
 
 Owns the difference between a topic that was discovered and a topic the app can

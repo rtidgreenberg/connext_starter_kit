@@ -17,6 +17,7 @@ from ..connext_environment import (
     license_setup_message,
     validate_generated_types,
 )
+from ..debug_log import dbg, dbg_exc
 from .models import MonitoringSnapshot, MonitoringSnapshotKind, ServiceInstanceRef
 
 
@@ -88,6 +89,8 @@ class RtiServiceMonitoringClient:
         self._uses_real_connext = dds_module is None
         self._types: Optional[_MonitoringTypes] = None
         self._sessions: Dict[int, _MonitoringSession] = {}
+        self._pending_snapshots_by_service: Dict[str, List[MonitoringSnapshot]] = {}
+        self._service_by_guid_by_domain: Dict[int, Dict[str, ServiceInstanceRef]] = {}
 
     async def latest_snapshot(self, service: ServiceInstanceRef) -> Optional[MonitoringSnapshot]:
         snapshots = await self.take_available(service)
@@ -124,7 +127,7 @@ class RtiServiceMonitoringClient:
 
     def _take_available_sync(self, service: ServiceInstanceRef) -> List[MonitoringSnapshot]:
         session = self._session_for_domain(service.monitoring_domain_id)
-        snapshots: List[MonitoringSnapshot] = []
+        raw_count = 0
         for kind in (
                 MonitoringSnapshotKind.CONFIG,
                 MonitoringSnapshotKind.EVENT,
@@ -132,10 +135,98 @@ class RtiServiceMonitoringClient:
         ):
             reader = session.readers[kind]
             for sample in _reader_take(reader):
+                raw_count += 1
                 snapshot = normalize_monitoring_sample(service, kind, sample)
                 if snapshot is not None:
-                    snapshots.append(snapshot)
-        return snapshots
+                    routed = self._route_snapshot(service, snapshot)
+                    self._pending_snapshots_by_service.setdefault(routed.service.key, []).append(routed)
+        results = self._pending_snapshots_by_service.pop(service.key, [])
+        if not results:
+            # The monitoring data may have been routed under a different service
+            # name (e.g. the Recording Service reports its config name like
+            # "record_selected" while the GUI uses a generated control name).
+            # Collect any pending snapshots from the same monitoring domain.
+            domain_keys = [
+                key for key, pending in self._pending_snapshots_by_service.items()
+                if pending and pending[0].service.monitoring_domain_id == service.monitoring_domain_id
+                and pending[0].service.kind == service.kind
+            ]
+            for key in domain_keys:
+                results.extend(self._pending_snapshots_by_service.pop(key, []))
+        if raw_count or results:
+            dbg("monitoring", f"_take_available_sync service={service.key!r}",
+                raw_samples=raw_count, results=len(results),
+                pending_keys=list(self._pending_snapshots_by_service.keys()))
+        return results
+
+    def _route_snapshot(
+            self,
+            service: ServiceInstanceRef,
+            snapshot: MonitoringSnapshot,
+    ) -> MonitoringSnapshot:
+        """Route a monitoring snapshot using object_guid as unique service identifier.
+
+        The RTI monitoring distribution platform assigns a unique object_guid
+        (16-byte KeyedResource key) to each service resource instance.  We use
+        this GUID as the primary key for correlating CONFIG, EVENT, and PERIODIC
+        samples to the same logical service.
+
+        Routing strategy:
+        1. If the sample's object_guid (or application_guid) is already mapped
+           to a service ref, route there — this is the steady-state fast path.
+        2. For a new GUID in a CONFIG sample, use service_name to establish the
+           initial mapping (handles multi-service domains).
+        3. For a new GUID in EVENT/PERIODIC, attribute to the caller (handles
+           single-service domains where CONFIG may arrive later).
+        """
+        domain_id = service.monitoring_domain_id
+        service_by_guid = self._service_by_guid_by_domain.setdefault(domain_id, {})
+        details = dict(snapshot.details)
+
+        object_guid = str(details.get("object_guid", "")).strip()
+        application_guid = str(details.get("application_guid", "")).strip()
+
+        # 1. Existing GUID mapping — primary correlation via object_guid.
+        if object_guid and object_guid in service_by_guid:
+            target_service = service_by_guid[object_guid]
+        elif application_guid and application_guid in service_by_guid:
+            target_service = service_by_guid[application_guid]
+        elif snapshot.kind == MonitoringSnapshotKind.CONFIG:
+            # 2. New GUID from CONFIG — use service_name for initial mapping.
+            service_name = str(details.get("service_name", "")).strip()
+            if service_name and service_name != service.name:
+                # Name differs from caller — create a ref with the reported name
+                # so multi-service domains route each service's data separately.
+                target_service = ServiceInstanceRef(
+                    kind=service.kind,
+                    name=service_name,
+                    admin_domain_id=service.admin_domain_id,
+                    monitoring_domain_id=service.monitoring_domain_id,
+                    config_paths=service.config_paths,
+                )
+            else:
+                # Name matches caller (or not reported) — attribute to caller.
+                target_service = service
+        else:
+            # 3. New GUID from EVENT/PERIODIC — attribute to caller.
+            target_service = service
+
+        # Register object_guid as the primary unique identifier per service.
+        if object_guid:
+            service_by_guid[object_guid] = target_service
+        if application_guid:
+            service_by_guid[application_guid] = target_service
+
+        if target_service.key == snapshot.service.key:
+            return snapshot
+        return MonitoringSnapshot(
+            service=target_service,
+            kind=snapshot.kind,
+            state=snapshot.state,
+            metrics=snapshot.metrics,
+            details=snapshot.details,
+            observed_at=snapshot.observed_at,
+        )
 
     def _session_for_domain(self, domain_id: int) -> _MonitoringSession:
         domain_id = int(domain_id)
@@ -266,6 +357,7 @@ def _parse_config_sample(service: ServiceInstanceRef, data: Any) -> Optional[Mon
             "service_detected": True,
             "service_name": _to_text(_field(recording_service, "application_name", service.name)),
         }
+        details.update(_resource_guid_details(data))
         application_guid = _guid_to_text(_field(recording_service, "application_guid", None))
         if application_guid:
             details["application_guid"] = application_guid
@@ -319,15 +411,24 @@ def _parse_event_sample(service: ServiceInstanceRef, data: Any) -> Optional[Moni
     state_int = _to_int(state)
     state_name = getattr(state, "name", ENTITY_STATE_NAMES.get(state_int, str(state)))
     metrics = {}
+    details = {"resource_kind": resource_kind, "state_int": state_int}
+    details.update(_resource_guid_details(data))
     sqlite = _field(event, "builtin_sqlite", None)
     if sqlite is not None:
+        current_db_directory = _to_text(_field(sqlite, "current_db_directory", ""))
+        current_file = _to_text(_field(sqlite, "current_file", ""))
+        if current_db_directory:
+            details["current_db_directory"] = current_db_directory
+        if current_file:
+            details["db_file"] = current_file
+            details["current_file"] = _join_recording_file(current_db_directory, current_file)
         metrics["rollover_count"] = _to_int(_field(sqlite, "rollover_count", -1), -1)
     return MonitoringSnapshot(
         service=service,
         kind=MonitoringSnapshotKind.EVENT,
         state=state_name,
         metrics=metrics,
-        details={"resource_kind": resource_kind, "state_int": state_int},
+        details=details,
     )
 
 
@@ -344,6 +445,7 @@ def _parse_periodic_sample(service: ServiceInstanceRef, data: Any) -> Optional[M
         "db_file_size": -1,
     }
     details = {"resource_kind": resource_kind, "db_file": ""}
+    details.update(_resource_guid_details(data))
     process = _field(periodic, "process", None)
     host = _field(periodic, "host", None)
     if process is not None:
@@ -375,6 +477,29 @@ def _sample_data_and_info(sample: Any) -> Tuple[Any, Any]:
         return sample.data, sample.info
     except AttributeError:
         return sample
+
+
+def _resource_guid_details(data: Any) -> Dict[str, str]:
+    details: Dict[str, str] = {}
+    object_guid = _guid_to_text(_field(data, "object_guid", None))
+    if object_guid:
+        details["object_guid"] = object_guid
+    owner_guid = _guid_to_text(_field(data, "owner_guid", None))
+    if owner_guid:
+        details["owner_guid"] = owner_guid
+    return details
+
+
+def _join_recording_file(directory: str, filename: str) -> str:
+    if not filename:
+        return ""
+    if os.path.isabs(filename) or not directory:
+        return filename
+    normalized_directory = os.path.normpath(directory)
+    normalized_filename = os.path.normpath(filename)
+    if normalized_filename == normalized_directory or normalized_filename.startswith(normalized_directory + os.sep):
+        return filename
+    return os.path.join(directory, filename)
 
 
 def _reader_take(reader: Any) -> Iterable[Any]:

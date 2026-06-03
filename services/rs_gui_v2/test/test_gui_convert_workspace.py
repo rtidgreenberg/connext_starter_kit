@@ -125,5 +125,83 @@ class TestGuiWorkspaceControllerWithConvert(unittest.TestCase):
         self.assertEqual(new_convert._config.selected_preset_id, "sqlite_to_json")
 
 
+class TestGuiWorkspaceControllerSaveLoad(unittest.TestCase):
+    """Tests for workspace save/load/error paths."""
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _path(self, name="test_workspace.json"):
+        return os.path.join(self._tmp, name)
+
+    def test_save_persists_and_load_restores(self):
+        convert = ConvertTabController.mock()
+        ctrl = GuiWorkspaceController(convert_controller=convert, clock=lambda: 100.0)
+
+        ctrl.save(self._path(), workspace_name="SavedWS")
+
+        self.assertTrue(os.path.isfile(self._path()))
+        self.assertEqual(ctrl.last_path, self._path())
+        self.assertEqual(ctrl.last_document.name, "SavedWS")
+
+        new_convert = ConvertTabController.mock()
+        ctrl2 = GuiWorkspaceController(convert_controller=new_convert)
+        doc = ctrl2.load(self._path())
+
+        self.assertEqual(doc.name, "SavedWS")
+        self.assertEqual(ctrl2.last_path, self._path())
+
+    def test_save_raises_on_empty_path(self):
+        ctrl = GuiWorkspaceController()
+        with self.assertRaises(ValueError):
+            ctrl.save("")
+
+    def test_load_raises_on_empty_path(self):
+        ctrl = GuiWorkspaceController()
+        with self.assertRaises(ValueError):
+            ctrl.load("")
+
+    def test_load_raises_on_nonexistent_file(self):
+        ctrl = GuiWorkspaceController()
+        with self.assertRaises((FileNotFoundError, OSError)):
+            ctrl.load("/nonexistent/path.json")
+
+    def test_handle_command_save(self):
+        from app_core import AppCommand, CommandStatus
+        convert = ConvertTabController.mock()
+        ctrl = GuiWorkspaceController(convert_controller=convert, clock=lambda: 200.0)
+        cmd = AppCommand(command_type="workspace.save", payload={"path": self._path(), "workspace_name": "CmdSave"})
+
+        result = ctrl.handle_command(cmd, workspace_name="Fallback")
+
+        self.assertEqual(result.status, CommandStatus.ACKNOWLEDGED)
+        self.assertIn("CmdSave", result.message)
+        self.assertTrue(os.path.isfile(self._path()))
+
+    def test_handle_command_load(self):
+        from app_core import AppCommand, CommandStatus
+        convert = ConvertTabController.mock()
+        ctrl = GuiWorkspaceController(convert_controller=convert, clock=lambda: 300.0)
+        ctrl.save(self._path(), workspace_name="LoadMe")
+
+        cmd = AppCommand(command_type="workspace.load", payload={"path": self._path()})
+        result = ctrl.handle_command(cmd)
+
+        self.assertEqual(result.status, CommandStatus.ACKNOWLEDGED)
+        self.assertIn("LoadMe", result.message)
+
+    def test_handle_command_unknown_type_raises(self):
+        from app_core import AppCommand
+        ctrl = GuiWorkspaceController()
+        cmd = AppCommand(command_type="workspace.delete", payload={})
+        with self.assertRaises(ValueError):
+            ctrl.handle_command(cmd)
+
+
 if __name__ == "__main__":
     unittest.main()

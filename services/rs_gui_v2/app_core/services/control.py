@@ -255,7 +255,7 @@ class ServiceCandidateSelection:
     def selected_candidate(self) -> Optional[ServiceProcessCandidate]:
         if self.selected_candidate_id:
             for candidate in self.candidates:
-                if candidate.candidate_id == self.selected_candidate_id:
+                if candidate.candidate_id == self.selected_candidate_id or candidate.launch_id == self.selected_candidate_id:
                     return candidate
         for candidate in self.candidates:
             if candidate.alive:
@@ -263,11 +263,16 @@ class ServiceCandidateSelection:
         return self.candidates[0] if self.candidates else None
 
     def select(self, candidate_id: str) -> "ServiceCandidateSelection":
-        if not any(candidate.candidate_id == candidate_id for candidate in self.candidates):
+        selected_id = ""
+        for candidate in self.candidates:
+            if candidate.candidate_id == candidate_id or candidate.launch_id == candidate_id:
+                selected_id = candidate.candidate_id
+                break
+        if not selected_id:
             raise ValueError(f"Unknown service candidate: {candidate_id}")
         return ServiceCandidateSelection(
             candidates=self.candidates,
-            selected_candidate_id=candidate_id,
+            selected_candidate_id=selected_id,
         )
 
     def candidates_for_admin_target(self, service: ServiceInstanceRef) -> Tuple[ServiceProcessCandidate, ...]:

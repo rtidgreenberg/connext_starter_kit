@@ -209,6 +209,12 @@ def build_gui_shell_assembly(
         config=RecordTabControllerConfig(
             display_label=config.recording_label,
             local_hostnames=local_hostnames,
+            launch_label=config.recording_label,
+            launch_config_paths=config.recording_config_paths,
+            launch_config_name=config.recording_config_name,
+            launch_admin_domain_id=config.admin_domain_id,
+            launch_monitoring_domain_id=config.monitoring_domain_id,
+            launch_data_domain_id=config.topics_domain_id,
             launch_working_dir=config.recording_working_dir or _repo_root(),
         ),
     )

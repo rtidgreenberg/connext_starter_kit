@@ -20,74 +20,7 @@ from gui import (
     build_gui_shell_assembly,
 )
 from rs_gui_v2_app import main
-
-
-class FakeContext:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-
-class FakeDpg:
-    def __init__(self):
-        self.calls = []
-        self.context_created = False
-        self.context_destroyed = False
-
-    def create_context(self):
-        self.context_created = True
-        self.calls.append(("create_context", (), {}))
-
-    def destroy_context(self):
-        self.context_destroyed = True
-        self.calls.append(("destroy_context", (), {}))
-
-    def window(self, *args, **kwargs):
-        self.calls.append(("window", args, kwargs))
-        return FakeContext()
-
-    def tab_bar(self, *args, **kwargs):
-        self.calls.append(("tab_bar", args, kwargs))
-        return FakeContext()
-
-    def tab(self, *args, **kwargs):
-        self.calls.append(("tab", args, kwargs))
-        return FakeContext()
-
-    def group(self, *args, **kwargs):
-        self.calls.append(("group", args, kwargs))
-        return FakeContext()
-
-    def table(self, *args, **kwargs):
-        self.calls.append(("table", args, kwargs))
-        return FakeContext()
-
-    def table_row(self, *args, **kwargs):
-        self.calls.append(("table_row", args, kwargs))
-        return FakeContext()
-
-    def add_text(self, *args, **kwargs):
-        self.calls.append(("add_text", args, kwargs))
-
-    def add_combo(self, *args, **kwargs):
-        self.calls.append(("add_combo", args, kwargs))
-
-    def add_button(self, *args, **kwargs):
-        self.calls.append(("add_button", args, kwargs))
-
-    def add_input_text(self, *args, **kwargs):
-        self.calls.append(("add_input_text", args, kwargs))
-
-    def add_checkbox(self, *args, **kwargs):
-        self.calls.append(("add_checkbox", args, kwargs))
-
-    def add_separator(self, *args, **kwargs):
-        self.calls.append(("add_separator", args, kwargs))
-
-    def add_table_column(self, *args, **kwargs):
-        self.calls.append(("add_table_column", args, kwargs))
+from fakes import FakeDpg
 
 
 class TestGuiShellFactory(unittest.TestCase):
@@ -107,7 +40,7 @@ class TestGuiShellFactory(unittest.TestCase):
         self.assertIsNotNone(assembly.discovery_client)
         self.assertIn("Factory Workspace", view.title)
         self.assertTrue(view.title.endswith("*"))
-        self.assertEqual(view.record_tab.selected_candidate_id, "launch-recording-main")
+        self.assertTrue(view.record_tab.selected_candidate_id.startswith("monitoring:"))
         self.assertEqual(view.record_tab.selected_candidate.control_name, "recording_service_8f4f2a1c")
         self.assertEqual(view.replay_tab.selected_target.control_name, "replay_service_2d91c4a0")
         self.assertIn(("memory_mb", "180"), view.record_tab.monitoring_summary)

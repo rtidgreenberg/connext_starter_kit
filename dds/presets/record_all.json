@@ -25,7 +25,8 @@
     "REC_DP_QOS": "DPLibrary::DefaultParticipant",
     "REC_SUB_QOS": "BuiltinQosLib::Generic.Common",
     "REC_DR_QOS": "BuiltinQosLib::Generic.Common",
-    "REC_STATUS_PERIOD_SEC": 1,
+    "REC_STATUS_PERIOD_SEC": 0,
+    "REC_STATUS_PERIOD_NSEC": 500000000,
     "REC_STATS_PERIOD_NSEC": 500000000,
     "REC_ROLLOVER_ENABLED": false,
     "REC_ROLLOVER_MB": 1024

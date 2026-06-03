@@ -171,7 +171,7 @@ class TestTopicsTabController(unittest.IsolatedAsyncioTestCase):
             clock=lambda: 80.0,
         )
 
-        subscribe = controller.handle_command(AppCommand(
+        subscribe = await controller.handle_command(AppCommand(
             command_type="topics.subscribe",
             payload={
                 "domain_id": 7,
@@ -189,7 +189,7 @@ class TestTopicsTabController(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(subscribed.action_by_id["unsubscribe"].enabled)
         self.assertTrue(subscribed.fields[0].selected)
 
-        unsubscribe = controller.handle_command(AppCommand(
+        unsubscribe = await controller.handle_command(AppCommand(
             command_type="topics.unsubscribe",
             payload={
                 "domain_id": 7,
@@ -216,7 +216,7 @@ class TestTopicsTabController(unittest.IsolatedAsyncioTestCase):
         )
         await controller.refresh_view()
 
-        controller.handle_command(AppCommand(
+        await controller.handle_command(AppCommand(
             command_type="topics.unsubscribe",
             payload={
                 "domain_id": 7,
@@ -242,9 +242,9 @@ class TestTopicsTabController(unittest.IsolatedAsyncioTestCase):
             config=TopicsTabControllerConfig(domain_id=7, selected_topic_key="7:RobotTelemetry"),
         )
 
-        controller.handle_command(AppCommand("topics.set_search", payload={"search_text": "robot"}))
-        controller.handle_command(AppCommand("topics.set_include_internal", payload={"include_internal": True}))
-        controller.handle_command(AppCommand(
+        await controller.handle_command(AppCommand("topics.set_search", payload={"search_text": "robot"}))
+        await controller.handle_command(AppCommand("topics.set_include_internal", payload={"include_internal": True}))
+        await controller.handle_command(AppCommand(
             "topics.set_field_selected",
             payload={
                 "domain_id": 7,
@@ -254,7 +254,7 @@ class TestTopicsTabController(unittest.IsolatedAsyncioTestCase):
                 "selected": True,
             },
         ))
-        controller.handle_command(AppCommand(
+        await controller.handle_command(AppCommand(
             "topics.set_plot_field_selected",
             payload={
                 "domain_id": 7,

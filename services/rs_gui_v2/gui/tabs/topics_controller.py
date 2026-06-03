@@ -164,7 +164,7 @@ class TopicsTabController:
             for request in subscriptions
         }
 
-    def handle_command(self, command: AppCommand) -> CommandResult:
+    async def handle_command(self, command: AppCommand) -> CommandResult:
         """Apply a queued Topics command to the controller state."""
 
         payload = dict(command.payload)

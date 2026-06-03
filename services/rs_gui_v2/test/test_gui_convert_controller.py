@@ -12,8 +12,26 @@ if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
 from app_core import CommandStatus
-from gui.tabs.convert_controller import ConvertTabController, ConvertTabControllerConfig
-from gui.tabs.convert_tab import ConvertPresetView, build_mock_convert_tab_view_model
+from gui.tabs.convert_controller import ConvertJobSubmission, ConvertTabController, ConvertTabControllerConfig
+from gui.tabs.convert_tab import ConvertJobRow, ConvertPresetView, build_mock_convert_tab_view_model
+
+
+class FakeTerminatingProcess:
+    def __init__(self):
+        self.returncode = None
+        self.terminate_calls = 0
+        self.kill_calls = 0
+
+    def poll(self):
+        return self.returncode
+
+    def terminate(self):
+        self.terminate_calls += 1
+        self.returncode = -15
+
+    def kill(self):
+        self.kill_calls += 1
+        self.returncode = -9
 
 
 class TestConvertTabController(unittest.IsolatedAsyncioTestCase):
@@ -80,7 +98,6 @@ class TestConvertTabController(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancel_conversion_moves_job_to_cancel_requested(self):
         job_id = "convert-1234"
-        from gui.tabs.convert_tab import ConvertJobRow
         from app_core import AppCommand
 
         job = ConvertJobRow(
@@ -109,9 +126,42 @@ class TestConvertTabController(unittest.IsolatedAsyncioTestCase):
         updated_job = controller._jobs[0]
         self.assertEqual(updated_job.state, "cancel_requested")
 
+    async def test_terminate_gui_launched_jobs_and_wait_verifies_exit(self):
+        job_id = "convert-1234"
+        process = FakeTerminatingProcess()
+        job = ConvertJobRow(
+            job_id=job_id,
+            preset_id="json",
+            input_path="services/input",
+            output_path="services/output",
+            output_format="JSON_SQLITE",
+            state="running",
+            progress="42%",
+        )
+        controller = ConvertTabController()
+        controller._jobs = (job,)
+        controller._submissions[job_id] = ConvertJobSubmission(
+            job_id=job_id,
+            submitted_at=0.0,
+            process_pid=4321,
+        )
+        controller._processes[4321] = process
+
+        results = await controller.terminate_gui_launched_jobs_and_wait(
+            (job_id,),
+            timeout_sec=0.0,
+            poll_sec=0.01,
+        )
+
+        self.assertEqual(process.terminate_calls, 1)
+        self.assertEqual(process.kill_calls, 0)
+        self.assertEqual(results[0]["local_termination"], "requested")
+        self.assertTrue(results[0]["process_exit_observed"])
+        self.assertNotIn(4321, controller._processes)
+        self.assertEqual(controller._job_by_id(job_id).state, "terminated")
+
     async def test_open_output_requires_completed_job(self):
         job_id = "convert-1234"
-        from gui.tabs.convert_tab import ConvertJobRow
         from app_core import AppCommand
 
         job = ConvertJobRow(
@@ -137,7 +187,6 @@ class TestConvertTabController(unittest.IsolatedAsyncioTestCase):
 
     async def test_open_output_succeeds_for_completed_job(self):
         job_id = "convert-1234"
-        from gui.tabs.convert_tab import ConvertJobRow
         from app_core import AppCommand
 
         job = ConvertJobRow(

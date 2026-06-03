@@ -1,6 +1,7 @@
 """Record tab view models and command factories for rs_gui_v2."""
 
 from dataclasses import dataclass, field
+import os
 import shlex
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
@@ -35,6 +36,7 @@ class RecordCandidateRow:
     state: str
     age: str
     confidence: str
+    current_file: str = ""
     selected: bool = False
     conflict: bool = False
     owned: bool = False
@@ -324,6 +326,7 @@ def _candidate_row(
         pid="" if candidate.pid is None else str(candidate.pid),
         hostname=candidate.hostname,
         state=candidate.observed_state,
+        current_file=_current_file(candidate.details),
         age=_age_text(now, candidate.last_seen_at),
         confidence=f"{candidate.confidence:.2f}",
         selected=candidate.candidate_id == selected_id,
@@ -367,13 +370,35 @@ def _monitoring_summary(selected: Optional[ServiceProcessCandidate]) -> Tuple[Tu
     if selected is None:
         return ()
     rows = []
-    for key in ("cpu_percent", "memory_mb", "throughput"):
+    current_file = _current_file(selected.details)
+    if current_file:
+        rows.append(("current_file", current_file))
+    for key in ("db_file_size", "rollover_count", "cpu_percent", "memory_mb", "memory_kb", "throughput"):
         if key in selected.metrics:
             rows.append((key, str(selected.metrics[key])))
-    for key in ("sessions", "topics", "last_event", "message", "output_path"):
+    for key in ("current_db_directory", "db_directory", "sessions", "topics", "last_event", "message", "output_path"):
         if key in selected.details:
             rows.append((key, str(selected.details[key])))
     return tuple(rows)
+
+
+def _current_file(details: Mapping[str, Any]) -> str:
+    current_file = str(details.get("current_file", "")).strip()
+    if current_file:
+        return current_file
+    db_file = str(details.get("db_file", "")).strip()
+    if not db_file:
+        return ""
+    db_directory = str(
+        details.get("current_db_directory", "") or details.get("db_directory", "")
+    ).strip()
+    if os.path.isabs(db_file) or not db_directory:
+        return db_file
+    normalized_directory = os.path.normpath(db_directory)
+    normalized_file = os.path.normpath(db_file)
+    if normalized_file == normalized_directory or normalized_file.startswith(normalized_directory + os.sep):
+        return db_file
+    return os.path.join(db_directory, db_file)
 
 
 def _readiness_text(readiness: Optional[AdminReadiness]) -> str:

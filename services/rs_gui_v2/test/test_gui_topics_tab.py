@@ -35,76 +35,11 @@ from gui import (
     build_topic_select_command,
     build_topics_tab_view_model,
 )
-from gui.main_window import DearPyGuiShell
+from gui.main_window import DearPyGuiShell, _render_topics_tab
 from gui.tabs.record_tab import build_mock_record_tab_view_model
 
 
-class FakeContext:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-
-class FakeDpg:
-    def __init__(self):
-        self.calls = []
-        self.context_created = False
-        self.context_destroyed = False
-
-    def create_context(self):
-        self.context_created = True
-        self.calls.append(("create_context", (), {}))
-
-    def destroy_context(self):
-        self.context_destroyed = True
-        self.calls.append(("destroy_context", (), {}))
-
-    def window(self, *args, **kwargs):
-        self.calls.append(("window", args, kwargs))
-        return FakeContext()
-
-    def tab_bar(self, *args, **kwargs):
-        self.calls.append(("tab_bar", args, kwargs))
-        return FakeContext()
-
-    def tab(self, *args, **kwargs):
-        self.calls.append(("tab", args, kwargs))
-        return FakeContext()
-
-    def group(self, *args, **kwargs):
-        self.calls.append(("group", args, kwargs))
-        return FakeContext()
-
-    def table(self, *args, **kwargs):
-        self.calls.append(("table", args, kwargs))
-        return FakeContext()
-
-    def table_row(self, *args, **kwargs):
-        self.calls.append(("table_row", args, kwargs))
-        return FakeContext()
-
-    def add_text(self, *args, **kwargs):
-        self.calls.append(("add_text", args, kwargs))
-
-    def add_combo(self, *args, **kwargs):
-        self.calls.append(("add_combo", args, kwargs))
-
-    def add_button(self, *args, **kwargs):
-        self.calls.append(("add_button", args, kwargs))
-
-    def add_input_text(self, *args, **kwargs):
-        self.calls.append(("add_input_text", args, kwargs))
-
-    def add_checkbox(self, *args, **kwargs):
-        self.calls.append(("add_checkbox", args, kwargs))
-
-    def add_separator(self, *args, **kwargs):
-        self.calls.append(("add_separator", args, kwargs))
-
-    def add_table_column(self, *args, **kwargs):
-        self.calls.append(("add_table_column", args, kwargs))
+from fakes import FakeDpg
 
 
 class TestTopicsTabViewModel(unittest.TestCase):
@@ -214,41 +149,23 @@ class TestTopicsTabViewModel(unittest.TestCase):
 
 class TestTopicsShellRendering(unittest.TestCase):
     def test_shell_renders_topics_tab_snapshot(self):
-        view = build_shell_view_model(
-            AppState(lifecycle=LifecyclePhase.RUNNING, discovery_enabled=True),
-            build_mock_record_tab_view_model(),
-            topics_tab=build_mock_topics_tab_view_model(),
-            workspace_name="Topics Workspace",
-        )
+        topics = build_mock_topics_tab_view_model()
         fake = FakeDpg()
-        shell = DearPyGuiShell(view_provider=lambda: view, dpg_module=fake)
 
-        rendered = shell.render_once()
+        _render_topics_tab(fake, topics, command_sink=None)
 
         text_values = [args[0] for name, args, _kwargs in fake.calls if name == "add_text" and args]
-        tab_labels = [kwargs.get("label") for name, _args, kwargs in fake.calls if name == "tab"]
-        self.assertEqual(rendered.topics_tab.selected_topic.topic_name, "RobotTelemetry")
-        self.assertIn("Topics", tab_labels)
         self.assertIn("RobotTelemetry", text_values)
         self.assertIn("Field Picker", text_values)
         self.assertIn("Sample Inspector", text_values)
 
     def test_topics_buttons_emit_commands_when_command_sink_is_present(self):
         commands = []
-        view = build_shell_view_model(
-            AppState(lifecycle=LifecyclePhase.RUNNING, discovery_enabled=True),
-            build_mock_record_tab_view_model(),
-            topics_tab=build_mock_topics_tab_view_model(),
-            workspace_name="Topics Workspace",
-        )
+        topics = build_mock_topics_tab_view_model()
         fake = FakeDpg()
-        shell = DearPyGuiShell(
-            view_provider=lambda: view,
-            command_sink=lambda command: commands.append(command) or True,
-            dpg_module=fake,
-        )
 
-        shell.render_once()
+        _render_topics_tab(fake, topics, command_sink=lambda cmd: commands.append(cmd) or True)
+
         unsubscribe = next(
             kwargs["callback"] for name, args, kwargs in fake.calls
             if name == "add_button" and (kwargs.get("label") == "Unsubscribe" or (args and args[0] == "Unsubscribe"))

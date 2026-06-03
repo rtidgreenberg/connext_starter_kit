@@ -107,13 +107,25 @@ def metric(mean):
     return SimpleNamespace(publication_period_metrics=SimpleNamespace(mean=mean))
 
 
-def sample_for(resource_kind, branch_name, branch_data, valid=True):
+def sample_for(
+        resource_kind,
+        branch_name,
+        branch_data,
+        valid=True,
+        object_guid=None,
+        owner_guid=None,
+):
     union = SimpleNamespace(
         discriminator=resource_kind,
         value=object(),
         **{branch_name: branch_data},
     )
-    return FakeSample(SimpleNamespace(value=union), valid=valid)
+    data = SimpleNamespace(value=union)
+    if object_guid is not None:
+        data.object_guid = SimpleNamespace(value=object_guid)
+    if owner_guid is not None:
+        data.owner_guid = SimpleNamespace(value=owner_guid)
+    return FakeSample(data, valid=valid)
 
 
 class TestMonitoringSampleNormalization(unittest.TestCase):
@@ -157,7 +169,11 @@ class TestMonitoringSampleNormalization(unittest.TestCase):
     def test_event_sample_normalizes_state_and_rollover(self):
         branch = SimpleNamespace(
             state=SimpleNamespace(value=6, name="PAUSED"),
-            builtin_sqlite=SimpleNamespace(rollover_count=2),
+            builtin_sqlite=SimpleNamespace(
+                current_db_directory="/tmp/recordings/run_1",
+                current_file="data_0.db",
+                rollover_count=2,
+            ),
         )
         snapshot = normalize_monitoring_sample(
             self.service,
@@ -168,6 +184,28 @@ class TestMonitoringSampleNormalization(unittest.TestCase):
         self.assertEqual(snapshot.state, "PAUSED")
         self.assertEqual(snapshot.details["state_int"], 6)
         self.assertEqual(snapshot.metrics["rollover_count"], 2)
+        self.assertEqual(snapshot.details["current_db_directory"], "/tmp/recordings/run_1")
+        self.assertEqual(snapshot.details["db_file"], "data_0.db")
+        self.assertEqual(snapshot.details["current_file"], "/tmp/recordings/run_1/data_0.db")
+
+    def test_event_sample_keeps_directory_qualified_relative_current_file(self):
+        branch = SimpleNamespace(
+            state=SimpleNamespace(value=5, name="RUNNING"),
+            builtin_sqlite=SimpleNamespace(
+                current_db_directory="log_dir/recording_1780055124",
+                current_file="log_dir/recording_1780055124/data_0.db",
+                rollover_count=0,
+            ),
+        )
+        snapshot = normalize_monitoring_sample(
+            self.service,
+            MonitoringSnapshotKind.EVENT,
+            sample_for(RESOURCE_RECORDING_SERVICE, "recording_service", branch),
+        )
+
+        self.assertEqual(snapshot.state, "RUNNING")
+        self.assertEqual(snapshot.details["db_file"], "log_dir/recording_1780055124/data_0.db")
+        self.assertEqual(snapshot.details["current_file"], "log_dir/recording_1780055124/data_0.db")
 
     def test_periodic_sample_normalizes_metrics(self):
         branch = SimpleNamespace(
@@ -255,6 +293,65 @@ class TestRtiServiceMonitoringClient(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(snapshot.kind, MonitoringSnapshotKind.EVENT)
         self.assertEqual(snapshot.state, "RUNNING")
+
+    async def test_take_available_routes_drained_samples_to_matching_services(self):
+        service_a = ServiceInstanceRef(ServiceKind.RECORDING, "recording_a", monitoring_domain_id=54)
+        service_b = ServiceInstanceRef(ServiceKind.RECORDING, "recording_b", monitoring_domain_id=54)
+        guid_a = [1] * 16
+        guid_b = [2] * 16
+        config_a = SimpleNamespace(
+            application_name="recording_a",
+            application_guid=SimpleNamespace(value=guid_a),
+        )
+        config_b = SimpleNamespace(
+            application_name="recording_b",
+            application_guid=SimpleNamespace(value=guid_b),
+        )
+        periodic_a = SimpleNamespace(
+            builtin_sqlite=SimpleNamespace(current_file="a_0.db", current_file_size=10),
+        )
+        periodic_b = SimpleNamespace(
+            builtin_sqlite=SimpleNamespace(current_file="b_0.db", current_file_size=20),
+        )
+        FakeDataReader.samples_by_topic = {
+            MONITORING_CONFIG_TOPIC: [
+                sample_for(
+                    RESOURCE_RECORDING_SERVICE,
+                    "recording_service",
+                    config_a,
+                    object_guid=guid_a,
+                ),
+                sample_for(
+                    RESOURCE_RECORDING_SERVICE,
+                    "recording_service",
+                    config_b,
+                    object_guid=guid_b,
+                ),
+            ],
+            MONITORING_PERIODIC_TOPIC: [
+                sample_for(
+                    RESOURCE_RECORDING_SERVICE,
+                    "recording_service",
+                    periodic_a,
+                    object_guid=guid_a,
+                ),
+                sample_for(
+                    RESOURCE_RECORDING_SERVICE,
+                    "recording_service",
+                    periodic_b,
+                    object_guid=guid_b,
+                ),
+            ],
+        }
+        client = RtiServiceMonitoringClient(self.config, FakeDdsModule)
+
+        snapshots_a = await client.take_available(service_a)
+        snapshots_b = await client.take_available(service_b)
+
+        self.assertEqual([snapshot.service.name for snapshot in snapshots_a], ["recording_a", "recording_a"])
+        self.assertEqual([snapshot.service.name for snapshot in snapshots_b], ["recording_b", "recording_b"])
+        self.assertEqual(snapshots_a[-1].details["db_file"], "a_0.db")
+        self.assertEqual(snapshots_b[-1].details["db_file"], "b_0.db")
 
     async def test_snapshots_yields_available_snapshots_in_reader_order(self):
         config_branch = SimpleNamespace(application_name="deploy")

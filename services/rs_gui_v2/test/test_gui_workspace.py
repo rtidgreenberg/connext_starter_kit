@@ -183,9 +183,9 @@ def _plots_controller():
 
 
 async def _seed_topic_intent(topics):
-    topics.handle_command(AppCommand("topics.set_search", payload={"search_text": "robot"}))
-    topics.handle_command(AppCommand("topics.set_include_internal", payload={"include_internal": True}))
-    topics.handle_command(AppCommand(
+    await topics.handle_command(AppCommand("topics.set_search", payload={"search_text": "robot"}))
+    await topics.handle_command(AppCommand("topics.set_include_internal", payload={"include_internal": True}))
+    await topics.handle_command(AppCommand(
         "topics.set_field_selected",
         payload={
             "domain_id": 7,
@@ -195,7 +195,7 @@ async def _seed_topic_intent(topics):
             "selected": True,
         },
     ))
-    topics.handle_command(AppCommand(
+    await topics.handle_command(AppCommand(
         "topics.set_plot_field_selected",
         payload={
             "domain_id": 7,
@@ -205,7 +205,7 @@ async def _seed_topic_intent(topics):
             "selected": True,
         },
     ))
-    topics.handle_command(AppCommand(
+    await topics.handle_command(AppCommand(
         "topics.subscribe",
         payload={
             "domain_id": 7,

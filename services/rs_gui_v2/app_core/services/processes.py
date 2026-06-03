@@ -197,6 +197,10 @@ class ServiceProcessTerminationOutcome:
             object.__setattr__(self, "pid", int(self.pid))
 
     @property
+    def ok(self) -> bool:
+        return self.requested
+
+    @property
     def requested(self) -> bool:
         return self.status == ServiceProcessTerminationStatus.REQUESTED
 
@@ -223,6 +227,9 @@ class ServiceProcessHandle(Protocol):
 
     def terminate(self) -> None:
         """Request normal local process termination."""
+
+    def kill(self) -> None:
+        """Request forceful local process termination."""
 
 
 class ServiceProcessSpawner(Protocol):
@@ -290,6 +297,12 @@ class _SubprocessServiceProcessHandle:
             os.killpg(os.getpgid(self._handle.pid), signal.SIGTERM)
         except Exception:
             self._handle.terminate()
+
+    def kill(self) -> None:
+        try:
+            os.killpg(os.getpgid(self._handle.pid), signal.SIGKILL)
+        except Exception:
+            self._handle.kill()
 
     def _close_output(self) -> None:
         if not self._output_file.closed:
@@ -508,6 +521,82 @@ class ServiceProcessManager:
             launch_id=launch_id,
             pid=selected.pid,
             message="local termination requested",
+            output_path=output_path,
+            output_tail=output_tail,
+            requested_at=self._clock(),
+        )
+
+    def request_local_kill(
+            self,
+            selection: ServiceCandidateSelection,
+            candidate_id: str = "",
+    ) -> ServiceProcessTerminationOutcome:
+        selected = selection.selected_candidate
+        if candidate_id:
+            selected = selection.select(candidate_id).selected_candidate
+        if selected is None:
+            return ServiceProcessTerminationOutcome(
+                ServiceProcessTerminationStatus.NOT_ALLOWED,
+                message="no candidate selected",
+            )
+
+        launch_id = selected.launch_id or selected.candidate_id
+        handle = self._handles.get(launch_id)
+        output_path = str(selected.details.get("output_path", ""))
+        output_tail = str(selected.details.get("output_tail", ""))
+        if handle is None:
+            return ServiceProcessTerminationOutcome(
+                ServiceProcessTerminationStatus.NOT_FOUND,
+                candidate_id=selected.candidate_id,
+                launch_id=launch_id,
+                pid=selected.pid,
+                message="local process handle not found",
+                output_path=output_path,
+                output_tail=output_tail,
+                requested_at=self._clock(),
+            )
+        returncode = handle.poll()
+        if returncode is not None:
+            launch = self._launches[launch_id]
+            output_path = output_path or launch.output_path
+            output_tail = output_tail or _read_tail(output_path)
+            self._launches[launch_id] = replace(
+                launch,
+                state=ServiceProcessLaunchState.EXITED,
+                returncode=returncode,
+                updated_at=self._clock(),
+                message=f"process exited with return code {returncode}",
+                output_tail=output_tail,
+            )
+            return ServiceProcessTerminationOutcome(
+                ServiceProcessTerminationStatus.ALREADY_EXITED,
+                candidate_id=selected.candidate_id,
+                launch_id=launch_id,
+                pid=selected.pid,
+                message=f"process already exited with return code {returncode}",
+                output_path=output_path,
+                output_tail=output_tail,
+                requested_at=self._clock(),
+            )
+
+        kill = getattr(handle, "kill", None)
+        if callable(kill):
+            kill()
+        else:
+            handle.terminate()
+        self._launches[launch_id] = replace(
+            self._launches[launch_id],
+            state=ServiceProcessLaunchState.TERMINATE_REQUESTED,
+            termination_requested=True,
+            updated_at=self._clock(),
+            message="local kill requested after failed termination",
+        )
+        return ServiceProcessTerminationOutcome(
+            ServiceProcessTerminationStatus.REQUESTED,
+            candidate_id=selected.candidate_id,
+            launch_id=launch_id,
+            pid=selected.pid,
+            message="local kill requested",
             output_path=output_path,
             output_tail=output_tail,
             requested_at=self._clock(),

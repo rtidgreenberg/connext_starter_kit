@@ -2,9 +2,10 @@
 
 import asyncio
 from dataclasses import dataclass, field, replace
-from typing import Any, Optional, Tuple
+from typing import Any, Mapping, Optional, Tuple
 
 from app_core import AppCommand, AppEvent, AppRuntime
+from app_core.debug_log import dbg, dbg_exc
 from app_core.services import ServiceProcessLaunch, ServiceProcessLaunchState
 
 from .scheduler import UiFrameScheduler
@@ -27,11 +28,15 @@ class GuiShellSessionConfig:
     unsaved: bool = False
     command_drain_limit: Optional[int] = 20
     local_hostnames: Tuple[str, ...] = field(default_factory=tuple)
+    close_shutdown_exit_timeout_sec: float = 3.0
+    close_shutdown_poll_sec: float = 0.1
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "local_hostnames", tuple(str(name) for name in self.local_hostnames))
         if self.command_drain_limit is not None:
             object.__setattr__(self, "command_drain_limit", int(self.command_drain_limit))
+        object.__setattr__(self, "close_shutdown_exit_timeout_sec", max(0.0, float(self.close_shutdown_exit_timeout_sec)))
+        object.__setattr__(self, "close_shutdown_poll_sec", max(0.01, float(self.close_shutdown_poll_sec)))
 
 
 class GuiShellSession:
@@ -127,7 +132,11 @@ class GuiShellSession:
 
         if process_commands:
             await self.process_pending_commands(limit=self._config.command_drain_limit)
+        dbg("session", "refresh_view start")
         record_view = await self._record_controller.refresh_view()
+        dbg("session", "refresh_view done",
+            candidates=len(record_view.candidates),
+            state=record_view.observed_state)
         self._publish_record_process_state_events()
         self._publish_record_monitoring_events()
         convert_view = None
@@ -230,11 +239,11 @@ class GuiShellSession:
         if command.command_type.startswith("topics."):
             if self._topics_controller is None:
                 raise ValueError(f"Unsupported GUI command type: {command.command_type}")
-            return self._topics_controller.handle_command(command)
+            return await self._topics_controller.handle_command(command)
         if command.command_type.startswith("replay."):
             if self._replay_controller is None:
                 raise ValueError(f"Unsupported GUI command type: {command.command_type}")
-            return self._replay_controller.handle_command(command)
+            return await self._replay_controller.handle_command(command)
         if command.command_type.startswith("workspace."):
             result = self._workspace_controller.handle_command(
                 command,
@@ -285,11 +294,6 @@ class GuiShellSession:
 
         normalized_action = str(action).strip()
         selected = tuple(str(item_id) for item_id in item_ids)
-        if normalized_action == "shutdown_gui_launched":
-            await self._shutdown_gui_launched_items(selected)
-        elif normalized_action != "leave_running":
-            raise ValueError(f"Unsupported close action: {action}")
-
         self._runtime.publish_event(AppEvent(
             event_type="gui.close_requested",
             source="gui",
@@ -300,19 +304,98 @@ class GuiShellSession:
                 "message": f"Close requested: {normalized_action}",
             },
         ))
+        cleanup_results = ()
+        if normalized_action == "shutdown_gui_launched":
+            print("[INFO] SHUTDOWN_START: Shutting down GUI-spawned local processes", flush=True)
+            cleanup_results = await self._shutdown_gui_launched_items(selected)
+        elif normalized_action != "leave_running":
+            raise ValueError(f"Unsupported close action: {action}")
+
+        self._runtime.publish_event(AppEvent(
+            event_type="gui.close_completed",
+            source="gui",
+            payload={
+                "action": normalized_action,
+                "item_ids": list(selected),
+                "cleanup_results": list(cleanup_results),
+                "level": "info",
+                "message": f"Close completed: {normalized_action}",
+            },
+        ))
+        _print_shutdown_summary(normalized_action, cleanup_results)
         await self._runtime.shutdown()
 
-    async def _shutdown_gui_launched_items(self, item_ids: Tuple[str, ...]) -> None:
+    async def _shutdown_gui_launched_items(self, item_ids: Tuple[str, ...]) -> Tuple[Any, ...]:
+        cleanup_results = []
         record_ids = tuple(item_id.split(":", 1)[1] for item_id in item_ids if item_id.startswith("record:"))
         for candidate_id in record_ids:
             self._record_controller.select_candidate(candidate_id)
             outcome = await self._record_controller.execute_action("shutdown", timeout_sec=3.0)
-            if not getattr(outcome, "ok", False):
-                await self._record_controller.execute_action("terminate_local", timeout_sec=1.0)
+            cleanup_result = {
+                "kind": "recording",
+                "candidate_id": candidate_id,
+                "admin_shutdown": _console_payload(outcome),
+                "admin_shutdown_ok": bool(getattr(outcome, "ok", False)),
+                "process_exit_observed": False,
+                "local_termination": None,
+                "local_kill": None,
+            }
+            if getattr(outcome, "ok", False):
+                exited = await self._wait_for_record_process_exit(candidate_id)
+                if exited:
+                    cleanup_result["process_exit_observed"] = True
+                    cleanup_results.append(cleanup_result)
+                    continue
+                self._record_controller.mark_graceful_shutdown_failed()
+            else:
+                self._record_controller.mark_graceful_shutdown_failed()
+                termination = await self._record_controller.execute_action("terminate_local", timeout_sec=1.0)
+                cleanup_result["local_termination"] = _console_payload(termination)
+                if getattr(termination, "ok", False):
+                    cleanup_result["process_exit_observed"] = await self._wait_for_record_process_exit(candidate_id)
+                    if not cleanup_result["process_exit_observed"]:
+                        kill = await self._record_controller.execute_action("kill_local", timeout_sec=1.0)
+                        cleanup_result["local_kill"] = _console_payload(kill)
+                        if getattr(kill, "ok", False):
+                            cleanup_result["process_exit_observed"] = await self._wait_for_record_process_exit(candidate_id)
+                cleanup_results.append(cleanup_result)
+                continue
+            termination = await self._record_controller.execute_action("terminate_local", timeout_sec=1.0)
+            cleanup_result["local_termination"] = _console_payload(termination)
+            if getattr(termination, "ok", False):
+                cleanup_result["process_exit_observed"] = await self._wait_for_record_process_exit(candidate_id)
+                if not cleanup_result["process_exit_observed"]:
+                    kill = await self._record_controller.execute_action("kill_local", timeout_sec=1.0)
+                    cleanup_result["local_kill"] = _console_payload(kill)
+                    if getattr(kill, "ok", False):
+                        cleanup_result["process_exit_observed"] = await self._wait_for_record_process_exit(candidate_id)
+            cleanup_results.append(cleanup_result)
 
         convert_job_ids = tuple(item_id.split(":", 1)[1] for item_id in item_ids if item_id.startswith("convert:"))
         if convert_job_ids and self._convert_controller is not None:
-            self._convert_controller.terminate_gui_launched_jobs(convert_job_ids)
+            cleanup_results.extend(
+                await self._convert_controller.terminate_gui_launched_jobs_and_wait(
+                    convert_job_ids,
+                    timeout_sec=self._config.close_shutdown_exit_timeout_sec,
+                    poll_sec=self._config.close_shutdown_poll_sec,
+                )
+            )
+        return tuple(cleanup_results)
+
+    async def _wait_for_record_process_exit(self, candidate_id: str) -> bool:
+        deadline = asyncio.get_running_loop().time() + self._config.close_shutdown_exit_timeout_sec
+        while True:
+            record_view = await self._record_controller.refresh_view()
+            self._publish_record_process_state_events()
+            candidate = next(
+                (row for row in record_view.candidates if row.candidate_id == candidate_id),
+                None,
+            )
+            if candidate is None or str(candidate.state).lower() in {"exited", "start_failed", "stopped", "shutdown"}:
+                return True
+            if asyncio.get_running_loop().time() >= deadline:
+                return False
+            await asyncio.sleep(self._config.close_shutdown_poll_sec)
 
     def _publish_record_process_state_events(self) -> None:
         for candidate in self._record_controller.last_selection.candidates:
@@ -381,6 +464,66 @@ def _console_payload(value):
     if isinstance(value, dict):
         return {str(key): _console_payload(item) for key, item in value.items()}
     return str(value)
+
+
+def _print_shutdown_summary(action: str, cleanup_results: Tuple[Any, ...]) -> None:
+    results = tuple(_console_payload(item) for item in cleanup_results)
+    if action == "leave_running":
+        print("[INFO] SHUTDOWN_SUMMARY: No GUI-spawned local processes were selected for shutdown", flush=True)
+        return
+    if not results:
+        print("[INFO] SHUTDOWN_SUMMARY: No GUI-spawned local processes required shutdown", flush=True)
+        return
+
+    for result in results:
+        level = "INFO" if bool(result.get("process_exit_observed")) else "WARNING"
+        print(f"[{level}] {_shutdown_result_code(result)}: {_shutdown_result_message(result)}", flush=True)
+
+    verified_count = sum(1 for result in results if bool(result.get("process_exit_observed")))
+    total_count = len(results)
+    if verified_count == total_count:
+        print(
+            f"[INFO] SHUTDOWN_SUMMARY: All GUI-spawned local processes have exited ({total_count} process(es))",
+            flush=True,
+        )
+    else:
+        missing_count = total_count - verified_count
+        print(
+            f"[WARNING] SHUTDOWN_SUMMARY: {missing_count} GUI-spawned local process(es) "
+            "did not confirm exit",
+            flush=True,
+        )
+
+
+def _shutdown_result_code(result: Mapping[str, Any]) -> str:
+    kind = str(result.get("kind", "process")).lower()
+    if kind == "recording":
+        return "SHUTDOWN_RECORDING"
+    if kind == "convert":
+        return "SHUTDOWN_CONVERTER"
+    return "SHUTDOWN_PROCESS"
+
+
+def _shutdown_result_message(result: Mapping[str, Any]) -> str:
+    kind = str(result.get("kind", "process")).lower()
+    observed = bool(result.get("process_exit_observed"))
+    state = "exited" if observed else "exit not verified"
+    if kind == "recording":
+        name = str(result.get("candidate_id", "recording"))
+        if bool(result.get("admin_shutdown_ok")) and result.get("local_termination") is None:
+            method = "admin shutdown acknowledged"
+        elif result.get("local_termination") is not None:
+            method = "local termination fallback used"
+        else:
+            method = "admin shutdown attempted"
+        return f"Recording Service {name} {state} ({method})"
+    if kind == "convert":
+        job_id = str(result.get("job_id", "converter"))
+        pid = result.get("process_pid")
+        pid_text = f" pid {pid}" if pid else ""
+        termination = str(result.get("local_termination", "requested"))
+        return f"Converter job {job_id}{pid_text} {state} (local termination {termination})"
+    return f"GUI-spawned process {state}"
 
 
 def _result_failed(value) -> bool:

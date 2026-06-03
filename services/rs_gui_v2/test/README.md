@@ -128,5 +128,29 @@ and command resource paths rooted at the XML recording-service name, such as
 `/recording_services/deploy`. Use `--require-admin-shutdown` when remote
 shutdown acknowledgment should be a hard pass/fail criterion.
 
+```bash
+../../connext_dds_env/bin/python test/replay_service_churn.py --database-dir ../../log_dir/recording_1780085154
+```
+
+`replay_service_churn.py` is explicit-only and exercises the real GUI
+controller/session path for Replay Service. It queues `service.launch_replay`
+through `GuiShellSession`, waits for Replay to appear in session state, checks
+for Replay monitoring evidence when available, then calls
+`handle_close_request_async("shutdown_gui_launched", ...)` and verifies no
+orphan `rtireplayservice` process remains. If `--database-dir` is omitted, the
+gate picks the newest `log_dir/recording_*` directory containing `metadata.db`.
+
+```bash
+../../connext_dds_env/bin/python test/replay_service_churn.py --database-dir ../../log_dir/recording_1780085154
+```
+
+`replay_service_churn.py` is explicit-only as well: it drives the Replay launch
+through the GUI session/controller path, waits for the launched process to
+appear in Replay tab state, waits for monitoring merge to contribute the
+`/replay_services/...` resource identity when available, then issues the normal
+GUI close cleanup path and verifies that no orphan `rtireplayservice` process
+remains. If `--database-dir` is omitted, it automatically chooses the newest
+`log_dir/recording_*` directory that contains `metadata.db` and `data_0.db`.
+
 Future layers will add GUI rendering tests against a real Dear PyGui
 installation and broader live service restart fixtures.

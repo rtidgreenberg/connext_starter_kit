@@ -875,7 +875,9 @@ python3 -m unittest test_gui_replay_controller test_service_control test_gui_ses
 
 ### Slice 15 - Live Replay Churn Gate
 
-Status: `not-started`
+Status: `done`
+
+Evidence: Added explicit gate `services/rs_gui_v2/test/replay_service_churn.py` with deterministic coverage in `test_replay_service_churn.py` and README command documentation. Live validation passed via `../../connext_dds_env/bin/python test/replay_service_churn.py --database-dir ../../log_dir/recording_1780085154 --output ../../test_output/rs_gui_v2/replay_service_churn_live.json`, which launched Replay through `GuiShellSession`, observed monitoring identity `/replay_services/xcdr/sessions/DefaultSession/topics/DefaultTopicGroup@Square`, and closed with final state `exited` / return code `0` and no orphan `rtireplayservice` process.
 
 Goal: Add an explicit live/manual validation gate for launching and shutting down Replay Service from the GUI controller/session path.
 

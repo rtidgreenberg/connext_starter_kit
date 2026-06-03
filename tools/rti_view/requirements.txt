@@ -1,0 +1,4 @@
+# rti_view dependencies
+# Uses the shared repository virtual environment at connext_dds_env/.
+rti.connext==7.6.0
+dearpygui

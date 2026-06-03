@@ -16,3 +16,13 @@ On startup or when asked to initialize:
 1. Check if `planning/project.yaml` exists
 2. If not, trigger the framework selector workflow from `.github/prompts/rti_dev.prompt.md`
 3. If it exists, check for `planning/system_config.yaml` and route accordingly
+
+## rti_view Debug Logging
+
+When debugging `rti_view` interactive or plot issues, run with `--debug`:
+
+```
+python -m rti_view -d <domain> --debug test_output/rti_view_debug.log
+```
+
+Debug logs are written to `test_output/` within the workspace. To inspect the latest debug session, read the most recent `rti_view_debug*.log` file in `test_output/`. The log includes timestamped entries for subscribe, pump, field_select, mode, and sync_view operations with buffer stats (message count, point count, skipped_non_numeric, value types, axis ranges).

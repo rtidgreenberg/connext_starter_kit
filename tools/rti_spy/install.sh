@@ -9,7 +9,7 @@ echo
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 VENV_DIR="$REPO_ROOT/connext_dds_env"
 
 # --- NDDSHOME Auto-Detection ---
@@ -100,7 +100,7 @@ echo
 echo "=== Installation Complete ==="
 echo
 echo "To run RTI Spy:"
-echo "  ./run_rtispy.sh --domain 1"
+echo "  ./tools/rti_spy/run_rtispy.sh --domain 1"
 echo ""
 echo "The run script will automatically:"
 echo "  - Detect NDDSHOME if not set"

@@ -52,5 +52,8 @@ test_output/
 # Global ignores
 __pycache__/
 *.pyc
+*.log
+*.log.*
 *.db
+debug_logs/
 log_dir/

@@ -7,6 +7,7 @@ live_reports/
 manual_debug/
 rs_gui_logs/
 service_logs/
+debug_logs/
 service_churn/
 test/test_output/
 

@@ -1,2 +1,2 @@
 # RTI Connext DDS Python API - Required runtime dependency
-rti.connext==7.6.0
+rti.connext

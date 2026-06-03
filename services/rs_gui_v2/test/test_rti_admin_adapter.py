@@ -293,7 +293,7 @@ class TestRtiServiceAdminClient(unittest.IsolatedAsyncioTestCase):
             parameters={
                 "action": ACTION_UPDATE,
                 "resource_path": replay_service_state_resource(service, "xcdr"),
-                "octet_body": [ENTITY_STATE_STOPPED],
+                "entity_state_value": ENTITY_STATE_STOPPED,
             },
         )
 

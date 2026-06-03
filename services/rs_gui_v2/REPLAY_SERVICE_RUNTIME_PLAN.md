@@ -838,9 +838,9 @@ python3 -m unittest test_rti_monitoring_adapter test_gui_replay_controller
 
 ### Slice 14 - Replay Playback Admin Controls
 
-Status: `in-progress`
+Status: `done`
 
-Evidence: Replay playback actions now route through Service Admin when an admin facade is available, using `ServiceCommand.CUSTOM` with explicit `/replay_services/<resource>/state` updates and `EntityStateKind` octets derived from the installed `ServiceCommon.idl` (`STOPPED=4`, `RUNNING=5`, `PAUSED=6`). `ReplayTabController` preserves mock/local state transitions when no admin facade is wired, and now resolves monitoring-only Replay targets into synthetic admin candidates so playback controls are not limited to GUI-owned process rows. Focused tests cover Replay controller start/pause/resume/stop admin dispatch and RTI admin adapter encoding for Replay state-resource updates. Remaining gate: capture at least one successful live Replay playback control transition.
+Evidence: Replay playback actions now route through Service Admin when an admin facade is available, using `ServiceCommand.CUSTOM` with explicit `/replay_services/<resource>/state` updates and `EntityStateKind` values derived from the installed `ServiceCommon.idl` (`STOPPED=4`, `RUNNING=5`, `PAUSED=6`). The final implementation fixes the payload encoding bug by serializing `RTI::Service::EntityState` as a proper CDR body inside `RtiServiceAdminClient` for custom Replay state updates rather than sending raw octets. `ReplayTabController` preserves mock/local state transitions when no admin facade is wired, and resolves monitoring-only Replay targets into synthetic admin candidates so playback controls are not limited to GUI-owned process rows. Focused tests cover Replay controller start/pause/resume/stop admin dispatch and RTI admin adapter encoding for Replay state-resource updates. Live/manual gate passed in [test_output/rs_gui_v2/replay_live_gate_1780523094_42353.json](/home/rti/CAT/connext_starter_kit/test_output/rs_gui_v2/replay_live_gate_1780523094_42353.json): Replay acknowledged `pause`, `resume`, and `shutdown`, and exited with return code `0`.
 
 Goal: Implement start, pause, resume, and stop only after admin resources are verified.
 

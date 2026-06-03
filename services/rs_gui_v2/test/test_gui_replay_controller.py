@@ -233,11 +233,11 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
             "/replay_services/xcdr/state",
             "/replay_services/xcdr/state",
         ])
-        self.assertEqual([request.parameters["octet_body"] for request in admin_client.requests], [
-            [ENTITY_STATE_RUNNING],
-            [ENTITY_STATE_PAUSED],
-            [ENTITY_STATE_RUNNING],
-            [ENTITY_STATE_STOPPED],
+        self.assertEqual([request.parameters["entity_state_value"] for request in admin_client.requests], [
+            ENTITY_STATE_RUNNING,
+            ENTITY_STATE_PAUSED,
+            ENTITY_STATE_RUNNING,
+            ENTITY_STATE_STOPPED,
         ])
 
     async def test_select_target_updates_selected_row(self):

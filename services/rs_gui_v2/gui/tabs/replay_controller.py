@@ -365,7 +365,7 @@ class ReplayTabController:
                 **_admin_resource_parameters(selected),
                 "action": ACTION_UPDATE,
                 "resource_path": resource_path,
-                "octet_body": [state_value],
+                "entity_state_value": state_value,
             },
         )
         return CommandResult(

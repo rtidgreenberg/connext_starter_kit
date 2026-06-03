@@ -213,18 +213,23 @@ class RtiServiceAdminClient:
                 self._serialize_tag_params(request, types.data_tag_type),
             )
         if request.command == ServiceCommand.CUSTOM:
-            return self._encode_custom_command(request)
+            return self._encode_custom_command(request, types)
         raise ValueError(f"Unsupported Service Admin command: {request.command}")
 
     def _encode_custom_command(
-            self, request: ServiceCommandRequest
+            self, request: ServiceCommandRequest, types: _AdminTypes
     ) -> Tuple[int, str, str, Optional[list]]:
         action = int(request.parameters.get("action", ACTION_UPDATE))
         resource_path = str(request.parameters["resource_path"])
         string_body = str(request.parameters.get("string_body", ""))
-        octet_body = request.parameters.get("octet_body")
-        if octet_body is not None:
-            octet_body = [int(value) for value in octet_body]
+        octet_body = None
+        entity_state_value = request.parameters.get("entity_state_value")
+        if entity_state_value is not None:
+            octet_body = self._serialize_entity_state(types.entity_state_type, int(entity_state_value))
+        else:
+            octet_body = request.parameters.get("octet_body")
+            if octet_body is not None:
+                octet_body = [int(value) for value in octet_body]
         return action, resource_path, string_body, octet_body
 
     def _serialize_entity_state(self, entity_state_type: Any, state_value: int) -> list:

@@ -211,12 +211,15 @@ class ReplayTabController:
         executable = str(payload.get("executable", self._config.launch_executable)).strip()
         working_dir = str(payload.get("working_dir", self._config.launch_working_dir)).strip()
         operator_extra_args = _operator_extra_args(_extra_args_from_value(payload.get("extra_args", self._config.launch_extra_args)))
+        storage_variable_prefix = _storage_variable_prefix(config_name)
         launch_extra_args = (
             f"-DREPLAY_DOMAIN_ID={data_domain_id}",
             f"-DREPLAY_ADMIN_DOMAIN_ID={admin_domain_id}",
             f"-DREPLAY_MON_DOMAIN_ID={monitoring_domain_id}",
             f"-DREPLAY_STORAGE_FORMAT={storage_format}",
             f"-DREPLAY_DATABASE_DIR={database_path}",
+            f"-D{storage_variable_prefix}_STORAGE_FORMAT={storage_format}",
+            f"-D{storage_variable_prefix}_DATABASE_DIR={database_path}",
             f"-DREPLAY_PLAYBACK_RATE={playback_rate:g}",
             f"-DREPLAY_ENABLE_LOOPING={'true' if loop else 'false'}",
             f"-DREPLAY_TOPIC_ALLOW={topic_allow}",
@@ -234,6 +237,8 @@ class ReplayTabController:
             "REPLAY_ADMIN_DOMAIN_ID": str(admin_domain_id),
             "REPLAY_MON_DOMAIN_ID": str(monitoring_domain_id),
             "REPLAY_DATABASE_DIR": database_path,
+            f"{storage_variable_prefix}_STORAGE_FORMAT": storage_format,
+            f"{storage_variable_prefix}_DATABASE_DIR": database_path,
             "DOMAIN_ID": str(data_domain_id),
         }
         nddshome = os.environ.get("NDDSHOME", "") or detect_nddshome()
@@ -504,6 +509,10 @@ def _operator_extra_args(extra_args: Tuple[str, ...]) -> Tuple[str, ...]:
         "-DREPLAY_MON_DOMAIN_ID=",
         "-DREPLAY_STORAGE_FORMAT=",
         "-DREPLAY_DATABASE_DIR=",
+        "-DREPLAY_XCDR_STORAGE_FORMAT=",
+        "-DREPLAY_XCDR_DATABASE_DIR=",
+        "-DREPLAY_JSON_STORAGE_FORMAT=",
+        "-DREPLAY_JSON_DATABASE_DIR=",
         "-DREPLAY_PLAYBACK_RATE=",
         "-DREPLAY_ENABLE_LOOPING=",
         "-DREPLAY_TOPIC_ALLOW=",
@@ -511,3 +520,12 @@ def _operator_extra_args(extra_args: Tuple[str, ...]) -> Tuple[str, ...]:
         "-DDOMAIN_ID=",
     )
     return tuple(arg for arg in extra_args if not any(arg.startswith(prefix) for prefix in managed_arg_prefixes))
+
+
+def _storage_variable_prefix(config_name: str) -> str:
+    normalized = "".join(char if char.isalnum() else "_" for char in config_name.upper()).strip("_")
+    if normalized in {"", "XCDR"}:
+        return "REPLAY_XCDR"
+    if normalized == "JSON":
+        return "REPLAY_JSON"
+    return f"REPLAY_{normalized}"

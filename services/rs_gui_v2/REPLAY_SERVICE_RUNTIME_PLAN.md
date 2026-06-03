@@ -692,7 +692,9 @@ python3 -m unittest test_gui_session
 
 ### Slice 10 - Replay Service XML Template Variables
 
-Status: `not-started`
+Status: `done`
+
+Evidence: `services/replay_service_config.xml` now declares Replay admin/monitoring and variable-driven domain, storage, playback, and topic settings for both `xcdr` and `json`; `ReplayTabController.launch_replay()` emits config-specific storage variables consumed by the XML; `test_gui_replay_controller` verifies XML variable consumption and managed launch arguments.
 
 Goal: Make Replay launch command variables meaningful by adding administration/monitoring and variable-driven replay settings to XML.
 

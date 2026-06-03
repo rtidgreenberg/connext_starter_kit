@@ -4,6 +4,7 @@
 import os
 import sys
 import unittest
+import xml.etree.ElementTree as ET
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,6 +25,28 @@ from fakes import FakeHandle, FakeSpawner
 
 
 class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
+    def test_replay_service_xml_consumes_launch_variables(self):
+        xml_path = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "replay_service_config.xml"))
+        root = ET.parse(xml_path).getroot()
+        xml_text = ET.tostring(root, encoding="unicode")
+
+        for config_name in ("xcdr", "json"):
+            self.assertIsNotNone(root.find(f"./replay_service[@name='{config_name}']"))
+        for variable_name in (
+                "REPLAY_DOMAIN_ID",
+                "REPLAY_ADMIN_DOMAIN_ID",
+                "REPLAY_MON_DOMAIN_ID",
+                "REPLAY_XCDR_STORAGE_FORMAT",
+                "REPLAY_XCDR_DATABASE_DIR",
+                "REPLAY_JSON_STORAGE_FORMAT",
+                "REPLAY_JSON_DATABASE_DIR",
+                "REPLAY_PLAYBACK_RATE",
+                "REPLAY_ENABLE_LOOPING",
+                "REPLAY_TOPIC_ALLOW",
+                "REPLAY_TOPIC_DENY",
+        ):
+            self.assertIn(f"$({variable_name})", xml_text)
+
     def test_replay_launch_command_preserves_operator_fields(self):
         command = build_replay_launch_command(ReplayLaunchViewModel(
             label="Manual Replay",
@@ -171,7 +194,7 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
             "topic_allow": "Robot*",
             "topic_deny": "Debug*",
             "executable": "/opt/rti/bin/rtireplayservice",
-            "extra_args": ["-DREPLAY_DATABASE_DIR=ignored", "-DUSER_FLAG=1"],
+            "extra_args": ["-DREPLAY_DATABASE_DIR=ignored", "-DREPLAY_JSON_DATABASE_DIR=ignored", "-DUSER_FLAG=1"],
         })
         view = await controller.refresh_view()
 
@@ -191,9 +214,12 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
         self.assertIn("-remoteAdministrationDomainId 61", command_line)
         self.assertIn("-remoteMonitoringDomainId 62", command_line)
         self.assertIn("-DREPLAY_DATABASE_DIR=log_dir/xcdr", command_line)
+        self.assertIn("-DREPLAY_JSON_DATABASE_DIR=log_dir/xcdr", command_line)
+        self.assertIn("-DREPLAY_JSON_STORAGE_FORMAT=XCDR", command_line)
         self.assertIn("-DREPLAY_ENABLE_LOOPING=true", command_line)
         self.assertIn("-DUSER_FLAG=1", command_line)
         self.assertNotIn("-DREPLAY_DATABASE_DIR=ignored", command_line)
+        self.assertNotIn("-DREPLAY_JSON_DATABASE_DIR=ignored", command_line)
 
 
 if __name__ == "__main__":

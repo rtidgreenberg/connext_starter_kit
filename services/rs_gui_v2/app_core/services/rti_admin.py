@@ -25,6 +25,7 @@ from .models import (
     ServiceCommandOutcome,
     ServiceCommandRequest,
     ServiceInstanceRef,
+    ServiceKind,
 )
 
 
@@ -202,7 +203,7 @@ class RtiServiceAdminClient:
                 self._serialize_entity_state(types.entity_state_type, ENTITY_STATE_RUNNING),
             )
         if request.command == ServiceCommand.SHUTDOWN:
-            return ACTION_DELETE, recording_service_resource(request.service, _admin_resource_name(request)), "", None
+            return ACTION_DELETE, service_shutdown_resource(request.service, _admin_resource_name(request)), "", None
         if request.command == ServiceCommand.TAG:
             return (
                 ACTION_UPDATE,
@@ -431,12 +432,22 @@ def recording_service_resource(service: ServiceInstanceRef, resource_name: str =
     return f"/recording_services/{resource_name or service.name}"
 
 
+def replay_service_resource(service: ServiceInstanceRef, resource_name: str = "") -> str:
+    return f"/replay_services/{resource_name or service.name}"
+
+
 def recording_service_state_resource(service: ServiceInstanceRef, resource_name: str = "") -> str:
     return f"{recording_service_resource(service, resource_name)}/state"
 
 
 def recording_service_tag_resource(service: ServiceInstanceRef, resource_name: str = "") -> str:
     return f"{recording_service_resource(service, resource_name)}/storage/sqlite:tag_timestamp"
+
+
+def service_shutdown_resource(service: ServiceInstanceRef, resource_name: str = "") -> str:
+    if service.kind == ServiceKind.REPLAY:
+        return replay_service_resource(service, resource_name)
+    return recording_service_resource(service, resource_name)
 
 
 def _admin_resource_name(request: ServiceCommandRequest) -> str:

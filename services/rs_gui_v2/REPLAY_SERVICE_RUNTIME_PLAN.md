@@ -732,7 +732,9 @@ python3 -m unittest test_gui_replay_controller
 
 ### Slice 11 - Replay Admin Shutdown Only
 
-Status: `not-started`
+Status: `done`
+
+Evidence: Connext guidance confirmed Replay shutdown uses `DELETE /replay_services/<replay_service_xml_name>`; `RtiServiceAdminClient` now routes only `ServiceKind.REPLAY` shutdown through `/replay_services/...` while preserving Recording paths; `ReplayTabController.execute_action("shutdown")` sends `ServiceCommand.SHUTDOWN`; GUI close cleanup tries Replay admin shutdown before local fallback.
 
 Goal: Add high-confidence Replay Service Admin shutdown support before start/pause/resume/stop.
 

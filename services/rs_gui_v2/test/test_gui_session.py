@@ -456,8 +456,10 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
             hostname="dev-host",
             clock=lambda: 10.0,
         )
+        admin_client = FakeServiceAdminClient()
         replay_controller = ReplayTabController(
             process_manager=replay_manager,
+            admin_facade=ServiceAdminFacade(admin_client),
             config=ReplayTabControllerConfig(local_hostnames=("dev-host",)),
             clock=lambda: 12.0,
         )
@@ -474,12 +476,15 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
 
         await session.handle_close_request_async("shutdown_gui_launched", (f"replay:{launch.launch_id}",))
 
+        self.assertEqual([request.command for request in admin_client.requests], [ServiceCommand.SHUTDOWN])
+        self.assertEqual(admin_client.requests[0].parameters["admin_resource_name"], "xcdr")
         self.assertEqual(handle.terminate_calls, 1)
         events = runtime.drain_events()
         close_completed = next(event for event in events if event.event_type == "gui.close_completed")
         cleanup = close_completed.payload["cleanup_results"][0]
         self.assertEqual(cleanup["kind"], "replay")
         self.assertEqual(cleanup["candidate_id"], launch.launch_id)
+        self.assertTrue(cleanup["admin_shutdown_ok"])
         self.assertIsNotNone(cleanup["local_termination"])
 
     async def test_close_request_terminates_local_process_after_shutdown_failure(self):

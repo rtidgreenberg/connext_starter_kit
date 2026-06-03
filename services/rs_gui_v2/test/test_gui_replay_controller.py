@@ -13,7 +13,9 @@ if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
 from app_core import AppCommand
-from app_core.services import ServiceKind, ServiceProcessManager
+from app_core import CommandStatus
+from app_core.services import ServiceCommandOutcome
+from app_core.services import ServiceAdminFacade, ServiceCommand, ServiceKind, ServiceProcessManager
 from gui.tabs import (
     ReplayLaunchViewModel,
     ReplayTabController,
@@ -22,6 +24,22 @@ from gui.tabs import (
     build_replay_launch_command,
 )
 from fakes import FakeHandle, FakeSpawner
+
+
+class FakeServiceAdminClient:
+    def __init__(self):
+        self.requests = []
+
+    async def check_readiness(self, service):
+        raise AssertionError("readiness is not used by these tests")
+
+    async def send_command(self, request):
+        self.requests.append(request)
+        return ServiceCommandOutcome(
+            request=request,
+            status=CommandStatus.ACKNOWLEDGED,
+            message="ack",
+        )
 
 
 class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
@@ -220,6 +238,36 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
         self.assertIn("-DUSER_FLAG=1", command_line)
         self.assertNotIn("-DREPLAY_DATABASE_DIR=ignored", command_line)
         self.assertNotIn("-DREPLAY_JSON_DATABASE_DIR=ignored", command_line)
+
+    async def test_shutdown_dispatches_replay_admin_command(self):
+        handle = FakeHandle(7007)
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(handle),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        admin_client = FakeServiceAdminClient()
+        controller = ReplayTabController(
+            process_manager=manager,
+            admin_facade=ServiceAdminFacade(admin_client),
+            config=ReplayTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+        launch = controller.launch_replay({
+            "config_name": "xcdr",
+            "admin_domain_id": 61,
+            "monitoring_domain_id": 62,
+            "executable": "/opt/rti/bin/rtireplayservice",
+        })
+        await controller.refresh_view()
+
+        outcome = await controller.execute_action("shutdown", timeout_sec=2.0)
+
+        self.assertTrue(outcome.ok)
+        self.assertEqual([request.command for request in admin_client.requests], [ServiceCommand.SHUTDOWN])
+        self.assertEqual(admin_client.requests[0].service, launch.identity.service_ref)
+        self.assertEqual(admin_client.requests[0].parameters["admin_resource_name"], "xcdr")
+        self.assertEqual(admin_client.requests[0].timeout_sec, 2.0)
 
 
 if __name__ == "__main__":

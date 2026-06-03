@@ -10,6 +10,7 @@ from app_core.connext_environment import detect_nddshome, ensure_rti_license
 from app_core.services import (
     ServiceAdminFacade,
     ServiceCandidateSelection,
+    ServiceCommand,
     ServiceInstanceRef,
     ServiceKind,
     ServiceLaunchIntent,
@@ -293,7 +294,7 @@ class ReplayTabController:
         return launch
 
     async def execute_action(self, action_id: str, timeout_sec: Optional[float] = None):
-        """Dispatch high-confidence local Replay process actions."""
+        """Dispatch high-confidence Replay process actions."""
 
         if self._process_manager is None:
             raise RuntimeError("Replay Service actions require a ServiceProcessManager")
@@ -316,6 +317,17 @@ class ReplayTabController:
                 selection,
                 candidate_id=selected.candidate_id,
             )
+        if action_id == "shutdown":
+            if self._admin_facade is None:
+                raise RuntimeError("Replay Service shutdown requires a Service Admin facade")
+            outcome = await self._admin_facade.execute(
+                selected.service,
+                ServiceCommand.SHUTDOWN,
+                parameters=_admin_resource_parameters(selected),
+                timeout_sec=timeout_sec,
+            )
+            self._graceful_shutdown_failed = not outcome.ok
+            return outcome
         raise ValueError(f"Unsupported Replay tab action: {action_id}")
 
     async def refresh_view(self) -> ReplayTabViewModel:
@@ -529,3 +541,8 @@ def _storage_variable_prefix(config_name: str) -> str:
     if normalized == "JSON":
         return "REPLAY_JSON"
     return f"REPLAY_{normalized}"
+
+
+def _admin_resource_parameters(candidate) -> dict:
+    resource_name = str(candidate.details.get("admin_resource_name", ""))
+    return {"admin_resource_name": resource_name} if resource_name else {}

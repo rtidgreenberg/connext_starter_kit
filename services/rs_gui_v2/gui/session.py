@@ -390,7 +390,6 @@ class GuiShellSession:
         if replay_ids and self._replay_controller is not None:
             for candidate_id in replay_ids:
                 self._replay_controller.select_target(candidate_id)
-                self._replay_controller.mark_graceful_shutdown_failed()
                 cleanup_result = {
                     "kind": "replay",
                     "candidate_id": candidate_id,
@@ -400,6 +399,26 @@ class GuiShellSession:
                     "local_termination": None,
                     "local_kill": None,
                 }
+                try:
+                    outcome = await self._replay_controller.execute_action("shutdown", timeout_sec=3.0)
+                except Exception as exc:
+                    outcome = None
+                    cleanup_result["admin_shutdown"] = {
+                        "status": "failed",
+                        "message": str(exc),
+                    }
+                if outcome is not None:
+                    cleanup_result["admin_shutdown"] = _console_payload(outcome)
+                    cleanup_result["admin_shutdown_ok"] = bool(getattr(outcome, "ok", False))
+                if cleanup_result["admin_shutdown_ok"]:
+                    exited = await self._wait_for_replay_process_exit(candidate_id)
+                    if exited:
+                        cleanup_result["process_exit_observed"] = True
+                        cleanup_results.append(cleanup_result)
+                        continue
+                    self._replay_controller.mark_graceful_shutdown_failed()
+                else:
+                    self._replay_controller.mark_graceful_shutdown_failed()
                 termination = await self._replay_controller.execute_action("terminate_local", timeout_sec=1.0)
                 cleanup_result["local_termination"] = _console_payload(termination)
                 if getattr(termination, "ok", False):

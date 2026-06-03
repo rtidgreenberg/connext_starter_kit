@@ -34,6 +34,8 @@ from app_core.services.rti_admin import (
     recording_service_resource,
     recording_service_state_resource,
     recording_service_tag_resource,
+    replay_service_resource,
+    service_shutdown_resource,
 )
 
 
@@ -176,6 +178,15 @@ class TestRtiServiceAdminResources(unittest.TestCase):
             "/recording_services/deploy/storage/sqlite:tag_timestamp",
         )
 
+    def test_replay_service_resource_paths(self):
+        recording = ServiceInstanceRef(ServiceKind.RECORDING, "deploy")
+        replay = ServiceInstanceRef(ServiceKind.REPLAY, "xcdr")
+
+        self.assertEqual(replay_service_resource(replay), "/replay_services/xcdr")
+        self.assertEqual(service_shutdown_resource(recording), "/recording_services/deploy")
+        self.assertEqual(service_shutdown_resource(replay), "/replay_services/xcdr")
+        self.assertEqual(service_shutdown_resource(replay, "json"), "/replay_services/json")
+
     def test_cdr_buffer_to_octets_accepts_bytes_and_strings(self):
         self.assertEqual(cdr_buffer_to_octets(b"\x00\x01"), [0, 1])
         self.assertEqual(cdr_buffer_to_octets(["\x02", 3]), [2, 3])
@@ -251,6 +262,24 @@ class TestRtiServiceAdminClient(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(outcome.ok)
         self.assertEqual(command_data["action"], ACTION_DELETE)
         self.assertEqual(command_data["resource_identifier"], "/recording_services/deploy")
+
+    async def test_replay_shutdown_encodes_delete_resource(self):
+        request_module = FakeRequestModule()
+        client = RtiServiceAdminClient(self.config, FakeDdsModule, request_module)
+        service = ServiceInstanceRef(ServiceKind.REPLAY, "rs_gui_v2_replay_1234", admin_domain_id=54)
+        request = ServiceCommandRequest(
+            service,
+            ServiceCommand.SHUTDOWN,
+            parameters={"admin_resource_name": "xcdr"},
+        )
+
+        outcome = await client.send_command(request)
+
+        command_data = request_module.requesters[0].sent_requests[0]
+        self.assertTrue(outcome.ok)
+        self.assertEqual(command_data["application_name"], "rs_gui_v2_replay_1234")
+        self.assertEqual(command_data["action"], ACTION_DELETE)
+        self.assertEqual(command_data["resource_identifier"], "/replay_services/xcdr")
 
     async def test_shutdown_can_target_app_name_with_separate_xml_resource(self):
         request_module = FakeRequestModule()

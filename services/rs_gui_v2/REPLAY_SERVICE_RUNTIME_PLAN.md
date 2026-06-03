@@ -838,7 +838,9 @@ python3 -m unittest test_rti_monitoring_adapter test_gui_replay_controller
 
 ### Slice 14 - Replay Playback Admin Controls
 
-Status: `not-started`
+Status: `in-progress`
+
+Evidence: Replay playback actions now route through Service Admin when an admin facade is available, using `ServiceCommand.CUSTOM` with explicit `/replay_services/<resource>/state` updates and `EntityStateKind` octets derived from the installed `ServiceCommon.idl` (`STOPPED=4`, `RUNNING=5`, `PAUSED=6`). `ReplayTabController` preserves mock/local state transitions when no admin facade is wired, and now resolves monitoring-only Replay targets into synthetic admin candidates so playback controls are not limited to GUI-owned process rows. Focused tests cover Replay controller start/pause/resume/stop admin dispatch and RTI admin adapter encoding for Replay state-resource updates. Remaining gate: capture at least one successful live Replay playback control transition.
 
 Goal: Implement start, pause, resume, and stop only after admin resources are verified.
 

@@ -20,11 +20,15 @@ from app_core.services import (
     MonitoringSnapshot,
     MonitoringSnapshotKind,
     ServiceAdminFacade,
+    ServiceCandidateSelection,
     ServiceCommand,
+    ServiceInstanceRef,
     ServiceKind,
     ServiceMonitoringFacade,
+    ServiceProcessCandidate,
     ServiceProcessManager,
 )
+from app_core.services.rti_admin import ENTITY_STATE_PAUSED, ENTITY_STATE_RUNNING, ENTITY_STATE_STOPPED
 from gui.tabs import (
     ReplayLaunchViewModel,
     ReplayTabController,
@@ -159,6 +163,82 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resumed_view.observed_state, "RUNNING")
         self.assertEqual(stop.payload["state"], "STOPPED")
         self.assertEqual(stopped_view.observed_state, "STOPPED")
+
+    async def test_playback_commands_dispatch_replay_admin_custom_state_updates(self):
+        admin_client = FakeServiceAdminClient()
+        controller = ReplayTabController(
+            admin_facade=ServiceAdminFacade(admin_client),
+            targets=(ReplayTargetRow(
+                target_id="monitoring:replay:xcdr",
+                label="Replay",
+                control_name="rs_gui_v2_replay_1234",
+                source="monitoring",
+                hostname="dev-host",
+                state="PAUSED",
+                progress="",
+            ),),
+            config=ReplayTabControllerConfig(
+                service=ServiceInstanceRef(ServiceKind.REPLAY, "rs_gui_v2_replay_1234", admin_domain_id=61, monitoring_domain_id=62),
+                selected_target_id="monitoring:replay:xcdr",
+                database_path="services/replay_input/robot_run_03",
+            ),
+            clock=lambda: 10.0,
+        )
+        controller._last_selection = ServiceCandidateSelection(
+            candidates=(ServiceProcessCandidate(
+                candidate_id="monitoring:replay:xcdr",
+                service=ServiceInstanceRef(ServiceKind.REPLAY, "rs_gui_v2_replay_1234", admin_domain_id=61, monitoring_domain_id=62),
+                source="monitoring",
+                display_label="Replay",
+                launch_id="launch-id",
+                pid=7007,
+                hostname="dev-host",
+                observed_state="PAUSED",
+                details={
+                    "admin_resource_name": "xcdr",
+                    "resource_id": "/replay_services/xcdr",
+                },
+                alive=True,
+                owns_process=False,
+                confidence=1.0,
+                first_seen_at=1.0,
+                last_seen_at=2.0,
+            ),),
+            selected_candidate_id="monitoring:replay:xcdr",
+        )
+
+        start = await controller.handle_command(AppCommand(
+            "replay.start",
+            payload={"database_path": "services/replay_input/robot_run_03"},
+            command_id="start-replay",
+            created_at=1.0,
+        ))
+        pause = await controller.handle_command(AppCommand("replay.pause", command_id="pause-replay", created_at=2.0))
+        resume = await controller.handle_command(AppCommand("replay.resume", command_id="resume-replay", created_at=3.0))
+        stop = await controller.handle_command(AppCommand("replay.stop", command_id="stop-replay", created_at=4.0))
+
+        self.assertTrue(start.ok)
+        self.assertTrue(pause.ok)
+        self.assertTrue(resume.ok)
+        self.assertTrue(stop.ok)
+        self.assertEqual([request.command for request in admin_client.requests], [
+            ServiceCommand.CUSTOM,
+            ServiceCommand.CUSTOM,
+            ServiceCommand.CUSTOM,
+            ServiceCommand.CUSTOM,
+        ])
+        self.assertEqual([request.parameters["resource_path"] for request in admin_client.requests], [
+            "/replay_services/xcdr/state",
+            "/replay_services/xcdr/state",
+            "/replay_services/xcdr/state",
+            "/replay_services/xcdr/state",
+        ])
+        self.assertEqual([request.parameters["octet_body"] for request in admin_client.requests], [
+            [ENTITY_STATE_RUNNING],
+            [ENTITY_STATE_PAUSED],
+            [ENTITY_STATE_RUNNING],
+            [ENTITY_STATE_STOPPED],
+        ])
 
     async def test_select_target_updates_selected_row(self):
         controller = ReplayTabController.mock(clock=lambda: 10.0)

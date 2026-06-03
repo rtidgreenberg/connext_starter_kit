@@ -7,6 +7,13 @@ from typing import Iterable, Mapping, Optional, Tuple
 
 from app_core import AppCommand, CommandResult, CommandStatus
 from app_core.connext_environment import detect_nddshome, ensure_rti_license
+from app_core.services.rti_admin import (
+    ACTION_UPDATE,
+    ENTITY_STATE_PAUSED,
+    ENTITY_STATE_RUNNING,
+    ENTITY_STATE_STOPPED,
+    replay_service_state_resource,
+)
 from app_core.services import (
     MonitoringSnapshot,
     ServiceAdminFacade,
@@ -16,6 +23,7 @@ from app_core.services import (
     ServiceKind,
     ServiceLaunchIntent,
     ServiceMonitoringFacade,
+    ServiceProcessCandidate,
     ServiceProcessLaunch,
     ServiceProcessLaunchRequest,
     ServiceProcessManager,
@@ -169,18 +177,26 @@ class ReplayTabController:
             return _command_result(command, f"Selected Replay target {target.control_name}", target)
         if command.command_type == "replay.start":
             target = self._apply_action_payload(payload)
+            if self._admin_facade is not None:
+                return await self._execute_playback_command(command, target, ENTITY_STATE_RUNNING, "Started")
             self._set_target_state(target.target_id, "RUNNING", progress="running")
             return _command_result(command, f"Started replay {target.control_name}", self._target_by_id(target.target_id))
         if command.command_type == "replay.pause":
             target = self._selected_target()
+            if self._admin_facade is not None:
+                return await self._execute_playback_command(command, target, ENTITY_STATE_PAUSED, "Paused")
             self._set_target_state(target.target_id, "PAUSED")
             return _command_result(command, f"Paused replay {target.control_name}", self._target_by_id(target.target_id))
         if command.command_type == "replay.resume":
             target = self._selected_target()
+            if self._admin_facade is not None:
+                return await self._execute_playback_command(command, target, ENTITY_STATE_RUNNING, "Resumed")
             self._set_target_state(target.target_id, "RUNNING", progress="running")
             return _command_result(command, f"Resumed replay {target.control_name}", self._target_by_id(target.target_id))
         if command.command_type == "replay.stop":
             target = self._selected_target()
+            if self._admin_facade is not None:
+                return await self._execute_playback_command(command, target, ENTITY_STATE_STOPPED, "Stopped")
             self._set_target_state(target.target_id, "STOPPED", progress="0%")
             return _command_result(command, f"Stopped replay {target.control_name}", self._target_by_id(target.target_id))
         if command.command_type == "replay.shutdown":
@@ -332,6 +348,39 @@ class ReplayTabController:
             return outcome
         raise ValueError(f"Unsupported Replay tab action: {action_id}")
 
+    async def _execute_playback_command(
+            self,
+            command: AppCommand,
+            target: ReplayTargetRow,
+            state_value: int,
+            verb: str,
+    ) -> CommandResult:
+        selected = self._selected_candidate_for_target(target.target_id)
+        resource_name = str(selected.details.get("admin_resource_name", ""))
+        resource_path = replay_service_state_resource(selected.service, resource_name)
+        outcome = await self._admin_facade.execute(
+            selected.service,
+            ServiceCommand.CUSTOM,
+            parameters={
+                **_admin_resource_parameters(selected),
+                "action": ACTION_UPDATE,
+                "resource_path": resource_path,
+                "octet_body": [state_value],
+            },
+        )
+        return CommandResult(
+            command_id=command.command_id,
+            status=CommandStatus.ACKNOWLEDGED if outcome.ok else outcome.status,
+            message=outcome.message or f"{verb} replay {target.control_name}",
+            payload={
+                "target_id": target.target_id,
+                "control_name": target.control_name,
+                "resource_path": outcome.resource_path or resource_path,
+                "command": ServiceCommand.CUSTOM.value,
+            },
+            created_at=command.created_at,
+        )
+
     async def refresh_view(self) -> ReplayTabViewModel:
         """Return the next Replay-tab view from controller state."""
 
@@ -474,6 +523,40 @@ class ReplayTabController:
             target_id = targets[0].target_id
             self._config = replace(self._config, selected_target_id=target_id)
         return self._target_by_id(target_id)
+
+    def _selected_candidate_for_target(self, target_id: str):
+        selection = self._last_selection
+        if not selection.candidates:
+            self._runtime_targets()
+            selection = self._last_selection
+        for candidate in selection.candidates:
+            if candidate.candidate_id == target_id or candidate.launch_id == target_id:
+                return candidate
+        if selection.selected_candidate is not None:
+            return selection.selected_candidate
+        target = self._target_by_id(target_id)
+        service = self._config.service or ServiceInstanceRef(
+            ServiceKind.REPLAY,
+            target.control_name,
+            admin_domain_id=self._config.launch_admin_domain_id,
+            monitoring_domain_id=self._config.launch_monitoring_domain_id,
+            config_paths=self._config.launch_config_paths,
+        )
+        resource_name = self._config.launch_config_name or target.control_name
+        return ServiceProcessCandidate(
+            candidate_id=target.target_id,
+            service=service,
+            source="monitoring",
+            display_label=target.label,
+            hostname=target.hostname,
+            observed_state=target.state,
+            details={"admin_resource_name": resource_name},
+            alive=True,
+            owns_process=target.owned,
+            confidence=1.0,
+            first_seen_at=self._clock(),
+            last_seen_at=self._clock(),
+        )
 
     def _target_by_id(self, target_id: str) -> ReplayTargetRow:
         for target in self._all_targets():

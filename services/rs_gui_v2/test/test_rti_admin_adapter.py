@@ -25,6 +25,7 @@ from app_core.services.rti_admin import (
     COMMAND_REQUEST_TOPIC_NAME,
     ENTITY_STATE_PAUSED,
     ENTITY_STATE_RUNNING,
+    ENTITY_STATE_STOPPED,
     ENTITY_STATE_TYPE_NAME,
     RETCODE_ERROR,
     RETCODE_OK,
@@ -34,6 +35,7 @@ from app_core.services.rti_admin import (
     recording_service_resource,
     recording_service_state_resource,
     recording_service_tag_resource,
+    replay_service_state_resource,
     replay_service_resource,
     service_shutdown_resource,
 )
@@ -280,6 +282,29 @@ class TestRtiServiceAdminClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(command_data["application_name"], "rs_gui_v2_replay_1234")
         self.assertEqual(command_data["action"], ACTION_DELETE)
         self.assertEqual(command_data["resource_identifier"], "/replay_services/xcdr")
+
+    async def test_replay_custom_state_update_encodes_state_resource(self):
+        request_module = FakeRequestModule()
+        client = RtiServiceAdminClient(self.config, FakeDdsModule, request_module)
+        service = ServiceInstanceRef(ServiceKind.REPLAY, "rs_gui_v2_replay_1234", admin_domain_id=54)
+        request = ServiceCommandRequest(
+            service,
+            ServiceCommand.CUSTOM,
+            parameters={
+                "action": ACTION_UPDATE,
+                "resource_path": replay_service_state_resource(service, "xcdr"),
+                "octet_body": [ENTITY_STATE_STOPPED],
+            },
+        )
+
+        outcome = await client.send_command(request)
+
+        command_data = request_module.requesters[0].sent_requests[0]
+        self.assertTrue(outcome.ok)
+        self.assertEqual(command_data["application_name"], "rs_gui_v2_replay_1234")
+        self.assertEqual(command_data["action"], ACTION_UPDATE)
+        self.assertEqual(command_data["resource_identifier"], "/replay_services/xcdr/state")
+        self.assertEqual(command_data["octet_body"], [ENTITY_STATE_STOPPED])
 
     async def test_shutdown_can_target_app_name_with_separate_xml_resource(self):
         request_module = FakeRequestModule()

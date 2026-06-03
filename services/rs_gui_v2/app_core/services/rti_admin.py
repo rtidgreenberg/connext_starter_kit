@@ -47,6 +47,7 @@ ACTION_DELETE = 3
 RETCODE_OK = 0
 RETCODE_ERROR = 1
 
+ENTITY_STATE_STOPPED = 4
 ENTITY_STATE_RUNNING = 5
 ENTITY_STATE_PAUSED = 6
 
@@ -438,6 +439,10 @@ def replay_service_resource(service: ServiceInstanceRef, resource_name: str = ""
 
 def recording_service_state_resource(service: ServiceInstanceRef, resource_name: str = "") -> str:
     return f"{recording_service_resource(service, resource_name)}/state"
+
+
+def replay_service_state_resource(service: ServiceInstanceRef, resource_name: str = "") -> str:
+    return f"{replay_service_resource(service, resource_name)}/state"
 
 
 def recording_service_tag_resource(service: ServiceInstanceRef, resource_name: str = "") -> str:

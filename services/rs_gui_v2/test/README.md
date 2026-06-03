@@ -140,17 +140,5 @@ for Replay monitoring evidence when available, then calls
 orphan `rtireplayservice` process remains. If `--database-dir` is omitted, the
 gate picks the newest `log_dir/recording_*` directory containing `metadata.db`.
 
-```bash
-../../connext_dds_env/bin/python test/replay_service_churn.py --database-dir ../../log_dir/recording_1780085154
-```
-
-`replay_service_churn.py` is explicit-only as well: it drives the Replay launch
-through the GUI session/controller path, waits for the launched process to
-appear in Replay tab state, waits for monitoring merge to contribute the
-`/replay_services/...` resource identity when available, then issues the normal
-GUI close cleanup path and verifies that no orphan `rtireplayservice` process
-remains. If `--database-dir` is omitted, it automatically chooses the newest
-`log_dir/recording_*` directory that contains `metadata.db` and `data_0.db`.
-
 Future layers will add GUI rendering tests against a real Dear PyGui
 installation and broader live service restart fixtures.

@@ -68,6 +68,7 @@ class GuiShellSession:
             convert_controller=convert_controller,
         )
         self._record_process_states = {}
+        self._replay_process_states = {}
 
     @property
     def runtime(self) -> AppRuntime:
@@ -145,6 +146,7 @@ class GuiShellSession:
         replay_view = None
         if self._replay_controller is not None:
             replay_view = await self._replay_controller.refresh_view()
+            self._publish_replay_process_state_events()
         topics_view = None
         if self._topics_controller is not None:
             topics_view = await self._topics_controller.refresh_view()
@@ -259,6 +261,10 @@ class GuiShellSession:
 
         if command.command_type == "service.launch_recording":
             return self._record_controller.launch_recording(command.payload)
+        if command.command_type == "service.launch_replay":
+            if self._replay_controller is None:
+                raise ValueError(f"Unsupported GUI command type: {command.command_type}")
+            return self._replay_controller.launch_replay(command.payload)
 
         action_id = _record_action_for_command(command.command_type)
         payload = dict(command.payload)
@@ -380,6 +386,30 @@ class GuiShellSession:
                     poll_sec=self._config.close_shutdown_poll_sec,
                 )
             )
+        replay_ids = tuple(item_id.split(":", 1)[1] for item_id in item_ids if item_id.startswith("replay:"))
+        if replay_ids and self._replay_controller is not None:
+            for candidate_id in replay_ids:
+                self._replay_controller.select_target(candidate_id)
+                self._replay_controller.mark_graceful_shutdown_failed()
+                cleanup_result = {
+                    "kind": "replay",
+                    "candidate_id": candidate_id,
+                    "admin_shutdown": None,
+                    "admin_shutdown_ok": False,
+                    "process_exit_observed": False,
+                    "local_termination": None,
+                    "local_kill": None,
+                }
+                termination = await self._replay_controller.execute_action("terminate_local", timeout_sec=1.0)
+                cleanup_result["local_termination"] = _console_payload(termination)
+                if getattr(termination, "ok", False):
+                    cleanup_result["process_exit_observed"] = await self._wait_for_replay_process_exit(candidate_id)
+                    if not cleanup_result["process_exit_observed"]:
+                        kill = await self._replay_controller.execute_action("kill_local", timeout_sec=1.0)
+                        cleanup_result["local_kill"] = _console_payload(kill)
+                        if getattr(kill, "ok", False):
+                            cleanup_result["process_exit_observed"] = await self._wait_for_replay_process_exit(candidate_id)
+                cleanup_results.append(cleanup_result)
         return tuple(cleanup_results)
 
     async def _wait_for_record_process_exit(self, candidate_id: str) -> bool:
@@ -391,7 +421,29 @@ class GuiShellSession:
                 (row for row in record_view.candidates if row.candidate_id == candidate_id),
                 None,
             )
-            if candidate is None or str(candidate.state).lower() in {"exited", "start_failed", "stopped", "shutdown"}:
+            if candidate is None:
+                return True
+            exited_states = {"exited", "start_failed"}
+            if not candidate.owned:
+                exited_states = exited_states | {"stopped", "shutdown"}
+            if str(candidate.state).lower() in exited_states:
+                return True
+            if asyncio.get_running_loop().time() >= deadline:
+                return False
+            await asyncio.sleep(self._config.close_shutdown_poll_sec)
+
+    async def _wait_for_replay_process_exit(self, candidate_id: str) -> bool:
+        if self._replay_controller is None:
+            return True
+        deadline = asyncio.get_running_loop().time() + self._config.close_shutdown_exit_timeout_sec
+        while True:
+            replay_view = await self._replay_controller.refresh_view()
+            self._publish_replay_process_state_events()
+            target = next(
+                (row for row in replay_view.targets if row.candidate_id == candidate_id or row.target_id == candidate_id),
+                None,
+            )
+            if target is None or str(target.state).lower() in {"exited", "start_failed", "stopped", "shutdown"}:
                 return True
             if asyncio.get_running_loop().time() >= deadline:
                 return False
@@ -434,6 +486,30 @@ class GuiShellSession:
                     "message": f"Recording Service monitoring {snapshot.kind.value}: {snapshot.state}",
                 },
                 created_at=snapshot.observed_at,
+            ))
+
+    def _publish_replay_process_state_events(self) -> None:
+        if self._replay_controller is None:
+            return
+        for candidate in self._replay_controller.last_selection.candidates:
+            key = candidate.launch_id or candidate.candidate_id
+            if not key:
+                continue
+            state = str(candidate.observed_state)
+            previous = self._replay_process_states.get(key)
+            if previous == state:
+                continue
+            self._replay_process_states[key] = state
+            is_error_state = state in {"exited", "start_failed"}
+            self._runtime.publish_event(AppEvent(
+                event_type="service.process_state",
+                source="gui",
+                payload={
+                    "candidate": candidate.to_dict(),
+                    "level": "error" if is_error_state else "info",
+                    "message": f"Replay Service process observed: {state}",
+                },
+                created_at=candidate.last_seen_at,
             ))
 
 
@@ -499,6 +575,8 @@ def _shutdown_result_code(result: Mapping[str, Any]) -> str:
     kind = str(result.get("kind", "process")).lower()
     if kind == "recording":
         return "SHUTDOWN_RECORDING"
+    if kind == "replay":
+        return "SHUTDOWN_REPLAY"
     if kind == "convert":
         return "SHUTDOWN_CONVERTER"
     return "SHUTDOWN_PROCESS"
@@ -523,6 +601,13 @@ def _shutdown_result_message(result: Mapping[str, Any]) -> str:
         pid_text = f" pid {pid}" if pid else ""
         termination = str(result.get("local_termination", "requested"))
         return f"Converter job {job_id}{pid_text} {state} (local termination {termination})"
+    if kind == "replay":
+        name = str(result.get("candidate_id", "replay"))
+        if result.get("local_termination") is not None:
+            method = "local termination fallback used"
+        else:
+            method = "local termination attempted"
+        return f"Replay Service {name} {state} ({method})"
     return f"GUI-spawned process {state}"
 
 

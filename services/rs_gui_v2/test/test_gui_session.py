@@ -44,13 +44,16 @@ from gui.tabs import (
     ConvertTabController,
     RecordTabController,
     RecordTabControllerConfig,
+    ReplayLaunchViewModel,
     ReplayTabController,
+    ReplayTabControllerConfig,
     TopicsTabController,
     TopicsTabControllerConfig,
 )
 from gui.tabs.convert_controller import ConvertJobSubmission
 from gui.tabs.convert_tab import ConvertJobRow
 from gui.tabs.record_tab import build_record_launch_command
+from gui.tabs.replay_tab import build_replay_launch_command
 from test_gui_shell import FakeDpg, NoViewportCloseFakeDpg
 from test_gui_topics_controller import _fake_discovery_client
 from fakes import FakeHandle, FakeSpawner
@@ -398,6 +401,38 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(view.record_tab.selected_candidate_id, view.record_tab.selected_candidate.candidate_id)
         self.assertTrue(any(entry.message == "Dispatched service.launch_recording" for entry in view.event_log))
 
+    async def test_launch_replay_command_dispatches_to_process_manager(self):
+        replay_manager = ServiceProcessManager(
+            spawner=FakeSpawner(FakeHandle(7007)),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        replay_controller = ReplayTabController(
+            process_manager=replay_manager,
+            config=ReplayTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+        session, _admin_client, _launch = build_session(replay_controller=replay_controller)
+        await session.next_view_async(process_commands=False)
+        session.command_sink(build_replay_launch_command(ReplayLaunchViewModel(
+            label="Manual Replay",
+            config_paths=("services/replay_service_config.xml",),
+            config_name="xcdr",
+            data_domain_id=63,
+            admin_domain_id=61,
+            monitoring_domain_id=62,
+            database_path="log_dir/xcdr",
+            executable="/opt/rti/bin/rtireplayservice",
+        )))
+
+        view = await session.next_view_async()
+
+        self.assertEqual(view.replay_tab.selected_target.pid, "7007")
+        self.assertEqual(view.replay_tab.selected_target.source, "gui_launch")
+        self.assertEqual(view.replay_tab.observed_state, "running")
+        self.assertTrue(any(entry.message == "Dispatched service.launch_replay" for entry in view.event_log))
+        self.assertTrue(any(entry.message == "Replay Service process observed: running" for entry in view.event_log))
+
     async def test_close_request_leave_running_does_not_shutdown_services(self):
         session, admin_client, _launch = build_session()
         await session.next_view_async(process_commands=False)
@@ -413,6 +448,39 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
         await session.handle_close_request_async("shutdown_gui_launched", ("record:launch-main",))
 
         self.assertEqual([request.command for request in admin_client.requests], [ServiceCommand.SHUTDOWN])
+
+    async def test_close_request_terminates_selected_gui_launched_replay(self):
+        handle = FakeHandle(7007)
+        replay_manager = ServiceProcessManager(
+            spawner=FakeSpawner(handle),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        replay_controller = ReplayTabController(
+            process_manager=replay_manager,
+            config=ReplayTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+        launch = replay_controller.launch_replay({
+            "label": "Manual Replay",
+            "config_paths": ["services/replay_service_config.xml"],
+            "config_name": "xcdr",
+            "database_path": "log_dir/xcdr",
+            "executable": "/opt/rti/bin/rtireplayservice",
+        })
+        runtime = AppRuntime()
+        session, _admin_client, _launch = build_session(runtime=runtime, replay_controller=replay_controller)
+        await session.next_view_async(process_commands=False)
+
+        await session.handle_close_request_async("shutdown_gui_launched", (f"replay:{launch.launch_id}",))
+
+        self.assertEqual(handle.terminate_calls, 1)
+        events = runtime.drain_events()
+        close_completed = next(event for event in events if event.event_type == "gui.close_completed")
+        cleanup = close_completed.payload["cleanup_results"][0]
+        self.assertEqual(cleanup["kind"], "replay")
+        self.assertEqual(cleanup["candidate_id"], launch.launch_id)
+        self.assertIsNotNone(cleanup["local_termination"])
 
     async def test_close_request_terminates_local_process_after_shutdown_failure(self):
         handle = FakeHandle(4218)
@@ -450,6 +518,57 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([request.command for request in admin_client.requests], [ServiceCommand.SHUTDOWN])
         self.assertEqual(handle.terminate_calls, 1)
+
+    async def test_close_request_requires_process_exit_after_admin_shutdown_ack(self):
+        handle = FakeHandle(4218)
+        runtime = AppRuntime()
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(handle),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        launch = manager.launch(
+            launch_request(),
+            launch_id="launch-main",
+            session_guid="11111111-2222-3333-4444-555555555555",
+        )
+        monitoring_client = FakeServiceMonitoringClient()
+        monitoring_client.push_snapshot(MonitoringSnapshot(
+            service=launch.identity.service_ref,
+            kind=MonitoringSnapshotKind.PERIODIC,
+            state="STOPPED",
+            metrics={},
+            details={"process_id": 4218, "host_name": "dev-host"},
+            observed_at=20.0,
+        ))
+        admin_client = FakeServiceAdminClient()
+        controller = RecordTabController(
+            manager,
+            admin_facade=ServiceAdminFacade(admin_client),
+            monitoring_facade=ServiceMonitoringFacade(monitoring_client),
+            config=RecordTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+        session = GuiShellSession(
+            runtime=runtime,
+            scheduler=UiFrameScheduler(runtime, max_event_log=20),
+            record_controller=controller,
+            config=GuiShellSessionConfig(close_shutdown_exit_timeout_sec=0.0),
+        )
+        view = await session.next_view_async(process_commands=False)
+
+        await session.handle_close_request_async(
+            "shutdown_gui_launched",
+            (f"record:{view.record_tab.selected_candidate_id}",),
+        )
+
+        self.assertEqual([request.command for request in admin_client.requests], [ServiceCommand.SHUTDOWN])
+        self.assertEqual(handle.terminate_calls, 1)
+        events = runtime.drain_events()
+        close_completed = next(event for event in events if event.event_type == "gui.close_completed")
+        cleanup = close_completed.payload["cleanup_results"][0]
+        self.assertIsNotNone(cleanup["local_termination"])
+        self.assertEqual(cleanup["local_termination"]["status"], "requested")
 
     async def test_close_request_prints_verified_recording_shutdown_summary(self):
         runtime = AppRuntime()

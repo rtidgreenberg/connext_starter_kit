@@ -59,6 +59,7 @@ from gui.tabs.record_tab import (
     build_record_launch_command,
     build_record_tab_view_model,
 )
+from gui.tabs.replay_tab import ReplayTargetRow, build_replay_tab_view_model
 from rs_gui_v2_app import main
 from fakes import FakeContext, FakeDpg, NoViewportCloseFakeDpg, ManualFrameFakeDpg
 
@@ -706,6 +707,54 @@ class TestDearPyGuiRenderer(unittest.TestCase):
         self.assertEqual(close_requests[0][0], "shutdown_gui_launched")
         self.assertIn("record:launch-recording-main", close_requests[0][1])
         self.assertFalse(any("discovery:recording:old" in item_id for item_id in close_requests[0][1]))
+
+    def test_close_prompt_targets_gui_launched_replay_items(self):
+        fake = FakeDpg()
+        close_requests = []
+        replay = build_replay_tab_view_model(
+            targets=(
+                ReplayTargetRow(
+                    target_id="launch-replay-main",
+                    label="Replay Service",
+                    control_name="replay_service_1234",
+                    source="gui_launch",
+                    hostname="dev-host",
+                    state="running",
+                    progress="",
+                    pid="7007",
+                    owned=True,
+                    selected=True,
+                ),
+                ReplayTargetRow(
+                    target_id="discovery:replay:external",
+                    label="Replay Service",
+                    control_name="external_replay",
+                    source="discovery",
+                    hostname="lab-host",
+                    state="running",
+                    progress="",
+                ),
+            ),
+            selected_target_id="launch-replay-main",
+            database_path="log_dir/xcdr",
+        )
+        view = replace(build_empty_shell_view_model(), replay_tab=replay)
+        shell = DearPyGuiShell(
+            view_provider=lambda: view,
+            dpg_module=fake,
+            close_handler=lambda action, item_ids: close_requests.append((action, item_ids)) or True,
+        )
+
+        shell.render_once()
+        shell._close_prompt_callback(fake)()
+        _button_callback(fake, "Shutdown GUI-Launched")()
+
+        text_labels = [args[0] for name, args, _kwargs in fake.calls if name == "add_text" and args]
+        self.assertTrue(any("Replay Service" in label and "launched by this GUI" in label for label in text_labels))
+        self.assertTrue(any("external_replay" in label and "detected externally" in label for label in text_labels))
+        self.assertEqual(close_requests[0][0], "shutdown_gui_launched")
+        self.assertIn("replay:launch-replay-main", close_requests[0][1])
+        self.assertFalse(any("discovery:replay:external" in item_id for item_id in close_requests[0][1]))
 
     def test_native_window_close_exits_when_no_active_processes_remain(self):
         fake = FakeDpg()

@@ -12,10 +12,51 @@ if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
 from app_core import AppCommand
-from gui.tabs import ReplayTabController, ReplayTabControllerConfig, ReplayTargetRow
+from app_core.services import ServiceKind, ServiceProcessManager
+from gui.tabs import (
+    ReplayLaunchViewModel,
+    ReplayTabController,
+    ReplayTabControllerConfig,
+    ReplayTargetRow,
+    build_replay_launch_command,
+)
+from fakes import FakeHandle, FakeSpawner
 
 
 class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
+    def test_replay_launch_command_preserves_operator_fields(self):
+        command = build_replay_launch_command(ReplayLaunchViewModel(
+            label="Manual Replay",
+            config_paths=("services/replay_service_config.xml", "dds/qos/DDS_QOS_PROFILES.xml"),
+            config_name="json",
+            data_domain_id=63,
+            admin_domain_id=61,
+            monitoring_domain_id=62,
+            database_path="log_dir/xcdr",
+            playback_rate=2.5,
+            loop=True,
+            topic_allow="Robot*",
+            topic_deny="Debug*",
+            verbosity="WARN:WARN",
+            executable="/opt/rti/bin/rtireplayservice",
+            working_dir="services/rs_gui_v2/manual",
+            extra_args=("-DUSER_FLAG=1",),
+        ))
+
+        self.assertEqual(command.command_type, "service.launch_replay")
+        self.assertEqual(command.target, "replay")
+        self.assertEqual(command.payload["label"], "Manual Replay")
+        self.assertEqual(command.payload["config_paths"], [
+            "services/replay_service_config.xml",
+            "dds/qos/DDS_QOS_PROFILES.xml",
+        ])
+        self.assertEqual(command.payload["config_name"], "json")
+        self.assertEqual(command.payload["data_domain_id"], 63)
+        self.assertEqual(command.payload["admin_domain_id"], 61)
+        self.assertEqual(command.payload["monitoring_domain_id"], 62)
+        self.assertEqual(command.payload["database_path"], "log_dir/xcdr")
+        self.assertEqual(command.payload["extra_args"], ["-DUSER_FLAG=1"])
+
     async def test_mock_controller_refreshes_seeded_replay_view(self):
         controller = ReplayTabController.mock(clock=lambda: 10.0)
 
@@ -103,6 +144,56 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaisesRegex(ValueError, "recording database path"):
             await controller.handle_command(AppCommand("replay.start"))
+
+    async def test_launch_replay_builds_process_request_and_view_row(self):
+        handle = FakeHandle(7007)
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(handle),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        controller = ReplayTabController(
+            process_manager=manager,
+            config=ReplayTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+
+        launch = controller.launch_replay({
+            "label": "Manual Replay",
+            "config_paths": ["services/replay_service_config.xml", "dds/qos/DDS_QOS_PROFILES.xml"],
+            "config_name": "json",
+            "data_domain_id": 63,
+            "admin_domain_id": 61,
+            "monitoring_domain_id": 62,
+            "database_path": "log_dir/xcdr",
+            "playback_rate": 2.0,
+            "loop": True,
+            "topic_allow": "Robot*",
+            "topic_deny": "Debug*",
+            "executable": "/opt/rti/bin/rtireplayservice",
+            "extra_args": ["-DREPLAY_DATABASE_DIR=ignored", "-DUSER_FLAG=1"],
+        })
+        view = await controller.refresh_view()
+
+        self.assertEqual(launch.identity.intent.kind, ServiceKind.REPLAY)
+        self.assertEqual(launch.pid, 7007)
+        self.assertEqual(launch.request.config_name, "json")
+        self.assertEqual(launch.identity.intent.admin_domain_id, 61)
+        self.assertEqual(launch.identity.intent.monitoring_domain_id, 62)
+        self.assertEqual(view.selected_target_id, launch.launch_id)
+        self.assertEqual(view.selected_target.pid, "7007")
+        self.assertEqual(view.selected_target.source, "gui_launch")
+        self.assertTrue(view.selected_target.owned)
+        self.assertEqual(view.selected_target.state, "running")
+        command_line = " ".join(launch.command_line)
+        self.assertIn("/opt/rti/bin/rtireplayservice", command_line)
+        self.assertIn("-appName", command_line)
+        self.assertIn("-remoteAdministrationDomainId 61", command_line)
+        self.assertIn("-remoteMonitoringDomainId 62", command_line)
+        self.assertIn("-DREPLAY_DATABASE_DIR=log_dir/xcdr", command_line)
+        self.assertIn("-DREPLAY_ENABLE_LOOPING=true", command_line)
+        self.assertIn("-DUSER_FLAG=1", command_line)
+        self.assertNotIn("-DREPLAY_DATABASE_DIR=ignored", command_line)
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@ from gui import (
     build_default_gui_shell_session,
     build_gui_shell_assembly,
 )
+from gui.tabs import ReplayLaunchViewModel, build_replay_launch_command
 from rs_gui_v2_app import main
 from fakes import FakeDpg
 
@@ -69,6 +70,26 @@ class TestGuiShellFactory(unittest.TestCase):
         ])
         self.assertEqual(view.record_tab.command_history[0].command, "pause")
         self.assertTrue(any(entry.message == "Dispatched service.pause" for entry in view.event_log))
+
+    def test_mock_session_dispatches_replay_launch_through_process_manager(self):
+        assembly = build_gui_shell_assembly(GuiShellSessionFactoryConfig(
+            mode=GuiShellSessionMode.MOCK,
+        ))
+        assembly.session.next_view()
+        command = build_replay_launch_command(ReplayLaunchViewModel(
+            label="Factory Replay",
+            config_paths=("services/replay_service_config.xml",),
+            config_name="xcdr",
+            database_path="log_dir/xcdr",
+            executable="rtireplayservice",
+        ))
+
+        self.assertTrue(assembly.session.command_sink(command))
+        view = assembly.session.next_view()
+
+        self.assertTrue(any(entry.message == "Dispatched service.launch_replay" for entry in view.event_log))
+        self.assertTrue(any(launch.identity.intent.kind.value == "replay" for launch in assembly.process_manager.launches()))
+        self.assertTrue(any("rtireplayservice" in " ".join(line) for line in assembly.process_manager._spawner.command_lines))
 
     def test_headless_assembly_has_no_mock_launch_or_fake_clients(self):
         assembly = build_gui_shell_assembly(GuiShellSessionFactoryConfig(

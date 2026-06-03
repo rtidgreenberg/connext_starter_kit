@@ -25,11 +25,13 @@ from .record_tab import (
 )
 from .replay_tab import (
     ReplayActionView,
+    ReplayLaunchViewModel,
     ReplayTargetRow,
     ReplayTabViewModel,
     ReplayTimelineRow,
     build_mock_replay_tab_view_model,
     build_replay_action_command,
+    build_replay_launch_command,
     build_replay_tab_view_model,
 )
 from .replay_controller import ReplayTabController, ReplayTabControllerConfig
@@ -83,6 +85,7 @@ __all__ = [
     "RecordTabControllerConfig",
     "RecordTabViewModel",
     "ReplayActionView",
+    "ReplayLaunchViewModel",
     "ReplayTargetRow",
     "ReplayTabController",
     "ReplayTabControllerConfig",
@@ -115,6 +118,7 @@ __all__ = [
     "build_record_action_command",
     "build_record_tab_view_model",
     "build_replay_action_command",
+    "build_replay_launch_command",
     "build_replay_tab_view_model",
     "build_topic_action_command",
     "build_topic_field_command",

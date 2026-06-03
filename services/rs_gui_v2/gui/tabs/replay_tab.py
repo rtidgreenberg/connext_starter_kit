@@ -17,12 +17,63 @@ class ReplayTargetRow:
     hostname: str
     state: str
     progress: str
+    candidate_id: str = ""
+    pid: str = ""
+    owned: bool = False
+    age: str = ""
+    confidence: str = ""
+    output_path: str = ""
+    output_tail: str = ""
     selected: bool = False
     conflict: bool = False
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "candidate_id", str(self.candidate_id or self.target_id))
+        object.__setattr__(self, "pid", str(self.pid))
+        object.__setattr__(self, "owned", bool(self.owned))
         object.__setattr__(self, "selected", bool(self.selected))
         object.__setattr__(self, "conflict", bool(self.conflict))
+
+
+@dataclass(frozen=True)
+class ReplayLaunchViewModel:
+    """Operator-facing launch settings for Replay Service."""
+
+    label: str = "Replay Service"
+    config_paths: Tuple[str, ...] = ("services/replay_service_config.xml",)
+    available_config_names: Tuple[str, ...] = ("xcdr", "json")
+    config_name: str = "xcdr"
+    data_domain_id: int = 0
+    admin_domain_id: int = 0
+    monitoring_domain_id: int = 0
+    database_path: str = "log_dir/xcdr"
+    storage_format: str = "XCDR"
+    playback_rate: float = 1.0
+    loop: bool = False
+    time_window: str = ""
+    topic_allow: str = "*"
+    topic_deny: str = ""
+    qos_file_path: str = ""
+    participant_qos_profile: str = ""
+    writer_qos_profile: str = ""
+    verbosity: str = "ERROR:ERROR"
+    executable: str = ""
+    working_dir: str = ""
+    extra_args: Tuple[str, ...] = field(default_factory=tuple)
+    enabled: bool = True
+    disabled_reason: str = ""
+    command_preview: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "config_paths", tuple(str(path) for path in self.config_paths if str(path).strip()))
+        object.__setattr__(self, "available_config_names", tuple(str(name) for name in self.available_config_names if str(name).strip()))
+        object.__setattr__(self, "data_domain_id", int(self.data_domain_id))
+        object.__setattr__(self, "admin_domain_id", int(self.admin_domain_id))
+        object.__setattr__(self, "monitoring_domain_id", int(self.monitoring_domain_id))
+        object.__setattr__(self, "playback_rate", float(self.playback_rate))
+        object.__setattr__(self, "loop", bool(self.loop))
+        object.__setattr__(self, "extra_args", tuple(str(arg) for arg in self.extra_args if str(arg).strip()))
+        object.__setattr__(self, "enabled", bool(self.enabled))
 
 
 @dataclass(frozen=True)
@@ -61,6 +112,7 @@ class ReplayTabViewModel:
     qos_file_path: str = ""
     participant_qos_profile: str = ""
     writer_qos_profile: str = ""
+    launch: ReplayLaunchViewModel = field(default_factory=ReplayLaunchViewModel)
     targets: Tuple[ReplayTargetRow, ...] = field(default_factory=tuple)
     timeline: Tuple[ReplayTimelineRow, ...] = field(default_factory=tuple)
     actions: Tuple[ReplayActionView, ...] = field(default_factory=tuple)
@@ -69,6 +121,8 @@ class ReplayTabViewModel:
     def __post_init__(self) -> None:
         object.__setattr__(self, "playback_rate", float(self.playback_rate))
         object.__setattr__(self, "loop", bool(self.loop))
+        if not isinstance(self.launch, ReplayLaunchViewModel):
+            object.__setattr__(self, "launch", ReplayLaunchViewModel(**self.launch))
         object.__setattr__(self, "targets", tuple(self.targets))
         object.__setattr__(self, "timeline", tuple(self.timeline))
         object.__setattr__(self, "actions", tuple(self.actions))
@@ -101,6 +155,7 @@ def build_replay_tab_view_model(
     qos_file_path: str = "",
     participant_qos_profile: str = "",
     writer_qos_profile: str = "",
+        launch: ReplayLaunchViewModel = None,
         timeline: Iterable[ReplayTimelineRow] = (),
         diagnostics: Iterable[str] = (),
 ) -> ReplayTabViewModel:
@@ -129,6 +184,15 @@ def build_replay_tab_view_model(
         qos_file_path=str(qos_file_path),
         participant_qos_profile=str(participant_qos_profile),
         writer_qos_profile=str(writer_qos_profile),
+        launch=launch or ReplayLaunchViewModel(
+            database_path=str(database_path),
+            playback_rate=playback_rate,
+            loop=loop,
+            time_window=str(time_window),
+            qos_file_path=str(qos_file_path),
+            participant_qos_profile=str(participant_qos_profile),
+            writer_qos_profile=str(writer_qos_profile),
+        ),
         targets=targets,
         timeline=tuple(timeline),
         actions=_replay_actions(selected_target, database_path, observed_state),
@@ -171,6 +235,19 @@ def build_mock_replay_tab_view_model() -> ReplayTabViewModel:
         qos_file_path="dds/qos/DDS_QOS_PROFILES.xml",
         participant_qos_profile="DPLibrary::DefaultParticipant",
         writer_qos_profile="BuiltinQosLib::Generic.Common",
+        launch=ReplayLaunchViewModel(
+            label="Replay Service",
+            config_paths=("services/replay_service_config.xml",),
+            available_config_names=("xcdr", "json"),
+            config_name="xcdr",
+            database_path="services/replay_input/robot_run_03",
+            playback_rate=1.0,
+            loop=False,
+            time_window="00:00:10 - 00:02:30",
+            qos_file_path="dds/qos/DDS_QOS_PROFILES.xml",
+            participant_qos_profile="DPLibrary::DefaultParticipant",
+            writer_qos_profile="BuiltinQosLib::Generic.Common",
+        ),
         timeline=(
             ReplayTimelineRow("Robot run", "00:00:10", "00:02:30"),
             ReplayTimelineRow("Tag: e2e_tag_beta", "00:01:05", "00:01:25"),
@@ -208,6 +285,38 @@ def build_replay_action_command(
     return AppCommand(
         command_type=action_to_command[action_id],
         target=payload["control_name"],
+        payload=payload,
+    )
+
+
+def build_replay_launch_command(launch: ReplayLaunchViewModel) -> AppCommand:
+    """Translate Replay launch settings into an app-core launch command."""
+
+    payload: Dict[str, Any] = {
+        "label": launch.label,
+        "config_paths": list(launch.config_paths),
+        "config_name": launch.config_name,
+        "data_domain_id": launch.data_domain_id,
+        "admin_domain_id": launch.admin_domain_id,
+        "monitoring_domain_id": launch.monitoring_domain_id,
+        "database_path": launch.database_path,
+        "storage_format": launch.storage_format,
+        "playback_rate": launch.playback_rate,
+        "loop": launch.loop,
+        "time_window": launch.time_window,
+        "topic_allow": launch.topic_allow,
+        "topic_deny": launch.topic_deny,
+        "qos_file_path": launch.qos_file_path,
+        "participant_qos_profile": launch.participant_qos_profile,
+        "writer_qos_profile": launch.writer_qos_profile,
+        "verbosity": launch.verbosity,
+        "executable": launch.executable,
+        "working_dir": launch.working_dir,
+        "extra_args": list(launch.extra_args),
+    }
+    return AppCommand(
+        command_type="service.launch_replay",
+        target="replay",
         payload=payload,
     )
 

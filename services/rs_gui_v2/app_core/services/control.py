@@ -305,8 +305,10 @@ class ServiceCandidateSelection:
         hostname = selected.hostname.lower()
         local_host_match = bool(hostname and hostname in local_names)
         local_process_verified = selected.owns_process or local_host_match
+        launch_state = str(selected.details.get("launch_state", "")).strip().lower()
+        local_launch_active = selected.owns_process and launch_state not in {"exited", "start_failed"}
         process_terminate_enabled = (
-            selected.alive
+            (selected.alive or local_launch_active)
             and graceful_shutdown_failed
             and selected.pid is not None
             and local_process_verified

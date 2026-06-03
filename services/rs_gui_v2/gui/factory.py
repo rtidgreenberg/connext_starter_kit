@@ -58,6 +58,7 @@ from .tabs import (
     RecordTabController,
     RecordTabControllerConfig,
     ReplayTabController,
+    ReplayTabControllerConfig,
     TopicsTabController,
     TopicsTabControllerConfig,
 )
@@ -93,6 +94,11 @@ class GuiShellSessionFactoryConfig:
         "dds/qos/DDS_QOS_PROFILES.xml",
     )
     recording_working_dir: str = ""
+    replay_label: str = "Replay Service"
+    replay_config_name: str = "xcdr"
+    replay_config_paths: Tuple[str, ...] = ("services/replay_service_config.xml",)
+    replay_database_path: str = "log_dir/xcdr"
+    replay_working_dir: str = ""
     admin_domain_id: int = 0
     monitoring_domain_id: int = 0
     topics_domain_id: int = 0
@@ -115,6 +121,8 @@ class GuiShellSessionFactoryConfig:
         object.__setattr__(self, "local_hostnames", tuple(str(name) for name in self.local_hostnames))
         object.__setattr__(self, "recording_config_paths", tuple(str(path) for path in self.recording_config_paths))
         object.__setattr__(self, "recording_working_dir", str(self.recording_working_dir).strip())
+        object.__setattr__(self, "replay_config_paths", tuple(str(path) for path in self.replay_config_paths))
+        object.__setattr__(self, "replay_working_dir", str(self.replay_working_dir).strip())
         object.__setattr__(self, "admin_domain_id", int(self.admin_domain_id))
         object.__setattr__(self, "monitoring_domain_id", int(self.monitoring_domain_id))
         object.__setattr__(self, "topics_domain_id", int(self.topics_domain_id))
@@ -234,8 +242,28 @@ def build_gui_shell_assembly(
         ),
     )
     replay_controller = (
-        ReplayTabController.mock()
-        if config.mode == GuiShellSessionMode.MOCK else ReplayTabController()
+        ReplayTabController.mock(
+            process_manager=process_manager,
+            admin_facade=admin_facade,
+            monitoring_facade=monitoring_facade,
+        )
+        if config.mode == GuiShellSessionMode.MOCK else ReplayTabController(
+            process_manager=process_manager,
+            admin_facade=admin_facade,
+            monitoring_facade=monitoring_facade,
+            config=ReplayTabControllerConfig(
+                display_label=config.replay_label,
+                local_hostnames=local_hostnames,
+                launch_label=config.replay_label,
+                launch_config_paths=config.replay_config_paths,
+                launch_config_name=config.replay_config_name,
+                launch_data_domain_id=config.topics_domain_id,
+                launch_admin_domain_id=config.admin_domain_id,
+                launch_monitoring_domain_id=config.monitoring_domain_id,
+                launch_database_path=config.replay_database_path,
+                launch_working_dir=config.replay_working_dir or _repo_root(),
+            ),
+        )
     )
     convert_controller = (
         ConvertTabController.mock()

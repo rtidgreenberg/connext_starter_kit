@@ -21,6 +21,7 @@ from .tabs.replay_tab import (
     ReplayTargetRow,
     ReplayTabViewModel,
     build_replay_action_command,
+    build_replay_launch_command,
 )
 from .tabs.topics_tab import (
     TopicFieldRow,
@@ -66,6 +67,17 @@ REPLAY_TIME_WINDOW_TAG = "rs_gui_v2_replay_time_window"
 REPLAY_QOS_FILE_TAG = "rs_gui_v2_replay_qos_file"
 REPLAY_PARTICIPANT_QOS_TAG = "rs_gui_v2_replay_participant_qos"
 REPLAY_WRITER_QOS_TAG = "rs_gui_v2_replay_writer_qos"
+REPLAY_LAUNCH_LABEL_TAG = "rs_gui_v2_replay_launch_label"
+REPLAY_LAUNCH_CONFIG_PATHS_TAG = "rs_gui_v2_replay_launch_config_paths"
+REPLAY_LAUNCH_CONFIG_NAME_TAG = "rs_gui_v2_replay_launch_config_name"
+REPLAY_LAUNCH_DATA_DOMAIN_TAG = "rs_gui_v2_replay_launch_data_domain"
+REPLAY_LAUNCH_ADMIN_DOMAIN_TAG = "rs_gui_v2_replay_launch_admin_domain"
+REPLAY_LAUNCH_MONITOR_DOMAIN_TAG = "rs_gui_v2_replay_launch_monitor_domain"
+REPLAY_LAUNCH_DATABASE_PATH_TAG = "rs_gui_v2_replay_launch_database_path"
+REPLAY_LAUNCH_VERBOSITY_TAG = "rs_gui_v2_replay_launch_verbosity"
+REPLAY_LAUNCH_EXECUTABLE_TAG = "rs_gui_v2_replay_launch_executable"
+REPLAY_LAUNCH_WORKING_DIR_TAG = "rs_gui_v2_replay_launch_working_dir"
+REPLAY_LAUNCH_EXTRA_ARGS_TAG = "rs_gui_v2_replay_launch_extra_args"
 CONSOLE_OUTPUT_TAG = "rs_gui_v2_console_output"
 APP_CLOSE_MODAL_TAG = "rs_gui_v2_close_modal"
 APP_CLOSE_STATUS_TAG = "rs_gui_v2_close_status"
@@ -383,6 +395,21 @@ def _close_process_items(view: ShellViewModel) -> Tuple[Mapping[str, object], ..
             "active": active,
         })
     convert = view.convert_tab
+    replay = view.replay_tab
+    if replay is not None:
+        for row in replay.targets:
+            active = str(row.state).lower() not in ("exited", "start_failed", "stopped", "shutdown")
+            items.append({
+                "item_id": f"replay:{row.candidate_id}",
+                "kind": "Replay Service",
+                "name": row.control_name,
+                "source": row.source,
+                "pid": row.pid,
+                "hostname": row.hostname,
+                "state": row.state,
+                "owned": bool(row.owned),
+                "active": active,
+            })
     if convert is not None:
         for job in convert.jobs:
             active = str(job.state).lower() in ("queued", "starting", "running", "cancel_requested")
@@ -1259,6 +1286,7 @@ def _render_replay_tab(
         f"State: {replay.observed_state} | Rate: {replay.playback_rate:g}x | "
         f"Loop: {'on' if replay.loop else 'off'}"
     )
+    _render_replay_launch(dpg, replay, command_sink=command_sink)
     _add_labeled_input_text(
         dpg,
         "Recording DB Path",
@@ -1327,6 +1355,42 @@ def _render_replay_actions(
                 dpg.add_text(action.reason)
 
 
+def _render_replay_launch(
+        dpg,
+        replay: ReplayTabViewModel,
+        command_sink: Optional[Callable[[AppCommand], bool]] = None,
+) -> None:
+    launch = replay.launch
+    with _collapsible_section(dpg, "Launch Replay Service", default_open=True):
+        _add_labeled_input_text(dpg, "Label", f"##{REPLAY_LAUNCH_LABEL_TAG}", default_value=launch.label, tag=REPLAY_LAUNCH_LABEL_TAG)
+        _add_labeled_input_text(
+            dpg,
+            "Config XML Paths",
+            f"##{REPLAY_LAUNCH_CONFIG_PATHS_TAG}",
+            default_value=";".join(launch.config_paths),
+            tag=REPLAY_LAUNCH_CONFIG_PATHS_TAG,
+        )
+        _add_labeled_input_text(dpg, "Config Name", f"##{REPLAY_LAUNCH_CONFIG_NAME_TAG}", default_value=launch.config_name, tag=REPLAY_LAUNCH_CONFIG_NAME_TAG)
+        _add_labeled_input_text(dpg, "Data Domain", f"##{REPLAY_LAUNCH_DATA_DOMAIN_TAG}", default_value=str(launch.data_domain_id), tag=REPLAY_LAUNCH_DATA_DOMAIN_TAG)
+        _add_labeled_input_text(dpg, "Admin Domain", f"##{REPLAY_LAUNCH_ADMIN_DOMAIN_TAG}", default_value=str(launch.admin_domain_id), tag=REPLAY_LAUNCH_ADMIN_DOMAIN_TAG)
+        _add_labeled_input_text(dpg, "Monitoring Domain", f"##{REPLAY_LAUNCH_MONITOR_DOMAIN_TAG}", default_value=str(launch.monitoring_domain_id), tag=REPLAY_LAUNCH_MONITOR_DOMAIN_TAG)
+        _add_labeled_input_text(dpg, "Recording DB Path", f"##{REPLAY_LAUNCH_DATABASE_PATH_TAG}", default_value=launch.database_path, tag=REPLAY_LAUNCH_DATABASE_PATH_TAG)
+        with _collapsible_section(dpg, "Replay Launch Advanced", default_open=False):
+            _add_labeled_input_text(dpg, "Verbosity", f"##{REPLAY_LAUNCH_VERBOSITY_TAG}", default_value=launch.verbosity, tag=REPLAY_LAUNCH_VERBOSITY_TAG)
+            _add_labeled_input_text(dpg, "Executable", f"##{REPLAY_LAUNCH_EXECUTABLE_TAG}", default_value=launch.executable, tag=REPLAY_LAUNCH_EXECUTABLE_TAG)
+            _add_labeled_input_text(dpg, "Working Dir", f"##{REPLAY_LAUNCH_WORKING_DIR_TAG}", default_value=launch.working_dir, tag=REPLAY_LAUNCH_WORKING_DIR_TAG)
+            _add_labeled_input_text(dpg, "Extra Args", f"##{REPLAY_LAUNCH_EXTRA_ARGS_TAG}", default_value=" ".join(launch.extra_args), tag=REPLAY_LAUNCH_EXTRA_ARGS_TAG)
+        _add_action_button(
+            dpg,
+            label="Launch Replay Service",
+            enabled=launch.enabled,
+            callback=_replay_launch_callback(dpg, replay, command_sink),
+            width=ACTION_BUTTON_WIDTH,
+        )
+        if launch.disabled_reason and not launch.enabled:
+            dpg.add_text(launch.disabled_reason)
+
+
 def _render_replay_targets(
         dpg,
         replay: ReplayTabViewModel,
@@ -1335,7 +1399,7 @@ def _render_replay_targets(
     dpg.add_text("Replay Service Candidates")
     with dpg.table(header_row=True, borders_innerH=True, borders_outerH=True, borders_innerV=True):
         for heading in (
-                "Selected", "Control Name", "Source", "Host", "State",
+            "Selected", "Control Name", "Source", "PID", "Host", "State",
                 "Progress", "Diagnostic"):
             dpg.add_table_column(label=heading)
         for row in replay.targets:
@@ -1349,6 +1413,7 @@ def _render_replay_targets(
                 )
                 dpg.add_text(row.control_name)
                 dpg.add_text(row.source)
+                dpg.add_text(row.pid)
                 dpg.add_text(row.hostname)
                 dpg.add_text(row.state)
                 dpg.add_text(row.progress)
@@ -1400,6 +1465,44 @@ def _replay_view_from_inputs(dpg, replay: ReplayTabViewModel) -> ReplayTabViewMo
             replay.writer_qos_profile,
         ),
     )
+
+
+def _replay_launch_callback(
+        dpg,
+        replay: ReplayTabViewModel,
+        command_sink: Optional[Callable[[AppCommand], bool]],
+):
+    def _callback(_sender=None, _app_data=None, _user_data=None):
+        if command_sink is None:
+            return False
+        launch = replace(
+            replay.launch,
+            label=_dpg_text_value(dpg, REPLAY_LAUNCH_LABEL_TAG, replay.launch.label),
+            config_paths=tuple(
+                part.strip()
+                for part in _dpg_text_value(
+                    dpg,
+                    REPLAY_LAUNCH_CONFIG_PATHS_TAG,
+                    ";".join(replay.launch.config_paths),
+                ).replace("\n", ";").split(";")
+                if part.strip()
+            ),
+            config_name=_dpg_text_value(dpg, REPLAY_LAUNCH_CONFIG_NAME_TAG, replay.launch.config_name),
+            data_domain_id=int(_float_text_value(dpg, REPLAY_LAUNCH_DATA_DOMAIN_TAG, replay.launch.data_domain_id)),
+            admin_domain_id=int(_float_text_value(dpg, REPLAY_LAUNCH_ADMIN_DOMAIN_TAG, replay.launch.admin_domain_id)),
+            monitoring_domain_id=int(_float_text_value(dpg, REPLAY_LAUNCH_MONITOR_DOMAIN_TAG, replay.launch.monitoring_domain_id)),
+            database_path=_dpg_text_value(dpg, REPLAY_LAUNCH_DATABASE_PATH_TAG, replay.launch.database_path),
+            verbosity=_dpg_text_value(dpg, REPLAY_LAUNCH_VERBOSITY_TAG, replay.launch.verbosity),
+            executable=_dpg_text_value(dpg, REPLAY_LAUNCH_EXECUTABLE_TAG, replay.launch.executable),
+            working_dir=_dpg_text_value(dpg, REPLAY_LAUNCH_WORKING_DIR_TAG, replay.launch.working_dir),
+            extra_args=tuple(
+                part.strip()
+                for part in _dpg_text_value(dpg, REPLAY_LAUNCH_EXTRA_ARGS_TAG, " ".join(replay.launch.extra_args)).split()
+                if part.strip()
+            ),
+        )
+        return command_sink(build_replay_launch_command(launch))
+    return _callback
 
 
 def _replay_select_callback(

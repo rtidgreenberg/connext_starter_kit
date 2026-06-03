@@ -769,7 +769,9 @@ python3 -m unittest test_gui_replay_controller test_service_control
 
 ### Slice 12 - Replay Monitoring Normalization Spike
 
-Status: `not-started`
+Status: `done`
+
+Evidence: Live Replay Service 7.7.0 monitoring capture saved under ignored workspace output `test_output/rs_gui_v2/replay_monitoring_spike.json` using `rtireplayservice -cfgName xcdr -appName rs_gui_v2_replay_spike` on monitoring domain 463. Replay monitoring reuses the Recording Service monitoring union discriminators and branch names: service `20000` with `recording_service`, session `20001` with `recording_session`, topic group `20002` with `recording_topic_group`, and topic `20003` with `recording_topic`. Replay-specific identity appears in `resource_id` values such as `/replay_services/xcdr`, `/replay_services/xcdr/sessions/DefaultSession`, and `/replay_services/xcdr/sessions/DefaultSession/topics/DefaultTopicGroup@Square`. Service config includes `application_name`, `application_guid`, `host`, `process.id`, and `builtin_sqlite.db_directory`; periodic service samples include process/host metrics under the same `recording_service` branch.
 
 Goal: Identify and document Replay Service monitoring resource discriminators and fields before changing normalization.
 

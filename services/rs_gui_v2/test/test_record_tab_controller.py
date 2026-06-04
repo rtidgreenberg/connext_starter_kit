@@ -427,6 +427,44 @@ class TestRecordTabController(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(terminate_outcome.requested)
         self.assertEqual(handle.terminate_calls, 1)
 
+    async def test_successful_shutdown_reaps_gui_owned_process_promptly(self):
+        class ShutdownExitingAdminClient(FakeServiceAdminClient):
+            def __init__(self, handle):
+                super().__init__()
+                self._handle = handle
+
+            async def send_command(self, request):
+                if request.command == ServiceCommand.SHUTDOWN:
+                    self._handle.returncode = 0
+                return await super().send_command(request)
+
+        handle = FakeHandle(4218)
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(handle),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        launch = manager.launch(
+            launch_request(),
+            launch_id="launch-main",
+            session_guid="11111111-2222-3333-4444-555555555555",
+        )
+        controller = RecordTabController(
+            manager,
+            admin_facade=ServiceAdminFacade(ShutdownExitingAdminClient(handle)),
+            config=RecordTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+        await controller.refresh_view()
+
+        shutdown_outcome = await controller.execute_action("shutdown")
+        refreshed = manager.refresh(launch.launch_id)
+
+        self.assertTrue(shutdown_outcome.ok)
+        self.assertTrue(shutdown_outcome.payload["process_exit_observed"])
+        self.assertEqual(refreshed.state.value, "exited")
+        self.assertEqual(refreshed.returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

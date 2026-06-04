@@ -1,5 +1,6 @@
 """Record tab controller that wires app-core service snapshots to GUI views."""
 
+import asyncio
 from dataclasses import dataclass, field, replace
 import os
 import re
@@ -24,7 +25,9 @@ from app_core.services import (
     ServiceKind,
     ServiceLaunchIntent,
     ServiceMonitoringFacade,
+    ServiceProcessCandidate,
     ServiceProcessLaunch,
+    ServiceProcessLaunchState,
     ServiceProcessLaunchRequest,
     ServiceProcessManager,
 )
@@ -66,6 +69,9 @@ class RecordTabControllerConfig:
 
 class RecordTabController:
     """Build Record tab snapshots and dispatch selected service actions."""
+
+    _LOCAL_SHUTDOWN_REAP_TIMEOUT_SEC = 1.0
+    _LOCAL_SHUTDOWN_REAP_POLL_SEC = 0.05
 
     def __init__(
             self,
@@ -328,12 +334,31 @@ class RecordTabController:
         if outcome.ok and observed_state:
             payload = dict(outcome.payload)
             payload["observed_state"] = observed_state
+            if action_id == "shutdown":
+                payload["process_exit_observed"] = await self._wait_for_local_shutdown_exit(selected)
             outcome = replace(outcome, payload=payload)
 
         self._append_history(outcome)
         if action_id == "shutdown":
             self._graceful_shutdown_failed = not outcome.ok
         return outcome
+
+    async def _wait_for_local_shutdown_exit(self, selected: ServiceProcessCandidate) -> bool:
+        if not selected.owns_process:
+            return False
+        launch_id = selected.launch_id or selected.candidate_id
+        if not launch_id:
+            return False
+        deadline = self._clock() + self._LOCAL_SHUTDOWN_REAP_TIMEOUT_SEC
+        while True:
+            launch = self._process_manager.refresh(launch_id)
+            if launch is None:
+                return True
+            if launch.state in {ServiceProcessLaunchState.EXITED, ServiceProcessLaunchState.START_FAILED}:
+                return True
+            if self._clock() >= deadline:
+                return False
+            await asyncio.sleep(self._LOCAL_SHUTDOWN_REAP_POLL_SEC)
 
     def _append_history(self, outcome: ServiceCommandOutcome) -> None:
         self._command_history = self._command_history + (outcome,)

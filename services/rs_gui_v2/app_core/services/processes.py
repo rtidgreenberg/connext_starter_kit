@@ -6,6 +6,7 @@ import os
 import signal
 import socket
 import subprocess
+import threading
 import time
 from types import MappingProxyType
 from typing import Any, Dict, Iterable, Mapping, Optional, Protocol, Sequence, Tuple
@@ -280,7 +281,10 @@ class _SubprocessServiceProcessHandle:
     def __init__(self, handle, output_file, output_path: str) -> None:
         self._handle = handle
         self._output_file = output_file
+        self._output_lock = threading.Lock()
         self.output_path = str(output_path)
+        self._reap_thread = threading.Thread(target=self._wait_for_exit, daemon=True)
+        self._reap_thread.start()
 
     @property
     def pid(self) -> int:
@@ -305,8 +309,16 @@ class _SubprocessServiceProcessHandle:
             self._handle.kill()
 
     def _close_output(self) -> None:
-        if not self._output_file.closed:
-            self._output_file.close()
+        with self._output_lock:
+            if not self._output_file.closed:
+                self._output_file.close()
+
+    def _wait_for_exit(self) -> None:
+        try:
+            self._handle.wait()
+        except Exception:
+            return
+        self._close_output()
 
 
 class ServiceProcessManager:

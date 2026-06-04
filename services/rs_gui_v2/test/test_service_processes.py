@@ -3,6 +3,9 @@
 
 import os
 import sys
+import tempfile
+import threading
+import time
 import unittest
 
 
@@ -27,6 +30,7 @@ from app_core.services import (
     candidate_from_process_launch,
     SubprocessServiceProcessSpawner,
 )
+import app_core.services.processes as processes_module
 
 
 class FakeHandle:
@@ -165,6 +169,36 @@ class TestServiceProcessManager(unittest.TestCase):
             spawner._log_dir,
             os.path.join(repo_root, "services", "rs_gui_v2", "service_logs"),
         )
+
+    def test_subprocess_handle_reaps_exited_child_without_polling(self):
+        class WaitableHandle:
+            def __init__(self):
+                self.pid = 4321
+                self.returncode = None
+                self.wait_started = threading.Event()
+                self.allow_exit = threading.Event()
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self):
+                self.wait_started.set()
+                self.allow_exit.wait(timeout=1.0)
+                self.returncode = 0
+                return self.returncode
+
+        waitable = WaitableHandle()
+        with tempfile.TemporaryFile("wb") as output_file:
+            handle = processes_module._SubprocessServiceProcessHandle(waitable, output_file, "test.log")
+            self.assertTrue(waitable.wait_started.wait(timeout=0.2))
+
+            waitable.allow_exit.set()
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline and not output_file.closed:
+                time.sleep(0.01)
+
+            self.assertTrue(output_file.closed)
+            self.assertEqual(handle.poll(), 0)
 
     def _request(self):
         return ServiceProcessLaunchRequest(

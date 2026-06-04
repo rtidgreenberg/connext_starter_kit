@@ -432,7 +432,7 @@ class TestDearPyGuiRenderer(unittest.TestCase):
             name == "add_text" and args and str(args[0]).startswith("Recording target: Recording Service")
             for name, args, _kwargs in fake.calls
         ))
-        self.assertTrue(any(name == "render_dearpygui_frame" for name, _args, _kwargs in fake.calls))
+        self.assertFalse(any(name == "render_dearpygui_frame" for name, _args, _kwargs in fake.calls))
 
     def test_all_command_buttons_dispatch_expected_command_types(self):
         expected = {

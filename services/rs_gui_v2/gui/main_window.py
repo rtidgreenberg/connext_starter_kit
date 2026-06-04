@@ -235,7 +235,6 @@ class DearPyGuiShell:
             _refresh_record_tab(dpg, view, _sink)
             _refresh_replay_tab(dpg, view, _sink)
             _refresh_console_output(dpg, view)
-            _render_one_frame_if_possible(dpg)
             return accepted
         return _sink
 

@@ -186,7 +186,8 @@ class RtiServiceMonitoringClient:
         3. For a new GUID in EVENT/PERIODIC, attribute to the caller (handles
            single-service domains where CONFIG may arrive later).
         """
-        domain_id = service.monitoring_domain_id
+        source_service = snapshot.service
+        domain_id = source_service.monitoring_domain_id
         service_by_guid = self._service_by_guid_by_domain.setdefault(domain_id, {})
         details = dict(snapshot.details)
 
@@ -201,22 +202,22 @@ class RtiServiceMonitoringClient:
         elif snapshot.kind == MonitoringSnapshotKind.CONFIG:
             # 2. New GUID from CONFIG — use service_name for initial mapping.
             service_name = str(details.get("service_name", "")).strip()
-            if service_name and service_name != service.name:
+            if service_name and service_name != source_service.name:
                 # Name differs from caller — create a ref with the reported name
                 # so multi-service domains route each service's data separately.
                 target_service = ServiceInstanceRef(
-                    kind=service.kind,
+                    kind=source_service.kind,
                     name=service_name,
-                    admin_domain_id=service.admin_domain_id,
-                    monitoring_domain_id=service.monitoring_domain_id,
-                    config_paths=service.config_paths,
+                    admin_domain_id=source_service.admin_domain_id,
+                    monitoring_domain_id=source_service.monitoring_domain_id,
+                    config_paths=source_service.config_paths,
                 )
             else:
                 # Name matches caller (or not reported) — attribute to caller.
-                target_service = service
+                target_service = source_service
         else:
             # 3. New GUID from EVENT/PERIODIC — attribute to caller.
-            target_service = service
+            target_service = source_service
 
         # Register object_guid as the primary unique identifier per service.
         if object_guid:
@@ -359,13 +360,14 @@ def _parse_config_sample(service: ServiceInstanceRef, data: Any) -> Optional[Mon
     resource_kind = _union_discriminator(union_value)
     if resource_kind == RESOURCE_RECORDING_SERVICE:
         recording_service = _selected_union_value(union_value, "recording_service")
+        resolved_service = _service_with_inferred_kind(service, recording_service)
         details = {
             "resource_kind": resource_kind,
             "service_detected": True,
             "service_name": _to_text(_field(recording_service, "application_name", service.name)),
         }
         details.update(_resource_guid_details(data))
-        details.update(_resource_id_details(recording_service, service.kind))
+        details.update(_resource_id_details(recording_service, resolved_service.kind))
         application_guid = _guid_to_text(_field(recording_service, "application_guid", None))
         if application_guid:
             details["application_guid"] = application_guid
@@ -389,22 +391,23 @@ def _parse_config_sample(service: ServiceInstanceRef, data: Any) -> Optional[Mon
         if sqlite is not None:
             details["db_directory"] = _to_text(_field(sqlite, "db_directory", ""))
         return MonitoringSnapshot(
-            service=service,
+            service=resolved_service,
             kind=MonitoringSnapshotKind.CONFIG,
             state="configured",
             details=details,
         )
     if resource_kind == RESOURCE_RECORDING_TOPIC:
         topic = _selected_union_value(union_value, "recording_topic")
+        resolved_service = _service_with_inferred_kind(service, topic)
         return MonitoringSnapshot(
-            service=service,
+            service=resolved_service,
             kind=MonitoringSnapshotKind.CONFIG,
             state="configured",
             details={
                 "resource_kind": resource_kind,
                 "service_detected": True,
                 "topics": [_to_text(_field(topic, "topic_name", ""))],
-                **_resource_id_details(topic, service.kind),
+                **_resource_id_details(topic, resolved_service.kind),
             },
         )
     return None
@@ -497,6 +500,28 @@ def _resource_guid_details(data: Any) -> Dict[str, str]:
     if owner_guid:
         details["owner_guid"] = owner_guid
     return details
+
+
+def _service_with_inferred_kind(service: ServiceInstanceRef, resource: Any) -> ServiceInstanceRef:
+    resource_id = _to_text(_field(resource, "resource_id", ""))
+    inferred_kind = _infer_service_kind(resource_id)
+    if inferred_kind is None or inferred_kind == service.kind:
+        return service
+    return ServiceInstanceRef(
+        kind=inferred_kind,
+        name=service.name,
+        admin_domain_id=service.admin_domain_id,
+        monitoring_domain_id=service.monitoring_domain_id,
+        config_paths=service.config_paths,
+    )
+
+
+def _infer_service_kind(resource_id: str) -> Optional[ServiceKind]:
+    if resource_id.startswith("/replay_services/"):
+        return ServiceKind.REPLAY
+    if resource_id.startswith("/recording_services/"):
+        return ServiceKind.RECORDING
+    return None
 
 
 def _resource_id_details(resource: Any, service_kind: ServiceKind) -> Dict[str, str]:

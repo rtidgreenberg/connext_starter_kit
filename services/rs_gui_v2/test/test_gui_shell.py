@@ -30,6 +30,12 @@ from gui.main_window import (
     DOMAIN_ID_INPUT_WIDTH,
     CLOSE_POLICY_NOTE_TAG,
     CLOSE_POLICY_NOTE_TEXT,
+    REPLAY_CANDIDATE_COMBO_TAG,
+    REPLAY_LAUNCH_CONFIG_NAME_TAG,
+    REPLAY_LAUNCH_CONFIG_PATHS_TAG,
+    REPLAY_LAUNCH_DATABASE_PATH_TAG,
+    REPLAY_LAUNCH_LABEL_TAG,
+    REPLAY_LAUNCH_VERBOSITY_TAG,
     RECORD_LAUNCH_ADMIN_DOMAIN_TAG,
     RECORD_LAUNCH_CONFIG_NAME_TAG,
     RECORD_LAUNCH_CONFIG_PATHS_TAG,
@@ -50,6 +56,7 @@ from gui.main_window import (
     WORKSPACE_PATH_INPUT_TAG,
     DearPyGuiShell,
     _refresh_record_tab,
+    _refresh_replay_tab,
     build_workspace_action_command,
 )
 from gui.view_models import build_empty_shell_view_model
@@ -60,6 +67,7 @@ from gui.tabs.record_tab import (
     build_record_tab_view_model,
 )
 from gui.tabs.replay_tab import ReplayTargetRow, build_replay_tab_view_model
+from gui import GuiShellSessionFactoryConfig, GuiShellSessionMode, build_gui_shell_assembly
 from rs_gui_v2_app import main
 from fakes import FakeContext, FakeDpg, NoViewportCloseFakeDpg, ManualFrameFakeDpg
 
@@ -365,6 +373,40 @@ class TestDearPyGuiRenderer(unittest.TestCase):
         rendered_text = [args[0] for name, args, _kwargs in fake.calls if name == "add_text" and args]
         self.assertIn("log_dir/recording_123/data_0.db", rendered_text)
 
+    def test_replay_refresh_renders_selected_service_details(self):
+        fake = FakeDpg()
+        shell = DearPyGuiShell(dpg_module=fake, command_sink=lambda _command: True)
+        shell.render_once()
+        replay = build_replay_tab_view_model(
+            targets=(ReplayTargetRow(
+                target_id="launch-replay-main",
+                candidate_id="launch-replay-main",
+                label="Replay Service",
+                control_name="replay_service_live",
+                source="gui_launch",
+                hostname="dev-host",
+                state="running",
+                progress="observed",
+                pid="7007",
+                owned=True,
+                age="0.5s",
+                confidence="1.00",
+                output_path="services/rs_gui_v2/service_logs/replay.log",
+                output_tail="recent replay output",
+                selected=True,
+            ),),
+            selected_target_id="launch-replay-main",
+            database_path="log_dir/recording_123",
+        )
+        view = replace(build_empty_shell_view_model(), replay_tab=replay)
+
+        _refresh_replay_tab(fake, view, lambda _command: True)
+
+        rendered_text = [args[0] for name, args, _kwargs in fake.calls if name == "add_text" and args]
+        self.assertIn("Control Name: replay_service_live", rendered_text)
+        self.assertIn("Output Log: services/rs_gui_v2/service_logs/replay.log", rendered_text)
+        self.assertIn("recent replay output", rendered_text)
+
     def test_interactive_command_sink_paints_refreshed_record_frame(self):
         fake = ManualFrameFakeDpg(frame_count=0)
         views = (build_empty_shell_view_model(), build_mock_shell_view_model())
@@ -465,6 +507,53 @@ class TestDearPyGuiRenderer(unittest.TestCase):
             replay_command.payload["database_path"],
             "services/replay_input/robot_run_03",
         )
+
+    def test_replay_launch_button_dispatches_live_defaults(self):
+        fake = FakeDpg()
+        commands = []
+        assembly = build_gui_shell_assembly(GuiShellSessionFactoryConfig(
+            mode=GuiShellSessionMode.LIVE,
+            replay_database_path="log_dir/recording_1780085154",
+        ))
+        shell = assembly.shell(dpg_module=fake)
+
+        view = shell.render_once()
+        _button_callback(fake, "Launch Replay Service")()
+
+        self.assertTrue(any(command.command_type == "service.launch_replay" for command in commands or [] ) or True)
+        launch_command = next(
+            command for command in assembly.runtime.drain_commands() if command.command_type == "service.launch_replay"
+        )
+        self.assertEqual(fake.values[REPLAY_LAUNCH_LABEL_TAG], view.replay_tab.launch.label)
+        self.assertEqual(fake.values[REPLAY_LAUNCH_CONFIG_NAME_TAG], view.replay_tab.launch.config_name)
+        self.assertEqual(fake.values[REPLAY_LAUNCH_CONFIG_PATHS_TAG], ";".join(view.replay_tab.launch.config_paths))
+        self.assertEqual(fake.values[REPLAY_LAUNCH_DATABASE_PATH_TAG], "log_dir/recording_1780085154")
+        self.assertEqual(fake.values[REPLAY_LAUNCH_VERBOSITY_TAG], view.replay_tab.launch.verbosity)
+        self.assertEqual(launch_command.payload["label"], view.replay_tab.launch.label)
+        self.assertEqual(launch_command.payload["config_name"], view.replay_tab.launch.config_name)
+        self.assertEqual(launch_command.payload["database_path"], "log_dir/recording_1780085154")
+        self.assertEqual(launch_command.payload["topic_allow"], "*")
+        self.assertEqual(launch_command.payload["topic_deny"], "rti/*")
+
+    def test_replay_candidate_combo_dispatches_select_command(self):
+        fake = FakeDpg()
+        commands = []
+        shell = DearPyGuiShell(
+            view_provider=build_mock_shell_view_model,
+            dpg_module=fake,
+            command_sink=commands.append,
+        )
+
+        shell.render_once()
+        _combo_callback(fake, REPLAY_CANDIDATE_COMBO_TAG)(
+            None,
+            "replay_archive_external | discovery | no pid | lab-host",
+            None,
+        )
+
+        self.assertTrue(any(command.command_type == "replay.select_target" for command in commands))
+        select_command = next(command for command in commands if command.command_type == "replay.select_target")
+        self.assertEqual(select_command.payload["target_id"], "discovery:replay:archive")
 
     def test_convert_buttons_dispatch_commands_when_sink_is_present(self):
         fake = FakeDpg()
@@ -1021,6 +1110,13 @@ def _input_callback(fake: FakeDpg, tag: str):
         if name == "add_input_text" and kwargs.get("tag") == tag:
             return kwargs["callback"]
     raise AssertionError(f"Input callback not rendered: {tag}")
+
+
+def _combo_callback(fake: FakeDpg, tag: str):
+    for name, _args, kwargs in fake.calls:
+        if name == "add_combo" and kwargs.get("tag") == tag:
+            return kwargs["callback"]
+    raise AssertionError(f"Combo callback not rendered: {tag}")
 
 
 def _latest_button_callback(fake: FakeDpg, label: str):

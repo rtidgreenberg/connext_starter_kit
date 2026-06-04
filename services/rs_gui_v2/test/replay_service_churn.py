@@ -50,15 +50,15 @@ from app_core.services import (  # noqa: E402
     default_rti_service_admin_config,
     default_rti_service_monitoring_config,
 )
-from gui import GuiShellSession, GuiShellSessionConfig, UiFrameScheduler  # noqa: E402
-from gui.tabs import (  # noqa: E402
-    RecordTabController,
-    RecordTabControllerConfig,
-    ReplayLaunchViewModel,
+from gui import (  # noqa: E402
+    GuiShellSession,
+    GuiShellSessionMode,
+    GuiShellSessionFactoryConfig,
     ReplayTabController,
-    ReplayTabControllerConfig,
+    build_gui_shell_assembly,
 )
-from gui.tabs.replay_tab import build_replay_launch_command  # noqa: E402
+from gui.main_window import DearPyGuiShell  # noqa: E402
+from fakes import FakeDpg  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -167,61 +167,33 @@ def evaluate_result(config: ReplayServiceChurnConfig, result: ReplayServiceChurn
 
 async def run_replay_service_churn(config: ReplayServiceChurnConfig) -> ReplayServiceChurnReport:
     executable, database_dir = _live_requirements(config)
-    hostname = socket.gethostname()
-    local_hostnames = tuple(dict.fromkeys((hostname, "dev-host")))
-    working_dir = os.path.join(REPO_ROOT, "test_output", "rs_gui_v2", "replay_service_churn")
-    os.makedirs(working_dir, exist_ok=True)
-
-    runtime = AppRuntime()
-    scheduler = UiFrameScheduler(runtime, max_event_log=80)
-    record_controller = RecordTabController(
-        ServiceProcessManager(hostname=hostname),
-        config=RecordTabControllerConfig(local_hostnames=local_hostnames),
-    )
-    replay_manager = ServiceProcessManager(
-        spawner=SubprocessServiceProcessSpawner(),
-        hostname=hostname,
-    )
-    admin_client = RtiServiceAdminClient(default_rti_service_admin_config())
-    monitoring_client = RtiServiceMonitoringClient(default_rti_service_monitoring_config())
-    replay_controller = ReplayTabController(
-        process_manager=replay_manager,
-        admin_facade=ServiceAdminFacade(admin_client),
-        monitoring_facade=ServiceMonitoringFacade(monitoring_client),
-        config=ReplayTabControllerConfig(local_hostnames=local_hostnames),
-    )
-    session = GuiShellSession(
-        runtime=runtime,
-        scheduler=scheduler,
-        record_controller=record_controller,
-        replay_controller=replay_controller,
-        config=GuiShellSessionConfig(
-            close_shutdown_exit_timeout_sec=config.shutdown_timeout_sec,
-            close_shutdown_poll_sec=config.poll_interval_sec,
-            local_hostnames=local_hostnames,
-        ),
-    )
+    assembly = build_gui_shell_assembly(GuiShellSessionFactoryConfig(
+        mode=GuiShellSessionMode.LIVE,
+        admin_domain_id=config.admin_domain_id,
+        monitoring_domain_id=config.monitoring_domain_id,
+        topics_domain_id=config.data_domain_id,
+        replay_config_name=config.config_name,
+        replay_database_path=database_dir,
+        replay_working_dir=REPO_ROOT,
+    ))
+    session = assembly.session
+    runtime = assembly.runtime
+    replay_controller = assembly.replay_controller
+    replay_manager = assembly.process_manager
+    fake = FakeDpg()
 
     result = ReplayServiceChurnResult()
     try:
-        await session.next_view_async(process_commands=False)
-        launch_command = build_replay_launch_command(ReplayLaunchViewModel(
-            label="Replay GUI Churn Gate",
-            config_paths=(
-                os.path.join(SERVICES_DIR, "replay_service_config.xml"),
-                os.path.join(REPO_ROOT, "dds", "qos", "DDS_QOS_PROFILES.xml"),
-            ),
-            config_name=config.config_name,
-            data_domain_id=config.data_domain_id,
-            admin_domain_id=config.admin_domain_id,
-            monitoring_domain_id=config.monitoring_domain_id,
-            database_path=database_dir,
-            topic_allow="*",
-            topic_deny="rti/*",
-            executable=executable,
-            working_dir=working_dir,
-        ))
-        session.command_sink(launch_command)
+        initial_view = await session.next_view_async(process_commands=False)
+        shell = DearPyGuiShell(
+            view_provider=lambda: initial_view,
+            command_sink=session.command_sink,
+            close_handler=session.handle_close_request,
+            dpg_module=fake,
+        )
+        shell.render_once()
+        launch_callback = _button_callback(fake, "Launch Replay Service")
+        launch_callback()
 
         launch_view = await _wait_for_launch(session, config.startup_timeout_sec, config.poll_interval_sec)
         selected = replay_controller.last_selection.selected_candidate
@@ -276,8 +248,8 @@ async def run_replay_service_churn(config: ReplayServiceChurnConfig) -> ReplaySe
             pid = final.pid if final is not None else result.pid
             if final is not None and final.alive and pid is not None:
                 _kill_pid(pid)
-        await _safe_close(admin_client)
-        await _safe_close(monitoring_client)
+        await _safe_close(assembly.admin_client)
+        await _safe_close(assembly.monitoring_client)
 
     issues = evaluate_result(config, result)
     return ReplayServiceChurnReport(passed=not issues, issues=issues, config=config, result=result)
@@ -413,6 +385,16 @@ def _live_requirements(config: ReplayServiceChurnConfig) -> Tuple[str, str]:
         raise RuntimeError(f"Replay input directory is missing data_0.db: {database_dir}")
     os.environ.setdefault("NDDSHOME", nddshome)
     return executable, database_dir
+
+
+def _button_callback(fake: FakeDpg, label: str):
+    for name, args, kwargs in fake.calls:
+        if name != "add_button":
+            continue
+        button_label = kwargs.get("label") or (args[0] if args else "")
+        if button_label == label:
+            return kwargs["callback"]
+    raise AssertionError(f"Button not rendered: {label}")
 
 
 async def _safe_close(client: Any) -> None:

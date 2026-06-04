@@ -18,11 +18,13 @@ from replay_service_churn import (  # noqa: E402
     ReplayServiceChurnConfig,
     ReplayServiceChurnReport,
     ReplayServiceChurnResult,
+    _button_callback,
     discover_default_database_dir,
     evaluate_result,
     parse_args,
     write_report,
 )
+from fakes import FakeDpg  # noqa: E402
 
 
 class TestReplayServiceChurnConfig(unittest.TestCase):
@@ -81,6 +83,13 @@ class TestReplayServiceChurnConfig(unittest.TestCase):
             discovered = discover_default_database_dir(tmpdir)
 
             self.assertEqual(discovered, newer)
+
+    def test_button_callback_finds_named_button(self):
+        fake = FakeDpg()
+        callback = lambda: True
+        fake.add_button(label="Launch Replay Service", callback=callback)
+
+        self.assertIs(_button_callback(fake, "Launch Replay Service"), callback)
 
 
 class TestReplayServiceChurnEvaluation(unittest.TestCase):

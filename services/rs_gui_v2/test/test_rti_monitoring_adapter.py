@@ -508,6 +508,46 @@ class TestRtiServiceMonitoringClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshots_a[-1].metrics["db_file_size"], 10)
         self.assertEqual(snapshots_b[-1].metrics["db_file_size"], 20)
 
+    async def test_take_available_does_not_drain_replay_samples_into_recording_probe(self):
+        recording_probe = ServiceInstanceRef(ServiceKind.RECORDING, "", monitoring_domain_id=54)
+        replay_service = ServiceInstanceRef(ServiceKind.REPLAY, "replay_a", monitoring_domain_id=54)
+        guid = [7] * 16
+        config_branch = SimpleNamespace(
+            resource_id="/replay_services/xcdr",
+            application_name="replay_a",
+            application_guid=SimpleNamespace(value=guid),
+        )
+        periodic_branch = SimpleNamespace(
+            builtin_sqlite=SimpleNamespace(current_file="", current_file_size=10),
+        )
+        FakeDataReader.samples_by_topic = {
+            MONITORING_CONFIG_TOPIC: [
+                sample_for(
+                    RESOURCE_REPLAY_SERVICE,
+                    "recording_service",
+                    config_branch,
+                    object_guid=guid,
+                ),
+            ],
+            MONITORING_PERIODIC_TOPIC: [
+                sample_for(
+                    RESOURCE_REPLAY_SERVICE,
+                    "recording_service",
+                    periodic_branch,
+                    object_guid=guid,
+                ),
+            ],
+        }
+        client = RtiServiceMonitoringClient(self.config, FakeDdsModule)
+
+        recording_snapshots = await client.take_available(recording_probe)
+        replay_snapshots = await client.take_available(replay_service)
+
+        self.assertEqual(recording_snapshots, [])
+        self.assertEqual([snapshot.service.kind for snapshot in replay_snapshots], [ServiceKind.REPLAY, ServiceKind.REPLAY])
+        self.assertEqual([snapshot.service.name for snapshot in replay_snapshots], ["replay_a", "replay_a"])
+        self.assertEqual(replay_snapshots[0].details["admin_resource_name"], "xcdr")
+
     async def test_snapshots_yields_available_snapshots_in_reader_order(self):
         config_branch = SimpleNamespace(application_name="deploy")
         event_branch = SimpleNamespace(state=SimpleNamespace(value=6, name="PAUSED"))

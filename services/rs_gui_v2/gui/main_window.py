@@ -61,6 +61,8 @@ RECORD_VAR_ROLLOVER_MB_TAG = "rs_gui_v2_record_var_rollover_mb"
 RECORD_TAB_CONTENT_TAG = "rs_gui_v2_record_tab_content"
 RECORD_TAB_DYNAMIC_TAG = "rs_gui_v2_record_tab_dynamic"
 RECORD_CANDIDATE_COMBO_TAG = "rs_gui_v2_record_candidate_combo"
+REPLAY_TAB_DYNAMIC_TAG = "rs_gui_v2_replay_tab_dynamic"
+REPLAY_CANDIDATE_COMBO_TAG = "rs_gui_v2_replay_candidate_combo"
 REPLAY_DATABASE_PATH_TAG = "rs_gui_v2_replay_database_path"
 REPLAY_PLAYBACK_RATE_TAG = "rs_gui_v2_replay_playback_rate"
 REPLAY_TIME_WINDOW_TAG = "rs_gui_v2_replay_time_window"
@@ -194,6 +196,7 @@ class DearPyGuiShell:
                 if now - last_refresh["value"] >= FRAME_REFRESH_INTERVAL_SEC:
                     view = self._view_provider()
                     _refresh_record_tab(dpg, view, command_sink)
+                    _refresh_replay_tab(dpg, view, command_sink)
                     _refresh_console_output(dpg, view)
                     last_refresh["value"] = now
             except Exception:
@@ -215,6 +218,7 @@ class DearPyGuiShell:
                 try:
                     view = self._view_provider()
                     _refresh_record_tab(dpg, view, command_sink)
+                    _refresh_replay_tab(dpg, view, command_sink)
                     _refresh_console_output(dpg, view)
                     last_refresh = now
                 except Exception:
@@ -229,6 +233,7 @@ class DearPyGuiShell:
             accepted = self._command_sink(command)
             view = self._view_provider()
             _refresh_record_tab(dpg, view, _sink)
+            _refresh_replay_tab(dpg, view, _sink)
             _refresh_console_output(dpg, view)
             _render_one_frame_if_possible(dpg)
             return accepted
@@ -555,6 +560,47 @@ def _refresh_record_candidate_combo(dpg, view: ShellViewModel) -> None:
         return
 
 
+def _refresh_replay_tab(
+        dpg,
+        view: ShellViewModel,
+        command_sink: Optional[Callable[[AppCommand], bool]] = None,
+) -> None:
+    if not _has_item(dpg, REPLAY_TAB_DYNAMIC_TAG):
+        return
+    delete_item = getattr(dpg, "delete_item", None)
+    push_container_stack = getattr(dpg, "push_container_stack", None)
+    pop_container_stack = getattr(dpg, "pop_container_stack", None)
+    if not (callable(delete_item) and callable(push_container_stack) and callable(pop_container_stack)):
+        _refresh_replay_candidate_combo(dpg, view)
+        return
+    try:
+        delete_item(REPLAY_TAB_DYNAMIC_TAG, children_only=True)
+        push_container_stack(REPLAY_TAB_DYNAMIC_TAG)
+        try:
+            replay = _replay_view_from_inputs(dpg, view.replay_tab)
+            _render_replay_dynamic_section(dpg, replay, command_sink=command_sink)
+        finally:
+            pop_container_stack()
+    except Exception:
+        _refresh_replay_candidate_combo(dpg, view)
+
+
+def _refresh_replay_candidate_combo(dpg, view: ShellViewModel) -> None:
+    if not _has_item(dpg, REPLAY_CANDIDATE_COMBO_TAG):
+        return
+    configure_item = getattr(dpg, "configure_item", None)
+    set_value = getattr(dpg, "set_value", None)
+    if not (callable(configure_item) and callable(set_value)):
+        return
+    labels = _replay_candidate_labels(view.replay_tab)
+    selected = _selected_replay_target_label(view.replay_tab, labels)
+    try:
+        configure_item(REPLAY_CANDIDATE_COMBO_TAG, items=labels)
+        set_value(REPLAY_CANDIDATE_COMBO_TAG, selected)
+    except Exception:
+        return
+
+
 def _has_item(dpg, tag: str) -> bool:
     does_item_exist = getattr(dpg, "does_item_exist", None)
     if callable(does_item_exist):
@@ -583,6 +629,22 @@ def _record_candidate_labels(record: RecordTabViewModel):
 
 def _selected_record_candidate_label(record: RecordTabViewModel, labels):
     return record.selected_candidate.control_name if record.selected_candidate else labels[0]
+
+
+def _replay_candidate_labels(replay: ReplayTabViewModel):
+    return [_replay_candidate_label(row) for row in replay.targets] or ["No Replay Service"]
+
+
+def _selected_replay_target_label(replay: ReplayTabViewModel, labels):
+    return _replay_candidate_label(replay.selected_target) if replay.selected_target else labels[0]
+
+
+def _replay_candidate_label(row: Optional[ReplayTargetRow]) -> str:
+    if row is None:
+        return "No Replay Service"
+    pid = row.pid or "no pid"
+    host = row.hostname or "unknown host"
+    return f"{row.control_name} | {row.source} | {pid} | {host}"
 
 
 def _render_record_tab(
@@ -1280,13 +1342,23 @@ def _render_replay_tab(
         replay: ReplayTabViewModel,
         command_sink: Optional[Callable[[AppCommand], bool]] = None,
 ) -> None:
+    _render_replay_launch(dpg, replay, command_sink=command_sink)
+    dpg.add_separator()
+    with dpg.group(tag=REPLAY_TAB_DYNAMIC_TAG):
+        _render_replay_dynamic_section(dpg, replay, command_sink=command_sink)
+
+
+def _render_replay_dynamic_section(
+        dpg,
+        replay: ReplayTabViewModel,
+        command_sink: Optional[Callable[[AppCommand], bool]] = None,
+) -> None:
     target_name = replay.selected_target.control_name if replay.selected_target else "(none)"
     dpg.add_text(
         f"Replay target: {target_name} | "
         f"State: {replay.observed_state} | Rate: {replay.playback_rate:g}x | "
         f"Loop: {'on' if replay.loop else 'off'}"
     )
-    _render_replay_launch(dpg, replay, command_sink=command_sink)
     _add_labeled_input_text(
         dpg,
         "Recording DB Path",
@@ -1330,8 +1402,18 @@ def _render_replay_tab(
             default_value=replay.writer_qos_profile,
             tag=REPLAY_WRITER_QOS_TAG,
         )
+    labels = _replay_candidate_labels(replay)
+    dpg.add_text("Detected Replay Instance")
+    dpg.add_combo(
+        labels,
+        default_value=_selected_replay_target_label(replay, labels),
+        label="##replay_candidate_combo",
+        tag=REPLAY_CANDIDATE_COMBO_TAG,
+        callback=_replay_candidate_combo_callback(replay, command_sink),
+    )
     _render_replay_actions(dpg, replay, command_sink=command_sink)
     _render_replay_targets(dpg, replay, command_sink=command_sink)
+    _render_replay_details(dpg, replay)
     _render_replay_timeline(dpg, replay)
     for diagnostic in replay.diagnostics:
         dpg.add_text(f"Diagnostic: {diagnostic}")
@@ -1418,6 +1500,27 @@ def _render_replay_targets(
                 dpg.add_text(row.state)
                 dpg.add_text(row.progress)
                 dpg.add_text("duplicate target" if row.conflict else "")
+
+
+def _render_replay_details(dpg, replay: ReplayTabViewModel) -> None:
+    selected = replay.selected_target
+    if selected is None:
+        return
+    with _collapsible_section(dpg, "Replay Details", default_open=False):
+        dpg.add_text(f"Control Name: {selected.control_name}")
+        dpg.add_text(f"Source: {selected.source}")
+        dpg.add_text(f"Host: {selected.hostname or '(unknown)'}")
+        dpg.add_text(f"PID: {selected.pid or '(unknown)'}")
+        dpg.add_text(f"State: {selected.state}")
+        dpg.add_text(f"Progress: {selected.progress or '(n/a)'}")
+        dpg.add_text(f"Confidence: {selected.confidence or '(n/a)'}")
+        dpg.add_text(f"Owned By GUI: {'yes' if selected.owned else 'no'}")
+        dpg.add_text(f"Last Seen Age: {selected.age or '(n/a)'}")
+        if selected.output_path:
+            dpg.add_text(f"Output Log: {selected.output_path}")
+        if selected.output_tail:
+            dpg.add_text("Recent Output")
+            dpg.add_text(selected.output_tail)
 
 
 def _render_replay_timeline(dpg, replay: ReplayTabViewModel) -> None:
@@ -1517,6 +1620,26 @@ def _replay_select_callback(
             target=row.control_name,
             payload={"target_id": row.target_id, "control_name": row.control_name},
         ))
+    return _callback
+
+
+def _replay_candidate_combo_callback(
+        replay: ReplayTabViewModel,
+        command_sink: Optional[Callable[[AppCommand], bool]],
+):
+    label_to_row = {
+        _replay_candidate_label(row): row
+        for row in replay.targets
+    }
+
+    def _callback(_sender=None, app_data=None, _user_data=None):
+        if command_sink is None:
+            return False
+        row = label_to_row.get(str(app_data or ""))
+        if row is None:
+            return False
+        return _replay_select_callback(row, command_sink)()
+
     return _callback
 
 

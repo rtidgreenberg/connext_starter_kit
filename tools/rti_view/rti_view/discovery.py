@@ -8,7 +8,7 @@ for DynamicData subscriptions.
 from dataclasses import dataclass
 from threading import RLock
 import time
-from typing import Dict, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 import rti.connextdds as dds
 
@@ -72,7 +72,7 @@ class DiscoveryDiagnostic:
 class DiscoveryRegistry:
     """Registry of participants and endpoints discovered on one domain."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._participants: Dict[str, DiscoveredParticipant] = {}
         self._endpoints: Dict[str, DiscoveredEndpoint] = {}
         self._lock = RLock()
@@ -101,17 +101,17 @@ class DiscoveryRegistry:
 
     def writers_for_participant(self, participant_key: str) -> Tuple[DiscoveredEndpoint, ...]:
         with self._lock:
-            return tuple(sorted(
-                (ep for ep in self._endpoints.values() if ep.is_writer and ep.participant_key == participant_key),
-                key=lambda ep: (ep.topic_name, ep.key),
-            ))
+            return self._matching_endpoints(
+                lambda endpoint: endpoint.is_writer and endpoint.participant_key == participant_key,
+                key=lambda endpoint: (endpoint.topic_name, endpoint.key),
+            )
 
     def writers_for_topic(self, topic_name: str) -> Tuple[DiscoveredEndpoint, ...]:
         with self._lock:
-            return tuple(sorted(
-                (ep for ep in self._endpoints.values() if ep.is_writer and ep.topic_name == topic_name),
-                key=lambda ep: (ep.participant_key, ep.key),
-            ))
+            return self._matching_endpoints(
+                lambda endpoint: endpoint.is_writer and endpoint.topic_name == topic_name,
+                key=lambda endpoint: (endpoint.participant_key, endpoint.key),
+            )
 
     def topics_for_participant(self, participant_key: str) -> Tuple[str, ...]:
         return tuple(dict.fromkeys(ep.topic_name for ep in self.writers_for_participant(participant_key)))
@@ -128,8 +128,8 @@ class DiscoveryRegistry:
         """Return unique topic names with the first observed type name."""
         with self._lock:
             topics: Dict[str, str] = {}
-            for ep in sorted(self._endpoints.values(), key=lambda item: (item.topic_name, item.key)):
-                topics.setdefault(ep.topic_name, ep.type_name)
+            for endpoint in self._matching_endpoints(lambda endpoint: True, key=lambda endpoint: (endpoint.topic_name, endpoint.key)):
+                topics.setdefault(endpoint.topic_name, endpoint.type_name)
             return topics
 
     @property
@@ -165,6 +165,13 @@ class DiscoveryRegistry:
             ))
         return endpoint, tuple(diagnostics)
 
+    def _matching_endpoints(
+            self,
+            predicate: Callable[[DiscoveredEndpoint], bool],
+            key: Callable[[DiscoveredEndpoint], Tuple[str, str]],
+    ) -> Tuple[DiscoveredEndpoint, ...]:
+        return tuple(sorted((endpoint for endpoint in self._endpoints.values() if predicate(endpoint)), key=key))
+
 
 registry = DiscoveryRegistry()
 _listener_refs: Dict[int, Tuple[object, object]] = {}
@@ -189,20 +196,28 @@ def _endpoint_score(endpoint: DiscoveredEndpoint) -> Tuple[bool, float, str]:
 def _merge_endpoint(previous: DiscoveredEndpoint, current: DiscoveredEndpoint) -> DiscoveredEndpoint:
     return DiscoveredEndpoint(
         key=current.key,
-        topic_name=current.topic_name or previous.topic_name,
-        type_name=current.type_name or previous.type_name,
-        dynamic_type=current.dynamic_type if current.dynamic_type is not None else previous.dynamic_type,
-        kind=current.kind or previous.kind,
-        participant_key=current.participant_key or previous.participant_key,
-        reliability=current.reliability if current.reliability is not None else previous.reliability,
-        durability=current.durability if current.durability is not None else previous.durability,
-        deadline=current.deadline if current.deadline is not None else previous.deadline,
-        ownership=current.ownership if current.ownership is not None else previous.ownership,
-        presentation=current.presentation if current.presentation is not None else previous.presentation,
-        partition=current.partition if current.partition is not None else previous.partition,
-        type_debug=current.type_debug or previous.type_debug,
+        topic_name=_coalesce(current.topic_name, previous.topic_name),
+        type_name=_coalesce(current.type_name, previous.type_name),
+        dynamic_type=_coalesce_defined(current.dynamic_type, previous.dynamic_type),
+        kind=_coalesce(current.kind, previous.kind),
+        participant_key=_coalesce(current.participant_key, previous.participant_key),
+        reliability=_coalesce_defined(current.reliability, previous.reliability),
+        durability=_coalesce_defined(current.durability, previous.durability),
+        deadline=_coalesce_defined(current.deadline, previous.deadline),
+        ownership=_coalesce_defined(current.ownership, previous.ownership),
+        presentation=_coalesce_defined(current.presentation, previous.presentation),
+        partition=_coalesce_defined(current.partition, previous.partition),
+        type_debug=_coalesce(current.type_debug, previous.type_debug),
         observed_at=max(float(previous.observed_at), float(current.observed_at)),
     )
+
+
+def _coalesce(current, fallback):
+    return current or fallback
+
+
+def _coalesce_defined(current, fallback):
+    return current if current is not None else fallback
 
 
 def _key_bytes(key_value) -> Optional[bytes]:
@@ -233,17 +248,18 @@ def _key_parts(key_value) -> Tuple[int, ...]:
             if key_bytes[index:index + 4]
         )
     if isinstance(key_value, (list, tuple)):
-        parts = []
-        for value in key_value:
-            try:
-                parts.append(int(value))
-            except Exception:
-                parts.append(0)
-        return tuple(parts)
+        return tuple(_coerce_int(value) for value in key_value)
     try:
         return (int(key_value),)
     except Exception:
         return ()
+
+
+def _coerce_int(value) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return 0
 
 
 def _participant_ip(participant_data) -> str:
@@ -273,7 +289,7 @@ def participant_from_builtin_data(participant_data, observed_at: Optional[float]
         ip=_participant_ip(participant_data),
         rtps_host_id=host_id,
         rtps_app_id=app_id,
-        observed_at=time.time() if observed_at is None else float(observed_at),
+        observed_at=_observed_at(observed_at),
     )
 
 
@@ -295,8 +311,12 @@ def endpoint_from_builtin_data(data, kind: str, observed_at: Optional[float] = N
         presentation=getattr(data, "presentation", None),
         partition=getattr(data, "partition", None),
         type_debug=_type_debug_lines(data),
-        observed_at=time.time() if observed_at is None else float(observed_at),
+        observed_at=_observed_at(observed_at),
     )
+
+
+def _observed_at(observed_at: Optional[float]) -> float:
+    return time.time() if observed_at is None else float(observed_at)
 
 
 def _type_debug_lines(data) -> Tuple[str, ...]:
@@ -358,12 +378,14 @@ def refresh_participants(participant: dds.DomainParticipant, target_registry: Di
 
 def refresh_endpoints(participant: dds.DomainParticipant, target_registry: DiscoveryRegistry = registry) -> None:
     """Poll builtin endpoint readers so discovery does not depend only on listener callbacks."""
-    for data, info in participant.publication_reader.take():
+    _poll_endpoint_reader(participant.publication_reader, "Writer", target_registry)
+    _poll_endpoint_reader(participant.subscription_reader, "Reader", target_registry)
+
+
+def _poll_endpoint_reader(reader, kind: str, target_registry: DiscoveryRegistry) -> None:
+    for data, info in reader.take():
         if info.valid:
-            target_registry.add_endpoint(endpoint_from_builtin_data(data, "Writer"))
-    for data, info in participant.subscription_reader.take():
-        if info.valid:
-            target_registry.add_endpoint(endpoint_from_builtin_data(data, "Reader"))
+            target_registry.add_endpoint(endpoint_from_builtin_data(data, kind))
 
 
 def configure_type_lookup_qos(qos: dds.DomainParticipantQos) -> bool:

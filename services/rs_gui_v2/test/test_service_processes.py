@@ -108,7 +108,16 @@ class TestServiceProcessCommand(unittest.TestCase):
         self.assertEqual(command[command.index("-appName") + 1], "main_recorder_11111111")
         self.assertEqual(command[command.index("-remoteAdministrationDomainId") + 1], "54")
         self.assertEqual(command[command.index("-remoteMonitoringDomainId") + 1], "55")
-        self.assertEqual(command[command.index("-cfgFile") + 1], "recording_service_config.xml;DDS_QOS_PROFILES.xml")
+        repo_root = os.path.dirname(os.path.dirname(PARENT_DIR))
+        self.assertEqual(
+            command[command.index("-cfgFile") + 1],
+            ";".join(
+                (
+                    os.path.join(repo_root, "recording_service_config.xml"),
+                    os.path.join(repo_root, "DDS_QOS_PROFILES.xml"),
+                )
+            ),
+        )
         self.assertIn("-DDB_DIR=/tmp/run_001", command)
 
     def test_replay_command_uses_replay_binary_and_runtime_app_name(self):

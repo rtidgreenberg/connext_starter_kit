@@ -62,11 +62,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0 if view.record_tab.candidates else 1
     if args.gui or args.mock_gui:
         try:
-            if is_debug():
-                print(f"[DEBUG] Logging to: {log_path()}", flush=True)
-                dbg("app", "rs_gui_v2 starting", mode="mock" if args.mock_gui else "live")
             mode = GuiShellSessionMode.MOCK if args.mock_gui else GuiShellSessionMode.LIVE
             assembly = build_gui_shell_assembly(GuiShellSessionFactoryConfig(mode=mode))
+            if is_debug():
+                print(f"[DEBUG] Debug log: {log_path()}", flush=True)
+            if assembly.runtime.event_log_path:
+                print(f"[DEBUG] Event log: {assembly.runtime.event_log_path}", flush=True)
+            dbg(
+                "app",
+                "rs_gui_v2 starting",
+                mode="mock" if args.mock_gui else "live",
+                event_log=assembly.runtime.event_log_path,
+            )
             assembly.shell().run()
             dbg("app", "rs_gui_v2 exited normally")
             return 0

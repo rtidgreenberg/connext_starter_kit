@@ -40,7 +40,10 @@ class ReplayLaunchViewModel:
     """Operator-facing launch settings for Replay Service."""
 
     label: str = "Replay Service"
-    config_paths: Tuple[str, ...] = ("services/replay_service_config.xml",)
+    config_paths: Tuple[str, ...] = (
+        "services/replay_service_config.xml",
+        "dds/qos/DDS_QOS_PROFILES.xml",
+    )
     available_config_names: Tuple[str, ...] = ("xcdr", "json")
     config_name: str = "xcdr"
     data_domain_id: int = 0
@@ -52,7 +55,7 @@ class ReplayLaunchViewModel:
     loop: bool = False
     time_window: str = ""
     topic_allow: str = "*"
-    topic_deny: str = ""
+    topic_deny: str = "rti/*"
     qos_file_path: str = ""
     participant_qos_profile: str = ""
     writer_qos_profile: str = ""

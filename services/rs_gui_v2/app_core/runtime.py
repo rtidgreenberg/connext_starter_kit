@@ -52,6 +52,12 @@ class AppRuntime:
         return self._state.runtime_counters
 
     @property
+    def event_log_path(self) -> str:
+        if self._event_log_writer is None:
+            return ""
+        return self._event_log_writer.path
+
+    @property
     def task_names(self) -> List[str]:
         return sorted(self._tasks.keys())
 

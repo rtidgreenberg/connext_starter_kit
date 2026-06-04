@@ -661,7 +661,8 @@ def build_service_process_command(
     if request.verbosity:
         command.extend(["-verbosity", request.verbosity])
     if identity.intent.config_paths:
-        command.extend(["-cfgFile", ";".join(identity.intent.config_paths)])
+        resolved_config_paths = tuple(_resolve_launch_path(path) for path in identity.intent.config_paths)
+        command.extend(["-cfgFile", ";".join(resolved_config_paths)])
     command.extend(request.extra_args)
     return tuple(command)
 
@@ -698,6 +699,16 @@ def _workspace_relative_path(path: str) -> str:
     for _ in range(4):
         root = os.path.dirname(root)
     return os.path.join(root, path)
+
+
+def _resolve_launch_path(path: str) -> str:
+    normalized = str(path).strip()
+    if not normalized or os.path.isabs(normalized):
+        return normalized
+    cwd_candidate = os.path.abspath(normalized)
+    if os.path.exists(cwd_candidate):
+        return cwd_candidate
+    return _workspace_relative_path(normalized)
 
 
 def _read_tail(path: str, max_bytes: int = 8192) -> str:

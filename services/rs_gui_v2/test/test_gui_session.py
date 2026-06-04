@@ -433,6 +433,52 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(entry.message == "Dispatched service.launch_replay" for entry in view.event_log))
         self.assertTrue(any(entry.message == "Replay Service process observed: running" for entry in view.event_log))
 
+    async def test_replay_monitoring_updates_are_published_to_event_log(self):
+        handle = FakeHandle(7007)
+        replay_manager = ServiceProcessManager(
+            spawner=FakeSpawner(handle),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        monitoring_client = FakeServiceMonitoringClient()
+        replay_controller = ReplayTabController(
+            process_manager=replay_manager,
+            monitoring_facade=ServiceMonitoringFacade(monitoring_client),
+            config=ReplayTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+        launch = replay_manager.launch(
+            ServiceProcessLaunchRequest(
+                intent=ServiceLaunchIntent(
+                    kind=ServiceKind.REPLAY,
+                    label="Replay Service",
+                    admin_domain_id=61,
+                    monitoring_domain_id=62,
+                    config_paths=("replay.xml", "qos.xml"),
+                ),
+                config_name="xcdr",
+                executable="/opt/rti/bin/rtireplayservice",
+            ),
+            launch_id="launch-replay-main",
+            session_guid="11111111-2222-3333-4444-555555555555",
+        )
+        monitoring_client.push_snapshot(MonitoringSnapshot(
+            service=launch.identity.service_ref,
+            kind=MonitoringSnapshotKind.CONFIG,
+            state="configured",
+            details={
+                "resource_id": "/replay_services/xcdr",
+                "admin_resource_name": "xcdr",
+                "process_id": 7007,
+                "host_name": "dev-host",
+            },
+        ))
+        session, _admin_client, _launch = build_session(replay_controller=replay_controller)
+
+        view = await session.next_view_async(process_commands=False)
+
+        self.assertTrue(any(entry.message == "Replay Service monitoring config: configured" for entry in view.event_log))
+
     async def test_close_request_leave_running_does_not_shutdown_services(self):
         session, admin_client, _launch = build_session()
         await session.next_view_async(process_commands=False)

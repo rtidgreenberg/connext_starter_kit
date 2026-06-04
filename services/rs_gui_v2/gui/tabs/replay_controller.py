@@ -40,6 +40,16 @@ from .replay_tab import (
 )
 
 
+def _workspace_launch_path(path: str) -> str:
+    normalized = str(path).strip()
+    if not normalized or os.path.isabs(normalized):
+        return normalized
+    root = os.path.abspath(os.path.dirname(__file__))
+    for _ in range(4):
+        root = os.path.dirname(root)
+    return os.path.join(root, normalized)
+
+
 @dataclass(frozen=True)
 class ReplayTabControllerConfig:
     """Runtime wiring options for the Replay tab controller."""
@@ -56,7 +66,10 @@ class ReplayTabControllerConfig:
     participant_qos_profile: str = ""
     writer_qos_profile: str = ""
     launch_label: str = "Replay Service"
-    launch_config_paths: Tuple[str, ...] = ("services/replay_service_config.xml",)
+    launch_config_paths: Tuple[str, ...] = (
+        "services/replay_service_config.xml",
+        "dds/qos/DDS_QOS_PROFILES.xml",
+    )
     launch_config_name: str = "xcdr"
     launch_data_domain_id: int = 0
     launch_admin_domain_id: int = 0
@@ -64,7 +77,7 @@ class ReplayTabControllerConfig:
     launch_database_path: str = "log_dir/xcdr"
     launch_storage_format: str = "XCDR"
     launch_topic_allow: str = "*"
-    launch_topic_deny: str = ""
+    launch_topic_deny: str = "rti/*"
     launch_verbosity: str = "ERROR:ERROR"
     launch_executable: str = ""
     launch_working_dir: str = ""
@@ -105,6 +118,7 @@ class ReplayTabController:
         self._admin_facade = admin_facade
         self._monitoring_facade = monitoring_facade
         self._targets = tuple(targets)
+        self._state_overrides = {}
         self._timeline = tuple(timeline)
         self._diagnostics = tuple(str(item) for item in diagnostics)
         self._config = config or ReplayTabControllerConfig()
@@ -157,6 +171,10 @@ class ReplayTabController:
     def last_selection(self) -> ServiceCandidateSelection:
         return self._last_selection
 
+    @property
+    def last_monitoring_updates(self) -> Tuple[MonitoringSnapshot, ...]:
+        return self._latest_monitoring
+
     def select_target(self, target_id: str) -> ReplayTargetRow:
         """Select a Replay Service candidate by target id."""
 
@@ -178,29 +196,49 @@ class ReplayTabController:
         if command.command_type == "replay.start":
             target = self._apply_action_payload(payload)
             if self._admin_facade is not None:
+                if _relaunch_required_for_start(target):
+                    launch = self.launch_replay(payload)
+                    self._runtime_targets()
+                    return _command_result(command, f"Started replay {launch.identity.control_name}", self._target_by_id(launch.launch_id))
                 return await self._execute_playback_command(command, target, ENTITY_STATE_RUNNING, "Started")
             self._set_target_state(target.target_id, "RUNNING", progress="running")
             return _command_result(command, f"Started replay {target.control_name}", self._target_by_id(target.target_id))
         if command.command_type == "replay.pause":
-            target = self._selected_target()
+            target = self._apply_action_payload(payload)
             if self._admin_facade is not None:
                 return await self._execute_playback_command(command, target, ENTITY_STATE_PAUSED, "Paused")
             self._set_target_state(target.target_id, "PAUSED")
             return _command_result(command, f"Paused replay {target.control_name}", self._target_by_id(target.target_id))
         if command.command_type == "replay.resume":
-            target = self._selected_target()
+            target = self._apply_action_payload(payload)
             if self._admin_facade is not None:
                 return await self._execute_playback_command(command, target, ENTITY_STATE_RUNNING, "Resumed")
             self._set_target_state(target.target_id, "RUNNING", progress="running")
             return _command_result(command, f"Resumed replay {target.control_name}", self._target_by_id(target.target_id))
         if command.command_type == "replay.stop":
-            target = self._selected_target()
+            target = self._apply_action_payload(payload)
             if self._admin_facade is not None:
                 return await self._execute_playback_command(command, target, ENTITY_STATE_STOPPED, "Stopped")
             self._set_target_state(target.target_id, "STOPPED", progress="0%")
             return _command_result(command, f"Stopped replay {target.control_name}", self._target_by_id(target.target_id))
         if command.command_type == "replay.shutdown":
-            target = self._selected_target()
+            target = self._apply_action_payload(payload)
+            if self._admin_facade is not None:
+                selected = self._selected_candidate_for_target(target.target_id)
+                outcome = await self._admin_facade.execute(
+                    selected.service,
+                    ServiceCommand.SHUTDOWN,
+                    parameters=_admin_resource_parameters(selected),
+                    timeout_sec=command.timeout_sec,
+                )
+                self._graceful_shutdown_failed = not outcome.ok
+                if self._process_manager is not None and target.owned:
+                    self._process_manager.request_local_termination(
+                        self._last_selection,
+                        graceful_shutdown_failed=True,
+                        candidate_id=selected.candidate_id,
+                        local_hostnames=self._config.local_hostnames,
+                    )
             self._set_target_state(target.target_id, "SHUTDOWN", progress="")
             return _command_result(command, f"Shutdown replay {target.control_name}", self._target_by_id(target.target_id))
         raise ValueError(f"Unsupported Replay command type: {command.command_type}")
@@ -217,6 +255,7 @@ class ReplayTabController:
         admin_domain_id = _int_payload(payload, "admin_domain_id", self._config.launch_admin_domain_id)
         monitoring_domain_id = _int_payload(payload, "monitoring_domain_id", self._config.launch_monitoring_domain_id)
         database_path = str(payload.get("database_path", self._config.launch_database_path)).strip()
+        resolved_database_path = _workspace_launch_path(database_path)
         storage_format = str(payload.get("storage_format", self._config.launch_storage_format)).strip() or "XCDR"
         playback_rate = float(str(payload.get("playback_rate", self._config.playback_rate)).strip() or self._config.playback_rate)
         loop = bool(payload.get("loop", self._config.loop))
@@ -224,6 +263,7 @@ class ReplayTabController:
         topic_allow = str(payload.get("topic_allow", self._config.launch_topic_allow)).strip() or "*"
         topic_deny = str(payload.get("topic_deny", self._config.launch_topic_deny)).strip()
         qos_file_path = str(payload.get("qos_file_path", self._config.qos_file_path)).strip()
+        resolved_qos_file_path = _workspace_launch_path(qos_file_path)
         participant_qos_profile = str(payload.get("participant_qos_profile", self._config.participant_qos_profile)).strip()
         writer_qos_profile = str(payload.get("writer_qos_profile", self._config.writer_qos_profile)).strip()
         verbosity = str(payload.get("verbosity", self._config.launch_verbosity)).strip() or "ERROR:ERROR"
@@ -236,17 +276,17 @@ class ReplayTabController:
             f"-DREPLAY_ADMIN_DOMAIN_ID={admin_domain_id}",
             f"-DREPLAY_MON_DOMAIN_ID={monitoring_domain_id}",
             f"-DREPLAY_STORAGE_FORMAT={storage_format}",
-            f"-DREPLAY_DATABASE_DIR={database_path}",
+            f"-DREPLAY_DATABASE_DIR={resolved_database_path}",
             f"-D{storage_variable_prefix}_STORAGE_FORMAT={storage_format}",
-            f"-D{storage_variable_prefix}_DATABASE_DIR={database_path}",
+            f"-D{storage_variable_prefix}_DATABASE_DIR={resolved_database_path}",
             f"-DREPLAY_PLAYBACK_RATE={playback_rate:g}",
             f"-DREPLAY_ENABLE_LOOPING={'true' if loop else 'false'}",
             f"-DREPLAY_TOPIC_ALLOW={topic_allow}",
             f"-DREPLAY_TOPIC_DENY={topic_deny}",
             f"-DDOMAIN_ID={data_domain_id}",
         ) + operator_extra_args
-        if qos_file_path:
-            launch_extra_args += (f"-DREPLAY_QOS_FILE={qos_file_path}",)
+        if resolved_qos_file_path:
+            launch_extra_args += (f"-DREPLAY_QOS_FILE={resolved_qos_file_path}",)
         if participant_qos_profile:
             launch_extra_args += (f"-DREPLAY_DP_QOS={participant_qos_profile}",)
         if writer_qos_profile:
@@ -255,9 +295,9 @@ class ReplayTabController:
             "REPLAY_DOMAIN_ID": str(data_domain_id),
             "REPLAY_ADMIN_DOMAIN_ID": str(admin_domain_id),
             "REPLAY_MON_DOMAIN_ID": str(monitoring_domain_id),
-            "REPLAY_DATABASE_DIR": database_path,
+            "REPLAY_DATABASE_DIR": resolved_database_path,
             f"{storage_variable_prefix}_STORAGE_FORMAT": storage_format,
-            f"{storage_variable_prefix}_DATABASE_DIR": database_path,
+            f"{storage_variable_prefix}_DATABASE_DIR": resolved_database_path,
             "DOMAIN_ID": str(data_domain_id),
         }
         nddshome = os.environ.get("NDDSHOME", "") or detect_nddshome()
@@ -368,6 +408,17 @@ class ReplayTabController:
                 "entity_state_value": state_value,
             },
         )
+        if outcome.ok:
+            override = None
+            if state_value == ENTITY_STATE_PAUSED:
+                override = ("PAUSED", None)
+            elif state_value == ENTITY_STATE_STOPPED:
+                override = ("STOPPED", "0%")
+            elif state_value == ENTITY_STATE_RUNNING:
+                override = ("RUNNING", "running")
+            if override is not None:
+                self._state_overrides[selected.service.key] = override
+                self._set_target_state(target.target_id, override[0], progress=override[1])
         return CommandResult(
             command_id=command.command_id,
             status=CommandStatus.ACKNOWLEDGED if outcome.ok else outcome.status,
@@ -465,7 +516,15 @@ class ReplayTabController:
             candidates=replay_candidates,
             selected_candidate_id=selection.selected_candidate_id,
         )
-        return tuple(_target_from_candidate(candidate, self._clock()) for candidate in replay_candidates)
+        targets = []
+        for candidate in replay_candidates:
+            target = _target_from_candidate(candidate, self._clock())
+            override = self._state_overrides.get(candidate.service.key)
+            if override is not None:
+                state, progress = override
+                target = replace(target, state=state, progress=target.progress if progress is None else progress)
+            targets.append(target)
+        return tuple(targets)
 
     def _launch_view(self) -> ReplayLaunchViewModel:
         return ReplayLaunchViewModel(
@@ -493,8 +552,15 @@ class ReplayTabController:
 
     def _apply_action_payload(self, payload: Mapping[str, object]) -> ReplayTargetRow:
         target_id = str(payload.get("target_id") or self._config.selected_target_id)
+        control_name = str(payload.get("control_name") or "").strip()
         if target_id:
-            self.select_target(target_id)
+            try:
+                self.select_target(target_id)
+            except ValueError:
+                if control_name:
+                    self.select_target(control_name)
+                else:
+                    raise
         database_path = str(payload.get("database_path") or self._config.database_path)
         if not database_path.strip():
             raise ValueError("replay.start requires a recording database path")
@@ -590,6 +656,10 @@ def _command_result(command: AppCommand, message: str, target: ReplayTargetRow) 
         },
         created_at=command.created_at,
     )
+
+
+def _relaunch_required_for_start(target: ReplayTargetRow) -> bool:
+    return bool(target.owned) and str(target.state).strip().lower() in {"stopped", "shutdown", "exited", "start_failed"}
 
 
 def _target_from_candidate(candidate, now: float) -> ReplayTargetRow:

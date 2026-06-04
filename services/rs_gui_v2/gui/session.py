@@ -146,6 +146,7 @@ class GuiShellSession:
         replay_view = None
         if self._replay_controller is not None:
             replay_view = await self._replay_controller.refresh_view()
+            self._publish_replay_monitoring_events()
             self._publish_replay_process_state_events()
         topics_view = None
         if self._topics_controller is not None:
@@ -457,6 +458,7 @@ class GuiShellSession:
         deadline = asyncio.get_running_loop().time() + self._config.close_shutdown_exit_timeout_sec
         while True:
             replay_view = await self._replay_controller.refresh_view()
+            self._publish_replay_monitoring_events()
             self._publish_replay_process_state_events()
             target = next(
                 (row for row in replay_view.targets if row.candidate_id == candidate_id or row.target_id == candidate_id),
@@ -529,6 +531,25 @@ class GuiShellSession:
                     "message": f"Replay Service process observed: {state}",
                 },
                 created_at=candidate.last_seen_at,
+            ))
+
+    def _publish_replay_monitoring_events(self) -> None:
+        if self._replay_controller is None:
+            return
+        for snapshot in self._replay_controller.last_monitoring_updates:
+            self._runtime.publish_event(AppEvent(
+                event_type="service.monitoring_update",
+                source="gui",
+                payload={
+                    "service": snapshot.service.to_dict(),
+                    "kind": snapshot.kind.value,
+                    "state": snapshot.state,
+                    "metrics": dict(snapshot.metrics),
+                    "details": dict(snapshot.details),
+                    "level": "info",
+                    "message": f"Replay Service monitoring {snapshot.kind.value}: {snapshot.state}",
+                },
+                created_at=snapshot.observed_at,
             ))
 
 

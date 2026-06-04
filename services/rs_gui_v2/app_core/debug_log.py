@@ -1,7 +1,8 @@
 """Lightweight debug logger for rs_gui_v2.
 
-Writes timestamped debug lines to a rotating log file when DEBUG mode is
-enabled.  Enable by setting the environment variable RS_GUI_DEBUG=1.
+Writes timestamped debug lines to a rotating log file. Debug logging is enabled
+by default so launch/debug issues always leave a local trace. Disable it by
+setting the environment variable RS_GUI_DEBUG=0.
 
 Usage:
     from app_core.debug_log import dbg
@@ -15,7 +16,8 @@ import time
 import traceback
 from pathlib import Path
 
-_ENABLED = os.environ.get("RS_GUI_DEBUG", "").strip() in ("1", "true", "yes")
+_DEBUG_ENV = os.environ.get("RS_GUI_DEBUG", "").strip().lower()
+_ENABLED = _DEBUG_ENV not in ("0", "false", "no", "off")
 
 _LOG_DIR = Path(os.environ.get(
     "RS_GUI_LOG_DIR",
@@ -41,7 +43,7 @@ def _get_log_file():
 
 
 def dbg(tag: str, message: str, **kwargs) -> None:
-    """Write a debug line to the log file (no-op if RS_GUI_DEBUG is not set)."""
+    """Write a debug line to the log file (no-op if debug logging is disabled)."""
     if not _ENABLED:
         return
     elapsed = time.monotonic() - _START_TIME
@@ -71,5 +73,5 @@ def is_debug() -> bool:
 def log_path() -> str:
     """Return the path to the current debug log file (creates it if needed)."""
     if not _ENABLED:
-        return "(debug logging disabled - set RS_GUI_DEBUG=1)"
+        return "(debug logging disabled - set RS_GUI_DEBUG=0 only when needed)"
     return str(_get_log_file().name)

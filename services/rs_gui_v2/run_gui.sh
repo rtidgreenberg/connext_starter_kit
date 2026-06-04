@@ -24,7 +24,8 @@ Launcher options:
     --prepare-dds        Run setup.sh before launch and require Connext checks
     --diagnostics-only   Run startup diagnostics, then exit
     --skip-diagnostics   Launch without startup diagnostics
-    --debug              Enable debug logging to debug_logs/rs_gui_debug_<pid>.log
+    --debug              Keep debug logging enabled explicitly (default)
+    --no-debug           Disable debug logging for this run
 
 App modes:
     --gui                Launch the Dear PyGui shell (default)
@@ -39,6 +40,7 @@ Examples:
 ./run_gui.sh --headless-check
 ./run_gui.sh --prepare-dds --gui
 ./run_gui.sh --debug --prepare-dds --gui
+./run_gui.sh --no-debug --gui
 ./run_gui.sh --diagnostics-only --gui
 ./run_gui.sh --skip-diagnostics --gui
 EOF
@@ -58,6 +60,9 @@ for arg in "$@"; do
             ;;
         --debug)
             export RS_GUI_DEBUG=1
+            ;;
+        --no-debug)
+            export RS_GUI_DEBUG=0
             ;;
         -h|--help)
             usage

@@ -148,6 +148,7 @@ class RecordTabController:
         self._last_readiness = readiness
         dbg("record", f"readiness={readiness.status.value if readiness else None}")
         selection = self._selection(service, monitoring_snapshots)
+        selection = _apply_command_state_override(selection, self._command_history)
         self._last_selection = selection
         selected = selection.selected_candidate
         if selected and not self._config.selected_candidate_id:
@@ -322,6 +323,12 @@ class RecordTabController:
             )
         else:
             raise ValueError(f"Unsupported Record tab action: {action_id}")
+
+        observed_state = _observed_state_for_action(action_id)
+        if outcome.ok and observed_state:
+            payload = dict(outcome.payload)
+            payload["observed_state"] = observed_state
+            outcome = replace(outcome, payload=payload)
 
         self._append_history(outcome)
         if action_id == "shutdown":
@@ -541,6 +548,45 @@ def _service_command_for_action(action_id: str) -> ServiceCommand:
     if action_id == "tag":
         return ServiceCommand.TAG
     raise ValueError(f"Unsupported Record tab action: {action_id}")
+
+
+def _observed_state_for_action(action_id: str) -> str:
+    if action_id == "pause":
+        return "PAUSED"
+    if action_id == "resume":
+        return "RUNNING"
+    if action_id == "shutdown":
+        return "SHUTDOWN"
+    return ""
+
+
+def _apply_command_state_override(
+        selection: ServiceCandidateSelection,
+        command_history: Tuple[ServiceCommandOutcome, ...],
+) -> ServiceCandidateSelection:
+    if not selection.candidates or not command_history:
+        return selection
+    latest = command_history[-1]
+    if not latest.ok:
+        return selection
+    observed_state = str(latest.payload.get("observed_state", "")).strip()
+    if not observed_state:
+        return selection
+    request_service = latest.request.service
+    updated = []
+    changed = False
+    for candidate in selection.candidates:
+        if candidate.service.key == request_service.key:
+            updated.append(replace(candidate, observed_state=observed_state))
+            changed = True
+        else:
+            updated.append(candidate)
+    if not changed:
+        return selection
+    return ServiceCandidateSelection(
+        candidates=tuple(updated),
+        selected_candidate_id=selection.selected_candidate_id,
+    )
 
 
 def _admin_resource_parameters(candidate) -> dict:

@@ -96,7 +96,10 @@ class GuiShellSessionFactoryConfig:
     recording_working_dir: str = ""
     replay_label: str = "Replay Service"
     replay_config_name: str = "xcdr"
-    replay_config_paths: Tuple[str, ...] = ("services/replay_service_config.xml",)
+    replay_config_paths: Tuple[str, ...] = (
+        "services/replay_service_config.xml",
+        "dds/qos/DDS_QOS_PROFILES.xml",
+    )
     replay_database_path: str = "log_dir/xcdr"
     replay_working_dir: str = ""
     admin_domain_id: int = 0
@@ -260,7 +263,7 @@ def build_gui_shell_assembly(
                 launch_data_domain_id=config.topics_domain_id,
                 launch_admin_domain_id=config.admin_domain_id,
                 launch_monitoring_domain_id=config.monitoring_domain_id,
-                launch_database_path=config.replay_database_path,
+                launch_database_path=_default_replay_database_path(config),
                 launch_working_dir=config.replay_working_dir or _repo_root(),
             ),
         )
@@ -578,3 +581,42 @@ def _default_local_hostnames(config: GuiShellSessionFactoryConfig) -> Tuple[str,
 
 def _repo_root() -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+
+def _default_replay_database_path(config: GuiShellSessionFactoryConfig) -> str:
+    configured_path = str(config.replay_database_path).strip()
+    if config.mode != GuiShellSessionMode.LIVE:
+        return configured_path
+    if configured_path and _replay_database_path_exists(configured_path):
+        return configured_path
+    discovered_path = _discover_latest_recording_dir(_repo_root())
+    if discovered_path:
+        return os.path.relpath(discovered_path, _repo_root())
+    return configured_path
+
+
+def _replay_database_path_exists(path: str) -> bool:
+    candidate = path if os.path.isabs(path) else os.path.join(_repo_root(), path)
+    return os.path.isfile(os.path.join(candidate, "metadata.db")) and os.path.isfile(os.path.join(candidate, "data_0.db"))
+
+
+def _discover_latest_recording_dir(root: str) -> str:
+    log_root = os.path.join(root, "log_dir")
+    if not os.path.isdir(log_root):
+        return ""
+    candidates = []
+    for entry in os.listdir(log_root):
+        path = os.path.join(log_root, entry)
+        if not os.path.isdir(path):
+            continue
+        if not entry.startswith("recording_"):
+            continue
+        if not os.path.isfile(os.path.join(path, "metadata.db")):
+            continue
+        if not os.path.isfile(os.path.join(path, "data_0.db")):
+            continue
+        candidates.append(path)
+    if not candidates:
+        return ""
+    candidates.sort(key=os.path.getmtime, reverse=True)
+    return candidates[0]

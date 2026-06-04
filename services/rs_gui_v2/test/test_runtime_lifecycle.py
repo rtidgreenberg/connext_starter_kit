@@ -135,6 +135,16 @@ class TestRuntimeQueues(unittest.TestCase):
         finally:
             shutil.rmtree(absolute_log_dir, ignore_errors=True)
 
+    def test_runtime_exposes_event_log_path_when_configured(self):
+        log_dir = "services/rs_gui_v2/rs_gui_logs/runtime_unit"
+        runtime = AppRuntime(RuntimeConfig(app_log_dir=log_dir))
+
+        self.assertTrue(runtime.event_log_path.endswith(".jsonl"))
+        self.assertIn(
+            os.path.join("services", "rs_gui_v2", "rs_gui_logs", "runtime_unit"),
+            runtime.event_log_path,
+        )
+
     def test_drain_limit_preserves_remaining_items(self):
         runtime = AppRuntime()
         events = [AppEvent(str(index)) for index in range(3)]

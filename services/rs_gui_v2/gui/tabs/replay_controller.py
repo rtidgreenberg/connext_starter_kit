@@ -50,6 +50,18 @@ def _workspace_launch_path(path: str) -> str:
     return os.path.join(root, normalized)
 
 
+def _has_replayable_sqlite_files(path: str) -> bool:
+    candidate = _workspace_launch_path(path)
+    if not candidate or not os.path.isdir(candidate):
+        return False
+    if not os.path.isfile(os.path.join(candidate, "metadata.db")):
+        return False
+    return any(
+        entry.startswith("data_") and entry.endswith(".db")
+        for entry in os.listdir(candidate)
+    )
+
+
 @dataclass(frozen=True)
 class ReplayTabControllerConfig:
     """Runtime wiring options for the Replay tab controller."""
@@ -256,6 +268,12 @@ class ReplayTabController:
         monitoring_domain_id = _int_payload(payload, "monitoring_domain_id", self._config.launch_monitoring_domain_id)
         database_path = str(payload.get("database_path", self._config.launch_database_path)).strip()
         resolved_database_path = _workspace_launch_path(database_path)
+        if not database_path:
+            raise ValueError("Replay launch requires a recording database path")
+        if not _has_replayable_sqlite_files(database_path):
+            raise ValueError(
+                "Replay launch requires a recording database directory with metadata.db and at least one data_*.db file"
+            )
         storage_format = str(payload.get("storage_format", self._config.launch_storage_format)).strip() or "XCDR"
         playback_rate = float(str(payload.get("playback_rate", self._config.playback_rate)).strip() or self._config.playback_rate)
         loop = bool(payload.get("loop", self._config.loop))

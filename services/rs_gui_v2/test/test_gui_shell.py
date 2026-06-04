@@ -34,6 +34,8 @@ from gui.main_window import (
     REPLAY_LAUNCH_CONFIG_NAME_TAG,
     REPLAY_LAUNCH_CONFIG_PATHS_TAG,
     REPLAY_LAUNCH_DATABASE_PATH_TAG,
+    REPLAY_LAUNCH_ERROR_MODAL_TAG,
+    REPLAY_LAUNCH_ERROR_TEXT_TAG,
     REPLAY_LAUNCH_LABEL_TAG,
     REPLAY_LAUNCH_VERBOSITY_TAG,
     RECORD_LAUNCH_ADMIN_DOMAIN_TAG,
@@ -534,6 +536,26 @@ class TestDearPyGuiRenderer(unittest.TestCase):
         self.assertEqual(launch_command.payload["database_path"], "log_dir/recording_1780085154")
         self.assertEqual(launch_command.payload["topic_allow"], "*")
         self.assertEqual(launch_command.payload["topic_deny"], "rti/*")
+
+    def test_replay_launch_button_shows_popup_when_database_path_missing(self):
+        fake = FakeDpg()
+        commands = []
+        shell = DearPyGuiShell(
+            view_provider=build_mock_shell_view_model,
+            dpg_module=fake,
+            command_sink=commands.append,
+        )
+
+        shell.render_once()
+        fake.values[REPLAY_LAUNCH_DATABASE_PATH_TAG] = ""
+        _button_callback(fake, "Launch Replay Service")()
+
+        self.assertFalse(any(command.command_type == "service.launch_replay" for command in commands))
+        self.assertTrue(any(
+            name == "window" and kwargs.get("tag") == REPLAY_LAUNCH_ERROR_MODAL_TAG
+            for name, _args, kwargs in fake.calls
+        ))
+        self.assertEqual(fake.values[REPLAY_LAUNCH_ERROR_TEXT_TAG], "Recording DB Path is required.")
 
     def test_replay_candidate_combo_dispatches_select_command(self):
         fake = FakeDpg()

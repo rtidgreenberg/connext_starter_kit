@@ -3,6 +3,7 @@
 
 import os
 import sys
+import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 
@@ -56,6 +57,17 @@ class FakeServiceAdminClient:
 
 
 class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
+    def _make_replay_database_dir(self) -> str:
+        tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tempdir.cleanup)
+        metadata_path = os.path.join(tempdir.name, "metadata.db")
+        data_path = os.path.join(tempdir.name, "data_0.db")
+        with open(metadata_path, "w", encoding="utf-8"):
+            pass
+        with open(data_path, "w", encoding="utf-8"):
+            pass
+        return tempdir.name
+
     def test_replay_service_xml_consumes_launch_variables(self):
         xml_path = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "replay_service_config.xml"))
         root = ET.parse(xml_path).getroot()
@@ -276,6 +288,7 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
             await controller.handle_command(AppCommand("replay.start"))
 
     async def test_launch_replay_builds_process_request_and_view_row(self):
+        database_dir = self._make_replay_database_dir()
         handle = FakeHandle(7007)
         manager = ServiceProcessManager(
             spawner=FakeSpawner(handle),
@@ -295,7 +308,7 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
             "data_domain_id": 63,
             "admin_domain_id": 61,
             "monitoring_domain_id": 62,
-            "database_path": "log_dir/xcdr",
+            "database_path": database_dir,
             "playback_rate": 2.0,
             "loop": True,
             "topic_allow": "Robot*",
@@ -321,15 +334,36 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
         self.assertIn("-appName", command_line)
         self.assertIn("-remoteAdministrationDomainId 61", command_line)
         self.assertIn("-remoteMonitoringDomainId 62", command_line)
-        self.assertIn(f"-DREPLAY_DATABASE_DIR={os.path.join(repo_root, 'log_dir', 'xcdr')}", command_line)
-        self.assertIn(f"-DREPLAY_JSON_DATABASE_DIR={os.path.join(repo_root, 'log_dir', 'xcdr')}", command_line)
+        self.assertIn(f"-DREPLAY_DATABASE_DIR={database_dir}", command_line)
+        self.assertIn(f"-DREPLAY_JSON_DATABASE_DIR={database_dir}", command_line)
         self.assertIn("-DREPLAY_JSON_STORAGE_FORMAT=XCDR", command_line)
         self.assertIn("-DREPLAY_ENABLE_LOOPING=true", command_line)
         self.assertIn("-DUSER_FLAG=1", command_line)
         self.assertNotIn("-DREPLAY_DATABASE_DIR=ignored", command_line)
         self.assertNotIn("-DREPLAY_JSON_DATABASE_DIR=ignored", command_line)
 
+    async def test_launch_replay_rejects_database_dir_without_replay_files(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            manager = ServiceProcessManager(
+                spawner=FakeSpawner(FakeHandle(7007)),
+                hostname="dev-host",
+                clock=lambda: 10.0,
+            )
+            controller = ReplayTabController(
+                process_manager=manager,
+                config=ReplayTabControllerConfig(local_hostnames=("dev-host",)),
+                clock=lambda: 12.0,
+            )
+
+            with self.assertRaisesRegex(ValueError, "metadata\.db and at least one data_\*\.db"):
+                controller.launch_replay({
+                    "config_name": "xcdr",
+                    "database_path": tempdir,
+                    "executable": "/opt/rti/bin/rtireplayservice",
+                })
+
     async def test_shutdown_dispatches_replay_admin_command(self):
+        database_dir = self._make_replay_database_dir()
         handle = FakeHandle(7007)
         manager = ServiceProcessManager(
             spawner=FakeSpawner(handle),
@@ -347,6 +381,7 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
             "config_name": "xcdr",
             "admin_domain_id": 61,
             "monitoring_domain_id": 62,
+            "database_path": database_dir,
             "executable": "/opt/rti/bin/rtireplayservice",
         })
         await controller.refresh_view()
@@ -360,6 +395,7 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(admin_client.requests[0].timeout_sec, 2.0)
 
     async def test_refresh_merges_replay_monitoring_with_gui_launch(self):
+        database_dir = self._make_replay_database_dir()
         handle = FakeHandle(7007)
         manager = ServiceProcessManager(
             spawner=FakeSpawner(handle),
@@ -377,6 +413,7 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
             "config_name": "xcdr",
             "admin_domain_id": 61,
             "monitoring_domain_id": 62,
+            "database_path": database_dir,
             "executable": "/opt/rti/bin/rtireplayservice",
         })
         monitoring_client.push_snapshot(MonitoringSnapshot(

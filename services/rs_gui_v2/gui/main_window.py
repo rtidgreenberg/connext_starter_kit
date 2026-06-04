@@ -3,6 +3,7 @@
 from contextlib import nullcontext
 from dataclasses import replace
 import json
+import os
 import re
 import time
 from typing import Callable, Mapping, Optional, Tuple
@@ -80,6 +81,8 @@ REPLAY_LAUNCH_VERBOSITY_TAG = "rs_gui_v2_replay_launch_verbosity"
 REPLAY_LAUNCH_EXECUTABLE_TAG = "rs_gui_v2_replay_launch_executable"
 REPLAY_LAUNCH_WORKING_DIR_TAG = "rs_gui_v2_replay_launch_working_dir"
 REPLAY_LAUNCH_EXTRA_ARGS_TAG = "rs_gui_v2_replay_launch_extra_args"
+REPLAY_LAUNCH_ERROR_MODAL_TAG = "rs_gui_v2_replay_launch_error_modal"
+REPLAY_LAUNCH_ERROR_TEXT_TAG = "rs_gui_v2_replay_launch_error_text"
 CONSOLE_OUTPUT_TAG = "rs_gui_v2_console_output"
 APP_CLOSE_MODAL_TAG = "rs_gui_v2_close_modal"
 APP_CLOSE_STATUS_TAG = "rs_gui_v2_close_status"
@@ -112,6 +115,13 @@ def load_dearpygui():
             "Dear PyGui is not installed in this Python environment. "
             "Install dearpygui to run the rs_gui_v2 graphical shell."
         ) from exc
+
+
+def _repo_root() -> str:
+    root = os.path.abspath(os.path.dirname(__file__))
+    for _ in range(3):
+        root = os.path.dirname(root)
+    return root
 
 
 class DearPyGuiShell:
@@ -1603,8 +1613,51 @@ def _replay_launch_callback(
                 if part.strip()
             ),
         )
+        database_path = str(launch.database_path).strip()
+        if not database_path:
+            _show_replay_launch_error_popup(dpg, "Recording DB Path is required.")
+            return False
+        if not _replay_launch_database_exists(database_path):
+            _show_replay_launch_error_popup(
+                dpg,
+                "Recording DB Path must point to a replayable recording directory containing metadata.db and at least one data_*.db file.",
+            )
+            return False
         return command_sink(build_replay_launch_command(launch))
     return _callback
+
+
+def _replay_launch_database_exists(path: str) -> bool:
+    normalized = str(path).strip()
+    if not normalized:
+        return False
+    candidate = normalized if os.path.isabs(normalized) else os.path.join(_repo_root(), normalized)
+    if not os.path.isdir(candidate):
+        return False
+    if not os.path.isfile(os.path.join(candidate, "metadata.db")):
+        return False
+    return any(
+        entry.startswith("data_") and entry.endswith(".db")
+        for entry in os.listdir(candidate)
+    )
+
+
+def _show_replay_launch_error_popup(dpg, message: str) -> None:
+    does_item_exist = getattr(dpg, "does_item_exist", None)
+    delete_item = getattr(dpg, "delete_item", None)
+    if callable(does_item_exist) and callable(delete_item) and does_item_exist(REPLAY_LAUNCH_ERROR_MODAL_TAG):
+        delete_item(REPLAY_LAUNCH_ERROR_MODAL_TAG)
+    with dpg.window(
+            label="Replay Launch Error",
+            tag=REPLAY_LAUNCH_ERROR_MODAL_TAG,
+            modal=True,
+            no_resize=True,
+            no_collapse=True,
+            width=520,
+            height=140,
+            pos=(340, 220)):
+        dpg.add_text(str(message), tag=REPLAY_LAUNCH_ERROR_TEXT_TAG, wrap=460)
+        dpg.add_button(label="OK", width=90, callback=lambda *_args, **_kwargs: delete_item(REPLAY_LAUNCH_ERROR_MODAL_TAG) if callable(delete_item) else None)
 
 
 def _replay_select_callback(

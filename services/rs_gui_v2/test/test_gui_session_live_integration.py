@@ -61,6 +61,44 @@ def _live_requirements():
 _LIVE_SKIP_REASON, _LIVE_EXECUTABLE = _live_requirements()
 
 
+class _LiveDynamicPublisher:
+    """Tiny DynamicData publisher used by live recording integration tests."""
+
+    def __init__(self, domain_id: int, topic_name: str, type_name: str) -> None:
+        import rti.connextdds as dds
+
+        self._dds = dds
+        self._index = 0
+        dynamic_type = dds.StructType(type_name)
+        dynamic_type.add_member(dds.Member("source_id", dds.StringType(64)))
+        dynamic_type.add_member(dds.Member("index", dds.Int32Type()))
+        dynamic_type.add_member(dds.Member("value", dds.Float64Type()))
+
+        participant = dds.DomainParticipant(int(domain_id))
+        topic = dds.DynamicData.Topic(participant, topic_name, dynamic_type)
+        writer = dds.DynamicData.DataWriter(participant.implicit_publisher, topic)
+
+        self._participant = participant
+        self._writer = writer
+
+    def publish(self, count: int) -> None:
+        for _ in range(max(0, int(count))):
+            sample = self._writer.create_data()
+            sample["source_id"] = "gui-live-integration"
+            sample["index"] = int(self._index)
+            sample["value"] = float(self._index)
+            self._writer.write(sample)
+            self._index += 1
+
+    def close(self) -> None:
+        close_contained = getattr(self._participant, "close_contained_entities", None)
+        if callable(close_contained):
+            close_contained()
+        close_participant = getattr(self._participant, "close", None)
+        if callable(close_participant):
+            close_participant()
+
+
 async def _wait_for_state(session, expected_state, timeout_sec=8.0):
     deadline = time.monotonic() + timeout_sec
     last_view = None
@@ -189,8 +227,115 @@ async def _wait_for_live_monitoring_state(session, timeout_sec=12.0):
     return last_view
 
 
+async def _wait_for_file_growth(path: str, baseline_size: int, timeout_sec=10.0):
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        try:
+            current_size = os.path.getsize(path)
+        except OSError:
+            current_size = -1
+        if current_size > baseline_size:
+            return current_size
+        await asyncio.sleep(0.2)
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return -1
+
+
 @unittest.skipIf(_LIVE_SKIP_REASON, _LIVE_SKIP_REASON)
 class TestGuiSessionLiveIntegration(unittest.IsolatedAsyncioTestCase):
+    async def test_live_publisher_recording_file_size_increases(self):
+        run_id = f"gui_record_growth_{os.getpid()}_{int(time.time() * 1000)}"
+        run_dir = os.path.join(PARENT_DIR, "service_churn", "integration_tests", run_id)
+        os.makedirs(run_dir, exist_ok=True)
+        admin_domain_id = 360 + (os.getpid() % 30)
+        data_domain_id = admin_domain_id + 1
+        recording_config = os.path.join(REPO_ROOT, "dds", "qos", "recording_service.xml")
+        qos_file = os.path.join(REPO_ROOT, "dds", "qos", "DDS_QOS_PROFILES.xml")
+        assembly = build_gui_shell_assembly(GuiShellSessionFactoryConfig(
+            mode=GuiShellSessionMode.LIVE,
+            workspace_name="Live Recording Growth",
+            recording_working_dir=run_dir,
+            recording_config_paths=(recording_config, qos_file),
+            recording_config_name="record_selected",
+            admin_domain_id=admin_domain_id,
+            monitoring_domain_id=admin_domain_id,
+            topics_domain_id=data_domain_id,
+            start_runtime=True,
+        ))
+        session = assembly.session
+        pid = None
+        publisher = None
+        try:
+            initial_view = await session.next_view_async(process_commands=False)
+            launch_command = build_record_launch_command(initial_view.record_tab.launch)
+            launch_payload = dict(launch_command.payload)
+            launch_payload.update({
+                "data_domain_id": data_domain_id,
+                "admin_domain_id": admin_domain_id,
+                "monitoring_domain_id": admin_domain_id,
+                "working_dir": run_dir,
+                "topic_allow": "RsGuiV2Growth*",
+                "topic_deny": "rti/*",
+            })
+            session.command_sink(AppCommand(
+                command_type=launch_command.command_type,
+                target=launch_command.target,
+                payload=launch_payload,
+                command_id="launch-live-record-growth",
+                created_at=time.time(),
+            ))
+
+            launch_view = await session.next_view_async()
+            selected = launch_view.record_tab.selected_candidate
+            self.assertIsNotNone(selected)
+            pid = int(selected.pid)
+            self.assertGreater(pid, 0)
+
+            publisher = _LiveDynamicPublisher(
+                domain_id=data_domain_id,
+                topic_name="RsGuiV2GrowthTelemetry",
+                type_name="RsGuiV2GrowthTelemetryType",
+            )
+            publisher.publish(300)
+
+            monitored_view = await _wait_for_current_file(session, timeout_sec=15.0)
+            selected = monitored_view.record_tab.selected_candidate
+            self.assertIsNotNone(selected)
+            self.assertTrue(selected.current_file)
+
+            resolved_current_file = selected.current_file
+            if not os.path.isabs(resolved_current_file):
+                resolved_current_file = os.path.join(run_dir, resolved_current_file)
+            self.assertTrue(os.path.exists(resolved_current_file), selected.current_file)
+
+            initial_size = os.path.getsize(resolved_current_file)
+            publisher.publish(600)
+            grown_size = await _wait_for_file_growth(resolved_current_file, initial_size, timeout_sec=12.0)
+            self.assertGreater(
+                grown_size,
+                initial_size,
+                f"recording file did not grow: path={resolved_current_file} initial={initial_size} final={grown_size}",
+            )
+
+            await session.handle_close_request_async(
+                "shutdown_gui_launched",
+                (f"record:{monitored_view.record_tab.selected_candidate_id}",),
+            )
+            self.assertTrue(await _wait_for_pid_exit(pid))
+        finally:
+            if publisher is not None:
+                publisher.close()
+            close = getattr(assembly.admin_client, "close", None)
+            if callable(close):
+                await close()
+            close = getattr(assembly.monitoring_client, "close", None)
+            if callable(close):
+                await close()
+            if pid is not None and _pid_is_running(pid):
+                _kill_pid(pid)
+
     async def test_default_gui_launch_receives_live_monitoring_current_file(self):
         run_id = f"gui_default_monitoring_{os.getpid()}_{int(time.time() * 1000)}"
         run_dir = os.path.join(PARENT_DIR, "service_churn", "integration_tests", run_id)

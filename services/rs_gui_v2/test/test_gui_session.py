@@ -3,6 +3,7 @@
 
 import os
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
@@ -140,6 +141,18 @@ def build_topics_controller():
         config=TopicsTabControllerConfig(domain_id=7, selected_topic_key="7:RobotTelemetry"),
         clock=lambda: 20.0,
     )
+
+
+def make_replay_database_dir(test_case: unittest.TestCase) -> str:
+    tempdir = tempfile.TemporaryDirectory()
+    test_case.addCleanup(tempdir.cleanup)
+    metadata_path = os.path.join(tempdir.name, "metadata.db")
+    data_path = os.path.join(tempdir.name, "data_0.db")
+    with open(metadata_path, "w", encoding="utf-8"):
+        pass
+    with open(data_path, "w", encoding="utf-8"):
+        pass
+    return tempdir.name
 
 
 class TestGuiShellSessionBridge(unittest.TestCase):
@@ -395,6 +408,7 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(entry.message == "Dispatched service.launch_recording" for entry in view.event_log))
 
     async def test_launch_replay_command_dispatches_to_process_manager(self):
+        replay_database_dir = make_replay_database_dir(self)
         replay_manager = ServiceProcessManager(
             spawner=FakeSpawner(FakeHandle(7007)),
             hostname="dev-host",
@@ -414,7 +428,7 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
             data_domain_id=63,
             admin_domain_id=61,
             monitoring_domain_id=62,
-            database_path="log_dir/xcdr",
+            database_path=replay_database_dir,
             executable="/opt/rti/bin/rtireplayservice",
         )))
 
@@ -489,6 +503,7 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([request.command for request in admin_client.requests], [ServiceCommand.SHUTDOWN])
 
     async def test_close_request_terminates_selected_gui_launched_replay(self):
+        replay_database_dir = make_replay_database_dir(self)
         handle = FakeHandle(7007)
         replay_manager = ServiceProcessManager(
             spawner=FakeSpawner(handle),
@@ -506,7 +521,7 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
             "label": "Manual Replay",
             "config_paths": ["services/replay_service_config.xml"],
             "config_name": "xcdr",
-            "database_path": "log_dir/xcdr",
+            "database_path": replay_database_dir,
             "executable": "/opt/rti/bin/rtireplayservice",
         })
         runtime = AppRuntime()

@@ -151,7 +151,7 @@ class RtiServiceMonitoringClient:
         if not results:
             # The monitoring data may have been routed under a different service
             # name (e.g. the Recording Service reports its config name like
-            # "record_selected" while the GUI uses a generated control name).
+            # "template" while the GUI uses a generated control name).
             # Collect any pending snapshots from the same monitoring domain.
             domain_keys = [
                 key for key, pending in self._pending_snapshots_by_service.items()

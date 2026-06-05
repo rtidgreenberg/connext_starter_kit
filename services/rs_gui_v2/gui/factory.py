@@ -88,7 +88,7 @@ class GuiShellSessionFactoryConfig:
     app_log_dir: str = "services/rs_gui_v2/rs_gui_logs"
     local_hostnames: Tuple[str, ...] = field(default_factory=tuple)
     recording_label: str = "Recording Service"
-    recording_config_name: str = "record_selected"
+    recording_config_name: str = "template"
     recording_config_paths: Tuple[str, ...] = (
         "dds/qos/recording_service.xml",
         "dds/qos/DDS_QOS_PROFILES.xml",

@@ -86,6 +86,7 @@ class TkRecordTab:
         launch.columnconfigure(3, weight=1)
 
         self.config_name_var = tk.StringVar(value="")
+        self.storage_format_var = tk.StringVar(value="XCDR")
         self.verbosity_var = tk.StringVar(value="")
         self.working_dir_var = tk.StringVar(value="")
         self.extra_args_var = tk.StringVar(value="")
@@ -94,9 +95,11 @@ class TkRecordTab:
         self.monitoring_domain_var = tk.StringVar(value="0")
         self.topic_allow_var = tk.StringVar(value="*")
         self.topic_deny_var = tk.StringVar(value="rti/*")
+        self.config_paths_var = tk.StringVar(value="")
 
         ttk.Label(launch, text="Config name").grid(row=0, column=0, sticky="w")
-        ttk.Entry(launch, textvariable=self.config_name_var).grid(row=0, column=1, sticky="ew", padx=(8, 16))
+        self.config_name_combo = ttk.Combobox(launch, textvariable=self.config_name_var, state="readonly")
+        self.config_name_combo.grid(row=0, column=1, sticky="ew", padx=(8, 16))
         ttk.Label(launch, text="Verbosity").grid(row=0, column=2, sticky="w")
         ttk.Entry(launch, textvariable=self.verbosity_var).grid(row=0, column=3, sticky="ew", padx=(8, 0))
 
@@ -118,8 +121,47 @@ class TkRecordTab:
         ttk.Entry(launch, textvariable=self.topic_allow_var).grid(row=3, column=1, columnspan=3, sticky="ew", padx=(8, 0), pady=(8, 0))
         ttk.Label(launch, text="Topic deny").grid(row=4, column=0, sticky="w", pady=(8, 0))
         ttk.Entry(launch, textvariable=self.topic_deny_var).grid(row=4, column=1, columnspan=3, sticky="ew", padx=(8, 0), pady=(8, 0))
+        ttk.Label(launch, text="Storage format").grid(row=5, column=0, sticky="w", pady=(8, 0))
+        ttk.Combobox(launch, textvariable=self.storage_format_var, state="readonly", values=("XCDR", "JSON")).grid(
+            row=5,
+            column=1,
+            sticky="w",
+            padx=(8, 0),
+            pady=(8, 0),
+        )
+        ttk.Label(launch, text="Config files").grid(row=6, column=0, sticky="nw", pady=(8, 0))
+        ttk.Label(launch, textvariable=self.config_paths_var, justify="left", wraplength=780).grid(row=6, column=1, columnspan=3, sticky="ew", padx=(8, 0), pady=(8, 0))
+        ttk.Label(launch, text="Launch preview").grid(row=7, column=0, sticky="nw", pady=(8, 0))
+        self.launch_preview_text = tk.Text(
+            launch,
+            height=4,
+            wrap="word",
+            state="disabled",
+            relief="solid",
+            borderwidth=1,
+            background=DARK_THEME["panel_alt"],
+            foreground=DARK_THEME["text"],
+            insertbackground=DARK_THEME["text"],
+            selectbackground=DARK_THEME["selection"],
+            selectforeground=DARK_THEME["text"],
+        )
+        self.launch_preview_text.grid(row=7, column=1, columnspan=3, sticky="ew", padx=(8, 0), pady=(8, 0))
         self.launch_button = ttk.Button(launch, text="Launch Recording Service", command=self._on_launch_clicked)
-        self.launch_button.grid(row=5, column=3, sticky="e", pady=(12, 0))
+        self.launch_button.grid(row=8, column=3, sticky="e", pady=(12, 0))
+
+        for variable in (
+                self.config_name_var,
+                self.verbosity_var,
+                self.working_dir_var,
+                self.extra_args_var,
+                self.data_domain_var,
+                self.admin_domain_var,
+                self.monitoring_domain_var,
+                self.storage_format_var,
+                self.topic_allow_var,
+                self.topic_deny_var,
+        ):
+            variable.trace_add("write", self._on_launch_form_changed)
 
         summary = ttk.LabelFrame(frame, text="Record Status", padding=12)
         summary.grid(row=2, column=0, sticky="ew", padx=12, pady=6)
@@ -210,7 +252,10 @@ class TkRecordTab:
     def _render_launch_form(self, launch: RecordLaunchViewModel) -> None:
         if self._launch_initialized:
             return
+        config_names = tuple(launch.available_config_names) or ((launch.config_name or "template"),)
+        self.config_name_combo["values"] = config_names
         self.config_name_var.set(launch.config_name)
+        self.storage_format_var.set(launch.storage_format)
         self.verbosity_var.set(launch.verbosity)
         self.working_dir_var.set(launch.working_dir)
         self.extra_args_var.set(" ".join(launch.extra_args))
@@ -219,6 +264,8 @@ class TkRecordTab:
         self.monitoring_domain_var.set(str(launch.monitoring_domain_id))
         self.topic_allow_var.set(launch.topic_allow)
         self.topic_deny_var.set(launch.topic_deny)
+        self.config_paths_var.set("; ".join(launch.config_paths) or "-")
+        self._set_launch_preview_text(launch.command_preview)
         self._launch_initialized = True
 
     def _render_actions(self, view: RecordTabViewModel) -> None:
@@ -242,6 +289,62 @@ class TkRecordTab:
         self.monitoring_text.insert("1.0", value)
         self.monitoring_text.configure(state="disabled")
 
+    def _set_launch_preview_text(self, value: str) -> None:
+        self.launch_preview_text.configure(state="normal")
+        self.launch_preview_text.delete("1.0", self._tk.END)
+        self.launch_preview_text.insert("1.0", value)
+        self.launch_preview_text.configure(state="disabled")
+
+    def _on_launch_form_changed(self, *_args) -> None:
+        if not self._launch_initialized:
+            return
+        self._set_launch_preview_text(self._build_launch_preview_from_form())
+
+    def _build_launch_preview_from_form(self) -> str:
+        data_domain = self.data_domain_var.get().strip() or "0"
+        admin_domain = self.admin_domain_var.get().strip() or "0"
+        monitoring_domain = self.monitoring_domain_var.get().strip() or "0"
+        storage_ui = self.storage_format_var.get().strip().upper() or "XCDR"
+        storage_env = "JSON_SQLITE" if storage_ui == "JSON" else "XCDR_AUTO"
+        topic_allow = self.topic_allow_var.get().strip() or "*"
+        topic_deny = self.topic_deny_var.get().strip()
+        executable = self._view.launch.executable if self._view is not None else ""
+        executable = executable or "rtirecordingservice"
+        config_name = self.config_name_var.get().strip() or "<config>"
+        verbosity = self.verbosity_var.get().strip() or "ERROR:ERROR"
+        config_paths = self.config_paths_var.get().strip()
+        extra_args = " ".join(arg for arg in self.extra_args_var.get().split() if arg.strip())
+        env_text = " ".join((
+            f"REC_DOMAIN_ID={data_domain}",
+            f"REC_ADMIN_DOMAIN_ID={admin_domain}",
+            f"REC_MON_DOMAIN_ID={monitoring_domain}",
+            f"REC_STORAGE_FORMAT={storage_env}",
+            f"REC_TOPIC_ALLOW={topic_allow}",
+            f"REC_TOPIC_DENY={topic_deny}",
+            f"DOMAIN_ID={data_domain}",
+            f"ADMIN_DOMAIN_ID={admin_domain}",
+        ))
+        cmd_parts = [
+            executable,
+            "-cfgName", config_name,
+            "-appName", "<generated>",
+            "-remoteAdministrationDomainId", admin_domain,
+            "-remoteMonitoringDomainId", monitoring_domain,
+            "-verbosity", verbosity,
+        ]
+        if config_paths and config_paths != "-":
+            cmd_parts.extend(["-cfgFile", config_paths])
+        cmd_parts.extend([
+            f"-DDOMAIN_ID={data_domain}",
+            f"-DADMIN_DOMAIN_ID={admin_domain}",
+            f"-DREC_STORAGE_FORMAT={storage_env}",
+            f"-DREC_TOPIC_ALLOW={topic_allow}",
+            f"-DREC_TOPIC_DENY={topic_deny}",
+        ])
+        if extra_args:
+            cmd_parts.append(extra_args)
+        return env_text + "\n" + " ".join(cmd_parts)
+
     def _on_candidate_selected(self, _event=None) -> None:
         candidate_id = self._candidate_display_to_id.get(self.candidate_var.get(), "")
         if candidate_id and self._adapter is not None:
@@ -264,6 +367,7 @@ class TkRecordTab:
                 data_domain_id=int(self.data_domain_var.get().strip() or self._view.launch.data_domain_id),
                 admin_domain_id=int(self.admin_domain_var.get().strip() or self._view.launch.admin_domain_id),
                 monitoring_domain_id=int(self.monitoring_domain_var.get().strip() or self._view.launch.monitoring_domain_id),
+                storage_format=self.storage_format_var.get().strip() or self._view.launch.storage_format,
                 topic_allow=self.topic_allow_var.get().strip() or self._view.launch.topic_allow,
                 topic_deny=self.topic_deny_var.get().strip(),
             )

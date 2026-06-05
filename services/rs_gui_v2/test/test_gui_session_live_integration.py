@@ -202,7 +202,7 @@ async def _wait_for_pid_exit(pid, timeout_sec=8.0):
     return not _pid_is_running(pid)
 
 
-async def _wait_for_current_file(session, timeout_sec=12.0):
+async def _wait_for_current_file(session, timeout_sec=12.0, on_retry=None):
     deadline = time.monotonic() + timeout_sec
     last_view = None
     while time.monotonic() < deadline:
@@ -210,6 +210,8 @@ async def _wait_for_current_file(session, timeout_sec=12.0):
         selected = last_view.record_tab.selected_candidate
         if selected is not None and selected.current_file:
             return last_view
+        if on_retry is not None:
+            on_retry()
         await asyncio.sleep(0.1)
     return last_view
 
@@ -227,7 +229,7 @@ async def _wait_for_live_monitoring_state(session, timeout_sec=12.0):
     return last_view
 
 
-async def _wait_for_file_growth(path: str, baseline_size: int, timeout_sec=10.0):
+async def _wait_for_file_growth(path: str, baseline_size: int, timeout_sec=10.0, on_retry=None):
     deadline = time.monotonic() + timeout_sec
     while time.monotonic() < deadline:
         try:
@@ -236,6 +238,8 @@ async def _wait_for_file_growth(path: str, baseline_size: int, timeout_sec=10.0)
             current_size = -1
         if current_size > baseline_size:
             return current_size
+        if on_retry is not None:
+            on_retry()
         await asyncio.sleep(0.2)
     try:
         return os.path.getsize(path)
@@ -258,7 +262,7 @@ class TestGuiSessionLiveIntegration(unittest.IsolatedAsyncioTestCase):
             workspace_name="Live Recording Growth",
             recording_working_dir=run_dir,
             recording_config_paths=(recording_config, qos_file),
-            recording_config_name="record_selected",
+            recording_config_name="template",
             admin_domain_id=admin_domain_id,
             monitoring_domain_id=admin_domain_id,
             topics_domain_id=data_domain_id,
@@ -300,7 +304,11 @@ class TestGuiSessionLiveIntegration(unittest.IsolatedAsyncioTestCase):
             )
             publisher.publish(300)
 
-            monitored_view = await _wait_for_current_file(session, timeout_sec=15.0)
+            monitored_view = await _wait_for_current_file(
+                session,
+                timeout_sec=15.0,
+                on_retry=lambda: publisher.publish(100),
+            )
             selected = monitored_view.record_tab.selected_candidate
             self.assertIsNotNone(selected)
             self.assertTrue(selected.current_file)
@@ -312,7 +320,12 @@ class TestGuiSessionLiveIntegration(unittest.IsolatedAsyncioTestCase):
 
             initial_size = os.path.getsize(resolved_current_file)
             publisher.publish(600)
-            grown_size = await _wait_for_file_growth(resolved_current_file, initial_size, timeout_sec=12.0)
+            grown_size = await _wait_for_file_growth(
+                resolved_current_file,
+                initial_size,
+                timeout_sec=12.0,
+                on_retry=lambda: publisher.publish(100),
+            )
             self.assertGreater(
                 grown_size,
                 initial_size,
@@ -349,7 +362,7 @@ class TestGuiSessionLiveIntegration(unittest.IsolatedAsyncioTestCase):
             workspace_name="Live Default Monitoring",
             recording_working_dir=run_dir,
             recording_config_paths=(recording_config, qos_file),
-            recording_config_name="record_selected",
+            recording_config_name="template",
             admin_domain_id=admin_domain_id,
             monitoring_domain_id=admin_domain_id,
             topics_domain_id=data_domain_id,
@@ -381,7 +394,7 @@ class TestGuiSessionLiveIntegration(unittest.IsolatedAsyncioTestCase):
             pid = int(selected.pid)
             self.assertGreater(pid, 0)
             self.assertTrue(selected.control_name.startswith("recording_service_"))
-            self.assertNotEqual(selected.control_name, "record_selected")
+            self.assertNotEqual(selected.control_name, "template")
 
             monitored_view = await _wait_for_current_file(session)
             selected = monitored_view.record_tab.selected_candidate

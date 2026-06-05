@@ -1,6 +1,7 @@
 """Replay tab view models and command factories for rs_gui_v2."""
 
 from dataclasses import dataclass, field, replace
+import shlex
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 from app_core import AppCommand
@@ -77,6 +78,8 @@ class ReplayLaunchViewModel:
         object.__setattr__(self, "loop", bool(self.loop))
         object.__setattr__(self, "extra_args", tuple(str(arg) for arg in self.extra_args if str(arg).strip()))
         object.__setattr__(self, "enabled", bool(self.enabled))
+        if not self.command_preview:
+            object.__setattr__(self, "command_preview", _launch_command_preview(self))
 
 
 @dataclass(frozen=True)
@@ -391,3 +394,40 @@ def _diagnostics(
     if any(target.conflict for target in targets):
         diagnostics.append("Duplicate Replay Service target detected")
     return tuple(diagnostics)
+
+
+def _launch_command_preview(launch: ReplayLaunchViewModel) -> str:
+    executable = launch.executable or "rtireplayservice"
+    env_parts = [
+        f"REPLAY_DOMAIN_ID={launch.data_domain_id}",
+        f"REPLAY_ADMIN_DOMAIN_ID={launch.admin_domain_id}",
+        f"REPLAY_MON_DOMAIN_ID={launch.monitoring_domain_id}",
+        f"REPLAY_DATABASE_DIR={launch.database_path or '<database_path>'}",
+        f"REPLAY_TOPIC_ALLOW={launch.topic_allow}",
+        f"REPLAY_TOPIC_DENY={launch.topic_deny}",
+        f"DOMAIN_ID={launch.data_domain_id}",
+    ]
+    command = [
+        executable,
+        "-cfgName", launch.config_name or "<config>",
+        "-appName", "<generated>",
+        "-remoteAdministrationDomainId", str(launch.admin_domain_id),
+        "-remoteMonitoringDomainId", str(launch.monitoring_domain_id),
+    ]
+    if launch.verbosity:
+        command.extend(["-verbosity", launch.verbosity])
+    if launch.config_paths:
+        command.extend(["-cfgFile", ";".join(launch.config_paths)])
+    command.extend([
+        f"-DREPLAY_DOMAIN_ID={launch.data_domain_id}",
+        f"-DREPLAY_ADMIN_DOMAIN_ID={launch.admin_domain_id}",
+        f"-DREPLAY_MON_DOMAIN_ID={launch.monitoring_domain_id}",
+        f"-DREPLAY_DATABASE_DIR={launch.database_path or '<database_path>'}",
+        f"-DREPLAY_PLAYBACK_RATE={launch.playback_rate:g}",
+        f"-DREPLAY_ENABLE_LOOPING={'true' if launch.loop else 'false'}",
+        f"-DREPLAY_TOPIC_ALLOW={launch.topic_allow}",
+        f"-DREPLAY_TOPIC_DENY={launch.topic_deny}",
+        f"-DDOMAIN_ID={launch.data_domain_id}",
+    ])
+    command.extend(launch.extra_args)
+    return " ".join(env_parts) + "\n" + " ".join(shlex.quote(str(part)) for part in command)

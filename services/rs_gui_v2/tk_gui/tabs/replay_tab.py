@@ -81,6 +81,7 @@ class TkReplayTab:
         self.qos_file_var = tk.StringVar(value="")
         self.participant_qos_var = tk.StringVar(value="")
         self.writer_qos_var = tk.StringVar(value="")
+        self.config_paths_var = tk.StringVar(value="")
 
         ttk.Label(launch, text="Config name").grid(row=0, column=0, sticky="w")
         ttk.Entry(launch, textvariable=self.config_name_var).grid(row=0, column=1, sticky="ew", padx=(8, 16))
@@ -115,6 +116,39 @@ class TkReplayTab:
         ttk.Entry(launch, textvariable=self.participant_qos_var).grid(row=6, column=1, sticky="ew", padx=(8, 16), pady=(8, 0))
         ttk.Label(launch, text="Writer QoS").grid(row=6, column=2, sticky="w", pady=(8, 0))
         ttk.Entry(launch, textvariable=self.writer_qos_var).grid(row=6, column=3, sticky="ew", padx=(8, 0), pady=(8, 0))
+        ttk.Label(launch, text="Config files").grid(row=7, column=0, sticky="nw", pady=(8, 0))
+        ttk.Label(launch, textvariable=self.config_paths_var, justify="left", wraplength=780).grid(row=7, column=1, columnspan=3, sticky="ew", padx=(8, 0), pady=(8, 0))
+        ttk.Label(launch, text="Launch preview").grid(row=8, column=0, sticky="nw", pady=(8, 0))
+        self.launch_preview_text = tk.Text(
+            launch,
+            height=4,
+            wrap="word",
+            state="disabled",
+            relief="solid",
+            borderwidth=1,
+            background=DARK_THEME["panel_alt"],
+            foreground=DARK_THEME["text"],
+            insertbackground=DARK_THEME["text"],
+            selectbackground=DARK_THEME["selection"],
+            selectforeground=DARK_THEME["text"],
+        )
+        self.launch_preview_text.grid(row=8, column=1, columnspan=3, sticky="ew", padx=(8, 0), pady=(8, 0))
+
+        for variable in (
+                self.config_name_var,
+                self.database_path_var,
+                self.playback_rate_var,
+                self.time_window_var,
+                self.data_domain_var,
+                self.admin_domain_var,
+                self.monitoring_domain_var,
+                self.topic_allow_var,
+                self.topic_deny_var,
+                self.qos_file_var,
+                self.participant_qos_var,
+                self.writer_qos_var,
+        ):
+            variable.trace_add("write", self._on_launch_form_changed)
 
         summary = ttk.LabelFrame(frame, text="Replay Status", padding=12)
         summary.grid(row=2, column=0, sticky="ew", padx=12, pady=6)
@@ -212,6 +246,8 @@ class TkReplayTab:
         self.qos_file_var.set(launch.qos_file_path)
         self.participant_qos_var.set(launch.participant_qos_profile)
         self.writer_qos_var.set(launch.writer_qos_profile)
+        self.config_paths_var.set("; ".join(launch.config_paths) or "-")
+        self._set_launch_preview_text(launch.command_preview)
         self._launch_initialized = True
 
     def _render_actions(self, view: ReplayTabViewModel) -> None:
@@ -234,6 +270,63 @@ class TkReplayTab:
         self.timeline_text.delete("1.0", self._tk.END)
         self.timeline_text.insert("1.0", value)
         self.timeline_text.configure(state="disabled")
+
+    def _set_launch_preview_text(self, value: str) -> None:
+        self.launch_preview_text.configure(state="normal")
+        self.launch_preview_text.delete("1.0", self._tk.END)
+        self.launch_preview_text.insert("1.0", value)
+        self.launch_preview_text.configure(state="disabled")
+
+    def _on_launch_form_changed(self, *_args) -> None:
+        if not self._launch_initialized:
+            return
+        self._set_launch_preview_text(self._build_launch_preview_from_form())
+
+    def _build_launch_preview_from_form(self) -> str:
+        data_domain = self.data_domain_var.get().strip() or "0"
+        admin_domain = self.admin_domain_var.get().strip() or "0"
+        monitoring_domain = self.monitoring_domain_var.get().strip() or "0"
+        database_path = self.database_path_var.get().strip() or "<database_path>"
+        topic_allow = self.topic_allow_var.get().strip() or "*"
+        topic_deny = self.topic_deny_var.get().strip()
+        executable = self._view.launch.executable if self._view is not None else ""
+        executable = executable or "rtireplayservice"
+        config_name = self.config_name_var.get().strip() or "<config>"
+        playback_rate = self.playback_rate_var.get().strip() or "1.0"
+        loop_text = "true" if self.loop_var.get() else "false"
+        verbosity = self._view.launch.verbosity if self._view is not None else "ERROR:ERROR"
+        config_paths = self.config_paths_var.get().strip()
+        env_text = " ".join((
+            f"REPLAY_DOMAIN_ID={data_domain}",
+            f"REPLAY_ADMIN_DOMAIN_ID={admin_domain}",
+            f"REPLAY_MON_DOMAIN_ID={monitoring_domain}",
+            f"REPLAY_DATABASE_DIR={database_path}",
+            f"REPLAY_TOPIC_ALLOW={topic_allow}",
+            f"REPLAY_TOPIC_DENY={topic_deny}",
+            f"DOMAIN_ID={data_domain}",
+        ))
+        cmd_parts = [
+            executable,
+            "-cfgName", config_name,
+            "-appName", "<generated>",
+            "-remoteAdministrationDomainId", admin_domain,
+            "-remoteMonitoringDomainId", monitoring_domain,
+            "-verbosity", verbosity,
+        ]
+        if config_paths and config_paths != "-":
+            cmd_parts.extend(["-cfgFile", config_paths])
+        cmd_parts.extend([
+            f"-DREPLAY_DOMAIN_ID={data_domain}",
+            f"-DREPLAY_ADMIN_DOMAIN_ID={admin_domain}",
+            f"-DREPLAY_MON_DOMAIN_ID={monitoring_domain}",
+            f"-DREPLAY_DATABASE_DIR={database_path}",
+            f"-DREPLAY_PLAYBACK_RATE={playback_rate}",
+            f"-DREPLAY_ENABLE_LOOPING={loop_text}",
+            f"-DREPLAY_TOPIC_ALLOW={topic_allow}",
+            f"-DREPLAY_TOPIC_DENY={topic_deny}",
+            f"-DDOMAIN_ID={data_domain}",
+        ])
+        return env_text + "\n" + " ".join(cmd_parts)
 
     def _on_target_selected(self, _event=None) -> None:
         target_id = self._target_display_to_id.get(self.target_select_var.get(), "")

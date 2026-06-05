@@ -71,7 +71,8 @@ class RecordLaunchViewModel:
     label: str = "Recording Service"
     config_paths: Tuple[str, ...] = field(default_factory=tuple)
     available_config_names: Tuple[str, ...] = field(default_factory=tuple)
-    config_name: str = "record_selected"
+    config_name: str = "template"
+    storage_format: str = "XCDR"
     data_domain_id: int = 0
     admin_domain_id: int = 0
     monitoring_domain_id: int = 0
@@ -88,6 +89,7 @@ class RecordLaunchViewModel:
     def __post_init__(self) -> None:
         object.__setattr__(self, "config_paths", tuple(str(path) for path in self.config_paths if str(path).strip()))
         object.__setattr__(self, "available_config_names", tuple(str(name) for name in self.available_config_names if str(name).strip()))
+        object.__setattr__(self, "storage_format", _normalize_storage_format(self.storage_format))
         object.__setattr__(self, "extra_args", tuple(str(arg) for arg in self.extra_args if str(arg).strip()))
         object.__setattr__(self, "data_domain_id", int(self.data_domain_id))
         object.__setattr__(self, "admin_domain_id", int(self.admin_domain_id))
@@ -226,6 +228,7 @@ def build_record_launch_command(launch: RecordLaunchViewModel) -> AppCommand:
             "label": launch.label,
             "config_paths": list(launch.config_paths),
             "config_name": launch.config_name,
+            "storage_format": launch.storage_format,
             "data_domain_id": launch.data_domain_id,
             "admin_domain_id": launch.admin_domain_id,
             "monitoring_domain_id": launch.monitoring_domain_id,
@@ -441,10 +444,23 @@ def _launch_command_preview(launch: RecordLaunchViewModel) -> str:
         command.extend(["-verbosity", launch.verbosity])
     if launch.config_paths:
         command.extend(["-cfgFile", ";".join(launch.config_paths)])
+    storage_value = _storage_format_env_value(launch.storage_format)
     command.extend((f"-DDOMAIN_ID={launch.data_domain_id}", f"-DADMIN_DOMAIN_ID={launch.admin_domain_id}"))
+    command.append(f"-DREC_STORAGE_FORMAT={storage_value}")
     command.extend((f"-DREC_TOPIC_ALLOW={launch.topic_allow}", f"-DREC_TOPIC_DENY={launch.topic_deny}"))
     command.extend(launch.extra_args)
     return " ".join(shlex.quote(str(part)) for part in command)
+
+
+def _normalize_storage_format(value: str) -> str:
+    text = str(value or "").strip().upper()
+    if text in {"JSON", "JSON_SQLITE"}:
+        return "JSON"
+    return "XCDR"
+
+
+def _storage_format_env_value(value: str) -> str:
+    return "JSON_SQLITE" if _normalize_storage_format(value) == "JSON" else "XCDR_AUTO"
 
 
 def _age_text(now: float, last_seen_at: float) -> str:

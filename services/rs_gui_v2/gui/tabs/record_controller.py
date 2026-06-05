@@ -49,7 +49,8 @@ class RecordTabControllerConfig:
         "dds/qos/recording_service.xml",
         "dds/qos/DDS_QOS_PROFILES.xml",
     )
-    launch_config_name: str = "record_selected"
+    launch_config_name: str = "template"
+    launch_storage_format: str = "XCDR"
     launch_data_domain_id: int = 0
     launch_admin_domain_id: int = 0
     launch_monitoring_domain_id: int = 0
@@ -66,6 +67,7 @@ class RecordTabControllerConfig:
         object.__setattr__(self, "launch_data_domain_id", int(self.launch_data_domain_id))
         object.__setattr__(self, "launch_admin_domain_id", int(self.launch_admin_domain_id))
         object.__setattr__(self, "launch_monitoring_domain_id", int(self.launch_monitoring_domain_id))
+        object.__setattr__(self, "launch_storage_format", _record_storage_format_ui(self.launch_storage_format))
         object.__setattr__(self, "launch_topic_allow", str(self.launch_topic_allow).strip() or "*")
         object.__setattr__(self, "launch_topic_deny", str(self.launch_topic_deny).strip())
         object.__setattr__(self, "launch_extra_args", tuple(str(arg) for arg in self.launch_extra_args if str(arg).strip()))
@@ -182,6 +184,8 @@ class RecordTabController:
         )
         label = str(payload.get("label", self._config.launch_label)).strip() or "Recording Service"
         config_name = str(payload.get("config_name", self._config.launch_config_name)).strip()
+        storage_format = _record_storage_format_ui(payload.get("storage_format", self._config.launch_storage_format))
+        storage_format_env = _record_storage_format_env(storage_format)
         data_domain_id = _int_payload(payload, "data_domain_id", self._config.launch_data_domain_id)
         admin_domain_id = _int_payload(payload, "admin_domain_id", self._config.launch_admin_domain_id)
         monitoring_domain_id = _int_payload(payload, "monitoring_domain_id", self._config.launch_monitoring_domain_id)
@@ -199,6 +203,7 @@ class RecordTabController:
             "-DREC_MON_DOMAIN_ID=",
             "-DREC_STATUS_PERIOD_SEC=",
             "-DREC_STATUS_PERIOD_NSEC=",
+            "-DREC_STORAGE_FORMAT=",
             "-DREC_TOPIC_ALLOW=",
             "-DREC_TOPIC_DENY=",
             "-DDOMAIN_ID=",
@@ -214,6 +219,7 @@ class RecordTabController:
             f"-DREC_MON_DOMAIN_ID={monitoring_domain_id}",
             "-DREC_STATUS_PERIOD_SEC=0",
             "-DREC_STATUS_PERIOD_NSEC=500000000",
+            f"-DREC_STORAGE_FORMAT={storage_format_env}",
             f"-DREC_TOPIC_ALLOW={topic_allow}",
             f"-DREC_TOPIC_DENY={topic_deny}",
             f"-DDOMAIN_ID={data_domain_id}",
@@ -223,6 +229,7 @@ class RecordTabController:
             "REC_DOMAIN_ID": str(data_domain_id),
             "REC_ADMIN_DOMAIN_ID": str(admin_domain_id),
             "REC_MON_DOMAIN_ID": str(monitoring_domain_id),
+            "REC_STORAGE_FORMAT": storage_format_env,
             "REC_TOPIC_ALLOW": topic_allow,
             "REC_TOPIC_DENY": topic_deny,
             "DOMAIN_ID": str(data_domain_id),
@@ -256,6 +263,7 @@ class RecordTabController:
             launch_label=label,
             launch_config_paths=config_paths,
             launch_config_name=config_name,
+            launch_storage_format=storage_format,
             launch_data_domain_id=data_domain_id,
             launch_admin_domain_id=admin_domain_id,
             launch_monitoring_domain_id=monitoring_domain_id,
@@ -363,14 +371,15 @@ class RecordTabController:
         launch_id = selected.launch_id or selected.candidate_id
         if not launch_id:
             return False
-        deadline = self._clock() + self._LOCAL_SHUTDOWN_REAP_TIMEOUT_SEC
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._LOCAL_SHUTDOWN_REAP_TIMEOUT_SEC
         while True:
             launch = self._process_manager.refresh(launch_id)
             if launch is None:
                 return True
             if launch.state in {ServiceProcessLaunchState.EXITED, ServiceProcessLaunchState.START_FAILED}:
                 return True
-            if self._clock() >= deadline:
+            if loop.time() >= deadline:
                 return False
             await asyncio.sleep(self._LOCAL_SHUTDOWN_REAP_POLL_SEC)
 
@@ -519,7 +528,7 @@ class RecordTabController:
         remap_service = False
         if not by_kind and service.name:
             # Monitoring data may be cached under the service's actual reported
-            # name (e.g. the RS config name "record_selected") rather than the
+            # name (e.g. the RS config name "template") rather than the
             # GUI control name ("RecordingService_<guid>").  Fall back to
             # matching by kind + monitoring domain and remap the service ref so
             # downstream candidate selection sees the correct identity.
@@ -567,6 +576,7 @@ class RecordTabController:
             config_paths=self._config.launch_config_paths,
             available_config_names=_recording_config_names(self._config.launch_config_paths),
             config_name=self._config.launch_config_name,
+            storage_format=self._config.launch_storage_format,
             data_domain_id=self._config.launch_data_domain_id,
             admin_domain_id=self._config.launch_admin_domain_id,
             monitoring_domain_id=self._config.launch_monitoring_domain_id,
@@ -618,7 +628,15 @@ def _apply_command_state_override(
     changed = False
     for candidate in selection.candidates:
         if candidate.service.key == request_service.key:
-            updated.append(replace(candidate, observed_state=observed_state))
+            if (
+                    observed_state.upper() == "SHUTDOWN"
+                    and candidate.owns_process
+                    and not candidate.alive
+                    and str(candidate.observed_state).strip().lower() in {"exited", "start_failed"}
+            ):
+                updated.append(candidate)
+            else:
+                updated.append(replace(candidate, observed_state=observed_state))
             changed = True
         else:
             updated.append(candidate)
@@ -680,6 +698,17 @@ def _normalize_record_extra_arg(arg: str) -> str:
     session_name = re.sub(r"[^0-9A-Za-z_]+", "_", text[len(prefix):].strip())
     session_name = re.sub(r"_+", "_", session_name).strip("_") or "recording_session"
     return f"{prefix}{session_name}"
+
+
+def _record_storage_format_ui(value: object) -> str:
+    text = str(value or "").strip().upper()
+    if text in {"JSON", "JSON_SQLITE"}:
+        return "JSON"
+    return "XCDR"
+
+
+def _record_storage_format_env(value: object) -> str:
+    return "JSON_SQLITE" if _record_storage_format_ui(value) == "JSON" else "XCDR_AUTO"
 
 
 def _int_payload(payload: Mapping[str, object], key: str, default: int) -> int:

@@ -11,18 +11,6 @@ cd services/rs_gui_v2
 
 ## Common Issues
 
-### Cannot import dearpygui.dearpygui
-
-Install dependencies in the repository virtual environment:
-
-```bash
-../../connext_dds_env/bin/python -m pip install -r requirements.txt
-```
-
-The requirements file pins the Dear PyGui version used by this workspace. If an
-unpinned install pulls a newer wheel and fails with a `GLIBCXX_* not found`
-error, reinstall from `requirements.txt`.
-
 ### NDDSHOME not detected
 
 Set `NDDSHOME` or install RTI Connext in a discoverable location:
@@ -70,15 +58,8 @@ Replay Service needs a valid recording directory containing at least
 Checks:
 
 - Confirm the selected replay input directory is a real recording output
-- Prefer an absolute path when launching from explicit scripts such as
-	`test/replay_service_churn.py`
+- Prefer an absolute path when launching Replay from the GUI
 - If using a relative path, resolve it from `services/rs_gui_v2/`
-
-Example:
-
-```bash
-../../connext_dds_env/bin/python test/replay_service_churn.py --database-dir /abs/path/to/log_dir/recording_1780085154
-```
 
 ### Replay admin readiness times out
 

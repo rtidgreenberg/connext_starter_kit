@@ -1,4 +1,4 @@
-"""Immutable shell view models for the rs_gui_v2 Dear PyGui layer."""
+"""Immutable shell view models for the rs_gui_v2 UI layer."""
 
 from dataclasses import dataclass, field
 from typing import Iterable, Mapping, Tuple

@@ -9,7 +9,7 @@ wireframes and approval gate required before rs_gui_v2 UI implementation.
 ## Purpose
 
 This document sketches the next architecture step for the Recording Service GUI
-work: rs_gui_v2, a Dear PyGui-based application for operating RTI infrastructure
+work: rs_gui_v2, a desktop application for operating RTI infrastructure
 services and inspecting DDS data.
 
 The current tkinter GUI remains the compact DDS reference implementation. This
@@ -45,12 +45,12 @@ easy to find.
 
 ## Design Principle
 
-rs_gui_v2 should use Dear PyGui as the view layer, not the DDS layer.
+rs_gui_v2 should keep the view layer separate from the DDS layer.
 
 DDS entities, service requesters, monitoring readers, topic subscriptions, type
-registries, and persistence should live in an application core that has no Dear
-PyGui dependency. The GUI should render state snapshots, dispatch user intents,
-and drain thread-safe event queues during its frame loop.
+registries, and persistence should live in an application core that has no UI
+toolkit dependency. The GUI should render state snapshots, dispatch user intents,
+and drain thread-safe event queues on the UI thread.
 
 This keeps the existing DDS lessons intact:
 
@@ -97,7 +97,7 @@ services/rs_gui_v2/
 |       +-- replay.py           # Replay Service facade
 |       +-- converter.py        # Converter Service job facade
 +-- gui/
-|   +-- main_window.py          # Dear PyGui setup and frame loop
+|   +-- ...                     # retained session/controller layer and legacy helpers
 |   +-- tabs/
 |   |   +-- record_tab.py
 |   |   +-- replay_tab.py
@@ -137,7 +137,7 @@ instead of coupling one GUI version to the other.
 Rules for new modules:
 
 - A module named `models.py`, `events.py`, `state.py`, `workspace.py`, or
-  `plotting.py` must not import DDS or GUI libraries.
+  `plotting.py` must not import DDS or UI libraries.
 - A module named `admin.py`, `monitoring.py`, `recording.py`, `replay.py`, or
   `converter.py` should define app-level APIs and facades, not low-level DDS
   calls.
@@ -582,9 +582,9 @@ DDS runtime thread / rti.asyncio loop
     -> internal events queue
     -> app core state reducer
     -> immutable snapshots / UI events
-    -> Dear PyGui frame loop drains queue and redraws widgets
+    -> UI refresh loop drains queue and redraws widgets
 
-Dear PyGui callbacks
+  UI callbacks
     -> command queue
     -> service facade or subscription manager
     -> result events
@@ -593,7 +593,7 @@ Dear PyGui callbacks
 
 Rules:
 
-- Dear PyGui callbacks must not block on DDS discovery, request/reply, file
+- UI callbacks must not block on DDS discovery, request/reply, file
   conversion, or database operations.
 - DDS listeners, if used at all, should only enqueue small events.
 - Admin commands should be serialized per service instance so one request/reply

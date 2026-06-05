@@ -1,4 +1,4 @@
-"""Dear PyGui-facing shell helpers for rs_gui_v2."""
+"""Session and view-model helpers for rs_gui_v2."""
 
 from .factory import (
     GuiShellAssembly,
@@ -10,7 +10,6 @@ from .factory import (
 from .scheduler import UiFrameScheduler
 from .session import GuiShellSession, GuiShellSessionConfig
 from .workspace import GuiWorkspaceController, GuiWorkspaceControllerConfig
-from .main_window import build_workspace_action_command
 from .tabs import (
     ConvertActionView,
     ConvertJobRow,
@@ -128,7 +127,6 @@ __all__ = [
     "build_plots_tab_view_model",
     "build_replay_action_command",
     "build_replay_tab_view_model",
-    "build_workspace_action_command",
     "build_shell_view_model",
     "build_topic_action_command",
     "build_topic_field_command",

@@ -41,8 +41,8 @@ front-loads those risks.
   only in explicitly named `rti_` or `dds_` adapter modules and their live tests.
 - Document the public API and the matching Connext API surface before expanding
   a feature into UI code.
-- Do not let the UI layer or Dear PyGui own DDS entities or mutate widgets from
-  DDS callbacks.
+- Do not let the UI layer own DDS entities or mutate widgets from DDS
+  callbacks.
 - Model admin command acknowledgment separately from observed service state.
 - Use bounded queues, bounded sample caches, and plot decimation from the first
   DynamicData subscription work.
@@ -96,7 +96,7 @@ Milestone B initial implementation status:
 - Added DDS-free `ServiceAdminFacade` and `ServiceMonitoringFacade` protocols.
 - Added deterministic fake admin and monitoring clients for headless tests.
 - Added import-boundary tests proving the headless app core does not import DDS,
-  Dear PyGui, tkinter, or rs_gui_v1 implementation modules.
+  UI toolkits, or rs_gui_v1 implementation modules.
 - Added `app_core/services/rti_admin.py` as the v2-owned RTI Service Admin
   request/reply adapter, with Connext imports isolated to the adapter module.
 - Added `setup.sh` and ignored `xml_types/` path so v2 generates its own
@@ -454,8 +454,8 @@ Initial wireframe draft status:
 - Expanded [RS_GUI_V2_WIREFRAME_PLAN.md](RS_GUI_V2_WIREFRAME_PLAN.md) with
   low-fidelity Markdown sketches for App Shell, Record, Replay, Convert,
   Topics, Plots, and Workspace/Settings.
-- Added app-core API annotations for each view so the future Dear PyGui shell
-  can stay snapshot-driven and DDS-free.
+- Added app-core API annotations for each view so the future UI shell can stay
+  snapshot-driven and DDS-free.
 - Added state tables for command lifecycle, topic lifecycle, degraded restore,
   missing type, unavailable service, invalid sample, high-rate plotting, and
   job failure behavior.
@@ -500,7 +500,7 @@ Initial wireframe draft status:
 
 ## Milestone F.0: Headless Service Candidate and Control Identity Foundation
 
-Goal: Prove the service/process identity model before adding Dear PyGui state.
+Goal: Prove the service/process identity model before adding live UI state.
 
 Implemented:
 
@@ -558,7 +558,7 @@ Goal: Deliver the first useful operator workflow while proving the UI bridge.
 
 Deliverables:
 
-- UI scheduler that drains app-core events on the Dear PyGui thread.
+- UI scheduler that drains app-core events on the UI thread.
 - status bar and event log panel.
 - Record tab with target selector/dropdown, candidate table, service status,
   command buttons, tag controls, command history, and observed-state display.
@@ -573,7 +573,7 @@ Acceptance gates:
   candidates and scope stats/controls to the selected candidate.
 - Command history shows request id, target resource, reply status, and observed
   state when available.
-- No Dear PyGui calls occur from DDS/runtime threads.
+- No UI calls occur from DDS/runtime threads.
 
 DDS notes:
 
@@ -591,15 +591,14 @@ Suggested PRs:
 Initial implementation status:
 
 - Added a `gui` package with DDS-free shell and Record-tab view models consumed
-  by the future Dear PyGui layer.
+  by the future UI layer.
 - Added `UiFrameScheduler` to drain app-core events into a bounded UI event log
   and build immutable shell snapshots on the GUI thread.
 - Added a mocked Record tab snapshot with target selector rows, candidate table
   state, command buttons, tag input state, command history, monitoring summary,
   diagnostics, and command-intent factories.
-- Added a lazy Dear PyGui renderer that accepts injected view providers and
-  command sinks, so tests can smoke-render the shell without a display or a
-  real Dear PyGui installation.
+- Added a lazy shell renderer that accepted injected view providers and command
+  sinks so tests could smoke-render the shell without a display.
 - Added `--mock-gui-check` and optional `--gui` entry-point modes for the first
   shell bridge.
 - Added headless GUI shell tests and expanded import-boundary tests so GUI
@@ -608,16 +607,16 @@ Initial implementation status:
   Service Admin readiness/actions, monitoring snapshots, selected candidate
   state, tag state, shutdown fallback state, and command history into the
   existing Record-tab view model without importing DDS or owning service
-  entities in Dear PyGui.
+  entities in the UI layer.
 - Added `GuiShellSession` to connect the app-core runtime queues, UI scheduler,
-  Record-tab controller, shell view provider, and Dear PyGui command sink so
-  Record button intents are queued and dispatched through app-core boundaries on
-  the next GUI frame.
+  Record-tab controller, shell view provider, and UI command sink so Record
+  button intents are queued and dispatched through app-core boundaries on the
+  next GUI frame.
 - Added default GUI session assembly for clean live, `mock`, and `headless`
   modes. The default `--gui` path opens without mock/demo candidates and without
   launching real RTI services. The explicit mock mode creates a fake Recording
-  Service process, fake admin/monitoring clients, a controller-backed session,
-  and a Dear PyGui shell provider without launching real RTI services.
+  Service process, fake admin/monitoring clients, and a controller-backed
+  session without launching real RTI services.
 
 ## Milestone G: Topics Tab
 
@@ -657,8 +656,8 @@ Initial implementation status:
   internal-topic visibility state, type/subscription diagnostics, subscribe /
   unsubscribe affordances, field picker rows, and flattened sample inspector
   rows.
-- Added deterministic mocked Topics data to the shell and Dear PyGui renderer so
-  the first GUI surface shows realistic discovered topics, unresolved type
+- Added deterministic mocked Topics data to the shell so the first GUI surface
+  shows realistic discovered topics, unresolved type
   states, selected fields, plot-ready fields, and the latest sample values
   without requiring live DDS entities.
 - Added `TopicsTabController` and factory wiring through `TopicDiscoveryFacade`
@@ -671,9 +670,9 @@ Initial implementation status:
   sample/subscription state through that snapshot path.
 - Added `topics.*` command intents and session dispatch for topic selection,
   search/internal visibility, subscribe/unsubscribe, selected fields, and
-  plot-field selection. The Dear PyGui Topics controls now emit queued
-  `AppCommand`s while the controller keeps command effects fake-first and
-  layered over data-session snapshots.
+  plot-field selection. The Topics controls now emit queued `AppCommand`s
+  while the controller keeps command effects fake-first and layered over
+  data-session snapshots.
 
 ## Milestone H: Plots Tab
 
@@ -770,8 +769,8 @@ Initial implementation status:
   restore internal-topic visibility, search text, selected topic, selected
   fields, plot fields, active subscription intent, selected plot, and empty plot
   layout definitions.
-- Added mocked Dear PyGui Workspace-tab controls for workspace name/path plus
-  save and load buttons. The buttons only emit `workspace.save` and
+- Added mocked Workspace-tab controls for workspace name/path plus save and
+  load buttons. The buttons only emit `workspace.save` and
   `workspace.load` commands through the shell command sink; file persistence
   remains behind the runtime-backed session and `GuiWorkspaceController`.
 
@@ -822,8 +821,8 @@ Initial implementation status:
 - Added Replay-tab command builders that emit `replay.*` `AppCommand` intents
   from UI state without assembling RTI Service Admin request bodies in renderer
   callbacks.
-- Rendered the mocked Replay tab in the Dear PyGui shell and covered fake-DPG
-  button dispatch. Runtime-backed Replay command routing and live Replay Service
+- Rendered the mocked Replay tab in the legacy shell and covered button
+  dispatch. Runtime-backed Replay command routing and live Replay Service
   adapter behavior remain future work.
 - Added a fake-first `ReplayTabController` and routed `replay.select_target`,
   `replay.start`, `replay.pause`, `replay.resume`, `replay.stop`, and
@@ -867,7 +866,7 @@ Initial implementation status:
 - Added a DDS-free mocked Convert-tab view model with named Converter presets,
   structured input/output storage, selected job snapshots, service-style log
   rows, validation diagnostics, and generated CLI/XML previews.
-- Rendered the mocked Convert tab in the Dear PyGui shell with config, storage,
+- Rendered the mocked Convert tab in the legacy shell with config, storage,
   data-selection, preset, job, log, and preview sections. The renderer emits
   `convert.run`, `convert.cancel`, `convert.open_output`, and
   `convert.inspect_output` command intents only.
@@ -904,11 +903,8 @@ Initial implementation status:
   validation, and RTI service executable presence.
 - Added `TROUBLESHOOTING.md` and README updates documenting startup diagnostics,
   dependency installation, and remediation workflows.
-- Pinned the Dear PyGui dependency to the compatible workspace version and added
-  diagnostics for native-library import failures such as `GLIBCXX_*` ABI
-  mismatches.
-- Added preflight regression tests for successful GUI dependency checks and
-  actionable Dear PyGui ABI-failure messages.
+- Added startup dependency diagnostics and regression tests for successful GUI
+  preflight checks.
 - Added immutable runtime counters for command/event queues, UI frame cadence,
   UI event-log drops, and sample receive/drop totals. The runtime and UI
   scheduler now update these counters as monotonic app-state data.

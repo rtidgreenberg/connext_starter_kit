@@ -42,9 +42,8 @@ class Diagnostic:
 
 
 class Preflight:
-    def __init__(self, require_connext: bool, require_dearpygui: bool) -> None:
+    def __init__(self, require_connext: bool) -> None:
         self.require_connext = require_connext
-        self.require_dearpygui = require_dearpygui
         self.results: List[Diagnostic] = []
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
         self.xml_dir = os.path.join(self.script_dir, "xml_types")
@@ -102,28 +101,6 @@ class Preflight:
                 "Cannot import rti.request in the active Python environment.",
                 "Live Recording Service Admin control requires RTI Python request/reply support.",
             )
-
-        if self.require_dearpygui:
-            import_error = self._import_error("dearpygui.dearpygui")
-            if not import_error:
-                self._record("INFO", "DEARPYGUI_IMPORT", "Dear PyGui import check passed")
-            else:
-                details = (
-                    "Install it with: ../../connext_dds_env/bin/python -m pip install -r "
-                    "services/rs_gui_v2/requirements.txt"
-                )
-                if "GLIBCXX_" in import_error:
-                    details += (
-                        "; detected libstdc++ ABI mismatch. Use pinned requirements "
-                        "or upgrade host libstdc++."
-                    )
-                details += f" (Import error: {import_error})"
-                self._record(
-                    "ERROR",
-                    "DEARPYGUI_IMPORT_FAILED",
-                    "Cannot import dearpygui.dearpygui.",
-                    details,
-                )
 
         license_file = detect_rti_license(nddshome)
         if license_file:
@@ -216,11 +193,6 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="treat Connext-related issues as launch-blocking errors",
     )
-    parser.add_argument(
-        "--require-dearpygui",
-        action="store_true",
-        help="treat missing Dear PyGui as an error",
-    )
     return parser.parse_args()
 
 
@@ -228,7 +200,6 @@ def main() -> int:
     args = _parse_args()
     preflight = Preflight(
         require_connext=args.require_connext,
-        require_dearpygui=args.require_dearpygui,
     )
     return preflight.run()
 

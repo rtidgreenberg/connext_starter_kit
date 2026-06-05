@@ -280,6 +280,8 @@ class TestRecordTabController(unittest.IsolatedAsyncioTestCase):
             "data_domain_id": 63,
             "admin_domain_id": 61,
             "monitoring_domain_id": 62,
+            "topic_allow": "Square,Robot*",
+            "topic_deny": "rti/*,internal/*",
             "verbosity": "WARN:WARN",
             "executable": "/opt/rti/bin/rtirecordingservice",
             "working_dir": "services/rs_gui_v2/manual",
@@ -296,13 +298,19 @@ class TestRecordTabController(unittest.IsolatedAsyncioTestCase):
         self.assertIn("-DADMIN_DOMAIN_ID=61", spawner.calls[0])
         self.assertIn("-DREC_STATUS_PERIOD_SEC=0", spawner.calls[0])
         self.assertIn("-DREC_STATUS_PERIOD_NSEC=500000000", spawner.calls[0])
+        self.assertIn("-DREC_TOPIC_ALLOW=Square,Robot*", spawner.calls[0])
+        self.assertIn("-DREC_TOPIC_DENY=rti/*,internal/*", spawner.calls[0])
         self.assertIn("-DDB_DIR=test_output/db", spawner.calls[0])
         self.assertIn("-DREC_SESSION_NAME=Manual_Recorder_Session", spawner.calls[0])
         self.assertNotIn("-DREC_SESSION_NAME=Manual Recorder Session", spawner.calls[0])
+        self.assertEqual(launch.request.environment["REC_TOPIC_ALLOW"], "Square,Robot*")
+        self.assertEqual(launch.request.environment["REC_TOPIC_DENY"], "rti/*,internal/*")
         self.assertEqual(view.selected_candidate_id, launch.launch_id)
         self.assertEqual(view.selected_candidate.pid, "5001")
         self.assertEqual(view.launch.config_name, "manual_deploy")
         self.assertEqual(view.launch.data_domain_id, 63)
+        self.assertEqual(view.launch.topic_allow, "Square,Robot*")
+        self.assertEqual(view.launch.topic_deny, "rti/*,internal/*")
 
     async def test_launch_recording_uses_detected_nddshome_when_environment_is_unset(self):
         spawner = FakeSpawner(FakeHandle(5001))

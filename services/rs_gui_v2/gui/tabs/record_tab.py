@@ -75,6 +75,8 @@ class RecordLaunchViewModel:
     data_domain_id: int = 0
     admin_domain_id: int = 0
     monitoring_domain_id: int = 0
+    topic_allow: str = "*"
+    topic_deny: str = "rti/*"
     verbosity: str = "ERROR:ERROR"
     executable: str = ""
     working_dir: str = ""
@@ -90,6 +92,8 @@ class RecordLaunchViewModel:
         object.__setattr__(self, "data_domain_id", int(self.data_domain_id))
         object.__setattr__(self, "admin_domain_id", int(self.admin_domain_id))
         object.__setattr__(self, "monitoring_domain_id", int(self.monitoring_domain_id))
+        object.__setattr__(self, "topic_allow", str(self.topic_allow).strip() or "*")
+        object.__setattr__(self, "topic_deny", str(self.topic_deny).strip())
         if not self.command_preview:
             object.__setattr__(self, "command_preview", _launch_command_preview(self))
         if self.enabled and not self.config_name.strip():
@@ -225,6 +229,8 @@ def build_record_launch_command(launch: RecordLaunchViewModel) -> AppCommand:
             "data_domain_id": launch.data_domain_id,
             "admin_domain_id": launch.admin_domain_id,
             "monitoring_domain_id": launch.monitoring_domain_id,
+            "topic_allow": launch.topic_allow,
+            "topic_deny": launch.topic_deny,
             "verbosity": launch.verbosity,
             "executable": launch.executable,
             "working_dir": launch.working_dir,
@@ -436,6 +442,7 @@ def _launch_command_preview(launch: RecordLaunchViewModel) -> str:
     if launch.config_paths:
         command.extend(["-cfgFile", ";".join(launch.config_paths)])
     command.extend((f"-DDOMAIN_ID={launch.data_domain_id}", f"-DADMIN_DOMAIN_ID={launch.admin_domain_id}"))
+    command.extend((f"-DREC_TOPIC_ALLOW={launch.topic_allow}", f"-DREC_TOPIC_DENY={launch.topic_deny}"))
     command.extend(launch.extra_args)
     return " ".join(shlex.quote(str(part)) for part in command)
 

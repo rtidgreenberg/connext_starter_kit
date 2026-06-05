@@ -1,8 +1,7 @@
 # RS GUI v2 (RTI Services Operator GUI)
 
-rs_gui_v2 is the next-generation Dear PyGui-based operator application for RTI
-infrastructure services. It is designed to cover recording, replay, conversion,
-topic browsing, sample inspection, plotting, and persisted workspaces.
+rs_gui_v2 is the next-generation operator application for RTI infrastructure
+services. The supported Record/Replay UI is now Tkinter-based.
 
 This directory currently includes:
 
@@ -10,6 +9,10 @@ This directory currently includes:
 - App-core modules that keep DDS logic separated from the GUI layer
 - A growing test suite for headless runtime, GUI session wiring, adapters, and
   boundaries
+- A Tk session-backed shell bridge with a working Record tab slice for launch,
+  selection, tag, and control actions
+- A Tk Replay tab slice for target selection, launch-path entry, and playback
+  control actions through the existing Replay/session boundary
 - Operator-facing Recording Service configure-and-launch controls in the Record
   tab, backed by the same process launch path validated by live churn gates
 - A `setup.sh` tool that generates v2-owned XML DynamicData types from the
@@ -25,7 +28,7 @@ Architecture and planning references:
 
 - RTI Connext DDS installation available (7.6.0 preferred by setup tooling)
 - Repository Python virtual environment at `connext_dds_env/`
-- Dear PyGui installed in that environment for real GUI rendering
+- Tkinter available in that environment for the Tk migration scaffold
 
 ## One-Time Setup (DDS XML Types)
 
@@ -55,8 +58,8 @@ Skip Python dependency installation if needed:
 
 ## Install GUI Dependency
 
-The rs_gui_v2 `requirements.txt` pins a known-compatible Dear PyGui version for
-this environment. Install GUI dependencies with:
+The rs_gui_v2 `requirements.txt` pins the current non-stdlib GUI dependencies
+for this environment. Tkinter is provided by the Python runtime.
 
 ```bash
 cd /home/rti/CAT/connext_starter_kit
@@ -71,7 +74,7 @@ From `services/rs_gui_v2`:
 ./run_gui.sh
 ```
 
-This defaults to `--gui` mode.
+This defaults to `--gui` mode, which now launches the Tk Record/Replay shell.
 
 Default GUI startup does not create mock/demo service candidates and does not
 launch Recording Service automatically. Use the Record tab launch controls to
@@ -86,8 +89,14 @@ Useful modes:
 # Build mock GUI session-backed data and exit
 ./run_gui.sh --mock-gui-check
 
-# Run the GUI with explicit mock/demo data
+# Run the Tk shell with explicit mock/demo data
 ./run_gui.sh --mock-gui
+
+# Build the Tk session-backed Record/Replay shell and exit
+../../connext_dds_env/bin/python rs_gui_v2_app.py --tk-gui-check
+
+# Run the Tk session-backed Record/Replay shell
+../../connext_dds_env/bin/python rs_gui_v2_app.py --tk-gui
 
 # Prepare DDS XML types first, then launch
 ./run_gui.sh --prepare-dds --gui
@@ -116,6 +125,8 @@ CLI options:
 - `--mock-gui-check`
 - `--mock-gui`
 - `--gui`
+- `--tk-gui-check`
+- `--tk-gui`
 
 ## Tests
 
@@ -192,33 +203,8 @@ Current Replay defaults used by the GUI/controller path:
 - Close action: `shutdown_gui_launched`, which tries Replay admin shutdown first
   and falls back to local termination when admin endpoints are unavailable
 
-When launching Replay from the GUI or from the explicit gate below, prefer an
-absolute database path or a path relative to the rs_gui_v2 working directory.
-
-## Live Replay Churn Gate
-
-Run the explicit Replay Service GUI-session gate:
-
-```bash
-../../connext_dds_env/bin/python test/replay_service_churn.py --database-dir ../../log_dir/recording_1780085154
-```
-
-The gate launches `rtireplayservice` through `GuiShellSession`, waits for the
-Replay target to appear in GUI controller/session state, checks for Replay
-monitoring identity when available, then closes via the normal
-`shutdown_gui_launched` path and verifies the spawned process exits. The gate
-writes a JSON report under `services/rs_gui_v2/live_reports/` unless `--output`
-overrides it.
-
-Useful options:
-
-```bash
-# Write the report into workspace test output
-../../connext_dds_env/bin/python test/replay_service_churn.py --database-dir /abs/path/to/recording_dir --output ../../test_output/rs_gui_v2/replay_service_churn_live.json
-
-# Allow missing monitoring evidence when debugging startup only
-../../connext_dds_env/bin/python test/replay_service_churn.py --database-dir /abs/path/to/recording_dir --allow-missing-monitoring
-```
+When launching Replay from the GUI, prefer an absolute database path or a path
+relative to the rs_gui_v2 working directory.
 
 ## Live Discovery Churn Gate
 
@@ -248,8 +234,8 @@ Useful options:
 ## Notes
 
 - `run_gui.sh --prepare-dds` uses `setup.sh` before launching.
-- `run_gui.sh --gui` validates that Dear PyGui is importable and prints an
-  actionable install command if it is missing.
+- `run_gui.sh --gui` launches the Tk Record/Replay shell and no longer depends
+  on the retired legacy renderer.
 - XML types are local generated artifacts in `xml_types/`.
 - `run_gui.sh` includes preflight startup diagnostics for environment,
   dependencies, generated XML metadata, and RTI service executables.

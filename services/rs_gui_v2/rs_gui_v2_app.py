@@ -13,7 +13,7 @@ from gui import (
     build_default_gui_shell_session,
     build_gui_shell_assembly,
 )
-from gui.main_window import DearPyGuiUnavailable
+from tk_gui import TkinterUnavailable, build_tk_placeholder_shell, run_tk_session_shell
 
 
 async def run_headless_once() -> LifecyclePhase:
@@ -39,12 +39,22 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--mock-gui",
         action="store_true",
-        help="run the Dear PyGui shell with explicit mock/demo data",
+        help="run the Tk shell with explicit mock/demo data",
     )
     parser.add_argument(
         "--gui",
         action="store_true",
-        help="run the Dear PyGui shell without mock/demo data",
+        help="run the Tk shell without mock/demo data",
+    )
+    parser.add_argument(
+        "--tk-gui-check",
+        action="store_true",
+        help="build the minimal Tk shell scaffold, then exit",
+    )
+    parser.add_argument(
+        "--tk-gui",
+        action="store_true",
+        help="run the minimal Tk shell scaffold",
     )
     return parser.parse_args(argv)
 
@@ -60,24 +70,57 @@ def main(argv: Optional[List[str]] = None) -> int:
         ))
         view = session.next_view()
         return 0 if view.record_tab.candidates else 1
+    if args.tk_gui_check:
+        session = build_default_gui_shell_session(GuiShellSessionFactoryConfig(
+            mode=GuiShellSessionMode.MOCK,
+        ))
+        try:
+            shell = build_tk_placeholder_shell(
+                workspace_name="rs_gui_v2",
+                view_provider=session.next_view,
+                command_sink=session.command_sink,
+            )
+            try:
+                shell.refresh_once()
+                ok = (
+                    shell.tab_titles() == ("Recording", "Replay", "Debug")
+                    and "Robot Run 03" in shell.root.title()
+                    and "Runtime:" in shell.status_text()
+                )
+                return 0 if ok else 1
+            finally:
+                shell.destroy()
+        except TkinterUnavailable as exc:
+            print(str(exc))
+            return 2
+        finally:
+            asyncio.run(session.runtime.shutdown())
     if args.gui or args.mock_gui:
         try:
             mode = GuiShellSessionMode.MOCK if args.mock_gui else GuiShellSessionMode.LIVE
-            assembly = build_gui_shell_assembly(GuiShellSessionFactoryConfig(mode=mode))
+            session = build_default_gui_shell_session(GuiShellSessionFactoryConfig(mode=mode))
             if is_debug():
                 print(f"[DEBUG] Debug log: {log_path()}", flush=True)
-            if assembly.runtime.event_log_path:
-                print(f"[DEBUG] Event log: {assembly.runtime.event_log_path}", flush=True)
+            if session.runtime.event_log_path:
+                print(f"[DEBUG] Event log: {session.runtime.event_log_path}", flush=True)
             dbg(
                 "app",
                 "rs_gui_v2 starting",
                 mode="mock" if args.mock_gui else "live",
-                event_log=assembly.runtime.event_log_path,
+                event_log=session.runtime.event_log_path,
+                ui="tk",
             )
-            assembly.shell().run()
-            dbg("app", "rs_gui_v2 exited normally")
-            return 0
-        except DearPyGuiUnavailable as exc:
+            return run_tk_session_shell(session)
+        except TkinterUnavailable as exc:
+            print(str(exc))
+            return 2
+    if args.tk_gui:
+        try:
+            session = build_default_gui_shell_session(GuiShellSessionFactoryConfig(
+                mode=GuiShellSessionMode.LIVE,
+            ))
+            return run_tk_session_shell(session)
+        except TkinterUnavailable as exc:
             print(str(exc))
             return 2
     _parse_args(["--help"])

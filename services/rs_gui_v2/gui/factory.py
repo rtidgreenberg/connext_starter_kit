@@ -150,17 +150,6 @@ class GuiShellAssembly:
     monitoring_client: Optional[ServiceMonitoringClient] = None
     discovery_client: Optional[FakeTopicDiscoveryClient] = None
 
-    def shell(self, dpg_module=None):
-        """Create a Dear PyGui shell using this assembly's session wiring."""
-
-        from .main_window import DearPyGuiShell
-        return DearPyGuiShell(
-            view_provider=self.session.next_view,
-            command_sink=self.session.command_sink,
-            close_handler=self.session.handle_close_request,
-            dpg_module=dpg_module,
-        )
-
 
 def build_default_gui_shell_session(
         config: Optional[GuiShellSessionFactoryConfig] = None,

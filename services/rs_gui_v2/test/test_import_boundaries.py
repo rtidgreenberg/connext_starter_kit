@@ -20,7 +20,6 @@ def _allows_connext_import(path):
 class TestImportBoundaries(unittest.TestCase):
     def test_app_core_has_no_v1_or_ui_imports(self):
         banned_roots = {
-            "dearpygui",
             "recording_service_control",
             "recording_service_environment",
             "recording_service_monitor",

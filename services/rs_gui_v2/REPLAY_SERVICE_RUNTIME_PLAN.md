@@ -49,11 +49,18 @@ Prefer small shared helpers only after the Record and Replay needs are clear. Ca
 
 ## Source Anchors
 
+Historical note:
+
+- early Replay slices referenced legacy renderer files and an explicit Replay
+   churn gate that were later retired during the Tk cleanup
+- current supported Record/Replay UI validation is the Tk shell plus
+   session/controller tests under `services/rs_gui_v2/test/`
+
 - `services/rs_gui_v2/gui/tabs/record_controller.py` - source model for runtime-backed controller behavior.
 - `services/rs_gui_v2/gui/tabs/record_tab.py` - source model for candidate/action rows, command history, monitoring summary, launch view model, and action enablement.
 - `services/rs_gui_v2/gui/tabs/replay_controller.py` - replace fake-first Replay state mutation with runtime-backed behavior.
 - `services/rs_gui_v2/gui/tabs/replay_tab.py` - extend Replay view models and command factories.
-- `services/rs_gui_v2/gui/render/replay.py` and `services/rs_gui_v2/gui/main_window.py` - add launch controls and richer details to the Replay tab UI.
+- Tk Replay UI modules and the retained session/controller layer - add launch controls and richer details to the Replay tab UI.
 - `services/rs_gui_v2/gui/session.py` - route launch/control commands, publish Replay process and monitoring events, and close Replay processes.
 - `services/rs_gui_v2/gui/factory.py` - wire Replay controller with `ServiceProcessManager`, `ServiceAdminFacade`, and `ServiceMonitoringFacade`.
 - `services/rs_gui_v2/app_core/services/processes.py` - already supports `ServiceKind.REPLAY` executable selection and `-appName`/admin/monitoring args.
@@ -389,7 +396,7 @@ Allowed files:
 
 - `services/rs_gui_v2/gui/tabs/replay_tab.py`
 - `services/rs_gui_v2/test/test_gui_replay_controller.py`
-- `services/rs_gui_v2/test/test_gui_shell.py`
+- session-backed Replay UI tests current for the active frontend
 
 Implementation notes:
 
@@ -407,14 +414,14 @@ Validation:
 
 ```bash
 cd services/rs_gui_v2/test
-python3 -m unittest test_gui_replay_controller test_gui_shell
+python3 -m unittest test_gui_replay_controller
 ```
 
 ### Slice 02 - Replay Launch Controls in the Renderer
 
 Status: `done`
 
-Evidence: Added Replay launch controls and `Launch Replay Service` command emission in both the modular Replay renderer and active inline Dear PyGui renderer. Validated with `python3 -m unittest test_gui_shell` and the focused combined suite.
+Evidence: Replay launch controls were added during the earlier renderer phase and later carried forward into the supported Tk Replay shell. The currently supported validation path is the focused Tk/session suite.
 
 Goal: Render Replay launch inputs and emit `service.launch_replay` without changing the controller.
 
@@ -422,9 +429,8 @@ Dependencies: Slice 01.
 
 Allowed files:
 
-- `services/rs_gui_v2/gui/render/replay.py`
-- `services/rs_gui_v2/gui/main_window.py` if legacy renderer parity is still required
-- `services/rs_gui_v2/test/test_gui_shell.py`
+- active Replay frontend modules for the supported UI layer
+- focused frontend tests for the supported UI layer
 
 Implementation notes:
 
@@ -441,8 +447,8 @@ Acceptance criteria:
 Validation:
 
 ```bash
-cd services/rs_gui_v2/test
-python3 -m unittest test_gui_shell
+cd services/rs_gui_v2
+../../connext_dds_env/bin/python test/test_tk_replay_tab.py
 ```
 
 ### Slice 03 - Replay Launch Request Construction
@@ -633,9 +639,8 @@ Dependencies: Slice 06.
 
 Allowed files:
 
-- `services/rs_gui_v2/gui/main_window.py`
-- `services/rs_gui_v2/gui/render/close_dialog.py` if this module is the active close dialog source
-- `services/rs_gui_v2/test/test_gui_shell.py`
+- active close-dialog and session cleanup modules for the supported UI layer
+- focused session/frontend tests for the supported UI layer
 
 Implementation notes:
 
@@ -652,7 +657,7 @@ Validation:
 
 ```bash
 cd services/rs_gui_v2/test
-python3 -m unittest test_gui_shell
+../../../connext_dds_env/bin/python -m unittest -v test_gui_session.TestGuiShellSessionBridge.test_session_close_cleanup_shuts_down_gui_launched_items
 ```
 
 ### Slice 09 - Replay Close Cleanup Fallback
@@ -877,7 +882,7 @@ python3 -m unittest test_gui_replay_controller test_service_control test_gui_ses
 
 Status: `done`
 
-Evidence: Added explicit gate `services/rs_gui_v2/test/replay_service_churn.py` with deterministic coverage in `test_replay_service_churn.py` and README command documentation. Live validation passed via `../../connext_dds_env/bin/python test/replay_service_churn.py --database-dir ../../log_dir/recording_1780085154 --output ../../test_output/rs_gui_v2/replay_service_churn_live.json`, which launched Replay through `GuiShellSession`, observed monitoring identity `/replay_services/xcdr/sessions/DefaultSession/topics/DefaultTopicGroup@Square`, and closed with final state `exited` / return code `0` and no orphan `rtireplayservice` process.
+Evidence: An explicit Replay churn gate existed during the pre-Tk phase and validated that Replay launched through `GuiShellSession`, produced monitoring evidence, and exited without leaving an orphan `rtireplayservice` process. That dedicated gate was later retired during Tk cleanup; the supported path now relies on the focused session and Tk validation suite documented in `services/rs_gui_v2/test/README.md`.
 
 Goal: Add an explicit live/manual validation gate for launching and shutting down Replay Service from the GUI controller/session path.
 
@@ -909,7 +914,7 @@ Manual/live validation required.
 
 Status: `done`
 
-Evidence: Updated operator-facing Replay documentation in `services/rs_gui_v2/README.md` with Replay launch defaults, close behavior, and the explicit `test/replay_service_churn.py` gate. Added troubleshooting guidance in `services/rs_gui_v2/TROUBLESHOOTING.md` for invalid replay database paths, missing admin readiness, missing monitoring evidence, and per-process service logs. Plan statuses now reflect completed Replay slices through Slice 16.
+Evidence: Updated operator-facing Replay documentation in `services/rs_gui_v2/README.md` with Replay launch defaults and close behavior. Added troubleshooting guidance in `services/rs_gui_v2/TROUBLESHOOTING.md` for invalid replay database paths, missing admin readiness, missing monitoring evidence, and per-process service logs. The older dedicated Replay churn gate was later retired during Tk cleanup, and the plan now reflects the supported Tk/session validation path.
 
 Goal: Update docs and mark implementation status after code slices land.
 

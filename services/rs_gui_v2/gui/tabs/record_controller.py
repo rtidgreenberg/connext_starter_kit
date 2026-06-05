@@ -53,6 +53,8 @@ class RecordTabControllerConfig:
     launch_data_domain_id: int = 0
     launch_admin_domain_id: int = 0
     launch_monitoring_domain_id: int = 0
+    launch_topic_allow: str = "*"
+    launch_topic_deny: str = "rti/*"
     launch_verbosity: str = "ERROR:ERROR"
     launch_executable: str = ""
     launch_working_dir: str = ""
@@ -64,6 +66,8 @@ class RecordTabControllerConfig:
         object.__setattr__(self, "launch_data_domain_id", int(self.launch_data_domain_id))
         object.__setattr__(self, "launch_admin_domain_id", int(self.launch_admin_domain_id))
         object.__setattr__(self, "launch_monitoring_domain_id", int(self.launch_monitoring_domain_id))
+        object.__setattr__(self, "launch_topic_allow", str(self.launch_topic_allow).strip() or "*")
+        object.__setattr__(self, "launch_topic_deny", str(self.launch_topic_deny).strip())
         object.__setattr__(self, "launch_extra_args", tuple(str(arg) for arg in self.launch_extra_args if str(arg).strip()))
 
 
@@ -181,6 +185,8 @@ class RecordTabController:
         data_domain_id = _int_payload(payload, "data_domain_id", self._config.launch_data_domain_id)
         admin_domain_id = _int_payload(payload, "admin_domain_id", self._config.launch_admin_domain_id)
         monitoring_domain_id = _int_payload(payload, "monitoring_domain_id", self._config.launch_monitoring_domain_id)
+        topic_allow = str(payload.get("topic_allow", self._config.launch_topic_allow)).strip() or "*"
+        topic_deny = str(payload.get("topic_deny", self._config.launch_topic_deny)).strip()
         verbosity = str(payload.get("verbosity", self._config.launch_verbosity)).strip() or "ERROR:ERROR"
         executable = str(payload.get("executable", self._config.launch_executable)).strip()
         working_dir = str(payload.get("working_dir", self._config.launch_working_dir)).strip()
@@ -193,6 +199,8 @@ class RecordTabController:
             "-DREC_MON_DOMAIN_ID=",
             "-DREC_STATUS_PERIOD_SEC=",
             "-DREC_STATUS_PERIOD_NSEC=",
+            "-DREC_TOPIC_ALLOW=",
+            "-DREC_TOPIC_DENY=",
             "-DDOMAIN_ID=",
             "-DADMIN_DOMAIN_ID=",
         )
@@ -206,6 +214,8 @@ class RecordTabController:
             f"-DREC_MON_DOMAIN_ID={monitoring_domain_id}",
             "-DREC_STATUS_PERIOD_SEC=0",
             "-DREC_STATUS_PERIOD_NSEC=500000000",
+            f"-DREC_TOPIC_ALLOW={topic_allow}",
+            f"-DREC_TOPIC_DENY={topic_deny}",
             f"-DDOMAIN_ID={data_domain_id}",
             f"-DADMIN_DOMAIN_ID={admin_domain_id}",
         ) + operator_extra_args
@@ -213,6 +223,8 @@ class RecordTabController:
             "REC_DOMAIN_ID": str(data_domain_id),
             "REC_ADMIN_DOMAIN_ID": str(admin_domain_id),
             "REC_MON_DOMAIN_ID": str(monitoring_domain_id),
+            "REC_TOPIC_ALLOW": topic_allow,
+            "REC_TOPIC_DENY": topic_deny,
             "DOMAIN_ID": str(data_domain_id),
             "ADMIN_DOMAIN_ID": str(admin_domain_id),
         }
@@ -247,6 +259,8 @@ class RecordTabController:
             launch_data_domain_id=data_domain_id,
             launch_admin_domain_id=admin_domain_id,
             launch_monitoring_domain_id=monitoring_domain_id,
+            launch_topic_allow=topic_allow,
+            launch_topic_deny=topic_deny,
             launch_verbosity=verbosity,
             launch_executable=executable,
             launch_working_dir=working_dir,
@@ -556,6 +570,8 @@ class RecordTabController:
             data_domain_id=self._config.launch_data_domain_id,
             admin_domain_id=self._config.launch_admin_domain_id,
             monitoring_domain_id=self._config.launch_monitoring_domain_id,
+            topic_allow=self._config.launch_topic_allow,
+            topic_deny=self._config.launch_topic_deny,
             verbosity=self._config.launch_verbosity,
             executable=self._config.launch_executable,
             working_dir=self._config.launch_working_dir,

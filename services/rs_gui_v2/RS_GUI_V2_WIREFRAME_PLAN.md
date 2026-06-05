@@ -25,7 +25,7 @@ like to operate before we build it.
 ## First-Pass Wireframes
 
 These sketches are intentionally low fidelity. They define information shape,
-state vocabulary, and app-core API usage before any Dear PyGui widgets are
+state vocabulary, and app-core API usage before any concrete widgets are
 implemented.
 
 ### 1. App Shell
@@ -582,7 +582,7 @@ Approval focus:
 ## Review Checklist
 
 The first-pass wireframes above should be reviewed against this checklist before
-we approve the Dear PyGui implementation scope.
+we approve the UI implementation scope.
 
 ### 1. App Shell
 

@@ -28,8 +28,8 @@ Launcher options:
     --no-debug           Disable debug logging for this run
 
 App modes:
-    --gui                Launch the Dear PyGui shell (default)
-    --mock-gui           Launch the Dear PyGui shell with explicit mock/demo data
+    --gui                Launch the Tk Record/Replay shell (default)
+    --mock-gui           Launch the Tk shell with explicit mock/demo data
     --mock-gui-check     Build mock GUI session-backed data, then exit
     --headless-check     Start and stop app core only, then exit
 
@@ -123,10 +123,6 @@ if [[ "$SKIP_DIAGNOSTICS" != true ]]; then
     if [[ "$REQUIRE_CONNEXT_DIAGNOSTICS" == true ]]; then
         PREFLIGHT_ARGS+=(--require-connext)
     fi
-    if [[ " ${APP_ARGS[*]} " == *" --gui "* ]]; then
-        PREFLIGHT_ARGS+=(--require-dearpygui)
-    fi
-
     echo "Running startup diagnostics..."
     if ! "$VENV_PYTHON" "$PREFLIGHT_ENTRY" "${PREFLIGHT_ARGS[@]}"; then
         echo

@@ -75,6 +75,10 @@ class GuiShellSession:
         return self._runtime
 
     @property
+    def config(self) -> GuiShellSessionConfig:
+        return self._config
+
+    @property
     def record_controller(self) -> RecordTabController:
         return self._record_controller
 

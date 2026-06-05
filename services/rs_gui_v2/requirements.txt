@@ -1,2 +1,1 @@
-dearpygui==1.11.1
 rti.connext==7.6.0

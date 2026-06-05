@@ -1,7 +1,8 @@
 # rs_gui_v2 Tests
 
-The current test suite covers the headless app core only. It does not import
-DDS, Dear PyGui, or any `rs_gui_v1` implementation modules.
+The current test suite covers the headless app core and the Tk Record/Replay
+shell. It does not import DDS UI bindings, legacy renderer code, or any `rs_gui_v1`
+implementation modules.
 
 Run from `services/rs_gui_v2`:
 
@@ -22,13 +23,8 @@ Current layers:
 - `test_discovery_catalog.py`: DDS-free topic inventory, type resolution,
   internal-topic filtering, and persisted topic-selection DTOs
 - `test_headless_entrypoint.py`: headless app entry point startup/shutdown
-- `test_gui_shell.py`: mocked Dear PyGui shell snapshots, Record-tab selector
-  view models, Convert/Replay command intents, workspace save/load command
-  intents, event-log scheduling, and fake-renderer smoke coverage without
-  requiring a display
 - `test_gui_factory.py`: default GUI shell session assembly for mock and
-  headless modes, including Topics/Plots snapshot wiring, CLI mock GUI checks,
-  and fake-renderer coverage
+  headless modes, including Topics/Plots snapshot wiring and CLI mock GUI checks
 - `test_gui_plots_tab.py`: mocked Plots-tab plot rows, series summaries,
   pause/resume affordances, bounded recent point rows, and diagnostics
 - `test_gui_plots_controller.py`: Plots-tab controller wiring from
@@ -42,9 +38,6 @@ Current layers:
   duplicate-target diagnostics, and command intents
 - `test_gui_replay_controller.py`: fake-first Replay-tab controller state
   transitions and `replay.*` command handling before live Replay Service wiring
-- `test_gui_topics_tab.py`: mocked Topics-tab discovery rows, field picker,
-  subscription/sample inspector state, `topics.*` command builders, and
-  fake-renderer command callback coverage
 - `test_gui_topics_controller.py`: Topics-tab controller wiring from the
   discovery facade and data-session snapshots into shell snapshots, including
   fake discovery scans, command-driven selection/subscription state,
@@ -52,6 +45,12 @@ Current layers:
 - `test_gui_session.py`: runtime-backed GUI session wiring from app-core command
   queues through Record, Replay, and Topics controllers into shell snapshots and
   event logs
+- `test_tk_shell_smoke.py`: Tk shell refresh bridge and session-backed shell
+  smoke coverage without requiring a visible display
+- `test_tk_record_tab.py`: Tk Record-tab adapter wiring and button/field intent
+  coverage
+- `test_tk_replay_tab.py`: Tk Replay-tab adapter wiring and button/field intent
+  coverage
 - `test_gui_workspace.py`: GUI workspace projection, save/load command routing,
   and restoration of Topics/Plots intent using workspace-local test output
 - `test_record_tab_controller.py`: Record tab wiring from the local process
@@ -128,17 +127,5 @@ and command resource paths rooted at the XML recording-service name, such as
 `/recording_services/deploy`. Use `--require-admin-shutdown` when remote
 shutdown acknowledgment should be a hard pass/fail criterion.
 
-```bash
-../../connext_dds_env/bin/python test/replay_service_churn.py --database-dir ../../log_dir/recording_1780085154
-```
-
-`replay_service_churn.py` is explicit-only and exercises the real GUI
-controller/session path for Replay Service. It queues `service.launch_replay`
-through `GuiShellSession`, waits for Replay to appear in session state, checks
-for Replay monitoring evidence when available, then calls
-`handle_close_request_async("shutdown_gui_launched", ...)` and verifies no
-orphan `rtireplayservice` process remains. If `--database-dir` is omitted, the
-gate picks the newest `log_dir/recording_*` directory containing `metadata.db`.
-
-Future layers will add GUI rendering tests against a real Dear PyGui
-installation and broader live service restart fixtures.
+Future layers will add broader Tk integration coverage and additional live
+service restart fixtures.

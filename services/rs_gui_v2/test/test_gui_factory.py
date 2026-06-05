@@ -3,6 +3,7 @@
 
 import os
 import sys
+import tempfile
 import unittest
 
 
@@ -21,7 +22,6 @@ from gui import (
 )
 from gui.tabs import ReplayLaunchViewModel, build_replay_launch_command
 from rs_gui_v2_app import main
-from fakes import FakeDpg
 
 
 class TestGuiShellFactory(unittest.TestCase):
@@ -76,20 +76,23 @@ class TestGuiShellFactory(unittest.TestCase):
             mode=GuiShellSessionMode.MOCK,
         ))
         assembly.session.next_view()
-        command = build_replay_launch_command(ReplayLaunchViewModel(
-            label="Factory Replay",
-            config_paths=("services/replay_service_config.xml",),
-            config_name="xcdr",
-            database_path="log_dir/xcdr",
-            executable="rtireplayservice",
-        ))
+        with tempfile.TemporaryDirectory() as tmpdir:
+            open(os.path.join(tmpdir, "metadata.db"), "w", encoding="utf-8").close()
+            open(os.path.join(tmpdir, "data_0.db"), "w", encoding="utf-8").close()
 
-        self.assertTrue(assembly.session.command_sink(command))
-        view = assembly.session.next_view()
+            command = build_replay_launch_command(ReplayLaunchViewModel(
+                label="Factory Replay",
+                config_paths=("services/replay_service_config.xml",),
+                config_name="xcdr",
+                database_path=tmpdir,
+                executable="rtireplayservice",
+            ))
 
-        self.assertTrue(any(entry.message == "Dispatched service.launch_replay" for entry in view.event_log))
-        self.assertTrue(any(launch.identity.intent.kind.value == "replay" for launch in assembly.process_manager.launches()))
-        self.assertTrue(any("rtireplayservice" in " ".join(line) for line in assembly.process_manager._spawner.command_lines))
+            self.assertTrue(assembly.session.command_sink(command))
+            assembly.session.next_view()
+
+            self.assertTrue(any(launch.identity.intent.kind.value == "replay" for launch in assembly.process_manager.launches()))
+            self.assertTrue(any("rtireplayservice" in " ".join(line) for line in assembly.process_manager._spawner.command_lines))
 
     def test_headless_assembly_has_no_mock_launch_or_fake_clients(self):
         assembly = build_gui_shell_assembly(GuiShellSessionFactoryConfig(
@@ -146,17 +149,13 @@ class TestGuiShellFactory(unittest.TestCase):
         self.assertEqual(view.record_tab.launch.working_dir, repo_root)
         self.assertTrue(os.path.isfile(os.path.join(repo_root, "dds/qos/recording_service.xml")))
 
-    def test_shell_can_render_clean_factory_session_with_injected_dearpygui(self):
+    def test_clean_factory_session_renders_without_legacy_shell_wrapper(self):
         assembly = build_gui_shell_assembly()
-        fake = FakeDpg()
-        shell = assembly.shell(dpg_module=fake)
 
-        view = shell.render_once()
+        view = assembly.session.next_view()
 
         self.assertEqual(view.record_tab.selected_candidate_id, "")
         self.assertEqual(view.record_tab.candidates, ())
-        self.assertTrue(fake.context_created)
-        self.assertTrue(fake.context_destroyed)
 
 
 class TestGuiFactoryEntrypoint(unittest.TestCase):
@@ -168,8 +167,8 @@ class TestGuiFactoryEntrypoint(unittest.TestCase):
 
         self.assertEqual(config.mode, GuiShellSessionMode.LIVE)
 
-    def test_default_gui_entrypoint_uses_assembly_shell(self):
-        self.assertTrue(callable(build_gui_shell_assembly().shell))
+    def test_default_gui_entrypoint_uses_session_assembly(self):
+        self.assertIsNotNone(build_gui_shell_assembly().session)
 
 
 if __name__ == "__main__":

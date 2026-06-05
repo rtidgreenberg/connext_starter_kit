@@ -1,4 +1,4 @@
-"""Frame scheduler bridge between app-core queues and the Dear PyGui thread."""
+"""Frame scheduler bridge between app-core queues and the UI thread."""
 
 from typing import Callable, Iterable, Tuple
 

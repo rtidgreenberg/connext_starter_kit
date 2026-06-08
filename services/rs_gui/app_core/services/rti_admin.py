@@ -1,4 +1,4 @@
-"""RTI Service Admin request/reply adapter for rs_gui_v2.
+"""RTI Service Admin request/reply adapter for rs_gui.
 
 This module is the only service-admin module that imports Connext DDS. The
 DDS-free `ServiceAdminFacade` and DTOs stay in `admin.py` and `models.py`.

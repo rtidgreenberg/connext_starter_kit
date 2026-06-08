@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Headless tests for rs_gui_v2 GUI workspace persistence wiring."""
+"""Headless tests for rs_gui GUI workspace persistence wiring."""
 
 import os
 import shutil

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pure unit tests for rs_gui_v2 service DTOs."""
+"""Pure unit tests for rs_gui service DTOs."""
 
 import os
 import sys

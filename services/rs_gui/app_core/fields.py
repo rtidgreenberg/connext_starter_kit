@@ -1,4 +1,4 @@
-"""DDS-free field catalog models for rs_gui_v2 topic inspection."""
+"""DDS-free field catalog models for rs_gui topic inspection."""
 
 from dataclasses import dataclass, field
 from enum import Enum

@@ -1,4 +1,4 @@
-"""Deterministic fake service clients for rs_gui_v2 headless tests."""
+"""Deterministic fake service clients for rs_gui headless tests."""
 
 from collections import defaultdict, deque
 from typing import Deque, Dict, List, Optional

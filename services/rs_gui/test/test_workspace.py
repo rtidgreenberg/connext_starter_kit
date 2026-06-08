@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pure unit tests for rs_gui_v2 workspace persistence."""
+"""Pure unit tests for rs_gui workspace persistence."""
 
 import json
 import os

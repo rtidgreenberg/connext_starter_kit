@@ -1,4 +1,4 @@
-"""Record tab view models and command factories for rs_gui_v2."""
+"""Record tab view models and command factories for rs_gui."""
 
 from dataclasses import dataclass, field
 import os
@@ -78,6 +78,7 @@ class RecordLaunchViewModel:
     monitoring_domain_id: int = 0
     topic_allow: str = "*"
     topic_deny: str = "rti/*"
+    log_directory: str = "services/rs_gui/log_data"
     verbosity: str = "ERROR:ERROR"
     executable: str = ""
     working_dir: str = ""
@@ -96,6 +97,7 @@ class RecordLaunchViewModel:
         object.__setattr__(self, "monitoring_domain_id", int(self.monitoring_domain_id))
         object.__setattr__(self, "topic_allow", str(self.topic_allow).strip() or "*")
         object.__setattr__(self, "topic_deny", str(self.topic_deny).strip())
+        object.__setattr__(self, "log_directory", str(self.log_directory).strip() or "services/rs_gui/log_data")
         if not self.command_preview:
             object.__setattr__(self, "command_preview", _launch_command_preview(self))
         if self.enabled and not self.config_name.strip():
@@ -234,6 +236,7 @@ def build_record_launch_command(launch: RecordLaunchViewModel) -> AppCommand:
             "monitoring_domain_id": launch.monitoring_domain_id,
             "topic_allow": launch.topic_allow,
             "topic_deny": launch.topic_deny,
+            "log_directory": launch.log_directory,
             "verbosity": launch.verbosity,
             "executable": launch.executable,
             "working_dir": launch.working_dir,
@@ -382,7 +385,7 @@ def _monitoring_summary(selected: Optional[ServiceProcessCandidate]) -> Tuple[Tu
     current_file = _current_file(selected.details)
     if current_file:
         rows.append(("current_file", current_file))
-    for key in ("db_file_size", "rollover_count", "cpu_percent", "memory_mb", "memory_kb", "throughput"):
+    for key in ("db_file_size", "rollover_count", "memory_mb", "memory_kb"):
         if key in selected.metrics:
             rows.append((key, str(selected.metrics[key])))
     for key in ("current_db_directory", "db_directory", "sessions", "topics", "last_event", "message", "output_path"):
@@ -446,6 +449,7 @@ def _launch_command_preview(launch: RecordLaunchViewModel) -> str:
         command.extend(["-cfgFile", ";".join(launch.config_paths)])
     storage_value = _storage_format_env_value(launch.storage_format)
     command.extend((f"-DDOMAIN_ID={launch.data_domain_id}", f"-DADMIN_DOMAIN_ID={launch.admin_domain_id}"))
+    command.append(f"-DREC_LOG_DIR={launch.log_directory}")
     command.append(f"-DREC_STORAGE_FORMAT={storage_value}")
     command.extend((f"-DREC_TOPIC_ALLOW={launch.topic_allow}", f"-DREC_TOPIC_DENY={launch.topic_deny}"))
     command.extend(launch.extra_args)

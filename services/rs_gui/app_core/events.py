@@ -1,4 +1,4 @@
-"""Typed command and event models for the rs_gui_v2 headless core."""
+"""Typed command and event models for the rs_gui headless core."""
 
 from dataclasses import dataclass, field
 from enum import Enum

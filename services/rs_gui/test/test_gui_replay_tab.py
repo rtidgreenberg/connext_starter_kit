@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Headless tests for rs_gui_v2 Replay tab view models."""
+"""Headless tests for rs_gui Replay tab view models."""
 
 import os
 import sys
@@ -29,7 +29,7 @@ class TestReplayTabViewModel(unittest.TestCase):
         self.assertEqual(view.database_path, "services/replay_input/robot_run_03")
         self.assertEqual(view.qos_file_path, "dds/qos/DDS_QOS_PROFILES.xml")
         self.assertEqual(view.participant_qos_profile, "DPLibrary::DefaultParticipant")
-        self.assertEqual(view.writer_qos_profile, "BuiltinQosLib::Generic.Common")
+        self.assertEqual(view.writer_qos_profile, "DataPatternsLibrary::replay_writer_transient_local")
         self.assertEqual(view.observed_state, "STOPPED")
         self.assertEqual(view.target_count, 2)
         self.assertEqual(view.timeline[0].label, "Robot run")
@@ -116,7 +116,7 @@ class TestReplayTabViewModel(unittest.TestCase):
         )
         self.assertEqual(
             command.payload["writer_qos_profile"],
-            "BuiltinQosLib::Generic.Common",
+            "DataPatternsLibrary::replay_writer_transient_local",
         )
         with self.assertRaises(ValueError):
             build_replay_action_command("rewind", view)

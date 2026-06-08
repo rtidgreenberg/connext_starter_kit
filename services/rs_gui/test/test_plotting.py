@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pure unit tests for rs_gui_v2 plotting buffers."""
+"""Pure unit tests for rs_gui plotting buffers."""
 
 import os
 import sys

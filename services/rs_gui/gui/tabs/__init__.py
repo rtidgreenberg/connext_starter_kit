@@ -1,4 +1,4 @@
-"""View-model builders for rs_gui_v2 tabs."""
+"""View-model builders for rs_gui tabs."""
 
 from .convert_tab import (
     ConvertActionView,

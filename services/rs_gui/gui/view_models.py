@@ -1,4 +1,4 @@
-"""Immutable shell view models for the rs_gui_v2 UI layer."""
+"""Immutable shell view models for the rs_gui UI layer."""
 
 from dataclasses import dataclass, field
 from typing import Iterable, Mapping, Tuple
@@ -125,7 +125,7 @@ def build_mock_shell_view_model(now: float = 120.0) -> ShellViewModel:
         plots_tab=build_mock_plots_tab_view_model(now=now),
         event_log=event_log,
         workspace_name="Robot Run 03",
-        workspace_path="services/rs_gui_v2/test_output/robot_run_03.json",
+        workspace_path="services/rs_gui/test_output/robot_run_03.json",
         unsaved=True,
     )
 

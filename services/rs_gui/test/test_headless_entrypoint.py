@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the rs_gui_v2 headless entry point."""
+"""Tests for the rs_gui headless entry point."""
 
 import os
 import sys
@@ -12,7 +12,7 @@ if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
 from app_core import LifecyclePhase
-from rs_gui_v2_app import main, run_headless_once
+from rs_gui_app import main, run_headless_once
 
 
 class TestHeadlessEntrypoint(unittest.IsolatedAsyncioTestCase):

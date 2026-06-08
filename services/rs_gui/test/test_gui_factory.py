@@ -21,7 +21,7 @@ from gui import (
     build_gui_shell_assembly,
 )
 from gui.tabs import ReplayLaunchViewModel, build_replay_launch_command
-from rs_gui_v2_app import main
+from rs_gui_app import main
 
 
 class TestGuiShellFactory(unittest.TestCase):
@@ -82,7 +82,7 @@ class TestGuiShellFactory(unittest.TestCase):
 
             command = build_replay_launch_command(ReplayLaunchViewModel(
                 label="Factory Replay",
-                config_paths=("services/replay_service_config.xml",),
+                config_paths=("dds/qos/replay_service_config.xml",),
                 config_name="xcdr",
                 database_path=tmpdir,
                 executable="rtireplayservice",

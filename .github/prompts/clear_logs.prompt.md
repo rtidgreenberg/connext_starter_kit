@@ -1,6 +1,6 @@
 ---
 mode: agent
-description: "Clear generated log folders in this workspace"
+description: "Clear generated GUI and service log folders in this workspace"
 ---
 
 # Clear Generated Log Folders
@@ -23,13 +23,13 @@ Clear generated runtime and GUI log output from this workspace while preserving 
 Clean these directories when they exist:
 
 - `log_dir/`
-- `services/rs_gui_v1/log_dir/`
-- `services/rs_gui_v2/rs_gui_logs/`
-- `services/rs_gui_v2/service_logs/`
-- `services/rs_gui_v2/service_churn/run_*/log_dir/`
-- `test_output/rs_gui_v2/service_churn/run_*/log_dir/`
+- `services/rs_gui/rs_gui_logs/`
+- `services/rs_gui/service_logs/`
+- `services/rs_gui/log_data/`
+- `services/rs_gui/service_churn/run_*/log_dir/`
+- `test_output/rs_gui/service_churn/run_*/log_dir/`
 
-If the user explicitly asks to clear test artifacts too, also clear generated contents under `test_output/rs_gui_v2/` while keeping the `test_output/` directory tree itself.
+If the user explicitly asks to clear test artifacts too, also clear generated contents under `test_output/rs_gui/` while keeping the `test_output/` directory tree itself.
 
 ## Workflow
 
@@ -37,11 +37,11 @@ If the user explicitly asks to clear test artifacts too, also clear generated co
 
    ```bash
    find log_dir \
-     services/rs_gui_v1/log_dir \
-     services/rs_gui_v2/rs_gui_logs \
-     services/rs_gui_v2/service_logs \
-     services/rs_gui_v2/service_churn/run_*/log_dir \
-     test_output/rs_gui_v2/service_churn/run_*/log_dir \
+     services/rs_gui/rs_gui_logs \
+     services/rs_gui/service_logs \
+     services/rs_gui/log_data \
+     services/rs_gui/service_churn/run_*/log_dir \
+     test_output/rs_gui/service_churn/run_*/log_dir \
      -mindepth 1 -maxdepth 1 -print 2>/dev/null | sort
    ```
 
@@ -51,11 +51,11 @@ If the user explicitly asks to clear test artifacts too, also clear generated co
 
    ```bash
    find log_dir \
-     services/rs_gui_v1/log_dir \
-     services/rs_gui_v2/rs_gui_logs \
-     services/rs_gui_v2/service_logs \
-     services/rs_gui_v2/service_churn/run_*/log_dir \
-     test_output/rs_gui_v2/service_churn/run_*/log_dir \
+     services/rs_gui/rs_gui_logs \
+     services/rs_gui/service_logs \
+     services/rs_gui/log_data \
+     services/rs_gui/service_churn/run_*/log_dir \
+     test_output/rs_gui/service_churn/run_*/log_dir \
      -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null
    ```
 

@@ -1,4 +1,4 @@
-"""Headless application core for rs_gui_v2."""
+"""Headless application core for rs_gui."""
 
 from .events import AppCommand, AppEvent, CommandResult, CommandStatus, LifecyclePhase
 from .extractors import (

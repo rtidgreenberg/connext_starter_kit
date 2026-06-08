@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for the rs_gui_v2 RTI Service Admin adapter.
+"""Unit tests for the rs_gui RTI Service Admin adapter.
 
 These tests use fake Connext modules so they can validate adapter encoding and
 outcome mapping without starting DDS.
@@ -268,7 +268,7 @@ class TestRtiServiceAdminClient(unittest.IsolatedAsyncioTestCase):
     async def test_replay_shutdown_encodes_delete_resource(self):
         request_module = FakeRequestModule()
         client = RtiServiceAdminClient(self.config, FakeDdsModule, request_module)
-        service = ServiceInstanceRef(ServiceKind.REPLAY, "rs_gui_v2_replay_1234", admin_domain_id=54)
+        service = ServiceInstanceRef(ServiceKind.REPLAY, "rs_gui_replay_1234", admin_domain_id=54)
         request = ServiceCommandRequest(
             service,
             ServiceCommand.SHUTDOWN,
@@ -279,14 +279,14 @@ class TestRtiServiceAdminClient(unittest.IsolatedAsyncioTestCase):
 
         command_data = request_module.requesters[0].sent_requests[0]
         self.assertTrue(outcome.ok)
-        self.assertEqual(command_data["application_name"], "rs_gui_v2_replay_1234")
+        self.assertEqual(command_data["application_name"], "rs_gui_replay_1234")
         self.assertEqual(command_data["action"], ACTION_DELETE)
         self.assertEqual(command_data["resource_identifier"], "/replay_services/xcdr")
 
     async def test_replay_custom_state_update_encodes_state_resource(self):
         request_module = FakeRequestModule()
         client = RtiServiceAdminClient(self.config, FakeDdsModule, request_module)
-        service = ServiceInstanceRef(ServiceKind.REPLAY, "rs_gui_v2_replay_1234", admin_domain_id=54)
+        service = ServiceInstanceRef(ServiceKind.REPLAY, "rs_gui_replay_1234", admin_domain_id=54)
         request = ServiceCommandRequest(
             service,
             ServiceCommand.CUSTOM,
@@ -301,7 +301,7 @@ class TestRtiServiceAdminClient(unittest.IsolatedAsyncioTestCase):
 
         command_data = request_module.requesters[0].sent_requests[0]
         self.assertTrue(outcome.ok)
-        self.assertEqual(command_data["application_name"], "rs_gui_v2_replay_1234")
+        self.assertEqual(command_data["application_name"], "rs_gui_replay_1234")
         self.assertEqual(command_data["action"], ACTION_UPDATE)
         self.assertEqual(command_data["resource_identifier"], "/replay_services/xcdr/state")
         self.assertEqual(command_data["octet_body"], [ENTITY_STATE_STOPPED])
@@ -309,7 +309,7 @@ class TestRtiServiceAdminClient(unittest.IsolatedAsyncioTestCase):
     async def test_shutdown_can_target_app_name_with_separate_xml_resource(self):
         request_module = FakeRequestModule()
         client = RtiServiceAdminClient(self.config, FakeDdsModule, request_module)
-        service = ServiceInstanceRef(ServiceKind.RECORDING, "rs_gui_v2_churn_1234", admin_domain_id=54)
+        service = ServiceInstanceRef(ServiceKind.RECORDING, "rs_gui_churn_1234", admin_domain_id=54)
         request = ServiceCommandRequest(
             service,
             ServiceCommand.SHUTDOWN,
@@ -320,13 +320,13 @@ class TestRtiServiceAdminClient(unittest.IsolatedAsyncioTestCase):
 
         command_data = request_module.requesters[0].sent_requests[0]
         self.assertTrue(outcome.ok)
-        self.assertEqual(command_data["application_name"], "rs_gui_v2_churn_1234")
+        self.assertEqual(command_data["application_name"], "rs_gui_churn_1234")
         self.assertEqual(command_data["resource_identifier"], "/recording_services/deploy")
 
     async def test_pause_can_target_app_name_with_separate_xml_resource(self):
         request_module = FakeRequestModule()
         client = RtiServiceAdminClient(self.config, FakeDdsModule, request_module)
-        service = ServiceInstanceRef(ServiceKind.RECORDING, "rs_gui_v2_churn_1234", admin_domain_id=54)
+        service = ServiceInstanceRef(ServiceKind.RECORDING, "rs_gui_churn_1234", admin_domain_id=54)
         request = ServiceCommandRequest(
             service,
             ServiceCommand.PAUSE,
@@ -337,7 +337,7 @@ class TestRtiServiceAdminClient(unittest.IsolatedAsyncioTestCase):
 
         command_data = request_module.requesters[0].sent_requests[0]
         self.assertTrue(outcome.ok)
-        self.assertEqual(command_data["application_name"], "rs_gui_v2_churn_1234")
+        self.assertEqual(command_data["application_name"], "rs_gui_churn_1234")
         self.assertEqual(command_data["resource_identifier"], "/recording_services/deploy/state")
 
     async def test_tag_encodes_tag_resource_and_payload(self):

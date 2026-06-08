@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for the rs_gui_v2 live discovery churn gate."""
+"""Unit tests for the rs_gui live discovery churn gate."""
 
 import os
 import sys

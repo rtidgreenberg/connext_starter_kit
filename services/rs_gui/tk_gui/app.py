@@ -1,4 +1,4 @@
-"""App bootstrap helpers for the minimal rs_gui_v2 Tk shell."""
+"""App bootstrap helpers for the minimal rs_gui Tk shell."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from .main_window import TkPlaceholderWindow
 
 
 def build_tk_placeholder_shell(
-        workspace_name: str = "rs_gui_v2",
+        workspace_name: str = "rs_gui",
         view_provider: Optional[Callable[[], object]] = None,
         command_sink: Optional[Callable[[object], bool]] = None,
         close_handler: Optional[Callable[[], None]] = None,
@@ -48,10 +48,10 @@ def build_tk_session_shell(session, refresh_interval_ms: int = 250) -> TkPlaceho
     )
 
     return build_tk_placeholder_shell(
-        workspace_name=session.config.workspace_name or "rs_gui_v2",
+        workspace_name=session.config.workspace_name or "rs_gui",
         view_provider=session.next_view,
         command_sink=session.command_sink,
-        close_handler=lambda: session.handle_close_request("leave_running"),
+        close_handler=lambda: session.handle_close_request("shutdown_gui_launched"),
         refresh_interval_ms=refresh_interval_ms,
         record_tab_adapter=record_tab_adapter,
         replay_tab_adapter=replay_tab_adapter,
@@ -59,7 +59,7 @@ def build_tk_session_shell(session, refresh_interval_ms: int = 250) -> TkPlaceho
 
 
 def run_tk_placeholder_shell(
-        workspace_name: str = "rs_gui_v2",
+        workspace_name: str = "rs_gui",
         view_provider: Optional[Callable[[], object]] = None,
         command_sink: Optional[Callable[[object], bool]] = None,
         close_handler: Optional[Callable[[], None]] = None,

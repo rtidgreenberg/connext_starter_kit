@@ -248,7 +248,7 @@ class ServiceProcessSpawner(Protocol):
 class SubprocessServiceProcessSpawner:
     """Standard-library spawner used by production wiring."""
 
-    def __init__(self, log_dir: str = "services/rs_gui_v2/service_logs") -> None:
+    def __init__(self, log_dir: str = "services/rs_gui/service_logs") -> None:
         self._log_dir = _workspace_relative_path(str(log_dir))
 
     def start(

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pure unit tests for rs_gui_v2 field catalog models."""
+"""Pure unit tests for rs_gui field catalog models."""
 
 import os
 import sys

@@ -1,4 +1,4 @@
-"""Tkinter tab widgets for rs_gui_v2."""
+"""Tkinter tab widgets for rs_gui."""
 
 from .record_tab import RecordTabAdapter, TkRecordTab
 from .replay_tab import ReplayTabAdapter, TkReplayTab

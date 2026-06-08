@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Entry point for rs_gui_v2 headless and GUI checks."""
+"""Entry point for rs_gui headless and GUI checks."""
 
 import argparse
 import asyncio
@@ -25,7 +25,7 @@ async def run_headless_once() -> LifecyclePhase:
 
 
 def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="rs_gui_v2 headless runtime")
+    parser = argparse.ArgumentParser(description="rs_gui headless runtime")
     parser.add_argument(
         "--headless-check",
         action="store_true",
@@ -76,7 +76,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         ))
         try:
             shell = build_tk_placeholder_shell(
-                workspace_name="rs_gui_v2",
+                workspace_name="rs_gui",
                 view_provider=session.next_view,
                 command_sink=session.command_sink,
             )
@@ -99,13 +99,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         try:
             mode = GuiShellSessionMode.MOCK if args.mock_gui else GuiShellSessionMode.LIVE
             session = build_default_gui_shell_session(GuiShellSessionFactoryConfig(mode=mode))
-            if is_debug():
-                print(f"[DEBUG] Debug log: {log_path()}", flush=True)
             if session.runtime.event_log_path:
-                print(f"[DEBUG] Event log: {session.runtime.event_log_path}", flush=True)
+                if is_debug():
+                    print(f"[DEBUG] RS GUI log: {log_path()}", flush=True)
+                else:
+                    print(f"[DEBUG] Event log: {session.runtime.event_log_path}", flush=True)
             dbg(
                 "app",
-                "rs_gui_v2 starting",
+                "rs_gui starting",
                 mode="mock" if args.mock_gui else "live",
                 event_log=session.runtime.event_log_path,
                 ui="tk",

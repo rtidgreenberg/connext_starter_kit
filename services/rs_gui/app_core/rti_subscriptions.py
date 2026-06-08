@@ -1,4 +1,4 @@
-"""RTI Connext DynamicData subscription adapter for rs_gui_v2.
+"""RTI Connext DynamicData subscription adapter for rs_gui.
 
 This module owns Connext DynamicData topic and reader creation. The subscription
 request, state, sample envelope, and cache models remain DDS-free in

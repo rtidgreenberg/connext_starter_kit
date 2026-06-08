@@ -26,7 +26,15 @@
       </element>
       <element>
         <name>REPLAY_XCDR_DATABASE_DIR</name>
-        <value>log_dir/xcdr</value>
+        <value>services/rs_gui/log_data/xcdr</value>
+      </element>
+      <element>
+        <name>REPLAY_STORAGE_FORMAT</name>
+        <value>XCDR_AUTO</value>
+      </element>
+      <element>
+        <name>REPLAY_DATABASE_DIR</name>
+        <value>services/rs_gui/log_data/xcdr</value>
       </element>
       <element>
         <name>REPLAY_JSON_STORAGE_FORMAT</name>
@@ -52,10 +60,14 @@
         <name>REPLAY_TOPIC_DENY</name>
         <value>rti/*</value>
       </element>
+      <element>
+        <name>REPLAY_DW_QOS</name>
+        <value>DataPatternsLibrary::replay_writer_transient_local</value>
+      </element>
     </value>
   </configuration_variables>
 
-  <replay_service name="xcdr">
+  <replay_service name="template">
 
     <administration>
       <domain_id>$(REPLAY_ADMIN_DOMAIN_ID)</domain_id>
@@ -75,11 +87,11 @@
       </statistics_sampling_period>
     </monitoring>
 
-    <!--  Storage settings -->
+    <!-- Storage settings -->
     <storage>
       <sqlite>
-        <storage_format>$(REPLAY_XCDR_STORAGE_FORMAT)</storage_format>
-        <database_dir>$(REPLAY_XCDR_DATABASE_DIR)</database_dir>
+        <storage_format>$(REPLAY_STORAGE_FORMAT)</storage_format>
+        <database_dir>$(REPLAY_DATABASE_DIR)</database_dir>
       </sqlite>
     </storage>
 
@@ -156,6 +168,71 @@
         <!-- Topics to replay -->
         <allow_topic_name_filter>$(REPLAY_TOPIC_ALLOW)</allow_topic_name_filter>
         <deny_topic_name_filter>$(REPLAY_TOPIC_DENY)</deny_topic_name_filter>
+        <datawriter_qos base_name="$(REPLAY_DW_QOS)" />
+      </topic_group>
+
+    </session>
+  </replay_service>
+
+
+  <replay_service name="xcdr">
+
+    <administration>
+      <domain_id>$(REPLAY_ADMIN_DOMAIN_ID)</domain_id>
+      <datareader_qos base_name="ServiceAdministrationProfiles::ServiceAdminReplierProfile" />
+      <datawriter_qos base_name="ServiceAdministrationProfiles::ServiceAdminReplierProfile" />
+    </administration>
+
+    <monitoring>
+      <domain_id>$(REPLAY_MON_DOMAIN_ID)</domain_id>
+      <status_publication_period>
+        <sec>1</sec>
+        <nanosec>0</nanosec>
+      </status_publication_period>
+      <statistics_sampling_period>
+        <sec>0</sec>
+        <nanosec>500000000</nanosec>
+      </statistics_sampling_period>
+    </monitoring>
+
+    <!-- Storage settings -->
+    <storage>
+      <sqlite>
+        <storage_format>$(REPLAY_XCDR_STORAGE_FORMAT)</storage_format>
+        <database_dir>$(REPLAY_XCDR_DATABASE_DIR)</database_dir>
+      </sqlite>
+    </storage>
+
+    <!-- Optionally select the begin and end times for the data to be replayed -->
+    <!--data_selection>
+            <time_range>
+                <begin_time>
+                    <sec>0</sec>
+                    <nanosec>0</nanosec>
+                </begin_time>
+            </time_range>
+        </data_selection-->
+
+    <!-- Specify playback behavior, including what local time to start -->
+    <playback>
+      <rate>$(REPLAY_PLAYBACK_RATE)</rate>
+      <enable_looping>$(REPLAY_ENABLE_LOOPING)</enable_looping>
+      <sample_order>RECEPTION_TIMESTAMP</sample_order>
+    </playback>
+
+
+    <domain_participant name="ReplayServiceParticipant">
+      <domain_id>$(REPLAY_DOMAIN_ID)</domain_id>
+
+    </domain_participant>
+
+    <session name="DefaultSession" default_participant_ref="ReplayServiceParticipant">
+      <!-- Topics to replay in this session -->
+      <topic_group name="DefaultTopicGroup">
+        <!-- Topics to replay -->
+        <allow_topic_name_filter>$(REPLAY_TOPIC_ALLOW)</allow_topic_name_filter>
+        <deny_topic_name_filter>$(REPLAY_TOPIC_DENY)</deny_topic_name_filter>
+        <datawriter_qos base_name="$(REPLAY_DW_QOS)" />
       </topic_group>
 
     </session>
@@ -182,7 +259,7 @@
       </statistics_sampling_period>
     </monitoring>
 
-    <!--  Storage settings -->
+    <!-- Storage settings -->
     <storage>
       <sqlite>
         <storage_format>$(REPLAY_JSON_STORAGE_FORMAT)</storage_format>
@@ -219,6 +296,7 @@
         <!-- Topics to replay -->
         <allow_topic_name_filter>$(REPLAY_TOPIC_ALLOW)</allow_topic_name_filter>
         <deny_topic_name_filter>$(REPLAY_TOPIC_DENY)</deny_topic_name_filter>
+        <datawriter_qos base_name="$(REPLAY_DW_QOS)" />
       </topic_group>
 
     </session>

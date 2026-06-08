@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Before implementing the rs_gui_v2 interface, we will create mock wireframes for
+Before implementing the rs_gui interface, we will create mock wireframes for
 review and approval. The wireframes should validate the operator workflow,
 screen layout, command feedback, data exploration model, and persistence flow
 without committing to widget code too early.
@@ -287,7 +287,7 @@ inspection in Topics and Plots.
 | * replay_service_d34a910f local pid 4332 dev-host STOPPED db: test_recording |
 |   replay_service_2c7718bb ext   pid 5175 lab-host RUNNING conflict           |
 +------------------------------------------------------------------------------+
-| Recording DB: services/rs_gui_v1/test/test_recording        [Browse]          |
+| Recording DB: services/rs_gui/test/test_recording           [Browse]          |
 | Time window: [start tag: e2e_tag_alpha] -> [end tag: e2e_tag_beta]            |
 | Rate: 1.0x      Loop: off      Topic filter: /Robot/*                         |
 +------------------------------------------------------------------------------+
@@ -750,5 +750,5 @@ Use the fastest format that lets us review the workflow clearly:
 - Optional clickable prototype later if the layout becomes ambiguous.
 
 The first pass should be low-fidelity and text-heavy enough to revise quickly.
-After approval, we can build rs_gui_v2 screens against mocked app-core state
+After approval, we can build rs_gui screens against mocked app-core state
 before connecting live DDS.

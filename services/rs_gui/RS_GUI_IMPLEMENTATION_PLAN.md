@@ -4,7 +4,7 @@
 
 We have enough confidence to begin implementation, with one important boundary:
 the first work should productize the DDS app core before building feature-heavy
-rs_gui_v2 screens.
+rs_gui screens.
 
 The current code already proves the hardest first DDS pieces:
 
@@ -23,17 +23,17 @@ front-loads those risks.
 ## Implementation Rules
 
 - Keep the current tkinter GUI working as the reference implementation until
-  rs_gui_v2 has its own vertical slice.
-- Keep rs_gui_v2 independent from rs_gui_v1. rs_gui_v2 must not import,
-  instantiate, subclass, shell out to, or depend on rs_gui_v1 implementation
-  modules. Use rs_gui_v1 only as an external behavior reference and regression
+  rs_gui has its own vertical slice.
+- Keep rs_gui independent from the legacy GUI codebase. rs_gui must not import,
+  instantiate, subclass, shell out to, or depend on legacy GUI implementation
+  modules. Use legacy behavior only as an external reference and regression
   baseline.
 - If logic needs to be shared between the two applications, extract it into a
   neutral shared module with its own tests instead of making either GUI depend
   on the other.
-- Create and approve mock wireframes before implementing rs_gui_v2 screens.
+- Create and approve mock wireframes before implementing rs_gui screens.
 - Build and test the app core in headless mode before wiring rich UI behavior.
-- Treat rs_gui_v2 as a Connext reference example: each new capability should
+- Treat rs_gui as a Connext reference example: each new capability should
   have a small app-level API, an isolated Connext adapter when DDS is needed,
   and tests or docs that make the RTI API usage easy to find.
 - Keep direct `rti.*` imports out of pure models, facades, state reducers,
@@ -77,13 +77,13 @@ DDS notes:
 Suggested first PRs:
 
 1. Add `app_core/runtime.py`, `app_core/events.py`, `app_core/state.py`.
-2. Add `rs_gui_v2_app.py` or equivalent shell entry point.
+2. Add `rs_gui_app.py` or equivalent shell entry point.
 3. Add headless lifecycle tests.
 
 Initial implementation status:
 
 - Added `app_core` runtime, event, command, result, and state models.
-- Added `rs_gui_v2_app.py` with a DDS-free `--headless-check` entry point.
+- Added `rs_gui_app.py` with a DDS-free `--headless-check` entry point.
 - Added pure headless unit tests for lifecycle, queues, task supervision,
   immutable DTOs, and the entry point.
 - Deferred environment/XTypes adapters to Milestone B so Milestone A remains
@@ -96,11 +96,11 @@ Milestone B initial implementation status:
 - Added DDS-free `ServiceAdminFacade` and `ServiceMonitoringFacade` protocols.
 - Added deterministic fake admin and monitoring clients for headless tests.
 - Added import-boundary tests proving the headless app core does not import DDS,
-  UI toolkits, or rs_gui_v1 implementation modules.
+  UI toolkits, or legacy GUI implementation modules.
 - Added `app_core/services/rti_admin.py` as the v2-owned RTI Service Admin
   request/reply adapter, with Connext imports isolated to the adapter module.
 - Added `setup.sh` and ignored `xml_types/` path so v2 generates its own
-  Service Admin XML DynamicData artifacts instead of depending on rs_gui_v1.
+  Service Admin XML DynamicData artifacts instead of depending on legacy code.
 - Added fake-Connext adapter tests for Service Admin resource paths, state and
   tag payload encoding, readiness, reply timeout, rejected replies, and cleanup.
 - Added `app_core/services/rti_monitoring.py` as the v2-owned RTI service
@@ -131,7 +131,7 @@ Milestone B initial implementation status:
 
 ## Milestone B: Service Admin and Monitoring Facades
 
-Goal: Build rs_gui_v2-owned Recording Service admin and monitoring adapters with
+Goal: Build rs_gui-owned Recording Service admin and monitoring adapters with
 stable, product-facing interfaces.
 
 Deliverables:
@@ -141,7 +141,8 @@ Deliverables:
 - `ServiceMonitoringFacade` that normalizes config, event, and periodic samples.
 - shared resource path builders.
 - service state model with requested, acknowledged, and observed states.
-- import-boundary tests proving service adapters do not depend on rs_gui_v1.
+- import-boundary tests proving service adapters do not depend on legacy GUI
+  implementation modules.
 - reference notes that show which RTI Service Admin and monitoring topics, types,
   and resource paths are used by the Connext adapters.
 
@@ -151,9 +152,9 @@ Acceptance gates:
 - Tests distinguish service unavailable, discovery timeout, command rejected,
   and command acknowledged.
 - Monitoring updates are normalized without GUI dependencies.
-- Existing rs_gui_v1 controller and monitor tests still pass as an external
+- Existing legacy controller and monitor tests still pass as an external
   regression baseline.
-- rs_gui_v2 service adapters have no imports from `services/rs_gui_v1`.
+- rs_gui service adapters have no imports from legacy GUI modules.
 - Pure service models, facades, and fakes have no `rti.*` imports.
 - Any DDS-backed admin or monitoring client lives in an explicitly named Connext
   adapter module and implements the DDS-free protocol.
@@ -178,7 +179,7 @@ Suggested PRs:
   facade.
 4. Add fake service adapters for deterministic headless tests.
 5. Add live service facade tests that compare against the existing service
-  fixtures without importing rs_gui_v1 implementation modules.
+  fixtures without importing legacy GUI implementation modules.
 6. Add `app_core/services/rti_admin.py` and `rti_monitoring.py` only after the
    DDS-free protocols and fakes are covered by tests.
 
@@ -414,7 +415,7 @@ Initial implementation status:
 ## Milestone E: UI Wireframes and Approval
 
 Goal: Approve the operator workflow and screen structure before writing
-rs_gui_v2 UI code.
+rs_gui UI code.
 
 Deliverables:
 
@@ -425,7 +426,7 @@ Deliverables:
 - topic lifecycle representation: discovered, type available, reader created,
   matched, receiving, unresolved, ambiguous.
 - approval notes captured in
-  [RS_GUI_V2_WIREFRAME_PLAN.md](RS_GUI_V2_WIREFRAME_PLAN.md).
+  [RS_GUI_WIREFRAME_PLAN.md](RS_GUI_WIREFRAME_PLAN.md).
 
 Acceptance gates:
 
@@ -447,11 +448,11 @@ Suggested PRs:
 
 1. Add low-fidelity Markdown wireframes for each major view.
 2. Review and revise wireframes with operator feedback.
-3. Freeze the approved MVP UI scope before rs_gui_v2 widget implementation.
+3. Freeze the approved MVP UI scope before rs_gui widget implementation.
 
 Initial wireframe draft status:
 
-- Expanded [RS_GUI_V2_WIREFRAME_PLAN.md](RS_GUI_V2_WIREFRAME_PLAN.md) with
+- Expanded [RS_GUI_WIREFRAME_PLAN.md](RS_GUI_WIREFRAME_PLAN.md) with
   low-fidelity Markdown sketches for App Shell, Record, Replay, Convert,
   Topics, Plots, and Workspace/Settings.
 - Added app-core API annotations for each view so the future UI shell can stay
@@ -544,7 +545,7 @@ Acceptance gates:
 - Process termination is enabled only after graceful shutdown failure and only
   for owned or verified-local process candidates.
 - Service control foundation remains DDS-free, GUI-free, and independent of
-  rs_gui_v1.
+  legacy GUI implementation modules.
 - Candidate composition preserves the owned-process flag from GUI launches while
   enriching the selected candidate with monitoring metrics and discovery
   participant identity.
@@ -584,7 +585,7 @@ DDS notes:
 
 Suggested PRs:
 
-1. Add rs_gui_v2 shell and scheduler.
+1. Add rs_gui shell and scheduler.
 2. Add Record tab backed by mocked app-state snapshots.
 3. Wire Record tab to the real service facade.
 
@@ -602,7 +603,7 @@ Initial implementation status:
 - Added `--mock-gui-check` and optional `--gui` entry-point modes for the first
   shell bridge.
 - Added headless GUI shell tests and expanded import-boundary tests so GUI
-  modules cannot import DDS, tkinter, or rs_gui_v1 implementation modules.
+  modules cannot import DDS, tkinter, or legacy GUI implementation modules.
 - Added `RecordTabController` to compose local process-manager candidates,
   Service Admin readiness/actions, monitoring snapshots, selected candidate
   state, tag state, shutdown fallback state, and command history into the
@@ -926,7 +927,7 @@ Initial implementation status:
   built-in in-memory DynamicData telemetry fixture, bounded reader
   history/resource limits, runtime sample/drop counter capture, bounded
   cache/plot assertions, RSS-growth guardrails, and JSON reporting under
-  `services/rs_gui_v2/live_reports/`.
+  `services/rs_gui/live_reports/`.
 - Hardened the RTI DynamicData subscription adapter for live soak use with
   optional bounded DataReader QoS, selector take limits, and Connext 7.6 Rank
   metadata normalization.
@@ -934,7 +935,7 @@ Initial implementation status:
   that launches through `ServiceProcessManager`, assigns fresh `-appName`
   values, checks Service Admin endpoint readiness, attempts remote shutdown,
   falls back to guarded local termination/kill when shutdown does not reply,
-  and writes JSON reports under `services/rs_gui_v2/live_reports/`.
+  and writes JSON reports under `services/rs_gui/live_reports/`.
 - Fixed live Service Admin command targeting so `application_name` remains the
   launched `-appName` while `resource_identifier` uses the XML service resource
   path, for example `/recording_services/deploy`. Strict
@@ -987,7 +988,7 @@ Sprint 3:
 Sprint 4:
 
 - Milestone F and Milestone G.
-- Outcome: rs_gui_v2 Record tab vertical slice plus topic browsing and sample
+- Outcome: rs_gui Record tab vertical slice plus topic browsing and sample
   inspection.
 
 Sprint 5:
@@ -1014,5 +1015,5 @@ existing tkinter path:
 
 That gives us a small, reversible foundation. The next PR can add v2-owned
 Recording Service admin models, fake adapters, and a `ServiceAdminFacade` shape,
-then validate behavior against live service fixtures without importing rs_gui_v1
+then validate behavior against live service fixtures without importing legacy GUI
 implementation modules.

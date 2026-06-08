@@ -1,4 +1,4 @@
-"""DDS-free topic data session coordination for rs_gui_v2."""
+"""DDS-free topic data session coordination for rs_gui."""
 
 from collections import defaultdict
 from dataclasses import dataclass, field

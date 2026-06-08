@@ -1,4 +1,4 @@
-"""DDS-free workspace persistence for rs_gui_v2 declarative state."""
+"""DDS-free workspace persistence for rs_gui declarative state."""
 
 from dataclasses import dataclass, field
 import json
@@ -144,7 +144,7 @@ class WorkspacePlotDefinition:
 
 @dataclass(frozen=True)
 class WorkspaceDocument:
-    """Versioned, DDS-free workspace document for rs_gui_v2."""
+    """Versioned, DDS-free workspace document for rs_gui."""
 
     name: str = ""
     domains: Tuple[int, ...] = field(default_factory=tuple)

@@ -136,7 +136,7 @@ cd services
 - ✅ Application topics: `Button`, `Command`, `Position`
 - ❌ RTI internal topics: `rti/*`
 
-**Configuration File**: `replay_service_config.xml` (uses `xcdr` configuration)
+**Configuration File**: `dds/qos/replay_service_config.xml` (uses `xcdr` configuration)
 
 **Running**:
 ```bash
@@ -144,7 +144,7 @@ cd services
 ./start_replay.sh
 ```
 
-**Playback Options**: Edit `replay_service_config.xml` to configure:
+**Playback Options**: Edit `dds/qos/replay_service_config.xml` to configure:
 - Playback rate (speed multiplier)
 - Looping behavior
 - Time range selection
@@ -164,7 +164,7 @@ cd services
 
 **Prerequisites**: First convert your recorded data to JSON (see [convert to JSON](#i-want-to-convert-my-recorded-data-to-json-for-post-processing))
 
-**Configuration File**: `replay_service_config.xml` (uses `json` configuration)
+**Configuration File**: `dds/qos/replay_service_config.xml` (uses `json` configuration)
 
 **Running**:
 ```bash
@@ -184,11 +184,11 @@ cd services
 
 **Running**:
 ```bash
-cd services/rs_gui_v1
+cd services/rs_gui
 ./run_gui.sh
 ```
 
-See [rs_gui_v1/README.md](rs_gui_v1/README.md) for prerequisites, setup, and usage details.
+See [rs_gui/README.md](rs_gui/README.md) for prerequisites, setup, and usage details.
 
 ---
 
@@ -209,7 +209,7 @@ python3 test/test_e2e_services.py -v
 See [test/README.md](test/README.md) for details on the test pipeline.
 
 GUI-specific tests (unit, widget, integration, E2E tags) live in
-[rs_gui_v1/test/](rs_gui_v1/test/README.md).
+[rs_gui/test/](rs_gui/test/README.md).
 
 ---
 
@@ -220,7 +220,7 @@ GUI-specific tests (unit, widget, integration, E2E tags) live in
 | `recording_service_config.xml` | Main recording configuration - selective topic recording |
 | `recording_service_config_external_types.xml` | Recording with external XML type definitions |
 | `converter_service_config.xml` | Conversion configurations (XCDR to JSON/CSV) |
-| `replay_service_config.xml` | Replay configurations (XCDR and JSON) |
+| `dds/qos/replay_service_config.xml` | Replay configurations (XCDR and JSON) |
 
 ## Scripts
 
@@ -253,13 +253,12 @@ services/
 ├── recording_service_config.xml
 ├── recording_service_config_external_types.xml
 ├── converter_service_config.xml
-├── replay_service_config.xml
+├── ../dds/qos/replay_service_config.xml
 ├── start_record.sh
 ├── start_record_external_types.sh
 ├── start_convert.sh
 ├── start_replay.sh
-├── rs_gui_v1/                  # Current tkinter GUI, CLI, monitoring, and tests
-└── rs_gui_v2/                  # v2 architecture, implementation, and wireframe plans
+└── rs_gui/                      # tkinter GUI, monitoring, and tests
 ```
 
 ## Resources

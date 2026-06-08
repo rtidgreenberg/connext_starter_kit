@@ -1,4 +1,4 @@
-"""RTI infrastructure service monitoring adapter for rs_gui_v2.
+"""RTI infrastructure service monitoring adapter for rs_gui.
 
 This module owns the Connext DDS readers for service monitoring topics. The
 DDS-free protocol and facade remain in `monitoring.py`.
@@ -289,7 +289,7 @@ class RtiServiceMonitoringClient:
         if not os.path.isfile(service_monitoring_xml):
             raise FileNotFoundError(
                 f"Required monitoring XML not found: {service_monitoring_xml}. "
-                "Run services/rs_gui_v2/setup.sh."
+                "Run services/rs_gui/setup.sh."
             )
         if not os.path.isfile(self.config.qos_file):
             raise FileNotFoundError(f"Required QoS XML not found: {self.config.qos_file}")

@@ -1,4 +1,4 @@
-"""Service-facing models and facades owned by rs_gui_v2."""
+"""Service-facing models and facades owned by rs_gui."""
 
 from .admin import ServiceAdminClient, ServiceAdminFacade
 from .candidates import (

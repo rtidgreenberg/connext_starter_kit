@@ -423,7 +423,7 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
         await session.next_view_async(process_commands=False)
         session.command_sink(build_replay_launch_command(ReplayLaunchViewModel(
             label="Manual Replay",
-            config_paths=("services/replay_service_config.xml",),
+            config_paths=("dds/qos/replay_service_config.xml",),
             config_name="xcdr",
             data_domain_id=63,
             admin_domain_id=61,
@@ -502,6 +502,17 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([request.command for request in admin_client.requests], [ServiceCommand.SHUTDOWN])
 
+    async def test_close_request_shutdown_without_item_ids_targets_gui_launched_recording(self):
+        session, admin_client, _launch = build_session()
+        await session.next_view_async(process_commands=False)
+
+        output = StringIO()
+        with redirect_stdout(output):
+            await session.handle_close_request_async("shutdown_gui_launched", ())
+
+        self.assertEqual([request.command for request in admin_client.requests], [ServiceCommand.SHUTDOWN])
+        self.assertIn("[INFO] SHUTDOWN_TARGETS: record:launch-main", output.getvalue())
+
     async def test_close_request_terminates_selected_gui_launched_replay(self):
         replay_database_dir = make_replay_database_dir(self)
         handle = FakeHandle(7007)
@@ -519,7 +530,7 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
         )
         launch = replay_controller.launch_replay({
             "label": "Manual Replay",
-            "config_paths": ["services/replay_service_config.xml"],
+            "config_paths": ["dds/qos/replay_service_config.xml"],
             "config_name": "xcdr",
             "database_path": replay_database_dir,
             "executable": "/opt/rti/bin/rtireplayservice",
@@ -809,7 +820,7 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failure.payload["result"]["status"], "failed")
 
     async def test_process_exit_refresh_reports_console_event_with_log_tail(self):
-        output_dir = os.path.join("test_output", "rs_gui_v2", "gui_session_tests")
+        output_dir = os.path.join("test_output", "rs_gui", "gui_session_tests")
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, "recording_exit.log")
         with open(output_path, "w", encoding="utf-8") as output_file:

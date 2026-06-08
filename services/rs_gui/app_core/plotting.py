@@ -1,4 +1,4 @@
-"""DDS-free plotting buffers and decimation for rs_gui_v2."""
+"""DDS-free plotting buffers and decimation for rs_gui."""
 
 from collections import deque
 from dataclasses import dataclass, field

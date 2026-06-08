@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pure unit tests for rs_gui_v2 headless data session coordination."""
+"""Pure unit tests for rs_gui headless data session coordination."""
 
 import os
 import sys

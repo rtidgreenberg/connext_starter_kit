@@ -1,4 +1,4 @@
-"""DDS-free topic subscription models and bounded sample cache for rs_gui_v2."""
+"""DDS-free topic subscription models and bounded sample cache for rs_gui."""
 
 from collections import defaultdict, deque
 from dataclasses import dataclass, field, replace

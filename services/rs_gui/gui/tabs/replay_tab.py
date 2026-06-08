@@ -1,4 +1,4 @@
-"""Replay tab view models and command factories for rs_gui_v2."""
+"""Replay tab view models and command factories for rs_gui."""
 
 from dataclasses import dataclass, field, replace
 import shlex
@@ -42,15 +42,15 @@ class ReplayLaunchViewModel:
 
     label: str = "Replay Service"
     config_paths: Tuple[str, ...] = (
-        "services/replay_service_config.xml",
+        "dds/qos/replay_service_config.xml",
         "dds/qos/DDS_QOS_PROFILES.xml",
     )
-    available_config_names: Tuple[str, ...] = ("xcdr", "json")
-    config_name: str = "xcdr"
+    available_config_names: Tuple[str, ...] = ("template", "xcdr", "json")
+    config_name: str = "template"
     data_domain_id: int = 0
     admin_domain_id: int = 0
     monitoring_domain_id: int = 0
-    database_path: str = "log_dir/xcdr"
+    database_path: str = "services/rs_gui/log_data/xcdr"
     storage_format: str = "XCDR"
     playback_rate: float = 1.0
     loop: bool = False
@@ -59,7 +59,7 @@ class ReplayLaunchViewModel:
     topic_deny: str = "rti/*"
     qos_file_path: str = ""
     participant_qos_profile: str = ""
-    writer_qos_profile: str = ""
+    writer_qos_profile: str = "DataPatternsLibrary::replay_writer_transient_local"
     verbosity: str = "ERROR:ERROR"
     executable: str = ""
     working_dir: str = ""
@@ -111,13 +111,14 @@ class ReplayTabViewModel:
 
     selected_target_id: str = ""
     database_path: str = ""
+    readiness: str = "not checked"
     observed_state: str = "no service"
     playback_rate: float = 1.0
     loop: bool = False
     time_window: str = ""
     qos_file_path: str = ""
     participant_qos_profile: str = ""
-    writer_qos_profile: str = ""
+    writer_qos_profile: str = "DataPatternsLibrary::replay_writer_transient_local"
     launch: ReplayLaunchViewModel = field(default_factory=ReplayLaunchViewModel)
     targets: Tuple[ReplayTargetRow, ...] = field(default_factory=tuple)
     timeline: Tuple[ReplayTimelineRow, ...] = field(default_factory=tuple)
@@ -154,13 +155,14 @@ def build_replay_tab_view_model(
         targets: Iterable[ReplayTargetRow] = (),
         selected_target_id: str = "",
         database_path: str = "",
+    readiness: str = "not checked",
         observed_state: str = "no service",
         playback_rate: float = 1.0,
         loop: bool = False,
         time_window: str = "",
     qos_file_path: str = "",
     participant_qos_profile: str = "",
-    writer_qos_profile: str = "",
+    writer_qos_profile: str = "DataPatternsLibrary::replay_writer_transient_local",
         launch: ReplayLaunchViewModel = None,
         timeline: Iterable[ReplayTimelineRow] = (),
         diagnostics: Iterable[str] = (),
@@ -183,6 +185,7 @@ def build_replay_tab_view_model(
     return ReplayTabViewModel(
         selected_target_id=selected_target_id,
         database_path=str(database_path),
+        readiness=str(readiness),
         observed_state=str(observed_state),
         playback_rate=playback_rate,
         loop=loop,
@@ -234,25 +237,26 @@ def build_mock_replay_tab_view_model() -> ReplayTabViewModel:
         targets=targets,
         selected_target_id="launch-replay-main",
         database_path="services/replay_input/robot_run_03",
+        readiness="request+reply matched",
         observed_state="STOPPED",
         playback_rate=1.0,
         loop=False,
         time_window="00:00:10 - 00:02:30",
         qos_file_path="dds/qos/DDS_QOS_PROFILES.xml",
         participant_qos_profile="DPLibrary::DefaultParticipant",
-        writer_qos_profile="BuiltinQosLib::Generic.Common",
+        writer_qos_profile="DataPatternsLibrary::replay_writer_transient_local",
         launch=ReplayLaunchViewModel(
             label="Replay Service",
-            config_paths=("services/replay_service_config.xml",),
-            available_config_names=("xcdr", "json"),
-            config_name="xcdr",
+            config_paths=("dds/qos/replay_service_config.xml",),
+            available_config_names=("template", "xcdr", "json"),
+            config_name="template",
             database_path="services/replay_input/robot_run_03",
             playback_rate=1.0,
             loop=False,
             time_window="00:00:10 - 00:02:30",
             qos_file_path="dds/qos/DDS_QOS_PROFILES.xml",
             participant_qos_profile="DPLibrary::DefaultParticipant",
-            writer_qos_profile="BuiltinQosLib::Generic.Common",
+            writer_qos_profile="DataPatternsLibrary::replay_writer_transient_local",
         ),
         timeline=(
             ReplayTimelineRow("Robot run", "00:00:10", "00:02:30"),
@@ -298,6 +302,7 @@ def build_replay_action_command(
 def build_replay_launch_command(launch: ReplayLaunchViewModel) -> AppCommand:
     """Translate Replay launch settings into an app-core launch command."""
 
+    service_verbosity, api_verbosity = _split_verbosity(launch.verbosity)
     payload: Dict[str, Any] = {
         "label": launch.label,
         "config_paths": list(launch.config_paths),
@@ -315,6 +320,8 @@ def build_replay_launch_command(launch: ReplayLaunchViewModel) -> AppCommand:
         "qos_file_path": launch.qos_file_path,
         "participant_qos_profile": launch.participant_qos_profile,
         "writer_qos_profile": launch.writer_qos_profile,
+        "service_verbosity": service_verbosity,
+        "api_verbosity": api_verbosity,
         "verbosity": launch.verbosity,
         "executable": launch.executable,
         "working_dir": launch.working_dir,
@@ -323,6 +330,38 @@ def build_replay_launch_command(launch: ReplayLaunchViewModel) -> AppCommand:
     return AppCommand(
         command_type="service.launch_replay",
         target="replay",
+        payload=payload,
+    )
+
+
+def build_replay_next_tag_command(
+        replay: ReplayTabViewModel,
+        tag_name: str,
+) -> AppCommand:
+    """Translate Next Tag intent into an app-core command.
+
+    This uses Replay Service remote administration to jump to a named tag.
+    """
+
+    target = replay.selected_target
+    clean_tag = str(tag_name or "").strip()
+    if not clean_tag:
+        raise ValueError("tag_name is required for replay.next_tag")
+    payload: Dict[str, Any] = {
+        "target_id": target.target_id if target is not None else "",
+        "control_name": target.control_name if target is not None else "",
+        "database_path": replay.database_path,
+        "playback_rate": replay.playback_rate,
+        "loop": replay.loop,
+        "time_window": replay.time_window,
+        "qos_file_path": replay.qos_file_path,
+        "participant_qos_profile": replay.participant_qos_profile,
+        "writer_qos_profile": replay.writer_qos_profile,
+        "tag_name": clean_tag,
+    }
+    return AppCommand(
+        command_type="replay.next_tag",
+        target=payload["control_name"],
         payload=payload,
     )
 
@@ -431,3 +470,14 @@ def _launch_command_preview(launch: ReplayLaunchViewModel) -> str:
     ])
     command.extend(launch.extra_args)
     return " ".join(env_parts) + "\n" + " ".join(shlex.quote(str(part)) for part in command)
+
+
+def _split_verbosity(value: str) -> Tuple[str, str]:
+    raw = str(value or "").strip().upper()
+    if not raw:
+        return ("ERROR", "ERROR")
+    parts = raw.split(":", 1)
+    service = parts[0].strip() or "ERROR"
+    api = parts[1].strip() if len(parts) > 1 else service
+    api = api or service
+    return (service, api)

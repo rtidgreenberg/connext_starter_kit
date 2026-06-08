@@ -1,4 +1,4 @@
-"""Shared Tk color palette for rs_gui_v2."""
+"""Shared Tk color palette for rs_gui."""
 
 DARK_THEME = {
     "bg": "#16181d",

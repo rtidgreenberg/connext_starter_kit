@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fake-Connext tests for the rs_gui_v2 RTI type registry adapter."""
+"""Fake-Connext tests for the rs_gui RTI type registry adapter."""
 
 import os
 import shutil

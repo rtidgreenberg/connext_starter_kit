@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import-boundary tests for the rs_gui_v2 headless app core."""
+"""Import-boundary tests for the rs_gui headless app core."""
 
 import ast
 import os
@@ -23,7 +23,6 @@ class TestImportBoundaries(unittest.TestCase):
             "recording_service_control",
             "recording_service_environment",
             "recording_service_monitor",
-            "rs_gui_v1",
             "tkinter",
         }
         violations = []
@@ -43,7 +42,7 @@ class TestImportBoundaries(unittest.TestCase):
                         imported_modules = [node.module]
                     for module_name in imported_modules:
                         root_name = module_name.split(".")[0]
-                        if root_name in banned_roots or "rs_gui_v1" in module_name:
+                        if root_name in banned_roots:
                             relative_path = os.path.relpath(path, PARENT_DIR)
                             violations.append(f"{relative_path}: {module_name}")
 
@@ -79,7 +78,6 @@ class TestImportBoundaries(unittest.TestCase):
             "recording_service_control",
             "recording_service_environment",
             "recording_service_monitor",
-            "rs_gui_v1",
             "rti",
             "tkinter",
         }
@@ -100,7 +98,7 @@ class TestImportBoundaries(unittest.TestCase):
                         imported_modules = [node.module]
                     for module_name in imported_modules:
                         root_name = module_name.split(".")[0]
-                        if root_name in banned_roots or "rs_gui_v1" in module_name:
+                        if root_name in banned_roots:
                             relative_path = os.path.relpath(path, PARENT_DIR)
                             violations.append(f"{relative_path}: {module_name}")
 

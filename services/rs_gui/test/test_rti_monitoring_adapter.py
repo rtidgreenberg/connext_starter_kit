@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for the rs_gui_v2 RTI service monitoring adapter."""
+"""Unit tests for the rs_gui RTI service monitoring adapter."""
 
 import os
 from types import SimpleNamespace
@@ -162,10 +162,10 @@ class TestMonitoringSampleNormalization(unittest.TestCase):
         self.assertEqual(snapshot.details["admin_resource_name"], "deploy")
 
     def test_replay_config_service_sample_normalizes_details(self):
-        service = ServiceInstanceRef(ServiceKind.REPLAY, "rs_gui_v2_replay_1234", monitoring_domain_id=54)
+        service = ServiceInstanceRef(ServiceKind.REPLAY, "rs_gui_replay_1234", monitoring_domain_id=54)
         branch = SimpleNamespace(
             resource_id="/replay_services/xcdr",
-            application_name="rs_gui_v2_replay_1234",
+            application_name="rs_gui_replay_1234",
             application_guid=SimpleNamespace(value=[15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]),
             process=SimpleNamespace(id=7007),
             host=SimpleNamespace(name="dev-host", id=7, target="x64Linux4gcc8.5.0"),
@@ -180,7 +180,7 @@ class TestMonitoringSampleNormalization(unittest.TestCase):
         self.assertEqual(snapshot.service.kind, ServiceKind.REPLAY)
         self.assertEqual(snapshot.kind, MonitoringSnapshotKind.CONFIG)
         self.assertEqual(snapshot.state, "configured")
-        self.assertEqual(snapshot.details["service_name"], "rs_gui_v2_replay_1234")
+        self.assertEqual(snapshot.details["service_name"], "rs_gui_replay_1234")
         self.assertEqual(snapshot.details["admin_resource_name"], "xcdr")
         self.assertEqual(snapshot.details["resource_id"], "/replay_services/xcdr")
         self.assertEqual(snapshot.details["process_id"], 7007)
@@ -198,7 +198,7 @@ class TestMonitoringSampleNormalization(unittest.TestCase):
         self.assertEqual(snapshot.details["resource_id"], "/recording_services/deploy/sessions/Default/topics/Position")
 
     def test_replay_config_topic_sample_normalizes_topic_name(self):
-        service = ServiceInstanceRef(ServiceKind.REPLAY, "rs_gui_v2_replay_1234", monitoring_domain_id=54)
+        service = ServiceInstanceRef(ServiceKind.REPLAY, "rs_gui_replay_1234", monitoring_domain_id=54)
         branch = SimpleNamespace(
             resource_id="/replay_services/xcdr/sessions/DefaultSession/topics/DefaultTopicGroup@Square",
             topic_name="Square",
@@ -236,7 +236,7 @@ class TestMonitoringSampleNormalization(unittest.TestCase):
         self.assertEqual(snapshot.details["current_file"], "/tmp/recordings/run_1/data_0.db")
 
     def test_replay_event_sample_normalizes_state(self):
-        service = ServiceInstanceRef(ServiceKind.REPLAY, "rs_gui_v2_replay_1234", monitoring_domain_id=54)
+        service = ServiceInstanceRef(ServiceKind.REPLAY, "rs_gui_replay_1234", monitoring_domain_id=54)
         branch = SimpleNamespace(
             state=SimpleNamespace(value=3, name="STARTED"),
             builtin_sqlite=SimpleNamespace(
@@ -300,7 +300,7 @@ class TestMonitoringSampleNormalization(unittest.TestCase):
         self.assertEqual(snapshot.details["db_file"], "data_0.dat")
 
     def test_replay_periodic_sample_normalizes_metrics(self):
-        service = ServiceInstanceRef(ServiceKind.REPLAY, "rs_gui_v2_replay_1234", monitoring_domain_id=54)
+        service = ServiceInstanceRef(ServiceKind.REPLAY, "rs_gui_replay_1234", monitoring_domain_id=54)
         branch = SimpleNamespace(
             process=SimpleNamespace(
                 uptime_sec=2,

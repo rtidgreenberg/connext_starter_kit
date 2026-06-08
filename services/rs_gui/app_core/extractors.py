@@ -1,4 +1,4 @@
-"""DDS-free field-path parsing and sample value extraction for rs_gui_v2."""
+"""DDS-free field-path parsing and sample value extraction for rs_gui."""
 
 from dataclasses import dataclass, field
 from enum import Enum

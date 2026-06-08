@@ -1,4 +1,4 @@
-"""GUI workspace projection and command handling for rs_gui_v2."""
+"""GUI workspace projection and command handling for rs_gui."""
 
 import time
 from dataclasses import dataclass

@@ -1,4 +1,4 @@
-"""Tk refresh-loop helpers for the rs_gui_v2 migration shell."""
+"""Tk refresh-loop helpers for the rs_gui migration shell."""
 
 from __future__ import annotations
 
@@ -50,6 +50,17 @@ class TkRefreshBridge:
 
     def _tick(self) -> None:
         self._after_id = None
-        self.refresh_once()
+        try:
+            self.refresh_once()
+        except KeyboardInterrupt:
+            # Ctrl+C during shutdown can interrupt asyncio.run() inside the view
+            # provider; stop the Tk refresh loop without surfacing a callback
+            # traceback.
+            self._running = False
+            try:
+                self._root.quit()
+            except Exception:
+                pass
+            return
         if self._running:
             self._schedule_next()

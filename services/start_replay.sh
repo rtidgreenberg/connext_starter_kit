@@ -20,14 +20,13 @@ fi
 
 
 # Replay Service configuration file
-xml="./replay_service_config.xml"
-
-config="xcdr"
-
 # QoS XML file — centralized profiles (available if replay config references them)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+xml="$REPO_ROOT/dds/qos/replay_service_config.xml"
 qos_file="$REPO_ROOT/dds/qos/DDS_QOS_PROFILES.xml"
+
+config="template"
 
 ################################################################################
 #                                 VERBOSITY                                    #

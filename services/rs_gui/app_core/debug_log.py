@@ -1,68 +1,89 @@
-"""Lightweight debug logger for rs_gui_v2.
+"""Lightweight structured debug logger for rs_gui.
 
-Writes timestamped debug lines to a rotating log file. Debug logging is enabled
-by default so launch/debug issues always leave a local trace. Disable it by
-setting the environment variable RS_GUI_DEBUG=0.
-
-Usage:
-    from app_core.debug_log import dbg
-
-    dbg("frame_callback", "view_provider returned", candidates=3)
+Writes debug entries as JSONL events under ``services/rs_gui/rs_gui_logs``.
+When the app runtime has already created an event log, debug output is appended
+to that same file with ``event_type=debug.log`` and the callsite tag recorded
+as the event source.
 """
 
+import json
 import os
 import sys
+import threading
 import time
 import traceback
+import uuid
 from pathlib import Path
+
+from .events import AppEvent
 
 _DEBUG_ENV = os.environ.get("RS_GUI_DEBUG", "").strip().lower()
 _ENABLED = _DEBUG_ENV not in ("0", "false", "no", "off")
+_EVENT_LOG_ENV = "RS_GUI_EVENT_LOG_PATH"
 
 _LOG_DIR = Path(os.environ.get(
     "RS_GUI_LOG_DIR",
-    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "debug_logs"),
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "rs_gui_logs"),
 ))
-_LOG_FILE = None
+_LOG_PATH = None
+_LOG_LOCK = threading.Lock()
 _START_TIME = time.monotonic()
 
 
-def _get_log_file():
-    global _LOG_FILE
-    if _LOG_FILE is not None:
-        return _LOG_FILE
+def _get_log_path() -> str:
+    global _LOG_PATH
+    runtime_log_path = os.environ.get(_EVENT_LOG_ENV, "").strip()
+    if runtime_log_path:
+        return runtime_log_path
+    if _LOG_PATH is not None:
+        return _LOG_PATH
     _LOG_DIR.mkdir(parents=True, exist_ok=True)
-    log_path = _LOG_DIR / f"rs_gui_debug_{os.getpid()}.log"
-    _LOG_FILE = open(log_path, "a", buffering=1)  # line-buffered
-    _LOG_FILE.write(f"\n{'='*72}\n")
-    _LOG_FILE.write(f"  rs_gui_v2 DEBUG session started at {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-    _LOG_FILE.write(f"  PID={os.getpid()}  Python={sys.version.split()[0]}\n")
-    _LOG_FILE.write(f"{'='*72}\n\n")
-    _LOG_FILE.flush()
-    return _LOG_FILE
+    _LOG_PATH = str(_LOG_DIR / f"rs_gui_{time.strftime('%Y%m%d_%H%M%S')}_{os.getpid()}.jsonl")
+    return _LOG_PATH
+
+
+def _write_event(event: AppEvent) -> None:
+    log_path = _get_log_path()
+    directory = os.path.dirname(log_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    with _LOG_LOCK:
+        with open(log_path, "a", encoding="utf-8") as log_file:
+            log_file.write(json.dumps(event.to_dict(), default=str, sort_keys=True) + "\n")
+
+
+def _debug_event(tag: str, message: str, payload=None) -> AppEvent:
+    details = dict(payload or {})
+    details.update({
+        "level": "debug",
+        "message": str(message),
+        "elapsed_sec": round(time.monotonic() - _START_TIME, 6),
+        "pid": os.getpid(),
+        "python": sys.version.split()[0],
+    })
+    return AppEvent(
+        event_type="debug.log",
+        source=str(tag),
+        payload=details,
+        event_id=str(uuid.uuid4()),
+        created_at=time.time(),
+    )
 
 
 def dbg(tag: str, message: str, **kwargs) -> None:
-    """Write a debug line to the log file (no-op if debug logging is disabled)."""
+    """Write a structured debug event (no-op if debug logging is disabled)."""
     if not _ENABLED:
         return
-    elapsed = time.monotonic() - _START_TIME
-    f = _get_log_file()
-    extra = ""
-    if kwargs:
-        extra = "  " + "  ".join(f"{k}={v!r}" for k, v in kwargs.items())
-    f.write(f"[{elapsed:9.3f}] [{tag}] {message}{extra}\n")
+    _write_event(_debug_event(tag, message, kwargs))
 
 
 def dbg_exc(tag: str, message: str) -> None:
-    """Write a debug line with the current exception traceback."""
+    """Write a structured debug event with the current exception traceback."""
     if not _ENABLED:
         return
-    elapsed = time.monotonic() - _START_TIME
-    f = _get_log_file()
-    f.write(f"[{elapsed:9.3f}] [{tag}] {message}\n")
-    traceback.print_exc(file=f)
-    f.write("\n")
+    _write_event(_debug_event(tag, message, {
+        "exception": traceback.format_exc(),
+    }))
 
 
 def is_debug() -> bool:
@@ -71,7 +92,7 @@ def is_debug() -> bool:
 
 
 def log_path() -> str:
-    """Return the path to the current debug log file (creates it if needed)."""
+    """Return the path to the active rs_gui event log file."""
     if not _ENABLED:
         return "(debug logging disabled - set RS_GUI_DEBUG=0 only when needed)"
-    return str(_get_log_file().name)
+    return _get_log_path()

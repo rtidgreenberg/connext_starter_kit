@@ -1,4 +1,4 @@
-"""RTI Connext built-in topic discovery adapter for rs_gui_v2.
+"""RTI Connext built-in topic discovery adapter for rs_gui.
 
 This module owns the Connext DDS built-in publication and subscription readers.
 The DDS-free discovery catalog and selection models remain in `discovery.py`.

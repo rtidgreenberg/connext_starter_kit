@@ -1,15 +1,15 @@
 # RS GUI v2 RTI Services App Architecture
 
 Companion planning documents:
-[RS_GUI_V2_IMPLEMENTATION_PLAN.md](RS_GUI_V2_IMPLEMENTATION_PLAN.md) breaks this
+[RS_GUI_IMPLEMENTATION_PLAN.md](RS_GUI_IMPLEMENTATION_PLAN.md) breaks this
 architecture into phased milestones, PR-sized tasks, and validation gates.
-[RS_GUI_V2_WIREFRAME_PLAN.md](RS_GUI_V2_WIREFRAME_PLAN.md) defines the mock
-wireframes and approval gate required before rs_gui_v2 UI implementation.
+[RS_GUI_WIREFRAME_PLAN.md](RS_GUI_WIREFRAME_PLAN.md) defines the mock
+wireframes and approval gate required before rs_gui UI implementation.
 
 ## Purpose
 
 This document sketches the next architecture step for the Recording Service GUI
-work: rs_gui_v2, a desktop application for operating RTI infrastructure
+work: rs_gui, a desktop application for operating RTI infrastructure
 services and inspecting DDS data.
 
 The current tkinter GUI remains the compact DDS reference implementation. This
@@ -23,7 +23,7 @@ document is the target architecture for a broader operator tool that supports:
 - Numeric field plotting
 - Persisted workspaces across restarts
 
-rs_gui_v2 is also intended to be a reference example for Connext end users. That
+rs_gui is also intended to be a reference example for Connext end users. That
 means the architecture should favor clear, inspectable API usage over clever
 framework code. Each major capability should have an obvious owner, a small
 public interface, and an adapter module where the relevant Connext API calls are
@@ -45,7 +45,7 @@ easy to find.
 
 ## Design Principle
 
-rs_gui_v2 should keep the view layer separate from the DDS layer.
+rs_gui should keep the view layer separate from the DDS layer.
 
 DDS entities, service requesters, monitoring readers, topic subscriptions, type
 registries, and persistence should live in an application core that has no UI
@@ -66,7 +66,7 @@ whose purpose is visible from the filename and tests.
 ## Target Shape
 
 ```text
-services/rs_gui_v2/
+services/rs_gui/
 +-- setup.sh                  # Generate v2-owned XML DynamicData type files
 +-- app_core/
 |   +-- runtime.py              # DDS-free lifecycle, queues, task ownership
@@ -114,12 +114,12 @@ services/rs_gui_v2/
   +-- test_discovery_catalog.py
   +-- test_field_extractors.py
   +-- test_plotting_buffers.py
-  +-- test_e2e_rs_gui_v2_services.py
+  +-- test_e2e_rs_gui_services.py
 ```
 
 The package names above are a target direction. The first implementation can
-reuse protocol lessons from the current Recording Service GUI, but rs_gui_v2
-must not depend on rs_gui_v1 implementation modules. If a helper becomes useful
+reuse protocol lessons from the current Recording Service GUI, but rs_gui
+must not depend on legacy GUI implementation modules. If a helper becomes useful
 to both applications, extract it into a neutral shared package with its own tests
 instead of coupling one GUI version to the other.
 
@@ -147,8 +147,8 @@ Rules for new modules:
 - UI modules should consume immutable state snapshots and enqueue commands. They
   should not create participants, topics, readers, requesters, or DynamicData
   objects.
-- Shared helpers must be neutral. If code is useful to both rs_gui_v1 and
-  rs_gui_v2, move it into a separate shared package with tests rather than
+- Shared helpers must be neutral. If code is useful to both the legacy GUI and
+  rs_gui, move it into a separate shared package with tests rather than
   importing one GUI version from the other.
 
 ## Connext API Usage Map
@@ -632,7 +632,7 @@ Rules:
 
 ### Phase 3: RS GUI v2 Shell
 
-- Create a minimal rs_gui_v2 app with Record, Replay, Convert, Topics, and
+- Create a minimal rs_gui app with Record, Replay, Convert, Topics, and
   Plots tabs.
 - Wire it to mocked app-core snapshots before DDS integration.
 - Add a single real Recording Service status panel through the service facade.
@@ -652,12 +652,12 @@ Rules:
 
 ## Testing Strategy
 
-- Keep current rs_gui_v1 controller and monitor tests as an external regression
-  baseline, not as dependencies of rs_gui_v2.
+- Keep legacy controller and monitor tests as an external regression
+  baseline, not as dependencies of rs_gui.
 - Add pure unit tests for workspace schema, reducers, field paths, extractors,
   buffers, and topic filtering.
 - Add import-boundary tests proving pure layers do not import `rti.*`, GUI
-  libraries, or rs_gui_v1 implementation modules.
+  libraries, or legacy GUI implementation modules.
 - Add focused adapter tests that are allowed to import `rti.*` and demonstrate
   one Connext API area at a time.
 - Add GUI tests around app-state snapshots rather than live DDS where possible.
@@ -677,7 +677,7 @@ Rules:
 
 ## Recommendation
 
-The best path forward is to create rs_gui_v2 as a new shell over a
+The best path forward is to create rs_gui as a new shell over a
 service-oriented DDS app core. Start with v2-owned interfaces, state models, and
 fakes; then add narrow Connext adapters that make RTI API usage clear and
 testable. After Service Admin and monitoring are proven, add discovery,

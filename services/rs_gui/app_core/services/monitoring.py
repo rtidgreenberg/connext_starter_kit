@@ -1,4 +1,4 @@
-"""DDS-free service monitoring protocols and facade for rs_gui_v2."""
+"""DDS-free service monitoring protocols and facade for rs_gui."""
 
 from typing import AsyncIterator, List, Optional, Protocol
 

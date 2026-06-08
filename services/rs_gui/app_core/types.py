@@ -1,4 +1,4 @@
-"""DDS-free type availability catalog for rs_gui_v2 discovery."""
+"""DDS-free type availability catalog for rs_gui discovery."""
 
 from dataclasses import dataclass, field
 from enum import Enum

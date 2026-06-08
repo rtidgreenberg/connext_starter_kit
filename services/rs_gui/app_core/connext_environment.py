@@ -1,11 +1,11 @@
-"""Connext environment helpers owned by rs_gui_v2."""
+"""Connext environment helpers owned by rs_gui."""
 
 import glob
 import os
 import re
 
 
-PREFERRED_CONNEXT_VERSION = "7.6.0"
+PREFERRED_CONNEXT_VERSION = "7.7.0"
 LICENSE_ENV_VAR = "RTI_LICENSE_FILE"
 GENERATED_TYPES_STAMP = ".generated_from_nddshome"
 
@@ -83,7 +83,7 @@ def validate_generated_types(xml_types_dir: str, nddshome: str = "") -> None:
         raise RuntimeError(
             "Generated XML type files were created from a different Connext "
             f"install. Expected NDDSHOME {expected_home}, stamp has "
-            f"{actual_home or '<missing>'}. Rerun services/rs_gui_v2/setup.sh."
+            f"{actual_home or '<missing>'}. Rerun services/rs_gui/setup.sh."
         )
 
     expected_version = connext_version_from_nddshome(nddshome)
@@ -92,7 +92,7 @@ def validate_generated_types(xml_types_dir: str, nddshome: str = "") -> None:
         raise RuntimeError(
             "Generated XML type files were created from Connext "
             f"{actual_version}, but active NDDSHOME is {expected_version}. "
-            "Rerun services/rs_gui_v2/setup.sh."
+            "Rerun services/rs_gui/setup.sh."
         )
 
 

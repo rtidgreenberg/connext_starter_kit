@@ -1,4 +1,4 @@
-"""Neutral service DTOs for rs_gui_v2 facades and tests."""
+"""Neutral service DTOs for rs_gui facades and tests."""
 
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -15,7 +15,7 @@ def _frozen_mapping(value: Optional[Mapping[str, Any]]) -> Mapping[str, Any]:
 
 
 class ServiceKind(str, Enum):
-    """Infrastructure service categories supported by rs_gui_v2."""
+    """Infrastructure service categories supported by rs_gui."""
 
     RECORDING = "recording"
     REPLAY = "replay"

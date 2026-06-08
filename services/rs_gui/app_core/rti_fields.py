@@ -1,4 +1,4 @@
-"""RTI Connext DynamicType field catalog adapter for rs_gui_v2."""
+"""RTI Connext DynamicType field catalog adapter for rs_gui."""
 
 from dataclasses import dataclass
 from typing import Any, List, Optional, Set, Tuple

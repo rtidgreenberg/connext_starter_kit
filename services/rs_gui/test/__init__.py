@@ -1,1 +1,1 @@
-"""Tests for rs_gui_v2."""
+"""Tests for rs_gui."""

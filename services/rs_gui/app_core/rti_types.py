@@ -1,4 +1,4 @@
-"""RTI Connext XML DynamicData type registry for rs_gui_v2.
+"""RTI Connext XML DynamicData type registry for rs_gui.
 
 This module owns Connext `QosProvider.type()` lookups. The DDS-free type catalog
 and resolution DTOs remain in `types.py`.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Headless tests for rs_gui_v2 Convert tab view models."""
+"""Headless tests for rs_gui Convert tab view models."""
 
 import os
 import sys

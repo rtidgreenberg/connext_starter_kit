@@ -5,7 +5,7 @@ This guide covers common startup issues detected by `run_gui.sh` diagnostics.
 ## Run Diagnostics Only
 
 ```bash
-cd services/rs_gui_v2
+cd services/rs_gui
 ./run_gui.sh --diagnostics-only --gui
 ```
 
@@ -29,10 +29,10 @@ Set `RTI_LICENSE_FILE` or place `rti_license.dat` in one of these locations:
 
 ### XML type files are missing or stale
 
-Regenerate rs_gui_v2-owned XML types:
+Regenerate rs_gui-owned XML types:
 
 ```bash
-cd services/rs_gui_v2
+cd services/rs_gui
 ./setup.sh
 ```
 
@@ -59,14 +59,14 @@ Checks:
 
 - Confirm the selected replay input directory is a real recording output
 - Prefer an absolute path when launching Replay from the GUI
-- If using a relative path, resolve it from `services/rs_gui_v2/`
+- If using a relative path, resolve it from `services/rs_gui/`
 
 ### Replay admin readiness times out
 
 If Replay starts but GUI close cleanup reports a timeout waiting for Service
 Admin endpoints, check these first:
 
-- `<administration>` is enabled in `services/replay_service_config.xml`
+- `<administration>` is enabled in `dds/qos/replay_service_config.xml`
 - The admin domain id used by the launch matches `REPLAY_ADMIN_DOMAIN_ID`
 - The process stayed alive long enough to create the admin endpoints
 
@@ -81,7 +81,7 @@ monitoring domain.
 
 Checks:
 
-- `<monitoring>` is enabled in `services/replay_service_config.xml`
+- `<monitoring>` is enabled in `dds/qos/replay_service_config.xml`
 - The monitoring domain id used by the launch matches `REPLAY_MON_DOMAIN_ID`
 - The replay input directory contains data for the selected session/topics
 
@@ -94,7 +94,7 @@ extend to session/topic resources, for example:
 
 ### Replay or Recording process exits unexpectedly
 
-Per-process logs are written under `services/rs_gui_v2/service_logs/`.
+Per-process logs are written under `services/rs_gui/service_logs/`.
 
 Useful checks:
 

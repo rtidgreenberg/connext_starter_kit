@@ -1,4 +1,4 @@
-"""Session and view-model helpers for rs_gui_v2."""
+"""Session and view-model helpers for rs_gui."""
 
 from .factory import (
     GuiShellAssembly,

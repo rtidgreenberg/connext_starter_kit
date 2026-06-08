@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run all rs_gui_v2 Python tests."""
+"""Run all rs_gui Python tests."""
 
 import os
 import sys

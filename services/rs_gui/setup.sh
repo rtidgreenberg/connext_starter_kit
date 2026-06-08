@@ -1,11 +1,11 @@
 #!/bin/bash
-# Generate XML DynamicData type files used by rs_gui_v2 Connext adapters.
+# Generate XML DynamicData type files used by rs_gui Connext adapters.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 XML_OUT_DIR="$SCRIPT_DIR/xml_types"
-PREFERRED_CONNEXT_VERSION="${PREFERRED_CONNEXT_VERSION:-7.6.0}"
+PREFERRED_CONNEXT_VERSION="${PREFERRED_CONNEXT_VERSION:-7.7.0}"
 INSTALL_PYTHON_DEPS=true
 
 usage() {
@@ -70,7 +70,7 @@ for idl in "${XML_IDL_FILES[@]}"; do
 done
 
 mkdir -p "$XML_OUT_DIR"
-echo "Generating rs_gui_v2 XML types in: $XML_OUT_DIR"
+echo "Generating rs_gui XML types in: $XML_OUT_DIR"
 for idl in "${XML_IDL_FILES[@]}"; do
     "$RTIDDSGEN" -convertToXML -d "$XML_OUT_DIR" -I "$IDL_DIR" "$IDL_DIR/$idl" -replace
 done
@@ -144,7 +144,7 @@ if [ "$INSTALL_PYTHON_DEPS" = true ]; then
     if [ -f "$REQUIREMENTS_FILE" ]; then
         if [ -x "$VENV_PYTHON" ]; then
             echo
-            echo "Installing rs_gui_v2 Python dependencies from: $REQUIREMENTS_FILE"
+            echo "Installing rs_gui Python dependencies from: $REQUIREMENTS_FILE"
             "$VENV_PYTHON" -m pip install -r "$REQUIREMENTS_FILE"
         else
             echo

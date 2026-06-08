@@ -3,7 +3,7 @@
 ## Purpose
 
 This document is the working implementation plan for replacing the previous
-control surface in rs_gui_v2 with a Tkinter-based desktop UI.
+control surface in rs_gui with a Tkinter-based desktop UI.
 
 It is intended to be the persistent source of truth for:
 
@@ -64,10 +64,10 @@ That makes this a UI replacement effort, not a ground-up application rewrite.
 
 ### Keep and Reuse
 
-- `services/rs_gui_v2/app_core/`
-- `services/rs_gui_v2/gui/session.py`
-- `services/rs_gui_v2/gui/tabs/record_controller.py`
-- `services/rs_gui_v2/gui/tabs/replay_controller.py`
+- `services/rs_gui/app_core/`
+- `services/rs_gui/gui/session.py`
+- `services/rs_gui/gui/tabs/record_controller.py`
+- `services/rs_gui/gui/tabs/replay_controller.py`
 - service/process DTOs, monitoring models, workspace models, command/event DTOs
 - existing unit and live behavior tests where they are not renderer-specific
 
@@ -87,7 +87,7 @@ That makes this a UI replacement effort, not a ground-up application rewrite.
 ## Proposed Target Shape
 
 ```text
-services/rs_gui_v2/
+services/rs_gui/
 +-- app_core/                      # mostly retained
 +-- gui/                           # retained session/controller layer and legacy helpers
 +-- tk_gui/
@@ -191,11 +191,11 @@ Validation:
 
 Files to add/change:
 
-- `services/rs_gui_v2/requirements.txt`
-- `services/rs_gui_v2/tk_gui/__init__.py`
-- `services/rs_gui_v2/tk_gui/app.py`
-- `services/rs_gui_v2/tk_gui/main_window.py`
-- `services/rs_gui_v2/test/test_tk_shell_smoke.py`
+- `services/rs_gui/requirements.txt`
+- `services/rs_gui/tk_gui/__init__.py`
+- `services/rs_gui/tk_gui/app.py`
+- `services/rs_gui/tk_gui/main_window.py`
+- `services/rs_gui/test/test_tk_shell_smoke.py`
 
 Allowed backend touchpoints:
 
@@ -205,7 +205,7 @@ Allowed backend touchpoints:
 
 Validation command:
 
-- `cd services/rs_gui_v2 && python test/test_tk_shell_smoke.py`
+- `cd services/rs_gui && python test/test_tk_shell_smoke.py`
 
 Out of scope:
 
@@ -244,11 +244,11 @@ Validation:
 
 Files to add/change:
 
-- `services/rs_gui_v2/tk_gui/app.py`
-- `services/rs_gui_v2/tk_gui/main_window.py`
-- `services/rs_gui_v2/tk_gui/refresh.py`
-- `services/rs_gui_v2/test/test_tk_shell_smoke.py`
-- `services/rs_gui_v2/test/test_gui_session.py`
+- `services/rs_gui/tk_gui/app.py`
+- `services/rs_gui/tk_gui/main_window.py`
+- `services/rs_gui/tk_gui/refresh.py`
+- `services/rs_gui/test/test_tk_shell_smoke.py`
+- `services/rs_gui/test/test_gui_session.py`
 
 Allowed backend touchpoints:
 
@@ -277,8 +277,8 @@ Required bridge contract:
 
 Validation command:
 
-- `cd services/rs_gui_v2 && python test/test_gui_session.py`
-- `cd services/rs_gui_v2 && python test/test_tk_shell_smoke.py`
+- `cd services/rs_gui && python test/test_gui_session.py`
+- `cd services/rs_gui && python test/test_tk_shell_smoke.py`
 
 Out of scope:
 
@@ -323,12 +323,12 @@ Validation:
 
 Files to add/change:
 
-- `services/rs_gui_v2/tk_gui/main_window.py`
-- `services/rs_gui_v2/tk_gui/tabs/record_tab.py`
-- `services/rs_gui_v2/tk_gui/widgets/service_table.py`
-- `services/rs_gui_v2/tk_gui/widgets/command_history.py`
-- `services/rs_gui_v2/tk_gui/dialogs.py`
-- `services/rs_gui_v2/test/test_tk_record_tab.py`
+- `services/rs_gui/tk_gui/main_window.py`
+- `services/rs_gui/tk_gui/tabs/record_tab.py`
+- `services/rs_gui/tk_gui/widgets/service_table.py`
+- `services/rs_gui/tk_gui/widgets/command_history.py`
+- `services/rs_gui/tk_gui/dialogs.py`
+- `services/rs_gui/test/test_tk_record_tab.py`
 
 Allowed backend touchpoints:
 
@@ -342,9 +342,9 @@ Allowed backend touchpoints:
 
 Validation command:
 
-- `cd services/rs_gui_v2 && python test/test_tk_record_tab.py`
-- `cd services/rs_gui_v2 && python test/test_record_tab_controller.py`
-- `cd services/rs_gui_v2 && python test/test_tk_record_live_integration.py`
+- `cd services/rs_gui && python test/test_tk_record_tab.py`
+- `cd services/rs_gui && python test/test_record_tab_controller.py`
+- `cd services/rs_gui && python test/test_tk_record_live_integration.py`
 
 Out of scope:
 
@@ -386,10 +386,10 @@ Validation:
 
 Files to add/change:
 
-- `services/rs_gui_v2/tk_gui/main_window.py`
-- `services/rs_gui_v2/tk_gui/tabs/replay_tab.py`
-- `services/rs_gui_v2/tk_gui/dialogs.py`
-- `services/rs_gui_v2/test/test_tk_replay_tab.py`
+- `services/rs_gui/tk_gui/main_window.py`
+- `services/rs_gui/tk_gui/tabs/replay_tab.py`
+- `services/rs_gui/tk_gui/dialogs.py`
+- `services/rs_gui/test/test_tk_replay_tab.py`
 
 Allowed backend touchpoints:
 
@@ -402,9 +402,9 @@ Allowed backend touchpoints:
 
 Validation command:
 
-- `cd services/rs_gui_v2 && python test/test_tk_replay_tab.py`
-- `cd services/rs_gui_v2 && python test/test_gui_replay_controller.py`
-- `cd services/rs_gui_v2 && python test/test_tk_replay_live_integration.py`
+- `cd services/rs_gui && python test/test_tk_replay_tab.py`
+- `cd services/rs_gui && python test/test_gui_replay_controller.py`
+- `cd services/rs_gui && python test/test_tk_replay_live_integration.py`
 
 Out of scope:
 
@@ -443,24 +443,24 @@ Validation:
 
 Files to add/change:
 
-- `services/rs_gui_v2/rs_gui_v2_app.py`
-- `services/rs_gui_v2/run_gui.sh`
-- `services/rs_gui_v2/README.md`
+- `services/rs_gui/rs_gui_app.py`
+- `services/rs_gui/run_gui.sh`
+- `services/rs_gui/README.md`
 - remove the legacy Record/Replay renderer files
-- `services/rs_gui_v2/test/test_headless_entrypoint.py`
+- `services/rs_gui/test/test_headless_entrypoint.py`
 
 Validation command:
 
-- `cd services/rs_gui_v2 && python test/test_tk_shell_smoke.py`
-- `cd services/rs_gui_v2 && python test/test_tk_record_tab.py`
-- `cd services/rs_gui_v2 && python test/test_tk_replay_tab.py`
-- `cd services/rs_gui_v2 && python test/test_record_tab_controller.py`
-- `cd services/rs_gui_v2 && python test/test_gui_replay_controller.py`
-- `cd services/rs_gui_v2 && python test/test_headless_entrypoint.py`
-- `cd services/rs_gui_v2 && python test/test_tk_record_live_integration.py`
-- `cd services/rs_gui_v2 && python test/test_tk_replay_live_integration.py`
-- `cd services/rs_gui_v2 && python test/test_tk_service_button_live_integration.py`
-- `cd services/rs_gui_v2 && python test/test_tk_session_live_integration.py`
+- `cd services/rs_gui && python test/test_tk_shell_smoke.py`
+- `cd services/rs_gui && python test/test_tk_record_tab.py`
+- `cd services/rs_gui && python test/test_tk_replay_tab.py`
+- `cd services/rs_gui && python test/test_record_tab_controller.py`
+- `cd services/rs_gui && python test/test_gui_replay_controller.py`
+- `cd services/rs_gui && python test/test_headless_entrypoint.py`
+- `cd services/rs_gui && python test/test_tk_record_live_integration.py`
+- `cd services/rs_gui && python test/test_tk_replay_live_integration.py`
+- `cd services/rs_gui && python test/test_tk_service_button_live_integration.py`
+- `cd services/rs_gui && python test/test_tk_session_live_integration.py`
 
 Out of scope:
 
@@ -495,15 +495,15 @@ Required behavior:
 
 Suggested test file:
 
-- `services/rs_gui_v2/test/test_tk_record_live_integration.py`
+- `services/rs_gui/test/test_tk_record_live_integration.py`
 
 Current implementation anchor:
 
-- `services/rs_gui_v2/test/test_gui_session_live_integration.py`
+- `services/rs_gui/test/test_gui_session_live_integration.py`
 
 Validation command:
 
-- `cd services/rs_gui_v2 && python test/test_tk_record_live_integration.py`
+- `cd services/rs_gui && python test/test_tk_record_live_integration.py`
 
 Artifacts to verify:
 
@@ -530,15 +530,15 @@ Required behavior:
 
 Suggested test file:
 
-- `services/rs_gui_v2/test/test_tk_replay_live_integration.py`
+- `services/rs_gui/test/test_tk_replay_live_integration.py`
 
 Current implementation anchor:
 
-- `services/rs_gui_v2/test/test_gui_service_button_live_integration.py`
+- `services/rs_gui/test/test_gui_service_button_live_integration.py`
 
 Validation command:
 
-- `cd services/rs_gui_v2 && python test/test_tk_replay_live_integration.py`
+- `cd services/rs_gui && python test/test_tk_replay_live_integration.py`
 
 Artifacts to verify:
 
@@ -585,15 +585,15 @@ Required assertions:
 
 Suggested test file:
 
-- `services/rs_gui_v2/test/test_tk_service_button_live_integration.py`
+- `services/rs_gui/test/test_tk_service_button_live_integration.py`
 
 Current implementation anchor:
 
-- `services/rs_gui_v2/test/test_gui_service_button_live_integration.py`
+- `services/rs_gui/test/test_gui_service_button_live_integration.py`
 
 Validation command:
 
-- `cd services/rs_gui_v2 && python test/test_tk_service_button_live_integration.py`
+- `cd services/rs_gui && python test/test_tk_service_button_live_integration.py`
 
 ### Scenario D: Full Process Lifecycle And State Transition Verification
 
@@ -640,20 +640,20 @@ Required assertions:
 
 Suggested test files:
 
-- `services/rs_gui_v2/test/test_tk_record_live_integration.py`
-- `services/rs_gui_v2/test/test_tk_replay_live_integration.py`
-- `services/rs_gui_v2/test/test_tk_service_button_live_integration.py`
+- `services/rs_gui/test/test_tk_record_live_integration.py`
+- `services/rs_gui/test/test_tk_replay_live_integration.py`
+- `services/rs_gui/test/test_tk_service_button_live_integration.py`
 
 Current implementation anchors:
 
-- `services/rs_gui_v2/test/test_gui_session_live_integration.py`
-- `services/rs_gui_v2/test/test_gui_service_button_live_integration.py`
+- `services/rs_gui/test/test_gui_session_live_integration.py`
+- `services/rs_gui/test/test_gui_service_button_live_integration.py`
 
 Validation command:
 
-- `cd services/rs_gui_v2 && python test/test_tk_record_live_integration.py`
-- `cd services/rs_gui_v2 && python test/test_tk_replay_live_integration.py`
-- `cd services/rs_gui_v2 && python test/test_tk_service_button_live_integration.py`
+- `cd services/rs_gui && python test/test_tk_record_live_integration.py`
+- `cd services/rs_gui && python test/test_tk_replay_live_integration.py`
+- `cd services/rs_gui && python test/test_tk_service_button_live_integration.py`
 
 ### Scenario E: Live Service Discovery And Refresh
 
@@ -673,15 +673,15 @@ Required behavior:
 
 Suggested test file:
 
-- `services/rs_gui_v2/test/test_tk_session_live_integration.py`
+- `services/rs_gui/test/test_tk_session_live_integration.py`
 
 Current implementation anchor:
 
-- `services/rs_gui_v2/test/test_gui_session_live_integration.py`
+- `services/rs_gui/test/test_gui_session_live_integration.py`
 
 Validation command:
 
-- `cd services/rs_gui_v2 && python test/test_tk_session_live_integration.py`
+- `cd services/rs_gui && python test/test_tk_session_live_integration.py`
 
 ### Scenario F: Full Operator Flow
 
@@ -706,16 +706,16 @@ an orchestrated test suite that runs Scenarios A through E in sequence.
 
 Suggested test file:
 
-- `services/rs_gui_v2/test/test_tk_record_replay_e2e.py`
+- `services/rs_gui/test/test_tk_record_replay_e2e.py`
 
 Validation command:
 
-- `cd services/rs_gui_v2 && python test/test_tk_record_replay_e2e.py`
+- `cd services/rs_gui && python test/test_tk_record_replay_e2e.py`
 
 ## Validation Artifacts And Constraints
 
 - All generated outputs must stay inside the workspace, preferably under
-  `services/rs_gui_v2/test_output/` or another workspace-local test artifact
+  `services/rs_gui/test_output/` or another workspace-local test artifact
   directory.
 - End-to-end tests must use deterministic topic/data fixtures so subscriber
   assertions are stable.
@@ -750,18 +750,18 @@ when all items below pass.
 
 ### Required V1 Tests
 
-- [ ] `cd services/rs_gui_v2 && python test/test_tk_shell_smoke.py`
-- [ ] `cd services/rs_gui_v2 && python test/test_gui_session.py`
-- [ ] `cd services/rs_gui_v2 && python test/test_tk_record_tab.py`
-- [ ] `cd services/rs_gui_v2 && python test/test_record_tab_controller.py`
-- [ ] `cd services/rs_gui_v2 && python test/test_tk_replay_tab.py`
-- [ ] `cd services/rs_gui_v2 && python test/test_gui_replay_controller.py`
-- [ ] `cd services/rs_gui_v2 && python test/test_tk_record_live_integration.py`
-- [ ] `cd services/rs_gui_v2 && python test/test_tk_replay_live_integration.py`
-- [ ] `cd services/rs_gui_v2 && python test/test_tk_service_button_live_integration.py`
-- [ ] `cd services/rs_gui_v2 && python test/test_tk_session_live_integration.py`
-- [ ] `cd services/rs_gui_v2 && python test/test_tk_record_replay_e2e.py`
-- [ ] `cd services/rs_gui_v2 && python test/test_headless_entrypoint.py`
+- [ ] `cd services/rs_gui && python test/test_tk_shell_smoke.py`
+- [ ] `cd services/rs_gui && python test/test_gui_session.py`
+- [ ] `cd services/rs_gui && python test/test_tk_record_tab.py`
+- [ ] `cd services/rs_gui && python test/test_record_tab_controller.py`
+- [ ] `cd services/rs_gui && python test/test_tk_replay_tab.py`
+- [ ] `cd services/rs_gui && python test/test_gui_replay_controller.py`
+- [ ] `cd services/rs_gui && python test/test_tk_record_live_integration.py`
+- [ ] `cd services/rs_gui && python test/test_tk_replay_live_integration.py`
+- [ ] `cd services/rs_gui && python test/test_tk_service_button_live_integration.py`
+- [ ] `cd services/rs_gui && python test/test_tk_session_live_integration.py`
+- [ ] `cd services/rs_gui && python test/test_tk_record_replay_e2e.py`
+- [ ] `cd services/rs_gui && python test/test_headless_entrypoint.py`
 
 ### Required V1 Behavioral Coverage
 
@@ -817,7 +817,7 @@ Required follow-on coverage:
 
 Recommended generated test:
 
-- `services/rs_gui_v2/test/test_tk_close_policy_integration.py`
+- `services/rs_gui/test/test_tk_close_policy_integration.py`
 
 ### V2-2: Duplicate/Conflict Parity
 
@@ -834,7 +834,7 @@ Required follow-on coverage:
 
 Recommended generated test:
 
-- `services/rs_gui_v2/test/test_tk_duplicate_conflict_integration.py`
+- `services/rs_gui/test/test_tk_duplicate_conflict_integration.py`
 
 ### V2-3: Advanced Record Launch Options Parity
 
@@ -859,7 +859,7 @@ Required follow-on coverage:
 
 Recommended generated test:
 
-- `services/rs_gui_v2/test/test_tk_record_launch_options_integration.py`
+- `services/rs_gui/test/test_tk_record_launch_options_integration.py`
 
 ### V2-4: Advanced Replay Launch Options Parity
 
@@ -886,7 +886,7 @@ Required follow-on coverage:
 
 Recommended generated test:
 
-- `services/rs_gui_v2/test/test_tk_replay_launch_options_integration.py`
+- `services/rs_gui/test/test_tk_replay_launch_options_integration.py`
 
 ### V2-5: Event-Log Parity
 
@@ -903,7 +903,7 @@ Required follow-on coverage:
 
 Recommended generated test:
 
-- `services/rs_gui_v2/test/test_tk_event_log_integration.py`
+- `services/rs_gui/test/test_tk_event_log_integration.py`
 
 ## Recommended Generated Tests
 
@@ -969,7 +969,7 @@ Suggested status values:
 ### Assumptions
 
 - `dds view` now owns the richer data viewer/plot experience.
-- rs_gui_v2 only needs to be a reliable Record/Replay control and state-update surface.
+- rs_gui only needs to be a reliable Record/Replay control and state-update surface.
 - existing app-core and controllers are good enough to reuse as the initial
   backend contract.
 

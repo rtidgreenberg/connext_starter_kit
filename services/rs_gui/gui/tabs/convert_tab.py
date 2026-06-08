@@ -1,4 +1,4 @@
-"""Convert tab view models and command factories for rs_gui_v2."""
+"""Convert tab view models and command factories for rs_gui."""
 
 from dataclasses import dataclass, field
 import time

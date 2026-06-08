@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for rs_gui_v2 startup diagnostics."""
+"""Tests for rs_gui startup diagnostics."""
 
 import os
 import sys

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke tests for the minimal rs_gui_v2 Tk shell scaffold."""
+"""Smoke tests for the minimal rs_gui Tk shell scaffold."""
 
 import asyncio
 import os
@@ -14,7 +14,7 @@ if PARENT_DIR not in sys.path:
 
 from app_core import AppCommand
 from gui import GuiShellSessionFactoryConfig, GuiShellSessionMode, build_default_gui_shell_session
-from rs_gui_v2_app import main
+from rs_gui_app import main
 from tk_gui import TkinterUnavailable, build_tk_placeholder_shell, build_tk_session_shell
 
 

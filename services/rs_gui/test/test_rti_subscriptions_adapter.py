@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fake-Connext tests for the rs_gui_v2 RTI subscription adapter."""
+"""Fake-Connext tests for the rs_gui RTI subscription adapter."""
 
 import os
 import sys

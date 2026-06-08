@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live DDS discovery churn gate for rs_gui_v2 topic discovery."""
+"""Live DDS discovery churn gate for rs_gui topic discovery."""
 
 import argparse
 import asyncio

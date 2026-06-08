@@ -143,8 +143,21 @@ class TestRecordTabController(unittest.IsolatedAsyncioTestCase):
                 "application_guid": "app-guid-1",
                 "process_id": 9001,
                 "host_name": "dev-host",
+                "topics": ["Square"],
             },
             observed_at=20.0,
+        ))
+        monitoring_client.push_snapshot(MonitoringSnapshot(
+            service=launch.identity.service_ref,
+            kind=MonitoringSnapshotKind.CONFIG,
+            state="configured",
+            details={
+                "application_guid": "app-guid-1",
+                "process_id": 9001,
+                "host_name": "dev-host",
+                "topics": ["Circle"],
+            },
+            observed_at=20.5,
         ))
         monitoring_client.push_snapshot(MonitoringSnapshot(
             service=launch.identity.service_ref,
@@ -172,11 +185,13 @@ class TestRecordTabController(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first_view.observed_state, "observed")
         self.assertEqual(first_view.selected_candidate.current_file, "log_dir/recording/data_0.db")
         self.assertIn(("current_file", "log_dir/recording/data_0.db"), first_view.monitoring_summary)
-        self.assertIn(("cpu_percent", "3.5"), first_view.monitoring_summary)
-        self.assertEqual(first_update_count, 2)
+        self.assertIn(("topics", "['Square', 'Circle']"), first_view.monitoring_summary)
+        self.assertNotIn(("cpu_percent", "3.5"), first_view.monitoring_summary)
+        self.assertEqual(first_update_count, 3)
         self.assertEqual(len(controller.last_monitoring_updates), 0)
         self.assertEqual(second_view.selected_candidate_id, first_view.selected_candidate_id)
-        self.assertIn(("cpu_percent", "3.5"), second_view.monitoring_summary)
+        self.assertNotIn(("cpu_percent", "3.5"), second_view.monitoring_summary)
+        self.assertIn(("topics", "['Square', 'Circle']"), second_view.monitoring_summary)
 
     async def test_monitoring_updates_are_taken_for_each_spawned_recording_service(self):
         manager = ServiceProcessManager(
@@ -280,11 +295,12 @@ class TestRecordTabController(unittest.IsolatedAsyncioTestCase):
             "data_domain_id": 63,
             "admin_domain_id": 61,
             "monitoring_domain_id": 62,
+            "log_directory": "test_output/recording_logs",
             "topic_allow": "Square,Robot*",
             "topic_deny": "rti/*,internal/*",
             "verbosity": "WARN:WARN",
             "executable": "/opt/rti/bin/rtirecordingservice",
-            "working_dir": "services/rs_gui_v2/manual",
+            "working_dir": "services/rs_gui/manual",
             "extra_args": ["-DDB_DIR=test_output/db", "-DREC_SESSION_NAME=Manual Recorder Session"],
         })
         view = await controller.refresh_view()
@@ -298,19 +314,51 @@ class TestRecordTabController(unittest.IsolatedAsyncioTestCase):
         self.assertIn("-DADMIN_DOMAIN_ID=61", spawner.calls[0])
         self.assertIn("-DREC_STATUS_PERIOD_SEC=0", spawner.calls[0])
         self.assertIn("-DREC_STATUS_PERIOD_NSEC=500000000", spawner.calls[0])
+        self.assertIn("-DREC_FILENAME_EXPR=data_xcdr_%auto:0-9%.db", spawner.calls[0])
+        self.assertIn("-DREC_LOG_DIR=test_output/recording_logs/xcdr", spawner.calls[0])
         self.assertIn("-DREC_TOPIC_ALLOW=Square,Robot*", spawner.calls[0])
         self.assertIn("-DREC_TOPIC_DENY=rti/*,internal/*", spawner.calls[0])
         self.assertIn("-DDB_DIR=test_output/db", spawner.calls[0])
         self.assertIn("-DREC_SESSION_NAME=Manual_Recorder_Session", spawner.calls[0])
         self.assertNotIn("-DREC_SESSION_NAME=Manual Recorder Session", spawner.calls[0])
+        self.assertEqual(launch.request.environment["REC_FILENAME_EXPR"], "data_xcdr_%auto:0-9%.db")
+        self.assertEqual(launch.request.environment["REC_LOG_DIR"], "test_output/recording_logs/xcdr")
         self.assertEqual(launch.request.environment["REC_TOPIC_ALLOW"], "Square,Robot*")
         self.assertEqual(launch.request.environment["REC_TOPIC_DENY"], "rti/*,internal/*")
         self.assertEqual(view.selected_candidate_id, launch.launch_id)
         self.assertEqual(view.selected_candidate.pid, "5001")
         self.assertEqual(view.launch.config_name, "manual_deploy")
         self.assertEqual(view.launch.data_domain_id, 63)
+        self.assertEqual(view.launch.log_directory, "test_output/recording_logs/xcdr")
         self.assertEqual(view.launch.topic_allow, "Square,Robot*")
         self.assertEqual(view.launch.topic_deny, "rti/*,internal/*")
+
+    async def test_launch_recording_json_format_updates_filename_and_log_directory(self):
+        spawner = FakeSpawner(FakeHandle(5001))
+        manager = ServiceProcessManager(
+            spawner=spawner,
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        controller = RecordTabController(
+            manager,
+            admin_facade=ServiceAdminFacade(FakeServiceAdminClient()),
+            config=RecordTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+
+        launch = controller.launch_recording({
+            "config_paths": ["record.xml"],
+            "config_name": "template",
+            "storage_format": "JSON",
+            "log_directory": "test_output/recording_logs",
+        })
+
+        self.assertIn("-DREC_STORAGE_FORMAT=JSON_SQLITE", spawner.calls[0])
+        self.assertIn("-DREC_FILENAME_EXPR=data_json_%auto:0-9%.db", spawner.calls[0])
+        self.assertIn("-DREC_LOG_DIR=test_output/recording_logs/json", spawner.calls[0])
+        self.assertEqual(launch.request.environment["REC_FILENAME_EXPR"], "data_json_%auto:0-9%.db")
+        self.assertEqual(launch.request.environment["REC_LOG_DIR"], "test_output/recording_logs/json")
 
     async def test_launch_recording_uses_detected_nddshome_when_environment_is_unset(self):
         spawner = FakeSpawner(FakeHandle(5001))

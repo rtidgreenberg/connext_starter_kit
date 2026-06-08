@@ -1,4 +1,4 @@
-"""DDS-free service admin protocols and facade for rs_gui_v2."""
+"""DDS-free service admin protocols and facade for rs_gui."""
 
 from typing import Any, Mapping, Optional, Protocol
 

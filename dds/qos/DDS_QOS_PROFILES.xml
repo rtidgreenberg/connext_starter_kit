@@ -456,6 +456,23 @@
     </qos_profile>
 
 
+    <qos_profile name="replay_writer_transient_local" base_name="BuiltinQosLib::Generic.Common">
+
+      <!--
+        USE CASE:
+        Replay writer default profile. Keep Generic.Common as the base and
+        only set writer durability to TRANSIENT_LOCAL for late joiners.
+        -->
+
+      <datawriter_qos>
+        <durability>
+          <kind>TRANSIENT_LOCAL_DURABILITY_QOS</kind>
+        </durability>
+      </datawriter_qos>
+
+    </qos_profile>
+
+
     <qos_profile name="ParameterQoS" base_name="BuiltinQosLib::Generic.Common">
 
       <!-- 

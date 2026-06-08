@@ -1,4 +1,4 @@
-"""Application assembly helpers for the rs_gui_v2 GUI shell."""
+"""Application assembly helpers for the rs_gui GUI shell."""
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -85,7 +85,7 @@ class GuiShellSessionFactoryConfig:
     event_log_max_size: int = 200
     event_drain_limit: int = 50
     command_drain_limit: Optional[int] = 20
-    app_log_dir: str = "services/rs_gui_v2/rs_gui_logs"
+    app_log_dir: str = "services/rs_gui/rs_gui_logs"
     local_hostnames: Tuple[str, ...] = field(default_factory=tuple)
     recording_label: str = "Recording Service"
     recording_config_name: str = "template"
@@ -95,12 +95,12 @@ class GuiShellSessionFactoryConfig:
     )
     recording_working_dir: str = ""
     replay_label: str = "Replay Service"
-    replay_config_name: str = "xcdr"
+    replay_config_name: str = "template"
     replay_config_paths: Tuple[str, ...] = (
-        "services/replay_service_config.xml",
+        "dds/qos/replay_service_config.xml",
         "dds/qos/DDS_QOS_PROFILES.xml",
     )
-    replay_database_path: str = "log_dir/xcdr"
+    replay_database_path: str = "services/rs_gui/log_data/xcdr"
     replay_working_dir: str = ""
     admin_domain_id: int = 0
     monitoring_domain_id: int = 0
@@ -411,7 +411,7 @@ def _mock_discovery_client(config: GuiShellSessionFactoryConfig) -> FakeTopicDis
                 direction=EndpointDirection.READER,
                 endpoint_key="robot-telemetry-reader",
                 participant_key="participant-gui-reader",
-                participant_name="rs_gui_v2",
+                participant_name="rs_gui",
                 partitions=("/robot/alpha",),
                 observed_at=now - 1,
             ),
@@ -590,21 +590,27 @@ def _replay_database_path_exists(path: str) -> bool:
 
 
 def _discover_latest_recording_dir(root: str) -> str:
-    log_root = os.path.join(root, "log_dir")
+    log_root = os.path.join(root, "services", "rs_gui", "log_data")
     if not os.path.isdir(log_root):
         return ""
     candidates = []
+    search_roots = [log_root]
     for entry in os.listdir(log_root):
         path = os.path.join(log_root, entry)
-        if not os.path.isdir(path):
-            continue
-        if not entry.startswith("recording_"):
-            continue
-        if not os.path.isfile(os.path.join(path, "metadata.db")):
-            continue
-        if not os.path.isfile(os.path.join(path, "data_0.db")):
-            continue
-        candidates.append(path)
+        if os.path.isdir(path):
+            search_roots.append(path)
+    for candidate_root in search_roots:
+        for entry in os.listdir(candidate_root):
+            path = os.path.join(candidate_root, entry)
+            if not os.path.isdir(path):
+                continue
+            if not entry.startswith("recording_"):
+                continue
+            if not os.path.isfile(os.path.join(path, "metadata.db")):
+                continue
+            if not os.path.isfile(os.path.join(path, "data_0.db")):
+                continue
+            candidates.append(path)
     if not candidates:
         return ""
     candidates.sort(key=os.path.getmtime, reverse=True)

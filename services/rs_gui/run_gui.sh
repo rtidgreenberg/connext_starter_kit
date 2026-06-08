@@ -1,5 +1,5 @@
 #!/bin/bash
-# Launcher for rs_gui_v2.
+# Launcher for rs_gui.
 # - Defaults to GUI mode
 # - Uses repo virtualenv Python
 # - Optional DDS XML type preparation via setup.sh
@@ -9,7 +9,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 VENV_PYTHON="$REPO_ROOT/connext_dds_env/bin/python"
-APP_ENTRY="$SCRIPT_DIR/rs_gui_v2_app.py"
+APP_ENTRY="$SCRIPT_DIR/rs_gui_app.py"
 PREFLIGHT_ENTRY="$SCRIPT_DIR/preflight.py"
 PREPARE_DDS=false
 SKIP_DIAGNOSTICS=false
@@ -87,8 +87,8 @@ fi
 export PYTHONNOUSERSITE=1
 export PATH="$(dirname "$VENV_PYTHON"):$PATH"
 
-# Pin NDDSHOME to 7.6.0 — the minimum version for RS GUI admin/monitoring.
-export NDDSHOME="${NDDSHOME:-/home/rti/rti_connext_dds-7.6.0}"
+# Default NDDSHOME to the supported 7.7 LTS install for the GUI and spawned services.
+export NDDSHOME="${NDDSHOME:-/home/rti/rti_connext_dds-7.7.0}"
 
 # Work around VMware SVGA / Mesa driver issues that can cause GLFW segfaults
 # when the hardware GL context fails to initialize properly.
@@ -113,7 +113,7 @@ validate_generated_types(xml_dir, detect_nddshome())
 print("DDS XML type metadata OK")
 PY
     ); then
-        echo "ERROR: Generated XML types validation failed. Rerun services/rs_gui_v2/setup.sh."
+        echo "ERROR: Generated XML types validation failed. Rerun services/rs_gui/setup.sh."
         exit 1
     fi
 fi

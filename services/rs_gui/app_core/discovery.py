@@ -1,4 +1,4 @@
-"""DDS-free topic discovery catalog and selection models for rs_gui_v2."""
+"""DDS-free topic discovery catalog and selection models for rs_gui."""
 
 from dataclasses import dataclass, field, replace
 from enum import Enum

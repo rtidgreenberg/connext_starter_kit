@@ -6,7 +6,7 @@ import os
 import re
 import time
 import xml.etree.ElementTree as ET
-from typing import Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from app_core.debug_log import dbg, dbg_exc
 from app_core.events import CommandStatus
@@ -56,6 +56,7 @@ class RecordTabControllerConfig:
     launch_monitoring_domain_id: int = 0
     launch_topic_allow: str = "*"
     launch_topic_deny: str = "rti/*"
+    launch_log_directory: str = "services/rs_gui/log_data"
     launch_verbosity: str = "ERROR:ERROR"
     launch_executable: str = ""
     launch_working_dir: str = ""
@@ -191,6 +192,8 @@ class RecordTabController:
         monitoring_domain_id = _int_payload(payload, "monitoring_domain_id", self._config.launch_monitoring_domain_id)
         topic_allow = str(payload.get("topic_allow", self._config.launch_topic_allow)).strip() or "*"
         topic_deny = str(payload.get("topic_deny", self._config.launch_topic_deny)).strip()
+        log_directory = str(payload.get("log_directory", self._config.launch_log_directory)).strip() or "services/rs_gui/log_data"
+        effective_log_directory = _record_log_directory(log_directory, storage_format_env)
         verbosity = str(payload.get("verbosity", self._config.launch_verbosity)).strip() or "ERROR:ERROR"
         executable = str(payload.get("executable", self._config.launch_executable)).strip()
         working_dir = str(payload.get("working_dir", self._config.launch_working_dir)).strip()
@@ -204,6 +207,9 @@ class RecordTabController:
             "-DREC_STATUS_PERIOD_SEC=",
             "-DREC_STATUS_PERIOD_NSEC=",
             "-DREC_STORAGE_FORMAT=",
+            "-DREC_FILENAME_EXPR=",
+            "-DREC_LOG_DIR=",
+            "-DREC_WORKSPACE_DIR=",
             "-DREC_TOPIC_ALLOW=",
             "-DREC_TOPIC_DENY=",
             "-DDOMAIN_ID=",
@@ -219,6 +225,9 @@ class RecordTabController:
             f"-DREC_MON_DOMAIN_ID={monitoring_domain_id}",
             "-DREC_STATUS_PERIOD_SEC=0",
             "-DREC_STATUS_PERIOD_NSEC=500000000",
+            f"-DREC_FILENAME_EXPR={_record_filename_expression(storage_format_env)}",
+            f"-DREC_LOG_DIR={effective_log_directory}",
+            f"-DREC_WORKSPACE_DIR={effective_log_directory}",
             f"-DREC_STORAGE_FORMAT={storage_format_env}",
             f"-DREC_TOPIC_ALLOW={topic_allow}",
             f"-DREC_TOPIC_DENY={topic_deny}",
@@ -229,6 +238,9 @@ class RecordTabController:
             "REC_DOMAIN_ID": str(data_domain_id),
             "REC_ADMIN_DOMAIN_ID": str(admin_domain_id),
             "REC_MON_DOMAIN_ID": str(monitoring_domain_id),
+            "REC_FILENAME_EXPR": _record_filename_expression(storage_format_env),
+            "REC_LOG_DIR": effective_log_directory,
+            "REC_WORKSPACE_DIR": effective_log_directory,
             "REC_STORAGE_FORMAT": storage_format_env,
             "REC_TOPIC_ALLOW": topic_allow,
             "REC_TOPIC_DENY": topic_deny,
@@ -269,6 +281,7 @@ class RecordTabController:
             launch_monitoring_domain_id=monitoring_domain_id,
             launch_topic_allow=topic_allow,
             launch_topic_deny=topic_deny,
+            launch_log_directory=effective_log_directory,
             launch_verbosity=verbosity,
             launch_executable=executable,
             launch_working_dir=working_dir,
@@ -496,7 +509,25 @@ class RecordTabController:
         for snapshot in updates:
             by_kind = self._latest_monitoring_by_service.setdefault(snapshot.service.key, {})
             current = by_kind.get(snapshot.kind)
-            if current is None or snapshot.observed_at >= current.observed_at:
+            if current is None:
+                by_kind[snapshot.kind] = snapshot
+                continue
+            if snapshot.kind == MonitoringSnapshotKind.CONFIG:
+                newer, older = (
+                    (snapshot, current)
+                    if snapshot.observed_at >= current.observed_at
+                    else (current, snapshot)
+                )
+                by_kind[snapshot.kind] = MonitoringSnapshot(
+                    service=newer.service,
+                    kind=newer.kind,
+                    state=newer.state,
+                    metrics=newer.metrics,
+                    details=_merge_monitoring_details(older.details, newer.details),
+                    observed_at=newer.observed_at,
+                )
+                continue
+            if snapshot.observed_at >= current.observed_at:
                 by_kind[snapshot.kind] = snapshot
 
     def _discover_service_from_cache(
@@ -582,6 +613,7 @@ class RecordTabController:
             monitoring_domain_id=self._config.launch_monitoring_domain_id,
             topic_allow=self._config.launch_topic_allow,
             topic_deny=self._config.launch_topic_deny,
+            log_directory=self._config.launch_log_directory,
             verbosity=self._config.launch_verbosity,
             executable=self._config.launch_executable,
             working_dir=self._config.launch_working_dir,
@@ -709,6 +741,50 @@ def _record_storage_format_ui(value: object) -> str:
 
 def _record_storage_format_env(value: object) -> str:
     return "JSON_SQLITE" if _record_storage_format_ui(value) == "JSON" else "XCDR_AUTO"
+
+
+def _record_filename_expression(storage_format_env: str) -> str:
+    format_tag = "json" if str(storage_format_env).strip().upper() == "JSON_SQLITE" else "xcdr"
+    return f"data_{format_tag}_%auto:0-9%.db"
+
+
+def _record_log_directory(base_log_directory: str, storage_format_env: str) -> str:
+    format_tag = "json" if str(storage_format_env).strip().upper() == "JSON_SQLITE" else "xcdr"
+    normalized = str(base_log_directory).strip() or "services/rs_gui/log_data"
+    trimmed = normalized.rstrip("/\\")
+    if os.path.basename(trimmed) == format_tag:
+        return trimmed
+    return os.path.join(trimmed, format_tag)
+
+
+def _merge_monitoring_details(base: Mapping[str, Any], override: Mapping[str, Any]) -> Dict[str, Any]:
+    merged: Dict[str, Any] = dict(base)
+    for key, value in override.items():
+        if key == "topics":
+            merged[key] = _merge_topics(merged.get(key), value)
+            continue
+        merged[key] = value
+    return merged
+
+
+def _merge_topics(existing: Any, incoming: Any) -> List[str]:
+    def _to_topic_list(value: Any) -> List[str]:
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple, set)):
+            raw_values = value
+        else:
+            raw_values = (value,)
+        return [str(item).strip() for item in raw_values if str(item).strip()]
+
+    combined: List[str] = []
+    seen = set()
+    for topic_name in _to_topic_list(existing) + _to_topic_list(incoming):
+        if topic_name in seen:
+            continue
+        seen.add(topic_name)
+        combined.append(topic_name)
+    return combined
 
 
 def _int_payload(payload: Mapping[str, object], key: str, default: int) -> int:

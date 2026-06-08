@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live Recording Service restart/churn gate for rs_gui_v2."""
+"""Live Recording Service restart/churn gate for rs_gui."""
 
 import argparse
 import asyncio
@@ -249,7 +249,7 @@ def build_launch_request(config: ServiceChurnConfig, iteration: int) -> ServiceP
     nddshome = os.environ.get("NDDSHOME", detect_nddshome())
     service_config = os.path.join(SERVICES_DIR, "recording_service_config.xml")
     qos_file = os.path.join(REPO_ROOT, "dds", "qos", "DDS_QOS_PROFILES.xml")
-    run_dir = os.path.join(REPO_ROOT, "test_output", "rs_gui_v2", "service_churn", f"run_{iteration}")
+    run_dir = os.path.join(REPO_ROOT, "test_output", "rs_gui", "service_churn", f"run_{iteration}")
     os.makedirs(run_dir, exist_ok=True)
     return ServiceProcessLaunchRequest(
         intent=ServiceLaunchIntent(

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pure unit tests for rs_gui_v2 command, event, and state models."""
+"""Pure unit tests for rs_gui command, event, and state models."""
 
 import os
 import sys

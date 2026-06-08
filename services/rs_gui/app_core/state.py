@@ -1,4 +1,4 @@
-"""Immutable state snapshots for the rs_gui_v2 headless core."""
+"""Immutable state snapshots for the rs_gui headless core."""
 
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType

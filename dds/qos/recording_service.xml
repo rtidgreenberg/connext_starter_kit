@@ -20,7 +20,7 @@
       <element><name>REC_MON_DOMAIN_ID</name><value>0</value></element>
 
       <element><name>REC_SESSION_NAME</name><value>recording_session</value></element>
-      <element><name>REC_WORKSPACE_DIR</name><value>log_dir</value></element>
+      <element><name>REC_LOG_DIR</name><value>services/rs_gui/log_data</value></element>
       <element><name>REC_EXEC_DIR_EXPR</name><value>recording_%ts%</value></element>
       <element><name>REC_FILENAME_EXPR</name><value>data_%auto:0-9%.db</value></element>
       <element><name>REC_STORAGE_FORMAT</name><value>XCDR_AUTO</value></element>
@@ -65,7 +65,7 @@
       <sqlite>
         <storage_format>$(REC_STORAGE_FORMAT)</storage_format>
         <fileset>
-          <workspace_dir>$(REC_WORKSPACE_DIR)</workspace_dir>
+          <workspace_dir>$(REC_LOG_DIR)</workspace_dir>
           <execution_dir_expression>$(REC_EXEC_DIR_EXPR)</execution_dir_expression>
           <filename_expression>$(REC_FILENAME_EXPR)</filename_expression>
           <rollover>

@@ -1,4 +1,4 @@
-"""Minimal Tkinter main-window scaffold for the rs_gui_v2 migration."""
+"""Minimal Tkinter main-window scaffold for the rs_gui migration."""
 
 from __future__ import annotations
 
@@ -37,8 +37,9 @@ def _apply_dark_theme(root, ttk) -> None:
         pass
 
     root.configure(background=DARK_THEME["bg"])
-    root.option_add("*Foreground", DARK_THEME["text"])
-    root.option_add("*Background", DARK_THEME["bg"])
+    # Do not set global Tk option defaults for foreground/background.
+    # Native file dialogs on Linux may inherit only part of these options,
+    # causing low-contrast file names (light text on white backgrounds).
 
     style.configure(".",
                     background=DARK_THEME["bg"],
@@ -100,7 +101,7 @@ def _apply_dark_theme(root, ttk) -> None:
 class TkPlaceholderWindow:
     """Small wrapper around a Record/Replay/Debug Tk window."""
 
-    workspace_name: str = "rs_gui_v2"
+    workspace_name: str = "rs_gui"
     view_provider: Optional[Callable[[], "ShellViewModel"]] = None
     command_sink: Optional[Callable[["AppCommand"], bool]] = None
     close_handler: Optional[Callable[[], None]] = None

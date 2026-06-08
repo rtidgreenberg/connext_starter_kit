@@ -1,10 +1,10 @@
-# rs_gui_v2 Tests
+# rs_gui Tests
 
 The current test suite covers the headless app core and the Tk Record/Replay
-shell. It does not import DDS UI bindings, legacy renderer code, or any `rs_gui_v1`
+shell. It does not import DDS UI bindings, legacy renderer code, or any legacy-GUI
 implementation modules.
 
-Run from `services/rs_gui_v2`:
+Run from `services/rs_gui`:
 
 ```bash
 ../../connext_dds_env/bin/python test/run_all_tests.py -v
@@ -57,7 +57,7 @@ Current layers:
   manager, Service Admin facade, monitoring facade, command history, duplicate
   candidate detection, and guarded termination state into GUI snapshots
 - `test_import_boundaries.py`: no app-core imports from DDS, UI libraries, or
-  `rs_gui_v1` implementation modules, with Connext imports limited to explicit
+  legacy GUI implementation modules, with Connext imports limited to explicit
   adapter modules; GUI modules are also checked for no DDS or v1 imports
 - `test_plotting.py`: DDS-free numeric plot buffers, bounded history,
   deterministic decimation, skipped/dropped counters, and UI-facing snapshots
@@ -102,7 +102,7 @@ Live fixture gate:
 
 `live_soak.py` is intentionally not named `test_*.py`: it uses the real RTI
 Connext Python API, creates live DDS participants, and writes its report under
-`services/rs_gui_v2/live_reports/`. The regular suite covers its deterministic logic;
+`services/rs_gui/live_reports/`. The regular suite covers its deterministic logic;
 run the live gate explicitly when validating Milestone L soak behavior.
 
 ```bash

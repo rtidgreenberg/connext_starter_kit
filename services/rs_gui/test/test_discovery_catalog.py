@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pure unit tests for rs_gui_v2 topic discovery and selection models."""
+"""Pure unit tests for rs_gui topic discovery and selection models."""
 
 import os
 import sys

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fake-Connext tests for the rs_gui_v2 DynamicType field catalog adapter."""
+"""Fake-Connext tests for the rs_gui DynamicType field catalog adapter."""
 
 import os
 import sys

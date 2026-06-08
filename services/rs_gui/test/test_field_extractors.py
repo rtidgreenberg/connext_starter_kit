@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pure unit tests for rs_gui_v2 field-path extraction."""
+"""Pure unit tests for rs_gui field-path extraction."""
 
 import os
 import sys

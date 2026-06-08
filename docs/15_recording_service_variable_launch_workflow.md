@@ -252,7 +252,7 @@ Example usage:
 
 ## Roadmap: Live Service Admin Control
 
-Status: baseline implemented in `rs_gui_v2` with `RtiServiceAdminClient` wired
+Status: baseline implemented in `rs_gui` with `RtiServiceAdminClient` wired
 into LIVE GUI assembly and validated by the live service churn gate. Continue to
 extend operator-facing status details as new admin workflows are added.
 

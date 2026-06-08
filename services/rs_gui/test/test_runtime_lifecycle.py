@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pure unit tests for the rs_gui_v2 headless runtime."""
+"""Pure unit tests for the rs_gui headless runtime."""
 
 import asyncio
 import json
@@ -113,7 +113,7 @@ class TestRuntimeQueues(unittest.TestCase):
         self.assertEqual(runtime.counters.events_drained, 2)
 
     def test_runtime_writes_app_events_to_configured_log_dir(self):
-        log_dir = "services/rs_gui_v2/rs_gui_logs/runtime_unit"
+        log_dir = "services/rs_gui/rs_gui_logs/runtime_unit"
         absolute_log_dir = os.path.abspath(os.path.join(PARENT_DIR, "..", "..", log_dir))
         shutil.rmtree(absolute_log_dir, ignore_errors=True)
         runtime = AppRuntime(RuntimeConfig(app_log_dir=log_dir))
@@ -136,12 +136,12 @@ class TestRuntimeQueues(unittest.TestCase):
             shutil.rmtree(absolute_log_dir, ignore_errors=True)
 
     def test_runtime_exposes_event_log_path_when_configured(self):
-        log_dir = "services/rs_gui_v2/rs_gui_logs/runtime_unit"
+        log_dir = "services/rs_gui/rs_gui_logs/runtime_unit"
         runtime = AppRuntime(RuntimeConfig(app_log_dir=log_dir))
 
         self.assertTrue(runtime.event_log_path.endswith(".jsonl"))
         self.assertIn(
-            os.path.join("services", "rs_gui_v2", "rs_gui_logs", "runtime_unit"),
+            os.path.join("services", "rs_gui", "rs_gui_logs", "runtime_unit"),
             runtime.event_log_path,
         )
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live DDS smoke/soak gate for rs_gui_v2 DynamicData subscriptions."""
+"""Live DDS smoke/soak gate for rs_gui DynamicData subscriptions."""
 
 import argparse
 import asyncio
@@ -206,7 +206,7 @@ class LiveTelemetryPublisher:
 
 def build_live_soak_workspace(config: LiveSoakConfig) -> WorkspaceDocument:
     return WorkspaceDocument(
-        name="rs_gui_v2 live soak",
+        name="rs_gui live soak",
         domains=(config.domain_id,),
         subscriptions=(TopicSubscriptionRequest(
             domain_id=config.domain_id,

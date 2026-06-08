@@ -128,7 +128,7 @@ class TestServiceProcessCommand(unittest.TestCase):
         intent = ServiceLaunchIntent(
             kind=ServiceKind.REPLAY,
             label="Replay A",
-            config_paths=("replay_service_config.xml",),
+            config_paths=("dds/qos/replay_service_config.xml",),
         )
         identity = ServiceControlIdentity(
             intent=intent,
@@ -167,7 +167,7 @@ class TestServiceProcessManager(unittest.TestCase):
 
         self.assertEqual(
             spawner._log_dir,
-            os.path.join(repo_root, "services", "rs_gui_v2", "service_logs"),
+            os.path.join(repo_root, "services", "rs_gui", "service_logs"),
         )
 
     def test_subprocess_handle_reaps_exited_child_without_polling(self):
@@ -249,7 +249,7 @@ class TestServiceProcessManager(unittest.TestCase):
         self.assertEqual(candidate.details["working_dir"], "/workspace/services")
 
     def test_launch_records_process_output_path_for_console_payloads(self):
-        output_dir = os.path.join("services", "rs_gui_v2", "service_logs", "service_process_tests")
+        output_dir = os.path.join("services", "rs_gui", "service_logs", "service_process_tests")
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, "recording.log")
         with open(output_path, "w", encoding="utf-8") as output_file:
@@ -272,7 +272,7 @@ class TestServiceProcessManager(unittest.TestCase):
         self.assertEqual(candidate.details["output_path"], output_path)
 
     def test_process_exit_updates_candidate_alive_state(self):
-        output_dir = os.path.join("services", "rs_gui_v2", "service_logs", "service_process_tests")
+        output_dir = os.path.join("services", "rs_gui", "service_logs", "service_process_tests")
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, "early_exit.log")
         with open(output_path, "w", encoding="utf-8") as output_file:
@@ -335,7 +335,7 @@ class TestServiceProcessManager(unittest.TestCase):
         self.assertEqual(manager.refresh("launch-1").state, ServiceProcessLaunchState.TERMINATE_REQUESTED)
 
     def test_local_termination_not_allowed_includes_output_tail(self):
-        output_dir = os.path.join("services", "rs_gui_v2", "service_logs", "service_process_tests")
+        output_dir = os.path.join("services", "rs_gui", "service_logs", "service_process_tests")
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, "terminated_before_button.log")
         with open(output_path, "w", encoding="utf-8") as output_file:

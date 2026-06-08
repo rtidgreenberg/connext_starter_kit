@@ -1,4 +1,4 @@
-"""Headless runtime lifecycle and queue management for rs_gui_v2."""
+"""Headless runtime lifecycle and queue management for rs_gui."""
 
 import asyncio
 from dataclasses import dataclass
@@ -213,6 +213,7 @@ class _EventLogWriter:
             self._log_dir,
             f"rs_gui_{time.strftime('%Y%m%d_%H%M%S')}_{os.getpid()}.jsonl",
         )
+        os.environ["RS_GUI_EVENT_LOG_PATH"] = self.path
 
     def write(self, event: AppEvent) -> None:
         try:

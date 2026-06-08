@@ -1,6 +1,6 @@
 # RS GUI v2 (RTI Services Operator GUI)
 
-rs_gui_v2 is the next-generation operator application for RTI infrastructure
+rs_gui is the next-generation operator application for RTI infrastructure
 services. The supported Record/Replay UI is now Tkinter-based.
 
 This directory currently includes:
@@ -20,13 +20,13 @@ This directory currently includes:
 
 Architecture and planning references:
 
-- [RS_GUI_V2_ARCHITECTURE.md](RS_GUI_V2_ARCHITECTURE.md)
-- [RS_GUI_V2_IMPLEMENTATION_PLAN.md](RS_GUI_V2_IMPLEMENTATION_PLAN.md)
-- [RS_GUI_V2_WIREFRAME_PLAN.md](RS_GUI_V2_WIREFRAME_PLAN.md)
+- [RS_GUI_ARCHITECTURE.md](RS_GUI_ARCHITECTURE.md)
+- [RS_GUI_IMPLEMENTATION_PLAN.md](RS_GUI_IMPLEMENTATION_PLAN.md)
+- [RS_GUI_WIREFRAME_PLAN.md](RS_GUI_WIREFRAME_PLAN.md)
 
 ## Prerequisites
 
-- RTI Connext DDS installation available (7.6.0 preferred by setup tooling)
+- RTI Connext DDS 7.7 LTS installation available (preferred by setup tooling and GUI launcher)
 - Repository Python virtual environment at `connext_dds_env/`
 - Tkinter available in that environment for the Tk migration scaffold
 
@@ -35,7 +35,7 @@ Architecture and planning references:
 Generate/refresh v2 XML type artifacts tied to the active `NDDSHOME`:
 
 ```bash
-cd services/rs_gui_v2
+cd services/rs_gui
 ./setup.sh
 ```
 
@@ -45,10 +45,15 @@ What `setup.sh` does:
 - Uses `rtiddsgen -convertToXML` on RTI service IDL files
 - Writes XML files into `xml_types/`
 - Writes `xml_types/.generated_from_nddshome` metadata to detect stale types
-- Installs rs_gui_v2 Python dependencies from `requirements.txt` using the
+- Installs rs_gui Python dependencies from `requirements.txt` using the
   repository virtual environment (`connext_dds_env/bin/python`) when available
 
 Re-run `./setup.sh` whenever you switch Connext installations.
+
+For the supported default path, leave `NDDSHOME` unset and `run_gui.sh` will
+launch the GUI against `/home/rti/rti_connext_dds-7.7.0`. The same `NDDSHOME`
+is then used for `rtirecordingservice` and `rtireplayservice` when the GUI
+launches them.
 
 Skip Python dependency installation if needed:
 
@@ -58,17 +63,17 @@ Skip Python dependency installation if needed:
 
 ## Install GUI Dependency
 
-The rs_gui_v2 `requirements.txt` pins the current non-stdlib GUI dependencies
+The rs_gui `requirements.txt` pins the current non-stdlib GUI dependencies
 for this environment. Tkinter is provided by the Python runtime.
 
 ```bash
 cd /home/rti/CAT/connext_starter_kit
-./connext_dds_env/bin/python -m pip install -r services/rs_gui_v2/requirements.txt
+./connext_dds_env/bin/python -m pip install -r services/rs_gui/requirements.txt
 ```
 
 ## Run
 
-From `services/rs_gui_v2`:
+From `services/rs_gui`:
 
 ```bash
 ./run_gui.sh
@@ -93,10 +98,10 @@ Useful modes:
 ./run_gui.sh --mock-gui
 
 # Build the Tk session-backed Record/Replay shell and exit
-../../connext_dds_env/bin/python rs_gui_v2_app.py --tk-gui-check
+../../connext_dds_env/bin/python rs_gui_app.py --tk-gui-check
 
 # Run the Tk session-backed Record/Replay shell
-../../connext_dds_env/bin/python rs_gui_v2_app.py --tk-gui
+../../connext_dds_env/bin/python rs_gui_app.py --tk-gui
 
 # Prepare DDS XML types first, then launch
 ./run_gui.sh --prepare-dds --gui
@@ -116,7 +121,7 @@ Diagnostics can be bypassed for temporary local debugging:
 You can also run the app directly:
 
 ```bash
-../../connext_dds_env/bin/python rs_gui_v2_app.py --gui
+../../connext_dds_env/bin/python rs_gui_app.py --gui
 ```
 
 CLI options:
@@ -130,7 +135,7 @@ CLI options:
 
 ## Tests
 
-Run the rs_gui_v2 test suite from this folder:
+Run the rs_gui test suite from this folder:
 
 ```bash
 ../../connext_dds_env/bin/python test/run_all_tests.py -v
@@ -149,7 +154,7 @@ Run a bounded live DynamicData smoke/soak using the built-in telemetry fixture:
 The gate creates a live DynamicData reader and optional fixture publisher,
 applies bounded reader history/resource limits, feeds the same data-session and
 plot-buffer path used by the GUI, and writes a JSON report under
-`services/rs_gui_v2/live_reports/`.
+`services/rs_gui/live_reports/`.
 
 Useful options:
 
@@ -174,7 +179,7 @@ The gate launches `rtirecordingservice` through the same
 each iteration, checks Service Admin endpoint readiness, attempts remote
 shutdown using the launched app name plus the XML recording-service resource
 name, falls back to local process termination when shutdown does not reply, and
-writes a JSON report under `services/rs_gui_v2/live_reports/`.
+writes a JSON report under `services/rs_gui/live_reports/`.
 
 Useful options:
 
@@ -204,7 +209,7 @@ Current Replay defaults used by the GUI/controller path:
   and falls back to local termination when admin endpoints are unavailable
 
 When launching Replay from the GUI, prefer an absolute database path or a path
-relative to the rs_gui_v2 working directory.
+relative to the rs_gui working directory.
 
 ## Live Discovery Churn Gate
 
@@ -219,7 +224,7 @@ observes them through the same `RtiTopicDiscoveryClient` path used by the GUI,
 closes the endpoints, and verifies the run namespace converges to zero live
 topics. On Connext 7.6, endpoint delete samples may not arrive through the
 built-in readers in this environment, so the gate enables bounded stale-endpoint
-pruning and records a JSON report under `services/rs_gui_v2/live_reports/`.
+pruning and records a JSON report under `services/rs_gui/live_reports/`.
 
 Useful options:
 

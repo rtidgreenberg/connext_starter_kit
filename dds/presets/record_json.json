@@ -12,7 +12,7 @@
   ],
   "basic_variables": {
     "REC_DOMAIN_ID": 0,
-    "REC_WORKSPACE_DIR": "log_dir",
+    "REC_WORKSPACE_DIR": "services/rs_gui/log_data",
     "REC_EXEC_DIR_EXPR": "json_%ts%",
     "REC_FILENAME_EXPR": "json_%auto:0-1%.db",
     "REC_SESSION_NAME": "record_json_default",

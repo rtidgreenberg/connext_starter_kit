@@ -1,4 +1,4 @@
-"""Runtime-backed GUI shell session for rs_gui_v2."""
+"""Runtime-backed GUI shell session for rs_gui."""
 
 import asyncio
 from dataclasses import dataclass, field, replace
@@ -18,6 +18,10 @@ from .tabs import (
 )
 from .view_models import ShellViewModel
 from .workspace import GuiWorkspaceController
+
+
+_EXITED_STATES = {"exited", "start_failed", "stopped", "shutdown", "terminated", "completed", "failed", "cancelled"}
+_ACTIVE_CONVERT_STATES = {"queued", "running", "cancel_requested"}
 
 
 @dataclass(frozen=True)
@@ -305,6 +309,8 @@ class GuiShellSession:
 
         normalized_action = str(action).strip()
         selected = tuple(str(item_id) for item_id in item_ids)
+        if normalized_action == "shutdown_gui_launched" and not selected:
+            selected = await self._resolve_gui_launched_item_ids()
         self._runtime.publish_event(AppEvent(
             event_type="gui.close_requested",
             source="gui",
@@ -318,6 +324,10 @@ class GuiShellSession:
         cleanup_results = ()
         if normalized_action == "shutdown_gui_launched":
             print("[INFO] SHUTDOWN_START: Shutting down GUI-spawned local processes", flush=True)
+            if selected:
+                print(f"[INFO] SHUTDOWN_TARGETS: {', '.join(selected)}", flush=True)
+            else:
+                print("[INFO] SHUTDOWN_TARGETS: none", flush=True)
             cleanup_results = await self._shutdown_gui_launched_items(selected)
         elif normalized_action != "leave_running":
             raise ValueError(f"Unsupported close action: {action}")
@@ -335,6 +345,43 @@ class GuiShellSession:
         ))
         _print_shutdown_summary(normalized_action, cleanup_results)
         await self._runtime.shutdown()
+
+    async def _resolve_gui_launched_item_ids(self) -> Tuple[str, ...]:
+        """Collect active GUI-launched items when closeout doesn't provide explicit selections."""
+
+        resolved = []
+        record_view = await self._record_controller.refresh_view()
+        for candidate in record_view.candidates:
+            if not candidate.owned:
+                continue
+            if str(candidate.state).strip().lower() in _EXITED_STATES:
+                continue
+            resolved.append(f"record:{candidate.candidate_id}")
+
+        if self._replay_controller is not None:
+            replay_view = await self._replay_controller.refresh_view()
+            for target in replay_view.targets:
+                if not target.owned:
+                    continue
+                if str(target.state).strip().lower() in _EXITED_STATES:
+                    continue
+                resolved.append(f"replay:{target.target_id}")
+
+        if self._convert_controller is not None:
+            convert_view = await self._convert_controller.refresh_view()
+            for job in convert_view.jobs:
+                if str(job.state).strip().lower() not in _ACTIVE_CONVERT_STATES:
+                    continue
+                resolved.append(f"convert:{job.job_id}")
+
+        deduped = []
+        seen = set()
+        for item_id in resolved:
+            if item_id in seen:
+                continue
+            seen.add(item_id)
+            deduped.append(item_id)
+        return tuple(deduped)
 
     async def _shutdown_gui_launched_items(self, item_ids: Tuple[str, ...]) -> Tuple[Any, ...]:
         cleanup_results = []

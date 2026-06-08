@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Headless tests for rs_gui_v2 Plots tab controller wiring."""
+"""Headless tests for rs_gui Plots tab controller wiring."""
 
 import os
 import sys

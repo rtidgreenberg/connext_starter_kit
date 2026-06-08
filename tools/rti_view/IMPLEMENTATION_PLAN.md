@@ -422,7 +422,7 @@ Completion gate:
 Deliverables:
 
 - Update `tools/README.md` to list `rti_view/` and `rti_spy/` separately.
-- Ensure `rs_gui_v2` only references `rti_view` where needed.
+- Ensure `rs_gui` only references `rti_view` where needed.
 - Remove stale `dds_view`, Textual, or old path references.
 
 Tests:

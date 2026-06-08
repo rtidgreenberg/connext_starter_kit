@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pure unit tests for rs_gui_v2 subscription models and sample cache."""
+"""Pure unit tests for rs_gui subscription models and sample cache."""
 
 import os
 import sys

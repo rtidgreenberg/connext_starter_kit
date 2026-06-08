@@ -1,4 +1,4 @@
-"""Shared test doubles for rs_gui_v2 headless tests.
+"""Shared test doubles for rs_gui headless tests.
 
 Canonical implementations of FakeHandle and FakeSpawner. Import from here
 instead of duplicating process-manager doubles across test files.

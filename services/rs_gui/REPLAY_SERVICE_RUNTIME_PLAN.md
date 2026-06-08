@@ -17,7 +17,7 @@ The target user experience is:
 Recording Service now has the working model:
 
 - `RecordTabController` owns launch settings, selected candidate id, monitoring cache, command history, admin readiness, and local graceful-shutdown fallback.
-- `ServiceProcessManager` launches RTI service binaries, tracks process handles, captures stdout/stderr under `services/rs_gui_v2/service_logs/`, exposes local process candidates, and supports guarded terminate/kill fallback.
+- `ServiceProcessManager` launches RTI service binaries, tracks process handles, captures stdout/stderr under `services/rs_gui/service_logs/`, exposes local process candidates, and supports guarded terminate/kill fallback.
 - `ServiceCandidateSelection` merges GUI launch, monitoring, and discovery evidence into stable candidate rows.
 - `RtiServiceAdminClient` sends pause, resume, shutdown, and tag commands through the RTI Service Admin request/reply topics.
 - `RtiServiceMonitoringClient` reads infrastructure service monitoring topics and normalizes Recording Service config, event, and periodic samples.
@@ -39,7 +39,7 @@ The main implementation should add a Replay-specific controller that mirrors Rec
 
 - `ServiceKind.REPLAY`
 - executable default: `rtireplayservice`
-- default config file: `services/replay_service_config.xml`, plus `dds/qos/DDS_QOS_PROFILES.xml` when needed
+- default config file: `dds/qos/replay_service_config.xml`, plus `dds/qos/DDS_QOS_PROFILES.xml` when needed
 - config names: existing `xcdr` and `json` initially, later any XML-discovered replay_service names
 - launch variables for database path, domain ids, playback rate, loop mode, topic filters, and QoS overrides
 - Service Admin resource paths for Replay Service resources
@@ -54,19 +54,19 @@ Historical note:
 - early Replay slices referenced legacy renderer files and an explicit Replay
    churn gate that were later retired during the Tk cleanup
 - current supported Record/Replay UI validation is the Tk shell plus
-   session/controller tests under `services/rs_gui_v2/test/`
+   session/controller tests under `services/rs_gui/test/`
 
-- `services/rs_gui_v2/gui/tabs/record_controller.py` - source model for runtime-backed controller behavior.
-- `services/rs_gui_v2/gui/tabs/record_tab.py` - source model for candidate/action rows, command history, monitoring summary, launch view model, and action enablement.
-- `services/rs_gui_v2/gui/tabs/replay_controller.py` - replace fake-first Replay state mutation with runtime-backed behavior.
-- `services/rs_gui_v2/gui/tabs/replay_tab.py` - extend Replay view models and command factories.
+- `services/rs_gui/gui/tabs/record_controller.py` - source model for runtime-backed controller behavior.
+- `services/rs_gui/gui/tabs/record_tab.py` - source model for candidate/action rows, command history, monitoring summary, launch view model, and action enablement.
+- `services/rs_gui/gui/tabs/replay_controller.py` - replace fake-first Replay state mutation with runtime-backed behavior.
+- `services/rs_gui/gui/tabs/replay_tab.py` - extend Replay view models and command factories.
 - Tk Replay UI modules and the retained session/controller layer - add launch controls and richer details to the Replay tab UI.
-- `services/rs_gui_v2/gui/session.py` - route launch/control commands, publish Replay process and monitoring events, and close Replay processes.
-- `services/rs_gui_v2/gui/factory.py` - wire Replay controller with `ServiceProcessManager`, `ServiceAdminFacade`, and `ServiceMonitoringFacade`.
-- `services/rs_gui_v2/app_core/services/processes.py` - already supports `ServiceKind.REPLAY` executable selection and `-appName`/admin/monitoring args.
-- `services/rs_gui_v2/app_core/services/rti_admin.py` - needs Replay resource path support for Service Admin commands.
-- `services/rs_gui_v2/app_core/services/rti_monitoring.py` - needs Replay resource normalization.
-- `services/replay_service_config.xml` - current Replay Service XML, likely needs variable-driven administration/monitoring sections.
+- `services/rs_gui/gui/session.py` - route launch/control commands, publish Replay process and monitoring events, and close Replay processes.
+- `services/rs_gui/gui/factory.py` - wire Replay controller with `ServiceProcessManager`, `ServiceAdminFacade`, and `ServiceMonitoringFacade`.
+- `services/rs_gui/app_core/services/processes.py` - already supports `ServiceKind.REPLAY` executable selection and `-appName`/admin/monitoring args.
+- `services/rs_gui/app_core/services/rti_admin.py` - needs Replay resource path support for Service Admin commands.
+- `services/rs_gui/app_core/services/rti_monitoring.py` - needs Replay resource normalization.
+- `dds/qos/replay_service_config.xml` - current Replay Service XML, likely needs variable-driven administration/monitoring sections.
 
 ## Phase 1 - Replay Launch Model
 
@@ -103,7 +103,7 @@ Historical note:
    - launching a Replay Service process
    - starting/resuming playback on a selected Replay Service
 
-4. Update `services/replay_service_config.xml` or add a GUI-specific Replay template.
+4. Update `dds/qos/replay_service_config.xml` or add a GUI-specific Replay template.
 
    Preferred: introduce a variable-driven template parallel to `dds/qos/recording_service.xml` with variables such as:
    - `REPLAY_DOMAIN_ID`
@@ -354,7 +354,7 @@ Live/manual gates:
 - Confirm whether Replay Service supports the same entity-state values and CDR body encoding used by Recording Service pause/resume.
 - Confirm Replay Service monitoring resource discriminator values in `RTI::Service::Monitoring::*` DynamicData samples.
 - Confirm whether Replay Service monitoring exposes playback progress, current replay timestamp, sample counts, or database path.
-- Decide whether Replay launch should reuse `services/replay_service_config.xml` or add a dedicated GUI variable-driven Replay XML under `dds/qos/`.
+- Decide whether Replay launch should reuse `dds/qos/replay_service_config.xml` or add a dedicated GUI variable-driven Replay XML under `dds/qos/`.
 - Decide whether Replay Service should run until shutdown by default or exit naturally when playback completes. The GUI must represent both clean exit and active service states accurately.
 
 ## Suggested Implementation Order
@@ -394,8 +394,8 @@ Dependencies: None.
 
 Allowed files:
 
-- `services/rs_gui_v2/gui/tabs/replay_tab.py`
-- `services/rs_gui_v2/test/test_gui_replay_controller.py`
+- `services/rs_gui/gui/tabs/replay_tab.py`
+- `services/rs_gui/test/test_gui_replay_controller.py`
 - session-backed Replay UI tests current for the active frontend
 
 Implementation notes:
@@ -413,7 +413,7 @@ Acceptance criteria:
 Validation:
 
 ```bash
-cd services/rs_gui_v2/test
+cd services/rs_gui/test
 python3 -m unittest test_gui_replay_controller
 ```
 
@@ -447,7 +447,7 @@ Acceptance criteria:
 Validation:
 
 ```bash
-cd services/rs_gui_v2
+cd services/rs_gui
 ../../connext_dds_env/bin/python test/test_tk_replay_tab.py
 ```
 
@@ -463,9 +463,9 @@ Dependencies: Slice 01.
 
 Allowed files:
 
-- `services/rs_gui_v2/gui/tabs/replay_controller.py`
-- `services/rs_gui_v2/test/test_gui_replay_controller.py`
-- `services/rs_gui_v2/test/fakes.py` only if existing fakes need small extensions
+- `services/rs_gui/gui/tabs/replay_controller.py`
+- `services/rs_gui/test/test_gui_replay_controller.py`
+- `services/rs_gui/test/fakes.py` only if existing fakes need small extensions
 
 Implementation notes:
 
@@ -484,7 +484,7 @@ Acceptance criteria:
 Validation:
 
 ```bash
-cd services/rs_gui_v2/test
+cd services/rs_gui/test
 python3 -m unittest test_gui_replay_controller
 ```
 
@@ -500,8 +500,8 @@ Dependencies: Slice 03.
 
 Allowed files:
 
-- `services/rs_gui_v2/gui/session.py`
-- `services/rs_gui_v2/test/test_gui_session.py`
+- `services/rs_gui/gui/session.py`
+- `services/rs_gui/test/test_gui_session.py`
 
 Implementation notes:
 
@@ -517,7 +517,7 @@ Acceptance criteria:
 Validation:
 
 ```bash
-cd services/rs_gui_v2/test
+cd services/rs_gui/test
 python3 -m unittest test_gui_session
 ```
 
@@ -533,9 +533,9 @@ Dependencies: Slices 03 and 04.
 
 Allowed files:
 
-- `services/rs_gui_v2/gui/factory.py`
-- `services/rs_gui_v2/test/test_gui_factory.py`
-- `services/rs_gui_v2/test/test_gui_session.py`
+- `services/rs_gui/gui/factory.py`
+- `services/rs_gui/test/test_gui_factory.py`
+- `services/rs_gui/test/test_gui_session.py`
 
 Implementation notes:
 
@@ -551,7 +551,7 @@ Acceptance criteria:
 Validation:
 
 ```bash
-cd services/rs_gui_v2/test
+cd services/rs_gui/test
 python3 -m unittest test_gui_factory test_gui_session
 ```
 
@@ -567,10 +567,10 @@ Dependencies: Slices 03-05.
 
 Allowed files:
 
-- `services/rs_gui_v2/gui/tabs/replay_controller.py`
-- `services/rs_gui_v2/gui/tabs/replay_tab.py`
-- `services/rs_gui_v2/test/test_gui_replay_controller.py`
-- `services/rs_gui_v2/test/test_gui_session.py`
+- `services/rs_gui/gui/tabs/replay_controller.py`
+- `services/rs_gui/gui/tabs/replay_tab.py`
+- `services/rs_gui/test/test_gui_replay_controller.py`
+- `services/rs_gui/test/test_gui_session.py`
 
 Implementation notes:
 
@@ -588,7 +588,7 @@ Acceptance criteria:
 Validation:
 
 ```bash
-cd services/rs_gui_v2/test
+cd services/rs_gui/test
 python3 -m unittest test_gui_replay_controller test_gui_session
 ```
 
@@ -604,9 +604,9 @@ Dependencies: Slice 06.
 
 Allowed files:
 
-- `services/rs_gui_v2/gui/session.py`
-- `services/rs_gui_v2/gui/tabs/replay_controller.py`
-- `services/rs_gui_v2/test/test_gui_session.py`
+- `services/rs_gui/gui/session.py`
+- `services/rs_gui/gui/tabs/replay_controller.py`
+- `services/rs_gui/test/test_gui_session.py`
 
 Implementation notes:
 
@@ -623,7 +623,7 @@ Acceptance criteria:
 Validation:
 
 ```bash
-cd services/rs_gui_v2/test
+cd services/rs_gui/test
 python3 -m unittest test_gui_session test_gui_replay_controller
 ```
 
@@ -656,7 +656,7 @@ Acceptance criteria:
 Validation:
 
 ```bash
-cd services/rs_gui_v2/test
+cd services/rs_gui/test
 ../../../connext_dds_env/bin/python -m unittest -v test_gui_session.TestGuiShellSessionBridge.test_session_close_cleanup_shuts_down_gui_launched_items
 ```
 
@@ -672,8 +672,8 @@ Dependencies: Slices 07 and 08.
 
 Allowed files:
 
-- `services/rs_gui_v2/gui/session.py`
-- `services/rs_gui_v2/test/test_gui_session.py`
+- `services/rs_gui/gui/session.py`
+- `services/rs_gui/test/test_gui_session.py`
 
 Implementation notes:
 
@@ -691,7 +691,7 @@ Acceptance criteria:
 Validation:
 
 ```bash
-cd services/rs_gui_v2/test
+cd services/rs_gui/test
 python3 -m unittest test_gui_session
 ```
 
@@ -699,7 +699,7 @@ python3 -m unittest test_gui_session
 
 Status: `done`
 
-Evidence: `services/replay_service_config.xml` now declares Replay admin/monitoring and variable-driven domain, storage, playback, and topic settings for both `xcdr` and `json`; `ReplayTabController.launch_replay()` emits config-specific storage variables consumed by the XML; `test_gui_replay_controller` verifies XML variable consumption and managed launch arguments.
+Evidence: `dds/qos/replay_service_config.xml` now declares Replay admin/monitoring and variable-driven domain, storage, playback, and topic settings for both `xcdr` and `json`; `ReplayTabController.launch_replay()` emits config-specific storage variables consumed by the XML; `test_gui_replay_controller` verifies XML variable consumption and managed launch arguments.
 
 Goal: Make Replay launch command variables meaningful by adding administration/monitoring and variable-driven replay settings to XML.
 
@@ -707,8 +707,8 @@ Dependencies: Slices 03-05.
 
 Allowed files:
 
-- `services/replay_service_config.xml` or a new dedicated GUI Replay XML under `dds/qos/`
-- `services/rs_gui_v2/gui/tabs/replay_controller.py` if variable names need alignment
+- `dds/qos/replay_service_config.xml` or a new dedicated GUI Replay XML under `dds/qos/`
+- `services/rs_gui/gui/tabs/replay_controller.py` if variable names need alignment
 - relevant tests that assert command args
 
 Implementation notes:
@@ -729,9 +729,9 @@ Validation:
 ```bash
 python3 - <<'PY'
 import xml.etree.ElementTree as ET
-ET.parse('services/replay_service_config.xml')
+ET.parse('dds/qos/replay_service_config.xml')
 PY
-cd services/rs_gui_v2/test
+cd services/rs_gui/test
 python3 -m unittest test_gui_replay_controller
 ```
 
@@ -747,10 +747,10 @@ Dependencies: Slices 06-09 and Slice 10 if live XML needs admin enabled.
 
 Allowed files:
 
-- `services/rs_gui_v2/app_core/services/rti_admin.py`
-- `services/rs_gui_v2/gui/tabs/replay_controller.py`
-- `services/rs_gui_v2/test/test_service_control.py` or admin-specific tests
-- `services/rs_gui_v2/test/test_gui_replay_controller.py`
+- `services/rs_gui/app_core/services/rti_admin.py`
+- `services/rs_gui/gui/tabs/replay_controller.py`
+- `services/rs_gui/test/test_service_control.py` or admin-specific tests
+- `services/rs_gui/test/test_gui_replay_controller.py`
 
 Implementation notes:
 
@@ -768,7 +768,7 @@ Acceptance criteria:
 Validation:
 
 ```bash
-cd services/rs_gui_v2/test
+cd services/rs_gui/test
 python3 -m unittest test_gui_replay_controller test_service_control
 ```
 
@@ -776,7 +776,7 @@ python3 -m unittest test_gui_replay_controller test_service_control
 
 Status: `done`
 
-Evidence: Live Replay Service 7.7.0 monitoring capture saved under ignored workspace output `test_output/rs_gui_v2/replay_monitoring_spike.json` using `rtireplayservice -cfgName xcdr -appName rs_gui_v2_replay_spike` on monitoring domain 463. Replay monitoring reuses the Recording Service monitoring union discriminators and branch names: service `20000` with `recording_service`, session `20001` with `recording_session`, topic group `20002` with `recording_topic_group`, and topic `20003` with `recording_topic`. Replay-specific identity appears in `resource_id` values such as `/replay_services/xcdr`, `/replay_services/xcdr/sessions/DefaultSession`, and `/replay_services/xcdr/sessions/DefaultSession/topics/DefaultTopicGroup@Square`. Service config includes `application_name`, `application_guid`, `host`, `process.id`, and `builtin_sqlite.db_directory`; periodic service samples include process/host metrics under the same `recording_service` branch.
+Evidence: Live Replay Service 7.7.0 monitoring capture saved under ignored workspace output `test_output/rs_gui/replay_monitoring_spike.json` using `rtireplayservice -cfgName xcdr -appName rs_gui_replay_spike` on monitoring domain 463. Replay monitoring reuses the Recording Service monitoring union discriminators and branch names: service `20000` with `recording_service`, session `20001` with `recording_session`, topic group `20002` with `recording_topic_group`, and topic `20003` with `recording_topic`. Replay-specific identity appears in `resource_id` values such as `/replay_services/xcdr`, `/replay_services/xcdr/sessions/DefaultSession`, and `/replay_services/xcdr/sessions/DefaultSession/topics/DefaultTopicGroup@Square`. Service config includes `application_name`, `application_guid`, `host`, `process.id`, and `builtin_sqlite.db_directory`; periodic service samples include process/host metrics under the same `recording_service` branch.
 
 Goal: Identify and document Replay Service monitoring resource discriminators and fields before changing normalization.
 
@@ -784,7 +784,7 @@ Dependencies: Slice 10, plus a local RTI installation capable of running Replay 
 
 Allowed files:
 
-- `services/rs_gui_v2/REPLAY_SERVICE_RUNTIME_PLAN.md`
+- `services/rs_gui/REPLAY_SERVICE_RUNTIME_PLAN.md`
 - `test_output/` evidence files only if needed and kept ignored
 - optional temporary local scripts only under `test_output/` if needed
 
@@ -816,10 +816,10 @@ Dependencies: Slice 12.
 
 Allowed files:
 
-- `services/rs_gui_v2/app_core/services/rti_monitoring.py`
-- `services/rs_gui_v2/gui/tabs/replay_controller.py`
-- `services/rs_gui_v2/test/test_rti_monitoring_adapter.py`
-- `services/rs_gui_v2/test/test_gui_replay_controller.py`
+- `services/rs_gui/app_core/services/rti_monitoring.py`
+- `services/rs_gui/gui/tabs/replay_controller.py`
+- `services/rs_gui/test/test_rti_monitoring_adapter.py`
+- `services/rs_gui/test/test_gui_replay_controller.py`
 
 Implementation notes:
 
@@ -837,7 +837,7 @@ Acceptance criteria:
 Validation:
 
 ```bash
-cd services/rs_gui_v2/test
+cd services/rs_gui/test
 python3 -m unittest test_rti_monitoring_adapter test_gui_replay_controller
 ```
 
@@ -845,7 +845,7 @@ python3 -m unittest test_rti_monitoring_adapter test_gui_replay_controller
 
 Status: `done`
 
-Evidence: Replay playback actions now route through Service Admin when an admin facade is available, using `ServiceCommand.CUSTOM` with explicit `/replay_services/<resource>/state` updates and `EntityStateKind` values derived from the installed `ServiceCommon.idl` (`STOPPED=4`, `RUNNING=5`, `PAUSED=6`). The final implementation fixes the payload encoding bug by serializing `RTI::Service::EntityState` as a proper CDR body inside `RtiServiceAdminClient` for custom Replay state updates rather than sending raw octets. `ReplayTabController` preserves mock/local state transitions when no admin facade is wired, and resolves monitoring-only Replay targets into synthetic admin candidates so playback controls are not limited to GUI-owned process rows. Focused tests cover Replay controller start/pause/resume/stop admin dispatch and RTI admin adapter encoding for Replay state-resource updates. Live/manual gate passed in [test_output/rs_gui_v2/replay_live_gate_1780523094_42353.json](/home/rti/CAT/connext_starter_kit/test_output/rs_gui_v2/replay_live_gate_1780523094_42353.json): Replay acknowledged `pause`, `resume`, and `shutdown`, and exited with return code `0`.
+Evidence: Replay playback actions now route through Service Admin when an admin facade is available, using `ServiceCommand.CUSTOM` with explicit `/replay_services/<resource>/state` updates and `EntityStateKind` values derived from the installed `ServiceCommon.idl` (`STOPPED=4`, `RUNNING=5`, `PAUSED=6`). The final implementation fixes the payload encoding bug by serializing `RTI::Service::EntityState` as a proper CDR body inside `RtiServiceAdminClient` for custom Replay state updates rather than sending raw octets. `ReplayTabController` preserves mock/local state transitions when no admin facade is wired, and resolves monitoring-only Replay targets into synthetic admin candidates so playback controls are not limited to GUI-owned process rows. Focused tests cover Replay controller start/pause/resume/stop admin dispatch and RTI admin adapter encoding for Replay state-resource updates. Live/manual gate passed in [test_output/rs_gui/replay_live_gate_1780523094_42353.json](/home/rti/CAT/connext_starter_kit/test_output/rs_gui/replay_live_gate_1780523094_42353.json): Replay acknowledged `pause`, `resume`, and `shutdown`, and exited with return code `0`.
 
 Goal: Implement start, pause, resume, and stop only after admin resources are verified.
 
@@ -853,10 +853,10 @@ Dependencies: Slice 11 plus confirmed RTI Replay Service admin resource/action b
 
 Allowed files:
 
-- `services/rs_gui_v2/app_core/services/models.py`
-- `services/rs_gui_v2/app_core/services/rti_admin.py`
-- `services/rs_gui_v2/gui/tabs/replay_controller.py`
-- `services/rs_gui_v2/gui/tabs/replay_tab.py`
+- `services/rs_gui/app_core/services/models.py`
+- `services/rs_gui/app_core/services/rti_admin.py`
+- `services/rs_gui/gui/tabs/replay_controller.py`
+- `services/rs_gui/gui/tabs/replay_tab.py`
 - relevant tests
 
 Implementation notes:
@@ -874,7 +874,7 @@ Acceptance criteria:
 Validation:
 
 ```bash
-cd services/rs_gui_v2/test
+cd services/rs_gui/test
 python3 -m unittest test_gui_replay_controller test_service_control test_gui_session
 ```
 
@@ -882,7 +882,7 @@ python3 -m unittest test_gui_replay_controller test_service_control test_gui_ses
 
 Status: `done`
 
-Evidence: An explicit Replay churn gate existed during the pre-Tk phase and validated that Replay launched through `GuiShellSession`, produced monitoring evidence, and exited without leaving an orphan `rtireplayservice` process. That dedicated gate was later retired during Tk cleanup; the supported path now relies on the focused session and Tk validation suite documented in `services/rs_gui_v2/test/README.md`.
+Evidence: An explicit Replay churn gate existed during the pre-Tk phase and validated that Replay launched through `GuiShellSession`, produced monitoring evidence, and exited without leaving an orphan `rtireplayservice` process. That dedicated gate was later retired during Tk cleanup; the supported path now relies on the focused session and Tk validation suite documented in `services/rs_gui/test/README.md`.
 
 Goal: Add an explicit live/manual validation gate for launching and shutting down Replay Service from the GUI controller/session path.
 
@@ -890,9 +890,9 @@ Dependencies: Slices 09-11, optionally Slice 13 for monitoring assertions.
 
 Allowed files:
 
-- `services/rs_gui_v2/test/service_churn.py` or a new Replay-specific explicit test script
-- `services/rs_gui_v2/test/README.md`
-- `services/rs_gui_v2/REPLAY_SERVICE_RUNTIME_PLAN.md`
+- `services/rs_gui/test/service_churn.py` or a new Replay-specific explicit test script
+- `services/rs_gui/test/README.md`
+- `services/rs_gui/REPLAY_SERVICE_RUNTIME_PLAN.md`
 
 Implementation notes:
 
@@ -914,7 +914,7 @@ Manual/live validation required.
 
 Status: `done`
 
-Evidence: Updated operator-facing Replay documentation in `services/rs_gui_v2/README.md` with Replay launch defaults and close behavior. Added troubleshooting guidance in `services/rs_gui_v2/TROUBLESHOOTING.md` for invalid replay database paths, missing admin readiness, missing monitoring evidence, and per-process service logs. The older dedicated Replay churn gate was later retired during Tk cleanup, and the plan now reflects the supported Tk/session validation path.
+Evidence: Updated operator-facing Replay documentation in `services/rs_gui/README.md` with Replay launch defaults and close behavior. Added troubleshooting guidance in `services/rs_gui/TROUBLESHOOTING.md` for invalid replay database paths, missing admin readiness, missing monitoring evidence, and per-process service logs. The older dedicated Replay churn gate was later retired during Tk cleanup, and the plan now reflects the supported Tk/session validation path.
 
 Goal: Update docs and mark implementation status after code slices land.
 
@@ -922,10 +922,10 @@ Dependencies: Any completed implementation slices.
 
 Allowed files:
 
-- `services/rs_gui_v2/REPLAY_SERVICE_RUNTIME_PLAN.md`
-- `services/rs_gui_v2/README.md`
-- `services/rs_gui_v2/TROUBLESHOOTING.md`
-- `services/rs_gui_v2/test/README.md`
+- `services/rs_gui/REPLAY_SERVICE_RUNTIME_PLAN.md`
+- `services/rs_gui/README.md`
+- `services/rs_gui/TROUBLESHOOTING.md`
+- `services/rs_gui/test/README.md`
 
 Implementation notes:
 

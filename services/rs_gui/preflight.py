@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Startup diagnostics for rs_gui_v2 launcher hardening."""
+"""Startup diagnostics for rs_gui launcher hardening."""
 
 from __future__ import annotations
 
@@ -72,7 +72,7 @@ class Preflight:
             return str(exc)
 
     def run(self) -> int:
-        self._record("INFO", "START", "Running rs_gui_v2 startup diagnostics")
+        self._record("INFO", "START", "Running rs_gui startup diagnostics")
 
         nddshome = detect_nddshome()
         if nddshome:
@@ -135,7 +135,7 @@ class Preflight:
             self._record_connext(
                 "XML_DIR_MISSING",
                 f"XML types directory missing: {self.xml_dir}",
-                "Run services/rs_gui_v2/setup.sh to generate XML DynamicData types.",
+                "Run services/rs_gui/setup.sh to generate XML DynamicData types.",
             )
             return
 
@@ -147,7 +147,7 @@ class Preflight:
             self._record_connext(
                 "XML_FILES_MISSING",
                 "One or more required XML type files are missing.",
-                f"Missing: {', '.join(missing)}. Run services/rs_gui_v2/setup.sh.",
+                f"Missing: {', '.join(missing)}. Run services/rs_gui/setup.sh.",
             )
         else:
             self._record("INFO", "XML_FILES", "Required XML type files are present")
@@ -187,7 +187,7 @@ class Preflight:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="rs_gui_v2 startup diagnostics")
+    parser = argparse.ArgumentParser(description="rs_gui startup diagnostics")
     parser.add_argument(
         "--require-connext",
         action="store_true",

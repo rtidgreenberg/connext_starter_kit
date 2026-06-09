@@ -1,22 +1,32 @@
 #!/bin/bash
-# Run script for rti_view.
-# Handles environment setup and executes the Dear PyGui application.
+# Launcher for rs_gui.
+# - Defaults to GUI mode
+# - Ensures repo virtualenv Python exists
+# - Synchronizes Python packages from requirements.txt
+# - Auto-detects RTI license file
+# - Optional DDS XML type preparation via setup.sh
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 VENV_DIR="$REPO_ROOT/connext_dds_env"
-VENV_PYTHON="$VENV_DIR/bin/python"
+VENV_PYTHON="$REPO_ROOT/connext_dds_env/bin/python"
 REQUIRED_PYTHON_BIN="python3.10"
 REQUIRED_PYTHON_VERSION="3.10"
 REQUIREMENTS_FILE="$SCRIPT_DIR/requirements.txt"
+APP_ENTRY="$SCRIPT_DIR/rs_gui_app.py"
+PREFLIGHT_ENTRY="$SCRIPT_DIR/preflight.py"
+PREPARE_DDS=false
+SKIP_DIAGNOSTICS=false
+DIAGNOSTICS_ONLY=false
+REQUIRE_CONNEXT_DIAGNOSTICS=false
 STEP_COUNTER=0
 
 log_step() {
     STEP_COUNTER=$((STEP_COUNTER + 1))
     echo
-    echo "[rti_view][step ${STEP_COUNTER}] $*"
+    echo "[rs_gui][step ${STEP_COUNTER}] $*"
 }
 
 find_required_python() {
@@ -95,8 +105,8 @@ ensure_venv() {
     fi
 }
 
-ensure_rti_view_deps() {
-    log_step "Checking rti_view Python dependencies"
+ensure_connext_python() {
+    log_step "Checking RTI Python package installation"
     local py_mm
     py_mm="$($VENV_PYTHON - <<'PY'
 import sys
@@ -116,28 +126,11 @@ PY
     set +e
     "$VENV_PYTHON" - <<'PY'
 import sys
-import traceback
 
-
-def require_import(module_name, package_label):
-    try:
-        __import__(module_name)
-    except Exception as exc:
-        print(f"ERROR: Failed to import {package_label}: {exc}", file=sys.stderr)
-        if package_label == "Dear PyGui" and "GLIBCXX_" in str(exc):
-            print(
-                "ERROR: The installed Dear PyGui wheel requires a newer libstdc++ runtime than this host provides.",
-                file=sys.stderr,
-            )
-            print(
-                "ERROR: Upgrade the system libstdc++/compiler runtime or install a Dear PyGui wheel compatible with this host.",
-                file=sys.stderr,
-            )
-        traceback.print_exc()
-        sys.exit(1)
-
-require_import("rti.connextdds", "RTI Connext DDS Python API")
-require_import("dearpygui.dearpygui", "Dear PyGui")
+try:
+    import rti.connextdds  # noqa: F401
+except Exception:
+    sys.exit(1)
 
 sys.exit(0)
 PY
@@ -145,7 +138,7 @@ PY
     set -e
 
     if [[ $status -ne 0 ]]; then
-        echo "ERROR: Installed dependencies do not satisfy launcher requirements. See the import error above for details."
+        echo "ERROR: Installed dependencies do not satisfy launcher requirements."
         return 1
     fi
 }
@@ -193,31 +186,137 @@ resolve_license_file() {
     return 1
 }
 
-echo "=== rti_view ==="
-echo
+usage() {
+    cat <<'EOF'
+Usage: ./run_rs_gui.sh [launcher-options] [app-mode]
+
+Launcher options:
+    --prepare-dds        Run setup.sh before launch and require Connext checks
+    --diagnostics-only   Run startup diagnostics, then exit
+    --skip-diagnostics   Launch without startup diagnostics
+    --debug              Keep debug logging enabled explicitly (default)
+    --no-debug           Disable debug logging for this run
+
+App modes:
+    --gui                Launch the Tk Record/Replay shell (default)
+    --mock-gui           Launch the Tk shell with explicit mock/demo data
+    --mock-gui-check     Build mock GUI session-backed data, then exit
+    --headless-check     Start and stop app core only, then exit
+
+Examples:
+./run_rs_gui.sh
+./run_rs_gui.sh --mock-gui
+./run_rs_gui.sh --mock-gui-check
+./run_rs_gui.sh --headless-check
+./run_rs_gui.sh --prepare-dds --gui
+./run_rs_gui.sh --debug --prepare-dds --gui
+./run_rs_gui.sh --no-debug --gui
+./run_rs_gui.sh --diagnostics-only --gui
+./run_rs_gui.sh --skip-diagnostics --gui
+EOF
+}
+
+APP_ARGS=()
+log_step "Parsing launcher arguments"
+for arg in "$@"; do
+    case "$arg" in
+        --prepare-dds)
+            PREPARE_DDS=true
+            ;;
+        --skip-diagnostics)
+            SKIP_DIAGNOSTICS=true
+            ;;
+        --diagnostics-only)
+            DIAGNOSTICS_ONLY=true
+            ;;
+        --debug)
+            export RS_GUI_DEBUG=1
+            ;;
+        --no-debug)
+            export RS_GUI_DEBUG=0
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            APP_ARGS+=("$arg")
+            ;;
+    esac
+done
+
+if [[ ${#APP_ARGS[@]} -eq 0 ]]; then
+    APP_ARGS=(--gui)
+fi
+
+ensure_venv
+ensure_connext_python
+
+export PYTHONNOUSERSITE=1
+export PATH="$(dirname "$VENV_PYTHON"):$PATH"
 
 log_step "Resolving NDDSHOME"
 if ! DETECTED_NDDSHOME="$(find_nddshome)"; then
     echo "ERROR: NDDSHOME is not set and no RTI Connext installation was found."
-    echo "Install RTI Connext 7.7 and/or set NDDSHOME before launching rti_view."
+    echo "Install RTI Connext 7.7 and/or set NDDSHOME before launching rs_gui."
     exit 1
 fi
 export NDDSHOME="$DETECTED_NDDSHOME"
-echo "NDDSHOME: $NDDSHOME"
-
-ensure_venv
-
-source "$VENV_DIR/bin/activate" 2>/dev/null || true
-export PATH="$VENV_DIR/bin:$PATH"
-export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
-echo "Using Python interpreter: $VENV_PYTHON"
-
-ensure_rti_view_deps
+echo "Using NDDSHOME: $NDDSHOME"
 
 if ! resolve_license_file; then
     exit 1
 fi
 
-log_step "Launching rti_view"
-echo "Starting rti_view..."
-python -m rti_view "$@"
+# Work around VMware SVGA / Mesa driver issues that can cause GLFW segfaults
+# when the hardware GL context fails to initialize properly.
+if [[ -z "${LIBGL_ALWAYS_SOFTWARE:-}" ]]; then
+    if lspci 2>/dev/null | grep -qi "VMware SVGA"; then
+        export LIBGL_ALWAYS_SOFTWARE=1
+    fi
+fi
+
+if [[ "$PREPARE_DDS" == true ]]; then
+    log_step "Preparing DDS XML type artifacts"
+    echo "Preparing DDS XML types using setup.sh..."
+    bash "$SCRIPT_DIR/setup.sh"
+    REQUIRE_CONNEXT_DIAGNOSTICS=true
+
+    # Validate generated types metadata against the active NDDSHOME.
+    if ! (cd "$SCRIPT_DIR" && "$VENV_PYTHON" - <<'PY'
+import os
+from app_core.connext_environment import detect_nddshome, validate_generated_types
+
+xml_dir = os.path.join(os.getcwd(), "xml_types")
+validate_generated_types(xml_dir, detect_nddshome())
+print("DDS XML type metadata OK")
+PY
+    ); then
+        echo "ERROR: Generated XML types validation failed. Rerun services/rs_gui/setup.sh."
+        exit 1
+    fi
+fi
+
+if [[ "$SKIP_DIAGNOSTICS" != true ]]; then
+    log_step "Running startup diagnostics"
+    PREFLIGHT_ARGS=()
+    if [[ "$REQUIRE_CONNEXT_DIAGNOSTICS" == true ]]; then
+        PREFLIGHT_ARGS+=(--require-connext)
+    fi
+    echo "Running startup diagnostics..."
+    if ! "$VENV_PYTHON" "$PREFLIGHT_ENTRY" "${PREFLIGHT_ARGS[@]}"; then
+        echo
+        echo "ERROR: Startup diagnostics failed."
+        echo "Use --skip-diagnostics to bypass checks temporarily."
+        exit 1
+    fi
+fi
+
+if [[ "$DIAGNOSTICS_ONLY" == true ]]; then
+    log_step "Diagnostics-only mode complete"
+    exit 0
+fi
+
+log_step "Launching rs_gui application"
+cd "$SCRIPT_DIR"
+exec "$VENV_PYTHON" "$APP_ENTRY" "${APP_ARGS[@]}"

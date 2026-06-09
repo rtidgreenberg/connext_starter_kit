@@ -27,8 +27,13 @@ Architecture and planning references:
 ## Prerequisites
 
 - RTI Connext DDS 7.7 LTS installation available (preferred by setup tooling and GUI launcher)
-- Repository Python virtual environment at `connext_dds_env/`
+- Python 3.10 available as `python3.10`
 - Tkinter available in that environment for the Tk migration scaffold
+
+The launcher manages the shared repository virtual environment at
+`connext_dds_env/`. If it is missing or was created with a different Python
+minor version, `run_rs_gui.sh` rebuilds it with Python 3.10 and synchronizes
+packages from `services/rs_gui/requirements.txt`.
 
 ## One-Time Setup (DDS XML Types)
 
@@ -45,15 +50,15 @@ What `setup.sh` does:
 - Uses `rtiddsgen -convertToXML` on RTI service IDL files
 - Writes XML files into `xml_types/`
 - Writes `xml_types/.generated_from_nddshome` metadata to detect stale types
-- Installs rs_gui Python dependencies from `requirements.txt` using the
-  repository virtual environment (`connext_dds_env/bin/python`) when available
+- Installs rs_gui Python dependencies from `requirements.txt` using the shared
+  repository virtual environment when available
 
 Re-run `./setup.sh` whenever you switch Connext installations.
 
-For the supported default path, leave `NDDSHOME` unset and `run_gui.sh` will
-launch the GUI against `/home/rti/rti_connext_dds-7.7.0`. The same `NDDSHOME`
-is then used for `rtirecordingservice` and `rtireplayservice` when the GUI
-launches them.
+For the supported default path, leave `NDDSHOME` unset and `run_rs_gui.sh` will
+prefer `~/rti_connext_dds-7.7.0`, then fall back to the newest detected Connext
+installation. The same `NDDSHOME` is then used for `rtirecordingservice` and
+`rtireplayservice` when the GUI launches them.
 
 Skip Python dependency installation if needed:
 
@@ -61,25 +66,36 @@ Skip Python dependency installation if needed:
 ./setup.sh --skip-python-deps
 ```
 
-## Install GUI Dependency
+## Install GUI Dependencies
 
-The rs_gui `requirements.txt` pins the current non-stdlib GUI dependencies
-for this environment. Tkinter is provided by the Python runtime.
+The rs_gui `requirements.txt` is the source of truth for Python package pins,
+including `rti.connext==7.7.*`. Tkinter is provided by the Python runtime.
 
 ```bash
 cd /home/rti/CAT/connext_starter_kit
 ./connext_dds_env/bin/python -m pip install -r services/rs_gui/requirements.txt
 ```
 
+In normal use you do not need to run this manually; `run_rs_gui.sh` performs the
+same synchronization step before launch after ensuring the shared venv uses
+Python 3.10.
+
 ## Run
 
 From `services/rs_gui`:
 
 ```bash
-./run_gui.sh
+./run_rs_gui.sh
 ```
 
 This defaults to `--gui` mode, which now launches the Tk Record/Replay shell.
+
+What the launcher does before starting the app:
+
+- Creates or rebuilds `connext_dds_env/` with Python 3.10
+- Installs packages from `services/rs_gui/requirements.txt`
+- Detects `NDDSHOME` and `RTI_LICENSE_FILE`
+- Runs startup diagnostics unless `--skip-diagnostics` is provided
 
 Default GUI startup does not create mock/demo service candidates and does not
 launch Recording Service automatically. Use the Record tab launch controls to
@@ -89,13 +105,13 @@ Useful modes:
 
 ```bash
 # Start and stop app core only (no GUI)
-./run_gui.sh --headless-check
+./run_rs_gui.sh --headless-check
 
 # Build mock GUI session-backed data and exit
-./run_gui.sh --mock-gui-check
+./run_rs_gui.sh --mock-gui-check
 
 # Run the Tk shell with explicit mock/demo data
-./run_gui.sh --mock-gui
+./run_rs_gui.sh --mock-gui
 
 # Build the Tk session-backed Record/Replay shell and exit
 ../../connext_dds_env/bin/python rs_gui_app.py --tk-gui-check
@@ -104,16 +120,16 @@ Useful modes:
 ../../connext_dds_env/bin/python rs_gui_app.py --tk-gui
 
 # Prepare DDS XML types first, then launch
-./run_gui.sh --prepare-dds --gui
+./run_rs_gui.sh --prepare-dds --gui
 
 # Run startup diagnostics only
-./run_gui.sh --diagnostics-only --gui
+./run_rs_gui.sh --diagnostics-only --gui
 ```
 
 Diagnostics can be bypassed for temporary local debugging:
 
 ```bash
-./run_gui.sh --skip-diagnostics --gui
+./run_rs_gui.sh --skip-diagnostics --gui
 ```
 
 ## Direct Entrypoint
@@ -238,11 +254,11 @@ Useful options:
 
 ## Notes
 
-- `run_gui.sh --prepare-dds` uses `setup.sh` before launching.
-- `run_gui.sh --gui` launches the Tk Record/Replay shell and no longer depends
+- `run_rs_gui.sh --prepare-dds` uses `setup.sh` before launching.
+- `run_rs_gui.sh --gui` launches the Tk Record/Replay shell and no longer depends
   on the retired legacy renderer.
 - XML types are local generated artifacts in `xml_types/`.
-- `run_gui.sh` includes preflight startup diagnostics for environment,
+- `run_rs_gui.sh` includes preflight startup diagnostics for environment,
   dependencies, generated XML metadata, and RTI service executables.
 - Replay close cleanup may report local termination fallback when Service Admin
   endpoints are not ready; the important end-state is that the spawned process

@@ -1,1 +1,1 @@
-rti.connext==7.6.0
+rti.connext==7.7.*

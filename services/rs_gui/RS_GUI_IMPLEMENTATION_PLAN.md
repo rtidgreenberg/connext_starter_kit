@@ -897,7 +897,7 @@ Acceptance gates:
 
 Initial implementation status:
 
-- Added `run_gui.sh` launcher support for startup diagnostics, diagnostics-only
+- Added `run_rs_gui.sh` launcher support for startup diagnostics, diagnostics-only
   mode, and temporary diagnostics bypass.
 - Added `preflight.py` startup checks for `NDDSHOME` detection, RTI Python API
   importability, license discoverability, generated XML-type presence/stamp

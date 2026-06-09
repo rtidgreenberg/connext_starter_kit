@@ -185,7 +185,7 @@ cd services
 **Running**:
 ```bash
 cd services/rs_gui
-./run_gui.sh
+./run_rs_gui.sh
 ```
 
 See [rs_gui/README.md](rs_gui/README.md) for prerequisites, setup, and usage details.

@@ -444,7 +444,7 @@ Validation:
 Files to add/change:
 
 - `services/rs_gui/rs_gui_app.py`
-- `services/rs_gui/run_gui.sh`
+- `services/rs_gui/run_rs_gui.sh`
 - `services/rs_gui/README.md`
 - remove the legacy Record/Replay renderer files
 - `services/rs_gui/test/test_headless_entrypoint.py`

@@ -1,12 +1,12 @@
 # RS GUI v2 Troubleshooting
 
-This guide covers common startup issues detected by `run_gui.sh` diagnostics.
+This guide covers common startup issues detected by `run_rs_gui.sh` diagnostics.
 
 ## Run Diagnostics Only
 
 ```bash
 cd services/rs_gui
-./run_gui.sh --diagnostics-only --gui
+./run_rs_gui.sh --diagnostics-only --gui
 ```
 
 ## Common Issues
@@ -108,5 +108,5 @@ Useful checks:
 Use this only for short-term local debugging:
 
 ```bash
-./run_gui.sh --skip-diagnostics --gui
+./run_rs_gui.sh --skip-diagnostics --gui
 ```

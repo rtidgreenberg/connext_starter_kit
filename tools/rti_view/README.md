@@ -4,6 +4,31 @@
 
 V1 focuses on one domain, one writer topic, one DynamicData field, and one view at a time. It discovers writer topics from DDS builtin topics, enumerates fields from discovered DynamicTypes, and can render selected field values as message data or a live plot.
 
+## Quickstart
+
+From the repository root, run:
+
+```bash
+./tools/rti_view/run_rti_view.sh -d 0
+```
+
+The launcher performs the normal bootstrap work for you:
+
+- creates or rebuilds `connext_dds_env/` with Python 3.10 when needed
+- installs packages from `tools/rti_view/requirements.txt`
+- detects `NDDSHOME` and `RTI_LICENSE_FILE`
+- starts the viewer once the environment is ready
+
+If you already know the topic and field, you can launch directly into a
+subscription path:
+
+```bash
+./tools/rti_view/run_rti_view.sh -d 0 -t Telemetry -f position.x -m plot --history 30
+```
+
+Use the detailed sections below only when you need manual setup, development
+workflow notes, or compatibility details.
+
 ## Prerequisites
 
 - Python 3.10 available as `python3.10`

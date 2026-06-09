@@ -3,6 +3,24 @@
 rs_gui is the next-generation operator application for RTI infrastructure
 services. The supported Record/Replay UI is now Tkinter-based.
 
+## Quickstart
+
+From the repository root, run:
+
+```bash
+./services/rs_gui/run_rs_gui.sh
+```
+
+The launcher performs the normal bootstrap work for you:
+
+- creates or rebuilds `connext_dds_env/` with Python 3.10 when needed
+- installs packages from `services/rs_gui/requirements.txt`
+- detects `NDDSHOME` and `RTI_LICENSE_FILE`
+- runs startup diagnostics before launching the GUI
+
+Use the detailed sections below only when you need manual setup, troubleshooting,
+or alternate launch modes.
+
 This directory currently includes:
 
 - A runnable app entrypoint with modes for headless and GUI checks

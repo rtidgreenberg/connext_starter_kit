@@ -1,47 +1,67 @@
 # RTI Spy
 
-RTI Spy is a Python/Textual DDS monitoring tool for RTI Connext DDS applications.
-It uses builtin topics to discover participants, DataReaders, and DataWriters on a
-specified domain, then can subscribe to writer topics using DynamicData and matched QoS.
+`rti_spy` is a Python/Textual DDS monitoring tool for RTI Connext DDS. It
+discovers participants, readers, and writers through builtin topics and can
+subscribe to discovered writer topics using DynamicData.
 
-## Files
-
-- `rtispy.py` — application source
-- `run_rtispy.sh` — environment/bootstrap runner
-- `install.sh` — RTI Spy dependency installer
-- `requirements.txt` — RTI Spy Python package requirements
-
-## Usage
+## Quick Start
 
 From the repository root:
 
 ```bash
-./tools/rti_spy/run_rtispy.sh --domain 1
+./tools/rti_spy/run_rtispy.sh
 ```
 
-Options:
+If `--domain` is omitted and the launcher is running in an interactive terminal,
+`rti_spy` prompts for a DDS domain before opening the UI. Press Enter to use
+domain `1`. In non-interactive runs it falls back to domain `1`.
 
-- `--domain` / `-d` — DDS domain ID, default `1`
-- `--interval` / `-i` — refresh interval in seconds, default `10`
+## What the Launcher Does
 
-The runner:
+`run_rtispy.sh` uses the shared repository Python environment in
+`connext_dds_env/` and will:
 
-1. Detects `NDDSHOME` when it is not set.
-2. Validates `RTI_LICENSE_FILE` or `$NDDSHOME/rti_license.dat`.
-3. Uses the shared repository virtual environment at `connext_dds_env/`.
-4. Runs `tools/rti_spy/install.sh` if required dependencies are missing.
-5. Starts `rtispy.py` with the provided arguments.
+- detect `NDDSHOME`
+- detect `RTI_LICENSE_FILE`
+- create or rebuild the shared Python 3.10 virtual environment if needed
+- install packages from `tools/rti_spy/requirements.txt`
+- start `rtispy.py`
 
-Manual setup:
+## Requirements
+
+- Python 3.10 available as `python3.10`
+- RTI Connext DDS 7.7.x available locally
+- A valid RTI license file
+
+`tools/rti_spy/requirements.txt` currently pins `rti.connext==7.7.*` and the
+Textual UI dependencies.
+
+## CLI
+
+The app entrypoint accepts:
+
+```text
+-d, --domain      DDS domain ID
+-i, --interval    Refresh interval in seconds (default: 10)
+--debug-log       Optional log file for discovery/subscription events
+```
+
+Direct invocation:
 
 ```bash
-./tools/rti_spy/install.sh
+./connext_dds_env/bin/python tools/rti_spy/rtispy.py --domain 1
 ```
 
-## DDS Patterns Used
+## Testing
 
-- Builtin topic discovery via DCPSParticipant, DCPSPublication, and DCPSSubscription.
-- Runtime DynamicType capture from discovered endpoint data.
-- DynamicData topic and reader creation without generated code.
-- QoS matching from discovered writer QoS.
-- Optional Distributed Logger monitoring and command request/reply flows.
+Run the startup tests:
+
+```bash
+PYTHONPATH=tools/rti_spy ./connext_dds_env/bin/python -m unittest tools/rti_spy/test/test_startup_live.py
+```
+
+Run the discovery/subscription integration test:
+
+```bash
+PYTHONPATH=tools/rti_spy ./connext_dds_env/bin/python -m unittest tools/rti_spy/test/test_live_e2e_integration.py
+```

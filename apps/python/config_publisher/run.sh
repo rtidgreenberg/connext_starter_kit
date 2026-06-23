@@ -1,37 +1,20 @@
 #!/bin/bash
-# Run script for Config Publisher Application (Python)
-# Publishes an AppConfig sample once on startup using ParameterQoS
+# Run script for Config Publisher Application (Python).
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+source "$REPO_ROOT/scripts/python_env.sh"
 
 echo "=== Config Publisher (Python) ==="
 echo
-
-# --- NDDSHOME Auto-Detection ---
-if [ -z "$NDDSHOME" ]; then
-    LATEST_RTI=$(ls -d ~/rti_connext_dds-* 2>/dev/null | sort -V | tail -n 1)
-    if [ -n "$LATEST_RTI" ] && [ -d "$LATEST_RTI" ]; then
-        export NDDSHOME="$LATEST_RTI"
-        echo "Found RTI installation: $NDDSHOME"
-    else
-        echo "ERROR: NDDSHOME not set and no RTI installation found."
-        exit 1
-    fi
-fi
-
-# --- Virtual Environment ---
-VENV_DIR="$REPO_ROOT/connext_dds_env"
-if [ -d "$VENV_DIR" ]; then
-    source "$VENV_DIR/bin/activate"
-    echo "Activated virtual environment: $VENV_DIR"
-else
-    echo "WARNING: Virtual environment not found at $VENV_DIR"
-    echo "Run apps/python/install.sh first."
-    exit 1
-fi
+python_env_init "config_publisher" "$REPO_ROOT"
+python_env_resolve_nddshome
+python_env_ensure_venv
+python_env_activate_venv
+python_env_sync_requirements "$REPO_ROOT/apps/python/requirements.txt" "rti.connextdds:RTI Connext DDS Python API"
+python_env_resolve_license_file
 
 # --- Generate Python types if needed ---
 PYTHON_GEN_DIR="$REPO_ROOT/dds/datamodel/python_gen"
@@ -45,4 +28,4 @@ fi
 
 # --- Run ---
 echo "Starting config_publisher..."
-python3 "$SCRIPT_DIR/config_publisher.py" "$@"
+python "$SCRIPT_DIR/config_publisher.py" "$@"

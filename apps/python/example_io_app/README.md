@@ -18,6 +18,9 @@ Python implementation demonstrating minimal DDS middleware setup with RTI Connex
    ./run.sh --domain_id 1
    ```
 
+The launcher uses the shared repository virtual environment at `connext_dds_env/`
+and standardizes on Python 3.10, matching the other Python tools in this repo.
+
 ---
 
 ## Table of Contents

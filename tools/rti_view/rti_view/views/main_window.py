@@ -66,8 +66,22 @@ class ActiveSubscription:
 class RtiViewShell:
     """Minimal Dear PyGui shell with stable tags and command-copy behavior."""
 
-    def __init__(self, initial_domain: int = 0, dpg_module=None) -> None:
-        self._selection = UiSelection(domain_id=initial_domain)
+    def __init__(
+            self,
+            initial_domain: int = 0,
+            initial_topic: str = "",
+            initial_field: str = "",
+            initial_mode: str = "plot",
+            history_seconds: int = 30,
+            dpg_module=None,
+    ) -> None:
+        self._selection = UiSelection(
+            domain_id=initial_domain,
+            topic_name=initial_topic,
+            field_path=initial_field,
+            mode=initial_mode,
+            history_seconds=history_seconds,
+        )
         self._dpg = dpg_module
         self._participant = None
         self._participant_domain: Optional[int] = None
@@ -79,6 +93,8 @@ class RtiViewShell:
         self._subscription: Optional[ActiveSubscription] = None
         self._debug_lines: List[str] = []
         self._logged_topic_type_keys: Set[str] = set()
+        self._direct_target = bool(initial_topic and initial_field)
+        self._direct_target_failed = False
 
     @property
     def selection(self) -> UiSelection:
@@ -278,11 +294,21 @@ class RtiViewShell:
         participant_key = self._participant_labels.get(selected_process, "")
         topic_names = registry.topics_for_participant(participant_key) if participant_key else ()
         self._topic_endpoints = registry.writer_by_topic_for_participant(participant_key) if participant_key else {}
-        self._configure_list(dpg, TOPIC_LIST_TAG, topic_names, "Select a process")
+        topic_empty_label = "Select a process"
+        if not participant_key and self._direct_target:
+            direct_endpoint, _diagnostics = registry.select_writer_for_topic(self._selection.topic_name)
+            if direct_endpoint is not None:
+                self._topic_endpoints = {direct_endpoint.topic_name: direct_endpoint}
+                topic_names = (direct_endpoint.topic_name,)
+                topic_empty_label = "Waiting for requested writer topic"
+            else:
+                topic_names = ()
+                topic_empty_label = "Waiting for requested writer topic"
+        self._configure_list(dpg, TOPIC_LIST_TAG, topic_names, topic_empty_label)
 
         selected_topic = self._get_value(dpg, TOPIC_LIST_TAG)
         if selected_topic not in self._topic_endpoints:
-            selected_topic = ""
+            selected_topic = self._selection.topic_name if self._direct_target else ""
         endpoint = self._topic_endpoints.get(selected_topic)
         field_names, field_empty_label = self._field_state(selected_topic, endpoint)
         self._field_choices = field_names
@@ -290,13 +316,16 @@ class RtiViewShell:
         self._sync_field_tree(dpg, endpoint, field_names, field_empty_label)
         self._set_field_status_if_changed(dpg, selected_topic, field_names, field_empty_label)
 
-        field_path = self._selection.field_path if self._selection.field_path in field_names else ""
+        field_path = self._selection.field_path
+        if field_names and field_path not in field_names:
+            field_path = ""
         self._set_selection(dpg, replace(
             self._selection,
             process_label=selected_process if selected_process in self._participant_labels else "",
-            topic_name=selected_topic if selected_topic in self._topic_endpoints else "",
+            topic_name=selected_topic if selected_topic else self._selection.topic_name,
             field_path=field_path,
         ))
+        self._maybe_auto_subscribe_direct_view(dpg, endpoint, field_names)
 
     def _configure_list(self, dpg, tag: str, items: Tuple[str, ...], empty_label: str) -> None:
         item_values = list(items) if items else [empty_label]
@@ -546,6 +575,32 @@ class RtiViewShell:
             if lines:
                 set_value(MESSAGE_DATA_TAG, "\n".join(lines[:80]))
 
+    def _maybe_auto_subscribe_direct_view(
+            self,
+            dpg,
+            endpoint: Optional[DiscoveredEndpoint],
+            field_names: Tuple[str, ...],
+    ) -> None:
+        if not self._direct_target or self._direct_target_failed:
+            return
+        if endpoint is None or endpoint.topic_name != self._selection.topic_name:
+            return
+        if not field_names:
+            return
+        if self._selection.field_path not in field_names:
+            self._direct_target_failed = True
+            self._set_status(
+                dpg,
+                f"Field '{self._selection.field_path}' was not found in topic '{self._selection.topic_name}'",
+            )
+            return
+        if self._subscription is not None:
+            if self._subscription.endpoint.topic_name == endpoint.topic_name and self._subscription.field_path == self._selection.field_path:
+                self._direct_target = False
+                return
+        if self._subscribe_selected_field(dpg):
+            self._direct_target = False
+
     def _close_subscription(self) -> None:
         subscription = self._subscription
         self._subscription = None
@@ -663,6 +718,8 @@ class RtiViewShell:
             if callable(configure_item):
                 configure_item(MESSAGE_DATA_TAG, show=(mode != "plot"))
                 configure_item(PLOT_GROUP_TAG, show=(mode == "plot"))
+            if self._subscription is not None:
+                self._sync_subscription_view(dpg)
         return _callback
 
     def _copy_command_callback(self, dpg):
@@ -733,9 +790,21 @@ def _load_dearpygui():
         ) from exc
 
 
-def run_interactive(domain_id: int = 0) -> None:
+def run_interactive(
+        domain_id: int = 0,
+        topic_name: str = "",
+        field_path: str = "",
+        mode: str = "plot",
+        history_seconds: int = 30,
+) -> None:
     """Launch the Dear PyGui interactive application."""
-    RtiViewShell(initial_domain=domain_id).run()
+    RtiViewShell(
+        initial_domain=domain_id,
+        initial_topic=topic_name,
+        initial_field=field_path,
+        initial_mode=mode,
+        history_seconds=history_seconds,
+    ).run()
 
 
 def _field_tree(field_paths: Tuple[str, ...]) -> Dict[str, object]:

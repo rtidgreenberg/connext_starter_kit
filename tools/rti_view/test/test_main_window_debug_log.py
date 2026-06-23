@@ -13,7 +13,7 @@ TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 if TEST_DIR not in sys.path:
     sys.path.insert(0, TEST_DIR)
 
-from rti_view.discovery import DiscoveredEndpoint, registry
+from rti_view.discovery import DiscoveredEndpoint, DiscoveredParticipant, registry
 from rti_view.subscriber import ReaderSetupResult
 from rti_view.views.main_window import (
     DEBUG_LOG_TAG,
@@ -251,6 +251,86 @@ class TestMainWindowDebugLog(unittest.TestCase):
             self.assertTrue(shell._subscribe_selected_field(dpg))
 
         self.assertEqual(dpg.values[STATUS_TEXT_TAG], "Subscribed to Telemetry")
+
+    def test_mode_toggle_resyncs_existing_subscription_view(self):
+        dpg = FakeDpg()
+        shell = RtiViewShell(initial_domain=0, dpg_module=dpg)
+        shell._participant = object()
+        endpoint = DiscoveredEndpoint(
+            key="writer-a",
+            participant_key="participant-1",
+            topic_name="Telemetry",
+            type_name="TelemetryType",
+            dynamic_type=object(),
+            kind="Writer",
+        )
+        shell._topic_endpoints = {"Telemetry": endpoint}
+        shell._set_selection(dpg, shell.selection.__class__(
+            domain_id=0,
+            topic_name="Telemetry",
+            field_path="pose.position.x",
+            mode="plot",
+        ))
+        reader = FakeReader(((FakeSample({
+            "pose": FakeSample({"position": FakeSample({"x": 12})}),
+        }), FakeInfo(True)),))
+
+        with patch("rti_view.views.main_window.setup_matched_reader", return_value=ReaderSetupResult(
+                reader=reader,
+                subscriber=object(),
+        )):
+            shell._subscribe_selected_field(dpg)
+        shell._pump_subscription(dpg)
+
+        subscription = shell._subscription
+        shell._mode_callback(dpg)(app_data="Message Data")
+
+        self.assertIs(shell._subscription, subscription)
+        self.assertEqual(shell.selection.mode, "text")
+        self.assertIn("Telemetry.pose.position.x = 12", dpg.values[MESSAGE_DATA_TAG])
+
+    def test_direct_launch_target_auto_subscribes_without_process_selection(self):
+        dpg = FakeDpg()
+        shell = RtiViewShell(
+            initial_domain=5,
+            initial_topic="Telemetry",
+            initial_field="pose.position.x",
+            initial_mode="plot",
+            history_seconds=45,
+            dpg_module=dpg,
+        )
+        shell._participant = object()
+        registry.add_participant(DiscoveredParticipant(key="participant-1", name="TelemetryPublisher", ip="127.0.0.1"))
+        endpoint = DiscoveredEndpoint(
+            key="writer-a",
+            participant_key="participant-1",
+            topic_name="Telemetry",
+            type_name="TelemetryType",
+            dynamic_type=FakeDynamicType("STRUCTURE_TYPE", "TelemetryType", (
+                FakeMember("pose", FakeDynamicType("STRUCTURE_TYPE", members=(
+                    FakeMember("position", FakeDynamicType("STRUCTURE_TYPE", members=(
+                        FakeMember("x", FakeDynamicType("FLOAT_64_TYPE")),
+                    ))),
+                ))),
+            )),
+            kind="Writer",
+        )
+        registry.add_endpoint(endpoint)
+
+        with patch("rti_view.views.main_window.refresh_endpoints"), \
+             patch("rti_view.views.main_window.refresh_participants"), \
+             patch("rti_view.views.main_window.setup_matched_reader", return_value=ReaderSetupResult(
+                 reader=FakeReader(()),
+                 subscriber=object(),
+             )) as setup_reader:
+            shell._update_discovery_view(dpg, force=True)
+
+        setup_reader.assert_called_once_with(shell._participant, endpoint)
+        self.assertIsNotNone(shell._subscription)
+        self.assertEqual(shell.selection.topic_name, "Telemetry")
+        self.assertEqual(shell.selection.field_path, "pose.position.x")
+        self.assertEqual(shell.selection.mode, "plot")
+        self.assertIn("-m plot", shell.selection.startup_command())
 
     def test_unselected_subscription_populates_fields_from_sample_items(self):
         dpg = FakeDpg()

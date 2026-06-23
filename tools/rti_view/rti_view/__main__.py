@@ -32,21 +32,14 @@ def main():
         from . import debug_log
         debug_log.enable(args.debug)
 
-    if args.topic and args.field:
-        # Direct view mode: skip browsing screens and render the selected field.
-        from .subscriber import run_direct_view
-        run_direct_view(
-            domain_id=args.domain,
-            topic_name=args.topic,
-            field_path=args.field,
-            mode=args.mode,
-            history_seconds=args.history,
-            timeout=args.timeout,
-        )
-    else:
-        # Interactive mode: discover topics, let user select
-        from .views.main_window import run_interactive
-        run_interactive(domain_id=args.domain)
+    from .views.main_window import run_interactive
+    run_interactive(
+        domain_id=args.domain,
+        topic_name=args.topic or "",
+        field_path=args.field or "",
+        mode=args.mode,
+        history_seconds=args.history,
+    )
 
 
 if __name__ == "__main__":

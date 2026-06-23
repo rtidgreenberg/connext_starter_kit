@@ -1,3 +1,6 @@
+import glob
+import os
+import sys
 import rti.connextdds as dds
 import time
 import argparse
@@ -19,6 +22,165 @@ logging.basicConfig(
 # Global maps
 endpoints = {}
 participants = {}
+
+
+def configure_logging(debug_log_path=None):
+  """Attach an optional file handler for discovery/subscription diagnostics."""
+  if not debug_log_path:
+    return
+
+  root_logger = logging.getLogger()
+  normalized_path = os.path.abspath(debug_log_path)
+  for handler in root_logger.handlers:
+    if getattr(handler, "_rti_spy_log_path", None) == normalized_path:
+      return
+
+  os.makedirs(os.path.dirname(normalized_path), exist_ok=True)
+  file_handler = logging.FileHandler(normalized_path, encoding="utf-8")
+  file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+  file_handler._rti_spy_log_path = normalized_path
+  root_logger.addHandler(file_handler)
+
+
+def configure_rti_environment():
+  """Populate NDDSHOME and RTI_LICENSE_FILE when they are discoverable locally."""
+  ndds_home = os.environ.get("NDDSHOME", "")
+  if not ndds_home:
+    installs = sorted(glob.glob(os.path.expanduser("~/rti_connext_dds-*")))
+    if installs:
+      ndds_home = installs[-1]
+      os.environ["NDDSHOME"] = ndds_home
+
+  if not os.environ.get("RTI_LICENSE_FILE") and ndds_home:
+    license_path = os.path.join(ndds_home, "rti_license.dat")
+    if os.path.isfile(license_path):
+      os.environ["RTI_LICENSE_FILE"] = license_path
+
+
+def configure_type_lookup_qos(qos):
+  """Enable remote DynamicType discovery on Connext 7.7+ and earlier inline-type peers."""
+  try:
+    discovery_config = qos.discovery_config
+    discovery_config.enabled_builtin_channels = dds.DiscoveryConfigBuiltinChannelKindMask.ALL
+    discovery_config.endpoint_type_object_lb_serialization_threshold = -1
+    try:
+      discovery_config.request_types_filter = "*"
+    except AttributeError:
+      pass
+    return True
+  except Exception:
+    return False
+
+
+def merge_endpoint(existing, incoming):
+  if existing is None:
+    return incoming
+
+  return Endpoint(
+      key=incoming.key or existing.key,
+      topic_name=incoming.topic_name or existing.topic_name,
+      type_name=incoming.type_name or existing.type_name,
+      type=incoming.type or existing.type,
+      kind=incoming.kind or existing.kind,
+      p_ip=incoming.p_ip or existing.p_ip,
+      p_name=incoming.p_name or existing.p_name,
+      p_key=incoming.p_key or existing.p_key,
+      reliability=incoming.reliability or existing.reliability,
+      durability=incoming.durability or existing.durability,
+      deadline=incoming.deadline or existing.deadline,
+      ownership=incoming.ownership or existing.ownership,
+      presentation=incoming.presentation or existing.presentation,
+      partition=incoming.partition or existing.partition,
+  )
+
+
+def create_participant(domain_id, name="RTI SPY"):
+  """Create a participant with builtin publication/subscription listeners attached."""
+  participant_factory_qos = dds.DomainParticipantFactoryQos()
+  participant_factory_qos.entity_factory.autoenable_created_entities = False
+  dds.DomainParticipant.participant_factory_qos = participant_factory_qos
+
+  qos = dds.DomainParticipantQos()
+  qos.participant_name.name = name
+  configure_type_lookup_qos(qos)
+
+  try:
+    participant = dds.DomainParticipant(domain_id, qos=qos)
+    participant.publication_reader.set_listener(PublicationListener(), dds.StatusMask.DATA_AVAILABLE)
+    participant.subscription_reader.set_listener(SubscriptionListener(), dds.StatusMask.DATA_AVAILABLE)
+    participant.enable()
+  finally:
+    participant_factory_qos.entity_factory.autoenable_created_entities = True
+    dds.DomainParticipant.participant_factory_qos = participant_factory_qos
+  return participant
+
+
+def create_topic_subscription(participant, endpoint):
+  """Create a DynamicData subscription that matches a discovered writer endpoint."""
+  if not endpoint.type:
+    raise ValueError("No type information available for this topic.")
+  if not isinstance(endpoint.type, dds.DynamicType):
+    raise TypeError("Discovered type is not a DynamicType.")
+
+  dynamic_topic = dds.DynamicData.Topic(participant, endpoint.topic_name, endpoint.type)
+
+  subscriber_qos = dds.SubscriberQos()
+  qos_set = False
+
+  if endpoint.partition:
+    subscriber_qos.partition.name = endpoint.partition.name
+    qos_set = True
+    logging.info(f"[create_topic_subscription] Setting subscriber partitions: {', '.join(endpoint.partition.name)}")
+
+  if endpoint.presentation:
+    subscriber_qos.presentation.access_scope = endpoint.presentation.access_scope
+    subscriber_qos.presentation.coherent_access = endpoint.presentation.coherent_access
+    subscriber_qos.presentation.ordered_access = endpoint.presentation.ordered_access
+    qos_set = True
+    logging.info(f"[create_topic_subscription] Setting subscriber presentation: access_scope={endpoint.presentation.access_scope}")
+
+  subscriber = dds.Subscriber(participant, subscriber_qos) if qos_set else dds.Subscriber(participant)
+
+  reader_qos = dds.DataReaderQos()
+  if endpoint.reliability:
+    reader_qos.reliability.kind = endpoint.reliability.kind
+    reader_qos.reliability.max_blocking_time = endpoint.reliability.max_blocking_time
+  if endpoint.durability:
+    reader_qos.durability.kind = endpoint.durability.kind
+  if endpoint.deadline:
+    reader_qos.deadline.period = endpoint.deadline.period
+  if endpoint.ownership:
+    reader_qos.ownership.kind = endpoint.ownership.kind
+
+  if endpoint.reliability:
+    logging.info(
+      f"[create_topic_subscription] Applying QoS - Reliability: {endpoint.reliability.kind}, "
+      f"Durability: {endpoint.durability.kind if endpoint.durability else 'N/A'}, "
+      f"Ownership: {endpoint.ownership.kind if endpoint.ownership else 'N/A'}"
+    )
+    dynamic_reader = dds.DynamicData.DataReader(subscriber, dynamic_topic, reader_qos)
+  else:
+    dynamic_reader = dds.DynamicData.DataReader(subscriber, dynamic_topic)
+
+  logging.info(f"[create_topic_subscription] Subscribed to topic '{endpoint.topic_name}'")
+  return subscriber, dynamic_topic, dynamic_reader
+
+
+def take_discovered_sample(reader):
+  """Take one valid DynamicData sample and log its source metadata."""
+  for sample in reader.take():
+    if not sample.info.valid:
+      continue
+
+    participant_data = reader.matched_publication_participant_data(sample.info.publication_handle)
+    ip_list = participant_data.default_unicast_locators[0].address[-4:]
+    address_str = '.'.join(str(byte) for byte in ip_list)
+    domain_id = participant_data.domain_id
+    topic_name = reader.topic_name
+    logging.info(f"[sample_received] topic='{topic_name}' source='{address_str}:{participant_data.default_unicast_locators[0].port}' domain={domain_id} data={sample.data}")
+    return sample.data, sample.info, participant_data
+
+  return None, None, None
 
 
 class Participant:
@@ -847,100 +1009,36 @@ class ParticipantDetailScreen(Screen):
     This enables generic monitoring tools like RTI Spy to work with any DDS type.
     """
     try:
-      if not self.endpoint.type:
-        self.output_widget.update("Error: No type information available for this topic.")
-        return
-      if not isinstance(self.endpoint.type, dds.DynamicType):
-        self.output_widget.update("Error: Discovered type is not a DynamicType. Cannot subscribe with DynamicData.")
-        return
-      
-      # DDS: Create topic using discovered DynamicType
-      dynamic_topic = dds.DynamicData.Topic(self.participant, self.endpoint.topic_name, self.endpoint.type)
-      
-      # Create subscriber with partition and presentation QoS if available
-      subscriber_qos = dds.SubscriberQos()
-      qos_set = False
-      
-      if self.endpoint.partition:
-        subscriber_qos.partition.name = self.endpoint.partition.name
-        qos_set = True
-        logging.info(f"[subscribe_topic] Setting subscriber partitions: {', '.join(self.endpoint.partition.name)}")
-      
-      if self.endpoint.presentation:
-        subscriber_qos.presentation.access_scope = self.endpoint.presentation.access_scope
-        subscriber_qos.presentation.coherent_access = self.endpoint.presentation.coherent_access
-        subscriber_qos.presentation.ordered_access = self.endpoint.presentation.ordered_access
-        qos_set = True
-        logging.info(f"[subscribe_topic] Setting subscriber presentation: access_scope={self.endpoint.presentation.access_scope}")
-      
-      if qos_set:
-        subscriber = dds.Subscriber(self.participant, subscriber_qos)
-      else:
-        subscriber = dds.Subscriber(self.participant)
-      
-      # Store subscriber reference for cleanup
+      subscriber, dynamic_topic, dynamic_reader = create_topic_subscription(self.participant, self.endpoint)
       self.subscriber = subscriber
-      
-      # DDS: Configure reader QoS to match discovered writer's QoS
-      # QoS matching rules: reader can request "equal or less strict" QoS than writer offers
-      # This ensures we receive data according to the writer's guarantees
-      reader_qos = dds.DataReaderQos()
-      
+      self.dynamic_reader = dynamic_reader
+
+      qos_info = ""
       if self.endpoint.reliability:
-        reader_qos.reliability.kind = self.endpoint.reliability.kind
-        reader_qos.reliability.max_blocking_time = self.endpoint.reliability.max_blocking_time
-        
-        if self.endpoint.durability:
-          reader_qos.durability.kind = self.endpoint.durability.kind
-        
-        if self.endpoint.deadline:
-          reader_qos.deadline.period = self.endpoint.deadline.period
-        
-        if self.endpoint.ownership:
-          reader_qos.ownership.kind = self.endpoint.ownership.kind
-        
-        logging.info(f"[subscribe_topic] Applying QoS - Reliability: {self.endpoint.reliability.kind}, Durability: {self.endpoint.durability.kind if self.endpoint.durability else 'N/A'}, Ownership: {self.endpoint.ownership.kind if self.endpoint.ownership else 'N/A'}")
-        
-        # DDS: Create DynamicData DataReader with matched QoS
-        dynamic_reader = dds.DynamicData.DataReader(subscriber, dynamic_topic, reader_qos)
-        self.dynamic_reader = dynamic_reader
-        
-        qos_info = f"Reliability: {self.endpoint.reliability.kind}\n"
-        qos_info += f"Durability: {self.endpoint.durability.kind if self.endpoint.durability else 'N/A'}\n"
-        qos_info += f"Ownership: {self.endpoint.ownership.kind if self.endpoint.ownership else 'N/A'}\n"
-        if self.endpoint.partition and len(self.endpoint.partition.name) > 0:
-          qos_info += f"Partitions: {', '.join(self.endpoint.partition.name)}\n"
-        self.output_widget.update(f"Subscribed to topic '{self.endpoint.topic_name}' with matched QoS.\n{qos_info}Waiting for samples...\n")
-      else:
-        # Fallback to default QoS if no QoS captured
-        dynamic_reader = dds.DynamicData.DataReader(subscriber, dynamic_topic)
-        # Store reader reference for cleanup
-        self.dynamic_reader = dynamic_reader
-        self.output_widget.update(f"Subscribed to topic '{self.endpoint.topic_name}' with default QoS.\nWaiting for samples...\n")
+        qos_info += f"Reliability: {self.endpoint.reliability.kind}\n"
+      if self.endpoint.durability:
+        qos_info += f"Durability: {self.endpoint.durability.kind}\n"
+      if self.endpoint.ownership:
+        qos_info += f"Ownership: {self.endpoint.ownership.kind}\n"
+      if self.endpoint.partition and len(self.endpoint.partition.name) > 0:
+        qos_info += f"Partitions: {', '.join(self.endpoint.partition.name)}\n"
+      self.output_widget.update(f"Subscribed to topic '{self.endpoint.topic_name}'.\n{qos_info}Waiting for samples...\n")
 
       while True:
         await asyncio.sleep(0.1)
-        for data, info in dynamic_reader.take():
-          if info.valid:
-            # DDS: Get writer handle from SampleInfo to identify the data source
-            writer_handle = info.publication_handle
+        data, info, participant_data = take_discovered_sample(dynamic_reader)
+        if data is not None:
+          ip_list = participant_data.default_unicast_locators[0].address[-4:]
+          address_str = '.'.join(str(byte) for byte in ip_list)
+          domain_id = participant_data.domain_id
+          port = participant_data.default_unicast_locators[0].port
+          topic_name = dynamic_reader.topic_name
 
-            # DDS: Get participant information for the matched writer
-            # This shows which participant/application sent this data
-            participant_data = dynamic_reader.matched_publication_participant_data(writer_handle)
-            
-            # Extract network location information for display
-            ip_list = participant_data.default_unicast_locators[0].address[-4:]
-            address_str = '.'.join(str(byte) for byte in ip_list)
-            domain_id = participant_data.domain_id
-            port = participant_data.default_unicast_locators[0].port
-            topic_name = dynamic_reader.topic_name
+          line = f"[{address_str}:{port} D:{domain_id}] {topic_name}: {data}"
+          self.sample_lines.append(line)
 
-            line = f"[{address_str}:{port} D:{domain_id}] {topic_name}: {data}"
-            self.sample_lines.append(line)
-
-            self.sample_lines = self.sample_lines[-20:]
-            self.output_widget.update("\n".join(self.sample_lines))
+          self.sample_lines = self.sample_lines[-20:]
+          self.output_widget.update("\n".join(self.sample_lines))
     except Exception as e:
       self.output_widget.update(f"Error: {e}")
 
@@ -985,11 +1083,12 @@ class SubscriptionListener(dds.SubscriptionBuiltinTopicData.DataReaderListener):
                          durability=durability, deadline=deadline, ownership=ownership,
                          presentation=presentation, partition=partition)
 
-        if key_string not in endpoints:
-          endpoints[key_string] = reader
+        existing = endpoints.get(key_string)
+        endpoints[key_string] = merge_endpoint(existing, reader)
+        if existing is None:
           logging.info(f"[SubscriptionListener] Added new Reader endpoint: {topic_name}")
         else:
-          logging.debug(f"[SubscriptionListener] Reader endpoint already exists: {topic_name}")
+          logging.debug(f"[SubscriptionListener] Reader endpoint updated: {topic_name}")
 
 class PublicationListener(dds.PublicationBuiltinTopicData.DataReaderListener):
   """Listener for DataWriter discovery via DCPSPublication builtin topic.
@@ -1028,11 +1127,12 @@ class PublicationListener(dds.PublicationBuiltinTopicData.DataReaderListener):
                          durability=durability, deadline=deadline, ownership=ownership,
                          presentation=presentation, partition=partition)
 
-        if key_string not in endpoints:
-          endpoints[key_string] = writer
+        existing = endpoints.get(key_string)
+        endpoints[key_string] = merge_endpoint(existing, writer)
+        if existing is None:
           logging.info(f"[PublicationListener] Added new Writer endpoint: {topic_name}")
         else:
-          logging.debug(f"[PublicationListener] Writer endpoint already exists: {topic_name}")
+          logging.debug(f"[PublicationListener] Writer endpoint updated: {topic_name}")
 
 
 class RTISPY(App):
@@ -1089,6 +1189,8 @@ class RTISPY(App):
 
         participant_info = Participant(name, ip, rtps_host_id, rtps_app_id)
         key_string = str(key_value)
+        if key_string not in participants:
+          logging.info(f"[participant_discovered] name='{name}' ip='{ip}' host_id={rtps_host_id} app_id={rtps_app_id}")
         participants[key_string] = participant_info
 
     # Refresh ParticipantsScreen if it's the current screen
@@ -1125,30 +1227,44 @@ class RTISPY(App):
     self.exit()
 
 def main():
+  def resolve_domain_id(domain_arg):
+    if domain_arg is not None:
+      return domain_arg
+
+    if not sys.stdin.isatty():
+      return 1
+
+    while True:
+      try:
+        response = input("DDS domain ID [1]: ").strip()
+      except EOFError:
+        return 1
+
+      if not response:
+        return 1
+
+      try:
+        domain_id = int(response)
+      except ValueError:
+        print("Please enter an integer domain ID.", file=sys.stderr)
+        continue
+
+      if domain_id < 0:
+        print("Please enter a non-negative domain ID.", file=sys.stderr)
+        continue
+
+      return domain_id
+
   parser = argparse.ArgumentParser(description="Discover all readers and writers on a DDS domain.")
-  parser.add_argument("-d", "--domain", type=int, default=1, help="DDS domain ID (default: 1)")
+  parser.add_argument("-d", "--domain", type=int, default=None, help="DDS domain ID (prompts on startup; defaults to 1 when non-interactive)")
   parser.add_argument("-i", "--interval", type=float, default=10, help="Refresh interval in seconds (default: 2.0)")
+  parser.add_argument("--debug-log", default=os.environ.get("RTI_SPY_DEBUG_LOG"), help="Optional path for discovery/subscription log output")
   args = parser.parse_args()
+  domain_id = resolve_domain_id(args.domain)
 
-  # DDS: Create participant in disabled state to configure listeners before discovery starts
-  # This ensures we don't miss any discovery events during initialization
-  participant_factory_qos = dds.DomainParticipantFactoryQos()
-  participant_factory_qos.entity_factory.autoenable_created_entities = False
-  dds.DomainParticipant.participant_factory_qos = participant_factory_qos
-
-  # DDS: Set participant name for easier identification in monitoring tools
-  qos = dds.DomainParticipantQos()
-  qos.participant_name.name = "RTI SPY"
-  participant = dds.DomainParticipant(args.domain, qos=qos)
-
-  # DDS: Attach listeners to builtin topic readers for automatic discovery notifications
-  # publication_reader: notified when DataWriters are discovered
-  # subscription_reader: notified when DataReaders are discovered
-  participant.publication_reader.set_listener(PublicationListener(), dds.StatusMask.DATA_AVAILABLE)
-  participant.subscription_reader.set_listener(SubscriptionListener(), dds.StatusMask.DATA_AVAILABLE)
-
-  # DDS: Enable participant to start discovery and communication
-  participant.enable()
+  configure_rti_environment()
+  configure_logging(args.debug_log)
+  participant = create_participant(domain_id, name="RTI SPY")
 
   app = RTISPY(participant, interval=args.interval)
   app.run()

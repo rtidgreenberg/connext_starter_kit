@@ -263,7 +263,7 @@ def _combine_candidates(
         existing,
         display_label=existing.display_label or incoming.display_label,
         launch_id=existing.launch_id or incoming.launch_id,
-        pid=existing.pid if existing.pid is not None else incoming.pid,
+        pid=_preferred_pid(existing, incoming),
         hostname=existing.hostname or incoming.hostname,
         participant_key=existing.participant_key or incoming.participant_key,
         participant_name=existing.participant_name or incoming.participant_name,
@@ -288,6 +288,18 @@ def _combine_candidates(
         first_seen_at=min(existing.first_seen_at, incoming.first_seen_at),
         last_seen_at=max(existing.last_seen_at, incoming.last_seen_at),
     )
+
+
+def _preferred_pid(
+        existing: ServiceProcessCandidate,
+        incoming: ServiceProcessCandidate,
+) -> Optional[int]:
+    for candidate in (incoming, existing):
+        if candidate.owns_process and candidate.pid is not None:
+            return candidate.pid
+    if existing.pid is not None:
+        return existing.pid
+    return incoming.pid
 
 
 def _local_exit_candidate(

@@ -66,7 +66,7 @@ Checks:
 If Replay starts but GUI close cleanup reports a timeout waiting for Service
 Admin endpoints, check these first:
 
-- `<administration>` is enabled in `dds/qos/replay_service_config.xml`
+- `<administration>` is enabled in `dds/qos/replay_service.xml`
 - The admin domain id used by the launch matches `REPLAY_ADMIN_DOMAIN_ID`
 - The process stayed alive long enough to create the admin endpoints
 
@@ -81,7 +81,7 @@ monitoring domain.
 
 Checks:
 
-- `<monitoring>` is enabled in `dds/qos/replay_service_config.xml`
+- `<monitoring>` is enabled in `dds/qos/replay_service.xml`
 - The monitoring domain id used by the launch matches `REPLAY_MON_DOMAIN_ID`
 - The replay input directory contains data for the selected session/topics
 

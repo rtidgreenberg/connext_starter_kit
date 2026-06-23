@@ -21,6 +21,8 @@ class FakeTerminatingProcess:
         self.returncode = None
         self.terminate_calls = 0
         self.kill_calls = 0
+        self.stdout = b"Progress: 42%"
+        self.stderr = b""
 
     def poll(self):
         return self.returncode
@@ -112,6 +114,13 @@ class TestConvertTabController(unittest.IsolatedAsyncioTestCase):
         controller = ConvertTabController()
         controller._jobs = (job,)
         controller._config = ConvertTabControllerConfig(selected_job_id=job_id)
+        process = FakeTerminatingProcess()
+        controller._submissions[job_id] = ConvertJobSubmission(
+            job_id=job_id,
+            submitted_at=0.0,
+            process_pid=4321,
+        )
+        controller._processes[4321] = process
 
         cmd = AppCommand(
             command_type="convert.cancel",
@@ -125,6 +134,8 @@ class TestConvertTabController(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Requested cancellation", result.message)
         updated_job = controller._jobs[0]
         self.assertEqual(updated_job.state, "cancel_requested")
+        self.assertEqual(process.terminate_calls, 1)
+        self.assertIn("local converter termination requested", updated_job.message)
 
     async def test_terminate_gui_launched_jobs_and_wait_verifies_exit(self):
         job_id = "convert-1234"

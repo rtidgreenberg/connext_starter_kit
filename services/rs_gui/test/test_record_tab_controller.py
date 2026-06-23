@@ -515,11 +515,14 @@ class TestRecordTabController(unittest.IsolatedAsyncioTestCase):
 
         shutdown_outcome = await controller.execute_action("shutdown")
         refreshed = manager.refresh(launch.launch_id)
+        view = await controller.refresh_view()
 
         self.assertTrue(shutdown_outcome.ok)
         self.assertTrue(shutdown_outcome.payload["process_exit_observed"])
+        self.assertEqual(shutdown_outcome.payload["observed_state"], "exited")
         self.assertEqual(refreshed.state.value, "exited")
         self.assertEqual(refreshed.returncode, 0)
+        self.assertEqual(view.selected_candidate.state, "exited")
 
 
 if __name__ == "__main__":

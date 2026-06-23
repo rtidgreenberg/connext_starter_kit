@@ -567,7 +567,7 @@ class GuiShellSession:
             key = candidate.launch_id or candidate.candidate_id
             if not key:
                 continue
-            state = str(candidate.observed_state)
+            state = str(candidate.observed_state).lower()
             previous = self._replay_process_states.get(key)
             if previous == state:
                 continue

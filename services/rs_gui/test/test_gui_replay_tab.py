@@ -16,6 +16,7 @@ from gui.tabs.replay_tab import (
     ReplayTimelineRow,
     build_mock_replay_tab_view_model,
     build_replay_action_command,
+    build_replay_next_tag_command,
     build_replay_tab_view_model,
 )
 
@@ -30,7 +31,7 @@ class TestReplayTabViewModel(unittest.TestCase):
         self.assertEqual(view.qos_file_path, "dds/qos/DDS_QOS_PROFILES.xml")
         self.assertEqual(view.participant_qos_profile, "DPLibrary::DefaultParticipant")
         self.assertEqual(view.writer_qos_profile, "DataPatternsLibrary::replay_writer_transient_local")
-        self.assertEqual(view.observed_state, "STOPPED")
+        self.assertEqual(view.observed_state, "stopped")
         self.assertEqual(view.target_count, 2)
         self.assertEqual(view.timeline[0].label, "Robot run")
         self.assertTrue(view.action_by_id["start"].enabled)
@@ -120,6 +121,22 @@ class TestReplayTabViewModel(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             build_replay_action_command("rewind", view)
+
+    def test_replay_next_tag_command_preserves_target_and_tag_name(self):
+        view = build_mock_replay_tab_view_model()
+
+        command = build_replay_next_tag_command(view, "e2e_tag_beta")
+
+        self.assertEqual(command.command_type, "replay.next_tag")
+        self.assertEqual(command.target, "replay_service_2d91c4a0")
+        self.assertEqual(command.payload["target_id"], "launch-replay-main")
+        self.assertEqual(command.payload["tag_name"], "e2e_tag_beta")
+        self.assertEqual(
+            command.payload["database_path"],
+            "services/replay_input/robot_run_03",
+        )
+        with self.assertRaises(ValueError):
+            build_replay_next_tag_command(view, "  ")
 
 
 if __name__ == "__main__":

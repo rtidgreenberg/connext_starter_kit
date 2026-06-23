@@ -97,7 +97,7 @@ class GuiShellSessionFactoryConfig:
     replay_label: str = "Replay Service"
     replay_config_name: str = "template"
     replay_config_paths: Tuple[str, ...] = (
-        "dds/qos/replay_service_config.xml",
+        "dds/qos/replay_service.xml",
         "dds/qos/DDS_QOS_PROFILES.xml",
     )
     replay_database_path: str = "services/rs_gui/log_data/xcdr"

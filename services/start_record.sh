@@ -18,6 +18,19 @@ if [[ -z "${NDDSHOME}" ]]; then
     exit 1;
 fi
 
+if [[ -z "${RTI_LICENSE_FILE:-}" ]]; then
+  for candidate in \
+    "$NDDSHOME/rti_license.dat" \
+    "$NDDSHOME/rti_license.txt" \
+    "$HOME/.rti/rti_license.dat" \
+    "$HOME/rti_license.dat"; do
+    if [[ -f "$candidate" ]]; then
+      export RTI_LICENSE_FILE="$candidate"
+      break
+    fi
+  done
+fi
+
 
 # Converter Service configuration file
 xml="./recording_service_config.xml"

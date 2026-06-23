@@ -3,6 +3,12 @@
 rs_gui is the next-generation operator application for RTI infrastructure
 services. The supported Record/Replay UI is now Tkinter-based.
 
+Authority boundary for the current codebase:
+
+- `tk_gui/` is the supported operator shell and the only UI surface that should receive new shell/view feature work.
+- `gui/` remains the shared session/controller/view-model layer that feeds the Tk shell, along with some retained legacy helpers.
+- Do not grow the legacy renderer surface inside `gui/`; new user-facing workflow changes should land in `tk_gui/` or in shared non-renderer controller/model code.
+
 ## Quickstart
 
 From the repository root, run:

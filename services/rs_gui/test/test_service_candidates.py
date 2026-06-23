@@ -189,6 +189,43 @@ class TestCandidateComposition(unittest.TestCase):
             "monitoring",
         ])
 
+    def test_gui_launch_pid_wins_over_monitoring_pid_for_owned_process(self):
+        identity = ServiceControlIdentity(
+            intent=ServiceLaunchIntent(ServiceKind.RECORDING, "Record Main"),
+            session_guid="11111111-2222-3333-4444-555555555555",
+            created_at=1.0,
+        )
+        launch_candidate = candidate_from_control_identity(
+            identity,
+            launch_id="launch-1",
+            pid=4218,
+            hostname="dev-host",
+            observed_state="STARTING",
+            observed_at=1.0,
+        )
+        snapshot = MonitoringSnapshot(
+            service=identity.service_ref,
+            kind=MonitoringSnapshotKind.CONFIG,
+            state="RUNNING",
+            details={
+                "process_id": 9999,
+                "host_name": "dev-host",
+            },
+            observed_at=20.0,
+        )
+
+        selection = build_service_candidate_selection(
+            identity.service_ref,
+            launch_candidates=(launch_candidate,),
+            monitoring_snapshots=(snapshot,),
+            display_label="Record Main",
+        )
+
+        candidate = selection.selected_candidate
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.pid, 4218)
+        self.assertTrue(candidate.owns_process)
+
     def test_unrelated_monitoring_snapshot_is_ignored(self):
         target = ServiceInstanceRef(ServiceKind.RECORDING, "record_main", admin_domain_id=0)
         other = ServiceInstanceRef(ServiceKind.RECORDING, "other", admin_domain_id=0)

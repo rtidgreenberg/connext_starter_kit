@@ -1,6 +1,5 @@
 """Record tab controller that wires app-core service snapshots to GUI views."""
 
-import asyncio
 from dataclasses import dataclass, field, replace
 import os
 import re
@@ -27,12 +26,23 @@ from app_core.services import (
     ServiceMonitoringFacade,
     ServiceProcessCandidate,
     ServiceProcessLaunch,
-    ServiceProcessLaunchState,
     ServiceProcessLaunchRequest,
     ServiceProcessManager,
 )
 
 from .record_tab import RecordLaunchViewModel, RecordTabViewModel, build_record_tab_view_model
+from .monitoring_cache import (
+    cache_monitoring_updates,
+    discover_service_from_cache,
+    monitoring_snapshots_for_service,
+    take_monitoring_updates,
+)
+from .controller_common import (
+    monitoring_services,
+    readiness_for_service,
+    resolve_target_service,
+    wait_for_local_shutdown_exit,
+)
 
 
 @dataclass(frozen=True)
@@ -141,19 +151,19 @@ class RecordTabController:
         mon_services = self._monitoring_services(service)
         dbg("record", f"monitoring_services count={len(mon_services)}",
             keys=[s.key for s in mon_services])
-        monitoring_updates = await self._take_monitoring_updates(mon_services)
+        monitoring_updates = await take_monitoring_updates(self._monitoring_facade, mon_services)
         dbg("record", f"monitoring_updates count={len(monitoring_updates)}")
         self._last_monitoring_updates = monitoring_updates
-        self._cache_monitoring_updates(monitoring_updates)
+        cache_monitoring_updates(self._latest_monitoring_by_service, monitoring_updates, _merge_monitoring_details)
         # If we discovered a service via monitoring but didn't have one yet,
         # adopt the discovered identity so subsequent frames track it properly.
         if not service.name:
-            discovered = self._discover_service_from_cache(service)
+            discovered = discover_service_from_cache(self._latest_monitoring_by_service, service)
             if discovered is not None:
                 dbg("record", f"discovered service={discovered.name!r} from monitoring")
                 service = discovered
                 self._config = replace(self._config, service=discovered)
-        monitoring_snapshots = self._monitoring_snapshots_for_service(service)
+        monitoring_snapshots = monitoring_snapshots_for_service(self._latest_monitoring_by_service, service)
         dbg("record", f"monitoring_snapshots count={len(monitoring_snapshots)}",
             kinds=[s.kind.value for s in monitoring_snapshots])
         self._latest_monitoring = monitoring_snapshots
@@ -371,6 +381,8 @@ class RecordTabController:
             payload["observed_state"] = observed_state
             if action_id == "shutdown":
                 payload["process_exit_observed"] = await self._wait_for_local_shutdown_exit(selected)
+                if payload["process_exit_observed"]:
+                    payload["observed_state"] = "exited"
             outcome = replace(outcome, payload=payload)
 
         self._append_history(outcome)
@@ -379,34 +391,22 @@ class RecordTabController:
         return outcome
 
     async def _wait_for_local_shutdown_exit(self, selected: ServiceProcessCandidate) -> bool:
-        if not selected.owns_process:
-            return False
-        launch_id = selected.launch_id or selected.candidate_id
-        if not launch_id:
-            return False
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + self._LOCAL_SHUTDOWN_REAP_TIMEOUT_SEC
-        while True:
-            launch = self._process_manager.refresh(launch_id)
-            if launch is None:
-                return True
-            if launch.state in {ServiceProcessLaunchState.EXITED, ServiceProcessLaunchState.START_FAILED}:
-                return True
-            if loop.time() >= deadline:
-                return False
-            await asyncio.sleep(self._LOCAL_SHUTDOWN_REAP_POLL_SEC)
+        return await wait_for_local_shutdown_exit(
+            self._process_manager,
+            selected,
+            self._LOCAL_SHUTDOWN_REAP_TIMEOUT_SEC,
+            self._LOCAL_SHUTDOWN_REAP_POLL_SEC,
+        )
 
     def _append_history(self, outcome: ServiceCommandOutcome) -> None:
         self._command_history = self._command_history + (outcome,)
 
     def _target_service(self) -> ServiceInstanceRef:
-        if self._config.service is not None:
-            return self._config.service
-        launches = self._process_manager.launches()
-        for launch in launches:
-            if launch.identity.intent.kind == ServiceKind.RECORDING:
-                return launch.identity.service_ref
-        return ServiceInstanceRef(ServiceKind.RECORDING, "", 0, 0)
+        return resolve_target_service(
+            self._config.service,
+            self._process_manager,
+            ServiceKind.RECORDING,
+        )
 
     def _selection(
             self,
@@ -472,134 +472,16 @@ class RecordTabController:
         return keys
 
     def _monitoring_services(self, service: ServiceInstanceRef) -> Tuple[ServiceInstanceRef, ...]:
-        services: List[ServiceInstanceRef] = []
-        if service.name:
-            services.append(service)
-        for launch in self._process_manager.launches():
-            if launch.identity.intent.kind == ServiceKind.RECORDING:
-                services.append(launch.identity.service_ref)
-        # When no named service is known, create a discovery probe on the
-        # configured monitoring domain so we can detect externally-launched
-        # Recording Services via their monitoring publications.
-        if not services:
-            probe = ServiceInstanceRef(
-                kind=ServiceKind.RECORDING,
-                name="",
-                admin_domain_id=self._config.launch_admin_domain_id,
-                monitoring_domain_id=self._config.launch_monitoring_domain_id,
-            )
-            services.append(probe)
-        unique: Dict[str, ServiceInstanceRef] = {}
-        for item in services:
-            unique.setdefault(item.key, item)
-        return tuple(unique.values())
-
-    async def _take_monitoring_updates(
-            self,
-            services: Iterable[ServiceInstanceRef],
-    ) -> Tuple[MonitoringSnapshot, ...]:
-        if self._monitoring_facade is None:
-            return ()
-        updates: List[MonitoringSnapshot] = []
-        for service in services:
-            updates.extend(await self._monitoring_facade.take_available(service))
-        return tuple(updates)
-
-    def _cache_monitoring_updates(self, updates: Iterable[MonitoringSnapshot]) -> None:
-        for snapshot in updates:
-            by_kind = self._latest_monitoring_by_service.setdefault(snapshot.service.key, {})
-            current = by_kind.get(snapshot.kind)
-            if current is None:
-                by_kind[snapshot.kind] = snapshot
-                continue
-            if snapshot.kind == MonitoringSnapshotKind.CONFIG:
-                newer, older = (
-                    (snapshot, current)
-                    if snapshot.observed_at >= current.observed_at
-                    else (current, snapshot)
-                )
-                by_kind[snapshot.kind] = MonitoringSnapshot(
-                    service=newer.service,
-                    kind=newer.kind,
-                    state=newer.state,
-                    metrics=newer.metrics,
-                    details=_merge_monitoring_details(older.details, newer.details),
-                    observed_at=newer.observed_at,
-                )
-                continue
-            if snapshot.observed_at >= current.observed_at:
-                by_kind[snapshot.kind] = snapshot
-
-    def _discover_service_from_cache(
-            self,
-            probe: ServiceInstanceRef,
-    ) -> Optional[ServiceInstanceRef]:
-        """Find a Recording Service identity from cached monitoring data.
-
-        When the GUI starts without a known service, monitoring data arriving
-        on the configured domain reveals externally-launched services.  This
-        returns the first discovered Recording Service ref so the controller
-        can adopt it for subsequent operations.
-        """
-        for cached_key, cached_by_kind in self._latest_monitoring_by_service.items():
-            if not cached_by_kind:
-                continue
-            sample = next(iter(cached_by_kind.values()))
-            if sample.service.kind != ServiceKind.RECORDING:
-                continue
-            if sample.service.monitoring_domain_id != probe.monitoring_domain_id:
-                continue
-            # Found a Recording Service on the expected monitoring domain.
-            if sample.service.name:
-                return sample.service
-        return None
-
-    def _monitoring_snapshots_for_service(self, service: ServiceInstanceRef) -> Tuple[MonitoringSnapshot, ...]:
-        by_kind = self._latest_monitoring_by_service.get(service.key, {})
-        remap_service = False
-        if not by_kind and service.name:
-            # Monitoring data may be cached under the service's actual reported
-            # name (e.g. the RS config name "template") rather than the
-            # GUI control name ("RecordingService_<guid>").  Fall back to
-            # matching by kind + monitoring domain and remap the service ref so
-            # downstream candidate selection sees the correct identity.
-            for cached_key, cached_by_kind in self._latest_monitoring_by_service.items():
-                if not cached_by_kind:
-                    continue
-                sample_snapshot = next(iter(cached_by_kind.values()))
-                if (sample_snapshot.service.kind == service.kind
-                        and sample_snapshot.service.monitoring_domain_id == service.monitoring_domain_id):
-                    by_kind = cached_by_kind
-                    remap_service = True
-                    break
-        snapshots = tuple(
-            snapshot for kind, snapshot in sorted(by_kind.items(), key=lambda item: item[0].value)
+        return monitoring_services(
+            service,
+            self._process_manager,
+            ServiceKind.RECORDING,
+            admin_domain_id=self._config.launch_admin_domain_id,
+            monitoring_domain_id=self._config.launch_monitoring_domain_id,
         )
-        if remap_service and snapshots:
-            snapshots = tuple(
-                MonitoringSnapshot(
-                    service=service,
-                    kind=s.kind,
-                    state=s.state,
-                    metrics=s.metrics,
-                    details=s.details,
-                    observed_at=s.observed_at,
-                )
-                for s in snapshots
-            )
-        return snapshots
 
     async def _readiness(self, service: ServiceInstanceRef) -> Optional[AdminReadiness]:
-        if not service.name:
-            return None
-        if self._admin_facade is None:
-            return AdminReadiness(
-                service=service,
-                status=AdminReadinessStatus.UNKNOWN,
-                message="Service Admin facade is not configured",
-                checked_at=self._clock(),
-            )
-        return await self._admin_facade.readiness(service)
+        return await readiness_for_service(self._admin_facade, service, self._clock)
 
     def _launch_view(self) -> RecordLaunchViewModel:
         return RecordLaunchViewModel(

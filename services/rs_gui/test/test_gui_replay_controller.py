@@ -27,8 +27,10 @@ from app_core.services import (
     ServiceCommand,
     ServiceInstanceRef,
     ServiceKind,
+    ServiceLaunchIntent,
     ServiceMonitoringFacade,
     ServiceProcessCandidate,
+    ServiceProcessLaunchRequest,
     ServiceProcessManager,
 )
 from app_core.services.rti_admin import ACTION_UPDATE, ENTITY_STATE_PAUSED, ENTITY_STATE_RUNNING, ENTITY_STATE_STOPPED
@@ -64,6 +66,17 @@ class FakeServiceAdminClient:
         )
 
 
+class ShutdownExitingReplayAdminClient(FakeServiceAdminClient):
+    def __init__(self, handle):
+        super().__init__()
+        self._handle = handle
+
+    async def send_command(self, request):
+        if request.command == ServiceCommand.SHUTDOWN:
+            self._handle.returncode = 0
+        return await super().send_command(request)
+
+
 class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
     def _make_replay_database_dir(self) -> str:
         tempdir = tempfile.TemporaryDirectory()
@@ -78,7 +91,7 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
 
     def test_replay_service_xml_consumes_launch_variables(self):
         xml_path = os.path.abspath(
-            os.path.join(SCRIPT_DIR, "..", "..", "..", "dds", "qos", "replay_service_config.xml")
+            os.path.join(SCRIPT_DIR, "..", "..", "..", "dds", "qos", "replay_service.xml")
         )
         root = ET.parse(xml_path).getroot()
         xml_text = ET.tostring(root, encoding="unicode")
@@ -103,7 +116,7 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
     def test_replay_launch_command_preserves_operator_fields(self):
         command = build_replay_launch_command(ReplayLaunchViewModel(
             label="Manual Replay",
-            config_paths=("dds/qos/replay_service_config.xml", "dds/qos/DDS_QOS_PROFILES.xml"),
+            config_paths=("dds/qos/replay_service.xml", "dds/qos/DDS_QOS_PROFILES.xml"),
             config_name="json",
             data_domain_id=63,
             admin_domain_id=61,
@@ -123,7 +136,7 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(command.target, "replay")
         self.assertEqual(command.payload["label"], "Manual Replay")
         self.assertEqual(command.payload["config_paths"], [
-            "dds/qos/replay_service_config.xml",
+            "dds/qos/replay_service.xml",
             "dds/qos/DDS_QOS_PROFILES.xml",
         ])
         self.assertEqual(command.payload["config_name"], "json")
@@ -189,7 +202,7 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(start.ok)
         self.assertEqual(start.payload["state"], "RUNNING")
-        self.assertEqual(running_view.observed_state, "RUNNING")
+        self.assertEqual(running_view.observed_state, "running")
         self.assertEqual(running_view.playback_rate, 2.0)
         self.assertTrue(running_view.loop)
         self.assertEqual(running_view.qos_file_path, "dds/qos/custom_qos.xml")
@@ -207,9 +220,9 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pause.payload["state"], "PAUSED")
         self.assertTrue(paused_view.action_by_id["resume"].enabled)
         self.assertEqual(resume.payload["state"], "RUNNING")
-        self.assertEqual(resumed_view.observed_state, "RUNNING")
+        self.assertEqual(resumed_view.observed_state, "running")
         self.assertEqual(stop.payload["state"], "STOPPED")
-        self.assertEqual(stopped_view.observed_state, "STOPPED")
+        self.assertEqual(stopped_view.observed_state, "stopped")
 
     async def test_playback_commands_dispatch_replay_admin_custom_state_updates(self):
         admin_client = FakeServiceAdminClient()
@@ -400,7 +413,7 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
 
         launch = controller.launch_replay({
             "label": "Manual Replay",
-            "config_paths": ["dds/qos/replay_service_config.xml", "dds/qos/DDS_QOS_PROFILES.xml"],
+            "config_paths": ["dds/qos/replay_service.xml", "dds/qos/DDS_QOS_PROFILES.xml"],
             "config_name": "json",
             "data_domain_id": 63,
             "admin_domain_id": 61,
@@ -470,7 +483,48 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(view.selected_target.owned)
         self.assertEqual(view.selected_target.state, "RUNNING")
-        self.assertEqual(view.observed_state, "RUNNING")
+        self.assertEqual(view.observed_state, "running")
+
+    async def test_duplicate_replay_targets_are_marked_conflicting(self):
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(FakeHandle(7007), FakeHandle(7008)),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        request = ServiceProcessLaunchRequest(
+            intent=ServiceLaunchIntent(
+                kind=ServiceKind.REPLAY,
+                label="Replay Service",
+                admin_domain_id=61,
+                monitoring_domain_id=62,
+                config_paths=("dds/qos/replay_service.xml",),
+            ),
+            config_name="xcdr",
+            executable="/opt/rti/bin/rtireplayservice",
+        )
+        manager.launch(
+            request,
+            launch_id="launch-a",
+            session_guid="11111111-2222-3333-4444-555555555555",
+        )
+        manager.launch(
+            request,
+            launch_id="launch-b",
+            session_guid="11111111-2222-3333-4444-555555555555",
+        )
+        controller = ReplayTabController(
+            process_manager=manager,
+            config=ReplayTabControllerConfig(local_hostnames=("dev-host",), selected_target_id="launch-a"),
+            clock=lambda: 12.0,
+        )
+
+        view = await controller.refresh_view()
+
+        self.assertEqual(len(view.targets), 2)
+        self.assertTrue(all(row.conflict for row in view.targets))
+        self.assertFalse(view.action_by_id["pause"].enabled)
+        self.assertFalse(view.action_by_id["shutdown"].enabled)
+        self.assertIn("Duplicate Replay Service target detected", view.diagnostics)
 
     async def test_launch_replay_rejects_database_dir_without_replay_files(self):
         with tempfile.TemporaryDirectory() as tempdir:
@@ -523,6 +577,76 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(admin_client.requests[0].service, launch.identity.service_ref)
         self.assertEqual(admin_client.requests[0].parameters["admin_resource_name"], "xcdr")
         self.assertEqual(admin_client.requests[0].timeout_sec, 2.0)
+
+    async def test_shutdown_does_not_force_local_termination_after_admin_ack(self):
+        database_dir = self._make_replay_database_dir()
+        handle = FakeHandle(7007)
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(handle),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        controller = ReplayTabController(
+            process_manager=manager,
+            admin_facade=ServiceAdminFacade(ShutdownExitingReplayAdminClient(handle)),
+            config=ReplayTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+        launch = controller.launch_replay({
+            "config_name": "xcdr",
+            "admin_domain_id": 61,
+            "monitoring_domain_id": 62,
+            "database_path": database_dir,
+            "executable": "/opt/rti/bin/rtireplayservice",
+        })
+        await controller.refresh_view()
+
+        result = await controller.handle_command(AppCommand(
+            "replay.shutdown",
+            payload={"target_id": launch.launch_id, "database_path": database_dir},
+            command_id="shutdown-replay",
+            created_at=2.0,
+        ))
+        refreshed = manager.refresh(launch.launch_id)
+
+        self.assertTrue(result.ok)
+        self.assertTrue(result.payload["process_exit_observed"])
+        self.assertEqual(handle.terminate_calls, 0)
+        self.assertEqual(refreshed.state.value, "exited")
+
+    async def test_replay_last_monitoring_updates_only_contains_new_samples(self):
+        database_dir = self._make_replay_database_dir()
+        manager = ServiceProcessManager(
+            spawner=FakeSpawner(FakeHandle(7007)),
+            hostname="dev-host",
+            clock=lambda: 10.0,
+        )
+        monitoring_client = FakeServiceMonitoringClient()
+        controller = ReplayTabController(
+            process_manager=manager,
+            monitoring_facade=ServiceMonitoringFacade(monitoring_client),
+            config=ReplayTabControllerConfig(local_hostnames=("dev-host",)),
+            clock=lambda: 12.0,
+        )
+        launch = controller.launch_replay({
+            "config_name": "xcdr",
+            "database_path": database_dir,
+            "executable": "/opt/rti/bin/rtireplayservice",
+        })
+        monitoring_client.push_snapshot(MonitoringSnapshot(
+            service=launch.identity.service_ref,
+            kind=MonitoringSnapshotKind.PERIODIC,
+            state="running",
+            metrics={"progress": "64%"},
+            observed_at=13.0,
+        ))
+
+        await controller.refresh_view()
+        first_update_count = len(controller.last_monitoring_updates)
+        await controller.refresh_view()
+
+        self.assertEqual(first_update_count, 1)
+        self.assertEqual(len(controller.last_monitoring_updates), 0)
 
     async def test_refresh_merges_replay_monitoring_with_gui_launch(self):
         database_dir = self._make_replay_database_dir()

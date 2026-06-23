@@ -1,5 +1,6 @@
 """Phase 6 tests: Real subprocess-based conversion job execution."""
 
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 from dataclasses import replace
@@ -32,12 +33,25 @@ class MockAsyncProcess:
         """Return captured output."""
         return self.stdout, self.stderr
 
+    def terminate(self):
+        self.poll_values = [-15]
+
 
 class MockConverterFacade:
     """Mock facade that reports service is ready."""
 
     async def is_service_ready(self):
         return True
+
+
+class MockAsyncStream:
+    def __init__(self, *chunks: bytes):
+        self._chunks = list(chunks)
+
+    async def read(self, _size: int):
+        if self._chunks:
+            return self._chunks.pop(0)
+        return b""
 
 
 class TestConvertPhase6SubprocessExecution(unittest.IsolatedAsyncioTestCase):
@@ -93,6 +107,44 @@ class TestConvertPhase6SubprocessExecution(unittest.IsolatedAsyncioTestCase):
         # Verify job state updated
         updated_job = self.controller._job_by_id("job-1")
         self.assertEqual(updated_job.state, "starting")
+
+    async def test_subprocess_output_is_captured_incrementally(self):
+        """Verify running subprocess output is appended to tracked submission state."""
+        job = ConvertJobRow(
+            job_id="job-1",
+            preset_id="preset-1",
+            input_path="/data/input",
+            output_path="/data/output",
+            output_format="JSON",
+            state="queued",
+            progress="0%",
+            created_at="2026-05-26T00:00:00Z",
+            message="Queued",
+        )
+        self.controller._jobs = (job,)
+        self.controller._submissions["job-1"] = ConvertJobSubmission(
+            job_id="job-1",
+            submitted_at=0,
+        )
+
+        mock_proc = MockAsyncProcess(pid=9999)
+        mock_proc.stdout = MockAsyncStream(b"Converting...\n", b"Progress: 75%\n")
+        mock_proc.stderr = MockAsyncStream()
+        with patch(
+            "gui.tabs.convert_controller.asyncio.create_subprocess_exec",
+            new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.return_value = mock_proc
+
+            await self.controller._submit_job_to_service(
+                job, "preset-1", "/data/input", "/data/output"
+            )
+
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        submission = self.controller._submissions["job-1"]
+        self.assertIn("Progress: 75%", submission.process_output)
 
     async def test_successful_process_completion(self):
         """Verify process exit 0 marks job completed."""
@@ -334,6 +386,40 @@ class TestConvertPhase6SubprocessExecution(unittest.IsolatedAsyncioTestCase):
         job_after = self.controller._job_by_id("job-1")
         self.assertEqual(job_after.state, "running")
         self.assertEqual(job_after.progress, "50%")
+
+    async def test_running_process_uses_parsed_progress_when_output_available(self):
+        """Verify running jobs use parser output instead of a fixed placeholder when available."""
+        job = ConvertJobRow(
+            job_id="job-1",
+            preset_id="preset-1",
+            input_path="/data/input",
+            output_path="/data/output",
+            output_format="JSON",
+            state="starting",
+            progress="0%",
+            created_at="2026-05-26T00:00:00Z",
+            message="Starting",
+        )
+        self.controller._jobs = (job,)
+        self.controller._submissions["job-1"] = ConvertJobSubmission(
+            job_id="job-1",
+            submitted_at=0,
+            process_pid=9999,
+            last_status_check=0,
+        )
+
+        mock_proc = MockAsyncProcess(
+            pid=9999,
+            poll_values=[None, None],
+            stdout=b"Converting records...\nProgress: 75%\nStill working...",
+        )
+        self.controller._processes[9999] = mock_proc
+
+        await self.controller._poll_job_status("job-1")
+
+        job_after = self.controller._job_by_id("job-1")
+        self.assertEqual(job_after.state, "running")
+        self.assertEqual(job_after.progress, "75%")
 
 
 if __name__ == "__main__":

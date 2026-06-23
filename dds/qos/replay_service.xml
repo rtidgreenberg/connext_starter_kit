@@ -26,7 +26,7 @@
       </element>
       <element>
         <name>REPLAY_XCDR_DATABASE_DIR</name>
-        <value>services/rs_gui/log_data/xcdr</value>
+        <value>log_dir/xcdr</value>
       </element>
       <element>
         <name>REPLAY_STORAGE_FORMAT</name>

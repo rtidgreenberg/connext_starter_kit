@@ -42,6 +42,20 @@ from .replay_tab import (
     build_mock_replay_tab_view_model,
     build_replay_tab_view_model,
 )
+from .monitoring_cache import (
+    cache_monitoring_updates,
+    discover_service_from_cache,
+    monitoring_snapshots_for_service,
+    take_monitoring_updates,
+)
+from .controller_common import (
+    candidate_display_fields,
+    candidate_has_duplicate_admin_target,
+    monitoring_services,
+    readiness_for_service,
+    resolve_target_service,
+    wait_for_local_shutdown_exit,
+)
 
 
 def _workspace_launch_path(path: str) -> str:
@@ -96,7 +110,7 @@ class ReplayTabControllerConfig:
     writer_qos_profile: str = "DataPatternsLibrary::replay_writer_transient_local"
     launch_label: str = "Replay Service"
     launch_config_paths: Tuple[str, ...] = (
-        "dds/qos/replay_service_config.xml",
+        "dds/qos/replay_service.xml",
         "dds/qos/DDS_QOS_PROFILES.xml",
     )
     launch_config_name: str = "template"
@@ -132,6 +146,9 @@ class ReplayTabControllerConfig:
 class ReplayTabController:
     """Build Replay tab snapshots and apply queued Replay commands."""
 
+    _LOCAL_SHUTDOWN_REAP_TIMEOUT_SEC = 1.0
+    _LOCAL_SHUTDOWN_REAP_POLL_SEC = 0.05
+
     def __init__(
             self,
             targets: Iterable[ReplayTargetRow] = (),
@@ -156,6 +173,7 @@ class ReplayTabController:
         self._last_selection = ServiceCandidateSelection()
         self._last_readiness: Optional[AdminReadiness] = None
         self._latest_monitoring_by_service: Dict[str, Dict[MonitoringSnapshotKind, MonitoringSnapshot]] = {}
+        self._last_monitoring_updates: Tuple[MonitoringSnapshot, ...] = ()
         self._latest_monitoring: Tuple[MonitoringSnapshot, ...] = ()
         self._graceful_shutdown_failed = False
 
@@ -204,7 +222,7 @@ class ReplayTabController:
 
     @property
     def last_monitoring_updates(self) -> Tuple[MonitoringSnapshot, ...]:
-        return self._latest_monitoring
+        return self._last_monitoring_updates
 
     def select_target(self, target_id: str) -> ReplayTargetRow:
         """Select a Replay Service candidate by target id."""
@@ -230,32 +248,28 @@ class ReplayTabController:
                 if _relaunch_required_for_start(target):
                     launch = self.launch_replay(payload)
                     self._runtime_targets()
-                    self._state_overrides[launch.identity.service_ref.key] = ("RUNNING", "running")
+                    self._state_overrides[launch.launch_id] = ("RUNNING", "running")
                     return _command_result(command, f"Started replay {launch.identity.control_name}", self._target_by_id(launch.launch_id))
                 return await self._execute_playback_command(command, target, ENTITY_STATE_RUNNING, "Started")
-            self._state_overrides[self._selected_candidate_for_target(target.target_id).service.key] = ("RUNNING", "running")
-            self._set_target_state(target.target_id, "RUNNING", progress="running")
+            self._state_overrides[target.target_id] = ("RUNNING", "running")
             return _command_result(command, f"Started replay {target.control_name}", self._target_by_id(target.target_id))
         if command.command_type == "replay.pause":
             target = self._apply_action_payload(payload)
             if self._admin_facade is not None:
                 return await self._execute_playback_command(command, target, ENTITY_STATE_PAUSED, "Paused")
-            self._state_overrides[self._selected_candidate_for_target(target.target_id).service.key] = ("PAUSED", None)
-            self._set_target_state(target.target_id, "PAUSED")
+            self._state_overrides[target.target_id] = ("PAUSED", None)
             return _command_result(command, f"Paused replay {target.control_name}", self._target_by_id(target.target_id))
         if command.command_type == "replay.resume":
             target = self._apply_action_payload(payload)
             if self._admin_facade is not None:
                 return await self._execute_playback_command(command, target, ENTITY_STATE_RUNNING, "Resumed")
-            self._state_overrides[self._selected_candidate_for_target(target.target_id).service.key] = ("RUNNING", "running")
-            self._set_target_state(target.target_id, "RUNNING", progress="running")
+            self._state_overrides[target.target_id] = ("RUNNING", "running")
             return _command_result(command, f"Resumed replay {target.control_name}", self._target_by_id(target.target_id))
         if command.command_type == "replay.stop":
             target = self._apply_action_payload(payload)
             if self._admin_facade is not None:
                 return await self._execute_playback_command(command, target, ENTITY_STATE_STOPPED, "Stopped")
-            self._state_overrides[self._selected_candidate_for_target(target.target_id).service.key] = ("STOPPED", "0%")
-            self._set_target_state(target.target_id, "STOPPED", progress="0%")
+            self._state_overrides[target.target_id] = ("STOPPED", "0%")
             return _command_result(command, f"Stopped replay {target.control_name}", self._target_by_id(target.target_id))
         if command.command_type == "replay.next_tag":
             target = self._apply_action_payload(payload)
@@ -263,8 +277,7 @@ class ReplayTabController:
             if not tag_name:
                 raise ValueError("replay.next_tag requires tag_name")
             if self._admin_facade is None:
-                self._state_overrides[self._selected_candidate_for_target(target.target_id).service.key] = ("RUNNING", "running")
-                self._set_target_state(target.target_id, "RUNNING", progress="running")
+                self._state_overrides[target.target_id] = ("RUNNING", "running")
                 return _command_result(command, f"Jumped replay {target.control_name} to tag {tag_name}", self._target_by_id(target.target_id))
             selected = self._selected_candidate_for_target(target.target_id)
             resource_name = str(selected.details.get("admin_resource_name", ""))
@@ -295,8 +308,9 @@ class ReplayTabController:
             )
         if command.command_type == "replay.shutdown":
             target = self._apply_action_payload(payload)
+            selected = self._selected_candidate_for_target(target.target_id)
+            process_exit_observed = False
             if self._admin_facade is not None:
-                selected = self._selected_candidate_for_target(target.target_id)
                 outcome = await self._admin_facade.execute(
                     selected.service,
                     ServiceCommand.SHUTDOWN,
@@ -304,15 +318,25 @@ class ReplayTabController:
                     timeout_sec=command.timeout_sec,
                 )
                 self._graceful_shutdown_failed = not outcome.ok
-                if self._process_manager is not None and target.owned:
-                    self._process_manager.request_local_termination(
-                        self._last_selection,
-                        graceful_shutdown_failed=True,
-                        candidate_id=selected.candidate_id,
-                        local_hostnames=self._config.local_hostnames,
-                    )
-            self._state_overrides[self._selected_candidate_for_target(target.target_id).service.key] = ("SHUTDOWN", "")
-            self._set_target_state(target.target_id, "SHUTDOWN", progress="")
+                if outcome.ok and selected.owns_process:
+                    process_exit_observed = await self._wait_for_local_shutdown_exit(selected)
+                    if not process_exit_observed:
+                        self._graceful_shutdown_failed = True
+                if outcome.ok and (not selected.owns_process or process_exit_observed):
+                    self._state_overrides[target.target_id] = ("SHUTDOWN", "")
+                return CommandResult(
+                    command_id=command.command_id,
+                    status=CommandStatus.ACKNOWLEDGED if outcome.ok else outcome.status,
+                    message=outcome.message or f"Shutdown replay {target.control_name}",
+                    payload={
+                        "target_id": target.target_id,
+                        "control_name": target.control_name,
+                        "command": ServiceCommand.SHUTDOWN.value,
+                        "process_exit_observed": process_exit_observed,
+                    },
+                    created_at=command.created_at,
+                )
+            self._state_overrides[target.target_id] = ("SHUTDOWN", "")
             return _command_result(command, f"Shutdown replay {target.control_name}", self._target_by_id(target.target_id))
         raise ValueError(f"Unsupported Replay command type: {command.command_type}")
 
@@ -496,8 +520,7 @@ class ReplayTabController:
             elif state_value == ENTITY_STATE_RUNNING:
                 override = ("RUNNING", "running")
             if override is not None:
-                self._state_overrides[selected.service.key] = override
-                self._set_target_state(target.target_id, override[0], progress=override[1])
+                self._state_overrides[target.target_id] = override
         return CommandResult(
             command_id=command.command_id,
             status=CommandStatus.ACKNOWLEDGED if outcome.ok else outcome.status,
@@ -515,18 +538,19 @@ class ReplayTabController:
         """Return the next Replay-tab view from controller state."""
 
         service = self._target_service()
-        monitoring_updates = await self._take_monitoring_updates(self._monitoring_services(service))
-        self._cache_monitoring_updates(monitoring_updates)
+        monitoring_updates = await take_monitoring_updates(self._monitoring_facade, self._monitoring_services(service))
+        self._last_monitoring_updates = monitoring_updates
+        cache_monitoring_updates(self._latest_monitoring_by_service, monitoring_updates, _merge_monitoring_details)
         if not service.name:
-            discovered = self._discover_service_from_cache(service)
+            discovered = discover_service_from_cache(self._latest_monitoring_by_service, service)
             if discovered is not None:
                 service = discovered
                 self._config = replace(self._config, service=discovered)
-        self._latest_monitoring = self._monitoring_snapshots_for_service(service)
+        self._latest_monitoring = monitoring_snapshots_for_service(self._latest_monitoring_by_service, service)
         readiness = await self._readiness(service)
         self._last_readiness = readiness
         runtime_targets = self._runtime_targets(service, self._latest_monitoring)
-        targets = runtime_targets + self._targets
+        targets = self._targets_with_overrides(runtime_targets + self._targets)
         view = build_replay_tab_view_model(
             targets=targets,
             selected_target_id=self._config.selected_target_id,
@@ -548,127 +572,34 @@ class ReplayTabController:
         return view
 
     def _target_service(self) -> ServiceInstanceRef:
-        if self._config.service is not None:
-            return self._config.service
-        if self._process_manager is not None:
-            for launch in self._process_manager.launches():
-                if launch.identity.intent.kind == ServiceKind.REPLAY:
-                    return launch.identity.service_ref
-        return ServiceInstanceRef(
+        return resolve_target_service(
+            self._config.service,
+            self._process_manager,
             ServiceKind.REPLAY,
-            "",
             admin_domain_id=self._config.launch_admin_domain_id,
             monitoring_domain_id=self._config.launch_monitoring_domain_id,
             config_paths=self._config.launch_config_paths,
         )
 
     def _monitoring_services(self, service: ServiceInstanceRef) -> Tuple[ServiceInstanceRef, ...]:
-        services = []
-        if service.name:
-            services.append(service)
-        if self._process_manager is not None:
-            for launch in self._process_manager.launches():
-                if launch.identity.intent.kind == ServiceKind.REPLAY:
-                    services.append(launch.identity.service_ref)
-        if not services:
-            services.append(ServiceInstanceRef(
-                kind=ServiceKind.REPLAY,
-                name="",
-                admin_domain_id=self._config.launch_admin_domain_id,
-                monitoring_domain_id=self._config.launch_monitoring_domain_id,
-            ))
-        unique = {}
-        for item in services:
-            unique.setdefault(item.key, item)
-        return tuple(unique.values())
-
-    async def _take_monitoring_updates(self, services: Tuple[ServiceInstanceRef, ...]) -> Tuple[MonitoringSnapshot, ...]:
-        if self._monitoring_facade is None:
-            return ()
-        updates = []
-        for service in services:
-            updates.extend(await self._monitoring_facade.take_available(service))
-        return tuple(updates)
-
-    def _cache_monitoring_updates(self, updates: Iterable[MonitoringSnapshot]) -> None:
-        for snapshot in updates:
-            by_kind = self._latest_monitoring_by_service.setdefault(snapshot.service.key, {})
-            current = by_kind.get(snapshot.kind)
-            if current is None:
-                by_kind[snapshot.kind] = snapshot
-                continue
-            if snapshot.kind == MonitoringSnapshotKind.CONFIG:
-                newer, older = (
-                    (snapshot, current)
-                    if snapshot.observed_at >= current.observed_at
-                    else (current, snapshot)
-                )
-                by_kind[snapshot.kind] = MonitoringSnapshot(
-                    service=newer.service,
-                    kind=newer.kind,
-                    state=newer.state,
-                    metrics=newer.metrics,
-                    details=_merge_monitoring_details(older.details, newer.details),
-                    observed_at=newer.observed_at,
-                )
-                continue
-            if snapshot.observed_at >= current.observed_at:
-                by_kind[snapshot.kind] = snapshot
-
-    def _discover_service_from_cache(self, probe: ServiceInstanceRef) -> Optional[ServiceInstanceRef]:
-        for cached_by_kind in self._latest_monitoring_by_service.values():
-            if not cached_by_kind:
-                continue
-            sample = next(iter(cached_by_kind.values()))
-            if sample.service.kind != ServiceKind.REPLAY:
-                continue
-            if sample.service.monitoring_domain_id != probe.monitoring_domain_id:
-                continue
-            if sample.service.name:
-                return sample.service
-        return None
-
-    def _monitoring_snapshots_for_service(self, service: ServiceInstanceRef) -> Tuple[MonitoringSnapshot, ...]:
-        by_kind = self._latest_monitoring_by_service.get(service.key, {})
-        remap_service = False
-        if not by_kind and service.name:
-            for cached_by_kind in self._latest_monitoring_by_service.values():
-                if not cached_by_kind:
-                    continue
-                sample = next(iter(cached_by_kind.values()))
-                if (sample.service.kind == service.kind
-                        and sample.service.monitoring_domain_id == service.monitoring_domain_id):
-                    by_kind = cached_by_kind
-                    remap_service = True
-                    break
-        snapshots = tuple(
-            snapshot for kind, snapshot in sorted(by_kind.items(), key=lambda item: item[0].value)
+        return monitoring_services(
+            service,
+            self._process_manager,
+            ServiceKind.REPLAY,
+            admin_domain_id=self._config.launch_admin_domain_id,
+            monitoring_domain_id=self._config.launch_monitoring_domain_id,
         )
-        if remap_service and snapshots:
-            snapshots = tuple(
-                MonitoringSnapshot(
-                    service=service,
-                    kind=s.kind,
-                    state=s.state,
-                    metrics=s.metrics,
-                    details=s.details,
-                    observed_at=s.observed_at,
-                )
-                for s in snapshots
-            )
-        return snapshots
 
     async def _readiness(self, service: ServiceInstanceRef) -> Optional[AdminReadiness]:
-        if not service.name:
-            return None
-        if self._admin_facade is None:
-            return AdminReadiness(
-                service=service,
-                status=AdminReadinessStatus.UNKNOWN,
-                message="Service Admin facade is not configured",
-                checked_at=self._clock(),
-            )
-        return await self._admin_facade.readiness(service)
+        return await readiness_for_service(self._admin_facade, service, self._clock)
+
+    async def _wait_for_local_shutdown_exit(self, selected: ServiceProcessCandidate) -> bool:
+        return await wait_for_local_shutdown_exit(
+            self._process_manager,
+            selected,
+            self._LOCAL_SHUTDOWN_REAP_TIMEOUT_SEC,
+            self._LOCAL_SHUTDOWN_REAP_POLL_SEC,
+        )
 
     def _runtime_targets(
             self,
@@ -694,10 +625,13 @@ class ReplayTabController:
         for candidate in replay_candidates:
             target = _target_from_candidate(candidate, self._clock())
             target = _stabilize_replay_target_state(target, candidate)
-            override = self._state_overrides.get(candidate.service.key)
-            if override is not None:
-                state, progress = override
-                target = replace(target, state=state, progress=target.progress if progress is None else progress)
+            if candidate_has_duplicate_admin_target(
+                self._last_selection,
+                candidate.candidate_id,
+                self._config.local_hostnames,
+                self._graceful_shutdown_failed,
+            ):
+                target = replace(target, conflict=True)
             targets.append(target)
         return tuple(targets)
 
@@ -806,16 +740,22 @@ class ReplayTabController:
         raise ValueError(f"Unknown Replay target: {target_id}")
 
     def _all_targets(self) -> Tuple[ReplayTargetRow, ...]:
-        return self._runtime_targets() + self._targets
+        return self._targets_with_overrides(self._runtime_targets() + self._targets)
 
-    def _set_target_state(self, target_id: str, state: str, progress: str = None) -> None:
+    def _targets_with_overrides(self, targets: Tuple[ReplayTargetRow, ...]) -> Tuple[ReplayTargetRow, ...]:
         updated = []
-        for target in self._targets:
-            if target.target_id == target_id:
-                updated.append(replace(target, state=str(state), progress=target.progress if progress is None else str(progress)))
-            else:
+        for target in targets:
+            override = self._state_overrides.get(target.target_id)
+            if override is None:
                 updated.append(target)
-        self._targets = tuple(updated)
+                continue
+            state, progress = override
+            updated.append(replace(
+                target,
+                state=str(state),
+                progress=target.progress if progress is None else str(progress),
+            ))
+        return tuple(updated)
 
 
 def _command_result(command: AppCommand, message: str, target: ReplayTargetRow) -> CommandResult:
@@ -839,20 +779,20 @@ def _relaunch_required_for_start(target: ReplayTargetRow) -> bool:
 
 def _target_from_candidate(candidate, now: float) -> ReplayTargetRow:
     details = dict(candidate.details)
-    age_sec = max(0.0, float(now) - float(candidate.last_seen_at))
+    display = candidate_display_fields(candidate, now, default_label="Replay Service", precise_age=True)
     return ReplayTargetRow(
         target_id=candidate.candidate_id,
         candidate_id=candidate.candidate_id,
-        label=candidate.display_label or "Replay Service",
-        control_name=candidate.service.name,
-        source=candidate.source.value,
-        hostname=candidate.hostname,
+        label=str(display["label"]),
+        control_name=str(display["control_name"]),
+        source=str(display["source"]),
+        hostname=str(display["hostname"]),
         state=_normalized_replay_state(candidate.observed_state),
         progress=str(candidate.metrics.get("progress", "")),
-        pid="" if candidate.pid is None else str(candidate.pid),
-        owned=candidate.owns_process,
-        age=f"{age_sec:.1f}s",
-        confidence=f"{candidate.confidence:.2f}",
+        pid=str(display["pid"]),
+        owned=bool(display["owned"]),
+        age=str(display["age"]),
+        confidence=str(display["confidence"]),
         output_path=str(details.get("output_path", "")),
         output_tail=str(details.get("output_tail", "")),
     )

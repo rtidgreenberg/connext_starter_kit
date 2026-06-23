@@ -22,6 +22,8 @@ from app_core.services import (
     candidate_from_control_identity,
 )
 
+from .controller_common import candidate_display_fields, candidate_has_duplicate_admin_target
+
 
 @dataclass(frozen=True)
 class RecordCandidateRow:
@@ -158,7 +160,15 @@ def build_record_tab_view_model(
         _candidate_row(
             candidate,
             selected_id=selected.candidate_id if selected else "",
-            conflict=duplicate_target and candidate.alive,
+            conflict=(
+                candidate.alive
+                and candidate_has_duplicate_admin_target(
+                    selection,
+                    candidate.candidate_id,
+                    local_hostnames,
+                    graceful_shutdown_failed,
+                )
+            ),
             now=now,
         )
         for candidate in selection.candidates
@@ -330,20 +340,21 @@ def _candidate_row(
         conflict: bool,
         now: float,
 ) -> RecordCandidateRow:
+    display = candidate_display_fields(candidate, now)
     return RecordCandidateRow(
         candidate_id=candidate.candidate_id,
-        label=candidate.display_label or candidate.service.name,
-        control_name=candidate.service.name,
-        source=candidate.source.value,
-        pid="" if candidate.pid is None else str(candidate.pid),
-        hostname=candidate.hostname,
+        label=str(display["label"]),
+        control_name=str(display["control_name"]),
+        source=str(display["source"]),
+        pid=str(display["pid"]),
+        hostname=str(display["hostname"]),
         state=candidate.observed_state,
         current_file=_current_file(candidate.details),
-        age=_age_text(now, candidate.last_seen_at),
-        confidence=f"{candidate.confidence:.2f}",
+        age=str(display["age"]),
+        confidence=str(display["confidence"]),
         selected=candidate.candidate_id == selected_id,
         conflict=conflict,
-        owned=candidate.owns_process,
+        owned=bool(display["owned"]),
     )
 
 
@@ -465,15 +476,3 @@ def _normalize_storage_format(value: str) -> str:
 
 def _storage_format_env_value(value: str) -> str:
     return "JSON_SQLITE" if _normalize_storage_format(value) == "JSON" else "XCDR_AUTO"
-
-
-def _age_text(now: float, last_seen_at: float) -> str:
-    if now <= 0 or last_seen_at <= 0:
-        return "unknown"
-    age = max(0.0, now - last_seen_at)
-    if age < 1.0:
-        return "now"
-    if age < 60.0:
-        return f"{int(age)}s"
-    minutes = int(age // 60)
-    return f"{minutes}m"

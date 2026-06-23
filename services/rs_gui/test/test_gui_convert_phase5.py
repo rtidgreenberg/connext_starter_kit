@@ -23,6 +23,18 @@ from gui.tabs.convert_tab import ConvertJobRow, ConvertPresetView
 class TestConvertJobSubmission(unittest.IsolatedAsyncioTestCase):
     """Test async job submission and tracking."""
 
+    class MockCancelableProcess:
+        def __init__(self):
+            self.returncode = None
+            self.terminate_calls = 0
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.terminate_calls += 1
+            self.returncode = -15
+
     async def test_run_conversion_tracks_submission(self):
         """Verify that submitting a job creates a submission tracking record."""
         preset = ConvertPresetView(
@@ -110,6 +122,8 @@ class TestConvertJobSubmission(unittest.IsolatedAsyncioTestCase):
         )
         controller._submissions[job_id] = submission
         controller._service_facade = True  # Mock facade
+        process = self.MockCancelableProcess()
+        controller._processes[5678] = process
 
         cmd = AppCommand(
             command_type="convert.cancel",
@@ -122,6 +136,8 @@ class TestConvertJobSubmission(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, CommandStatus.ACKNOWLEDGED)
         updated_job = controller._jobs[0]
         self.assertEqual(updated_job.state, "cancel_requested")
+        self.assertEqual(process.terminate_calls, 1)
+        self.assertIn("local converter termination requested", updated_job.message)
 
     async def test_update_jobs_from_monitoring_polls_running_jobs(self):
         """Verify that refresh_view triggers job monitoring updates."""

@@ -80,6 +80,7 @@ class ConvertTabController:
         self._service_ready = False
         self._submissions: Dict[str, ConvertJobSubmission] = {}  # Track subprocess submissions
         self._processes: Dict[int, subprocess.Popen] = {}  # Track active subprocesses by PID
+        self._output_tasks: Dict[int, Tuple[asyncio.Task, ...]] = {}
         self._polling_interval = 2.0  # seconds between status checks
 
     @classmethod
@@ -259,15 +260,18 @@ class ConvertTabController:
             updated_job if j.job_id == job_id else j for j in self._jobs
         )
 
-        # Notify service if job was submitted
-        if self._service_facade and job_id in self._submissions:
-            submission = self._submissions[job_id]
-            if submission.process_pid:
-                try:
-                    # TODO: Send cancellation command to service
-                    pass
-                except Exception as exc:
-                    updated_job = replace(updated_job, message=f"Cancel request sent (service error: {exc})")
+        submission = self._submissions.get(job_id)
+        if submission is not None and submission.process_pid:
+            process = self._processes.get(submission.process_pid)
+            if process is not None and _process_returncode(process) is None:
+                _terminate_process(process)
+                updated_job = replace(
+                    updated_job,
+                    message="Cancellation requested; local converter termination requested",
+                )
+                self._jobs = tuple(
+                    updated_job if j.job_id == job_id else j for j in self._jobs
+                )
 
         return _command_result(command, f"Requested cancellation of job {job_id}", updated_job)
 
@@ -338,6 +342,7 @@ class ConvertTabController:
             result["process_exit_observed"] = bool(observed)
             if observed:
                 self._processes.pop(process_pid, None)
+                self._clear_output_tasks(process_pid)
                 self._mark_job_terminated(job_id)
             results.append(result)
         return tuple(results)
@@ -446,6 +451,7 @@ class ConvertTabController:
             # Track the process
             if process_pid:
                 self._processes[process_pid] = process
+                self._output_tasks[process_pid] = self._track_process_output(job.job_id, process)
 
             # Mark as submitted
             submission = replace(
@@ -499,20 +505,17 @@ class ConvertTabController:
 
             if poll_result is None:
                 # Process still running
+                progress_output = _running_process_output(process, submission.process_output)
                 updated_job = replace(
                     job,
                     state="running",
-                    progress="50%",  # TODO: Parse progress from rticonverter output
+                    progress=self._parse_progress_from_output(progress_output),
                     message="Conversion in progress"
                 )
             else:
                 # Process completed
-                try:
-                    stdout, stderr = await process.communicate()
-                    output = (stdout.decode() if stdout else "") + (stderr.decode() if stderr else "")
-                    submission = replace(submission, process_output=output)
-                except Exception:
-                    output = ""
+                output = await self._collect_completed_process_output(job_id, process, submission)
+                submission = replace(submission, process_output=output)
 
                 if poll_result == 0:
                     # Success
@@ -534,6 +537,7 @@ class ConvertTabController:
                 # Clean up process tracking
                 if submission.process_pid in self._processes:
                     del self._processes[submission.process_pid]
+                self._clear_output_tasks(submission.process_pid)
 
             self._jobs = tuple(
                 updated_job if j.job_id == job_id else j for j in self._jobs
@@ -636,6 +640,59 @@ class ConvertTabController:
         
         # Default fallback
         return "50%"
+
+    def _track_process_output(self, job_id: str, process: Any) -> Tuple[asyncio.Task, ...]:
+        tasks = []
+        for stream_name in ("stdout", "stderr"):
+            stream = getattr(process, stream_name, None)
+            if _supports_async_stream_read(stream):
+                tasks.append(asyncio.create_task(self._capture_process_stream(job_id, stream)))
+        return tuple(tasks)
+
+    async def _capture_process_stream(self, job_id: str, stream: Any) -> None:
+        while True:
+            chunk = await stream.read(4096)
+            if not chunk:
+                return
+            if isinstance(chunk, bytes):
+                text = chunk.decode(errors="ignore")
+            else:
+                text = str(chunk)
+            self._append_process_output(job_id, text)
+
+    def _append_process_output(self, job_id: str, text: str) -> None:
+        if not text:
+            return
+        submission = self._submissions.get(job_id)
+        if submission is None:
+            return
+        self._submissions[job_id] = replace(
+            submission,
+            process_output=f"{submission.process_output}{text}",
+        )
+
+    async def _collect_completed_process_output(
+            self,
+            job_id: str,
+            process: Any,
+            submission: ConvertJobSubmission,
+    ) -> str:
+        tasks = self._output_tasks.get(submission.process_pid, ())
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+            latest = self._submissions.get(job_id)
+            return latest.process_output if latest is not None else submission.process_output
+        try:
+            stdout, stderr = await process.communicate()
+            return (stdout.decode() if stdout else "") + (stderr.decode() if stderr else "")
+        except Exception:
+            return submission.process_output
+
+    def _clear_output_tasks(self, process_pid: int) -> None:
+        tasks = self._output_tasks.pop(process_pid, ())
+        for task in tasks:
+            if not task.done():
+                task.cancel()
 
     def _parse_record_count_from_output(self, output: str) -> int:
         """Extract record count from converter output."""
@@ -761,6 +818,21 @@ def _signal_process_group(process: Any, sig: int) -> bool:
         return True
     except Exception:
         return False
+
+
+def _running_process_output(process: Any, existing_output: str) -> str:
+    output = str(existing_output or "")
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(process, stream_name, None)
+        if isinstance(stream, bytes):
+            output += stream.decode(errors="ignore")
+        elif isinstance(stream, str):
+            output += stream
+    return output
+
+
+def _supports_async_stream_read(stream: Any) -> bool:
+    return callable(getattr(stream, "read", None))
 
 
 async def _wait_for_process_exit(process: Any, timeout_sec: float, poll_sec: float) -> bool:

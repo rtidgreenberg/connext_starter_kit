@@ -18,15 +18,28 @@ if [[ -z "${NDDSHOME}" ]]; then
     exit 1;
 fi
 
+if [[ -z "${RTI_LICENSE_FILE:-}" ]]; then
+    for candidate in \
+        "$NDDSHOME/rti_license.dat" \
+        "$NDDSHOME/rti_license.txt" \
+        "$HOME/.rti/rti_license.dat" \
+        "$HOME/rti_license.dat"; do
+        if [[ -f "$candidate" ]]; then
+            export RTI_LICENSE_FILE="$candidate"
+            break
+        fi
+    done
+fi
+
 
 # Replay Service configuration file
 # QoS XML file — centralized profiles (available if replay config references them)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-xml="$REPO_ROOT/dds/qos/replay_service_config.xml"
+xml="$REPO_ROOT/dds/qos/replay_service.xml"
 qos_file="$REPO_ROOT/dds/qos/DDS_QOS_PROFILES.xml"
 
-config="template"
+config="xcdr"
 
 ################################################################################
 #                                 VERBOSITY                                    #

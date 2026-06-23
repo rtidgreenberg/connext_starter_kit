@@ -136,7 +136,7 @@ cd services
 - ✅ Application topics: `Button`, `Command`, `Position`
 - ❌ RTI internal topics: `rti/*`
 
-**Configuration File**: `dds/qos/replay_service_config.xml` (uses `xcdr` configuration)
+**Configuration File**: `dds/qos/replay_service.xml` (uses `xcdr` configuration)
 
 **Running**:
 ```bash
@@ -144,7 +144,7 @@ cd services
 ./start_replay.sh
 ```
 
-**Playback Options**: Edit `dds/qos/replay_service_config.xml` to configure:
+**Playback Options**: Edit `dds/qos/replay_service.xml` to configure:
 - Playback rate (speed multiplier)
 - Looping behavior
 - Time range selection
@@ -164,7 +164,7 @@ cd services
 
 **Prerequisites**: First convert your recorded data to JSON (see [convert to JSON](#i-want-to-convert-my-recorded-data-to-json-for-post-processing))
 
-**Configuration File**: `dds/qos/replay_service_config.xml` (uses `json` configuration)
+**Configuration File**: `dds/qos/replay_service.xml` (uses `json` configuration)
 
 **Running**:
 ```bash
@@ -220,7 +220,7 @@ GUI-specific tests (unit, widget, integration, E2E tags) live in
 | `recording_service_config.xml` | Main recording configuration - selective topic recording |
 | `recording_service_config_external_types.xml` | Recording with external XML type definitions |
 | `converter_service_config.xml` | Conversion configurations (XCDR to JSON/CSV) |
-| `dds/qos/replay_service_config.xml` | Replay configurations (XCDR and JSON) |
+| `dds/qos/replay_service.xml` | Replay configurations (XCDR and JSON) |
 
 ## Scripts
 
@@ -253,7 +253,7 @@ services/
 ├── recording_service_config.xml
 ├── recording_service_config_external_types.xml
 ├── converter_service_config.xml
-├── ../dds/qos/replay_service_config.xml
+├── ../dds/qos/replay_service.xml
 ├── start_record.sh
 ├── start_record_external_types.sh
 ├── start_convert.sh

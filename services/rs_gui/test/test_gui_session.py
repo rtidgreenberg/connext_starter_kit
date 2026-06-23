@@ -423,7 +423,7 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
         await session.next_view_async(process_commands=False)
         session.command_sink(build_replay_launch_command(ReplayLaunchViewModel(
             label="Manual Replay",
-            config_paths=("dds/qos/replay_service_config.xml",),
+            config_paths=("dds/qos/replay_service.xml",),
             config_name="xcdr",
             data_domain_id=63,
             admin_domain_id=61,
@@ -530,7 +530,7 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
         )
         launch = replay_controller.launch_replay({
             "label": "Manual Replay",
-            "config_paths": ["dds/qos/replay_service_config.xml"],
+            "config_paths": ["dds/qos/replay_service.xml"],
             "config_name": "xcdr",
             "database_path": replay_database_dir,
             "executable": "/opt/rti/bin/rtireplayservice",
@@ -896,7 +896,7 @@ class TestGuiShellSession(unittest.IsolatedAsyncioTestCase):
 
         view = await session.next_view_async()
 
-        self.assertEqual(view.replay_tab.observed_state, "RUNNING")
+        self.assertEqual(view.replay_tab.observed_state, "running")
         self.assertEqual(view.replay_tab.playback_rate, 2.0)
         self.assertTrue(view.replay_tab.action_by_id["pause"].enabled)
         self.assertTrue(any(entry.message == "Dispatched replay.start" for entry in view.event_log))

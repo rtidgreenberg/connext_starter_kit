@@ -82,7 +82,7 @@ class TestGuiShellFactory(unittest.TestCase):
 
             command = build_replay_launch_command(ReplayLaunchViewModel(
                 label="Factory Replay",
-                config_paths=("dds/qos/replay_service_config.xml",),
+                config_paths=("dds/qos/replay_service.xml",),
                 config_name="xcdr",
                 database_path=tmpdir,
                 executable="rtireplayservice",

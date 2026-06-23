@@ -48,6 +48,13 @@ import sys
 import time
 import unittest
 
+
+RS_GUI_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "rs_gui")
+if RS_GUI_DIR not in sys.path:
+    sys.path.insert(0, RS_GUI_DIR)
+
+from app_core.connext_environment import detect_nddshome, ensure_rti_license
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -55,12 +62,8 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SERVICES_DIR = os.path.dirname(SCRIPT_DIR)  # services/
 REPO_ROOT = os.path.dirname(SERVICES_DIR)   # repo root
 
-NDDSHOME = os.environ.get("NDDSHOME", "")
-if not NDDSHOME:
-    import glob as _glob
-    candidates = sorted(_glob.glob(os.path.expanduser("~/rti_connext_dds-*")))
-    if candidates:
-        NDDSHOME = candidates[-1]
+NDDSHOME = os.environ.get("NDDSHOME", "") or detect_nddshome()
+RTI_LICENSE_FILE = os.environ.get("RTI_LICENSE_FILE", "") or ensure_rti_license(NDDSHOME)
 
 RECORDER_BIN = os.path.join(NDDSHOME, "bin", "rtirecordingservice")
 REPLAY_BIN = os.path.join(NDDSHOME, "bin", "rtireplayservice")
@@ -112,6 +115,8 @@ def _skip_reason():
         import rti.connextdds  # noqa: F401
     except ImportError:
         return "rti.connextdds not available"
+    if not RTI_LICENSE_FILE or not os.path.isfile(RTI_LICENSE_FILE):
+        return "RTI license file not available"
     return None
 
 
@@ -126,6 +131,8 @@ def _publish_command_samples(domain_id, num_samples, interval):
     DataReader) before publishing to avoid the discovery race condition.
     """
     import rti.connextdds as dds
+
+    ensure_rti_license(NDDSHOME)
 
     # Build a type matching the Command struct from ExampleTypes.idl
     cmd_type = dds.StructType("example_types::Command")
@@ -228,6 +235,8 @@ class TestE2EServices(unittest.TestCase):
         """start_record.sh launches Recording Service and records data."""
         env = os.environ.copy()
         env["NDDSHOME"] = NDDSHOME
+        if RTI_LICENSE_FILE:
+            env["RTI_LICENSE_FILE"] = RTI_LICENSE_FILE
 
         proc = subprocess.Popen(
             ["bash", START_RECORD_SH, "deploy"],
@@ -307,6 +316,8 @@ class TestE2EServices(unittest.TestCase):
 
         env = os.environ.copy()
         env["NDDSHOME"] = NDDSHOME
+        if RTI_LICENSE_FILE:
+            env["RTI_LICENSE_FILE"] = RTI_LICENSE_FILE
 
         result = subprocess.run(
             ["bash", START_CONVERT_SH, "csv"],
@@ -410,6 +421,8 @@ class TestE2EServices(unittest.TestCase):
 
         env = os.environ.copy()
         env["NDDSHOME"] = NDDSHOME
+        if RTI_LICENSE_FILE:
+            env["RTI_LICENSE_FILE"] = RTI_LICENSE_FILE
 
         # Replay has enable_looping=false, so it exits when done.
         # The xcdr config reads from log_dir/xcdr

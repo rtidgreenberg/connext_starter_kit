@@ -128,7 +128,7 @@ class TestServiceProcessCommand(unittest.TestCase):
         intent = ServiceLaunchIntent(
             kind=ServiceKind.REPLAY,
             label="Replay A",
-            config_paths=("dds/qos/replay_service_config.xml",),
+            config_paths=("dds/qos/replay_service.xml",),
         )
         identity = ServiceControlIdentity(
             intent=intent,

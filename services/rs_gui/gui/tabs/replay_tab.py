@@ -42,7 +42,7 @@ class ReplayLaunchViewModel:
 
     label: str = "Replay Service"
     config_paths: Tuple[str, ...] = (
-        "dds/qos/replay_service_config.xml",
+        "dds/qos/replay_service.xml",
         "dds/qos/DDS_QOS_PROFILES.xml",
     )
     available_config_names: Tuple[str, ...] = ("template", "xcdr", "json")
@@ -180,7 +180,9 @@ def build_replay_tab_view_model(
         None,
     )
     if selected_target is not None:
-        observed_state = selected_target.state
+        observed_state = _presentation_replay_state(selected_target.state)
+    else:
+        observed_state = _presentation_replay_state(observed_state)
     diagnostics = tuple(str(item) for item in diagnostics) + _diagnostics(targets, database_path)
     return ReplayTabViewModel(
         selected_target_id=selected_target_id,
@@ -247,7 +249,7 @@ def build_mock_replay_tab_view_model() -> ReplayTabViewModel:
         writer_qos_profile="DataPatternsLibrary::replay_writer_transient_local",
         launch=ReplayLaunchViewModel(
             label="Replay Service",
-            config_paths=("dds/qos/replay_service_config.xml",),
+            config_paths=("dds/qos/replay_service.xml",),
             available_config_names=("template", "xcdr", "json"),
             config_name="template",
             database_path="services/replay_input/robot_run_03",
@@ -280,18 +282,7 @@ def build_replay_action_command(
     }
     if action_id not in action_to_command:
         raise ValueError(f"Unsupported Replay tab action: {action_id}")
-    target = replay.selected_target
-    payload: Dict[str, Any] = {
-        "target_id": target.target_id if target is not None else "",
-        "control_name": target.control_name if target is not None else "",
-        "database_path": replay.database_path,
-        "playback_rate": replay.playback_rate,
-        "loop": replay.loop,
-        "time_window": replay.time_window,
-        "qos_file_path": replay.qos_file_path,
-        "participant_qos_profile": replay.participant_qos_profile,
-        "writer_qos_profile": replay.writer_qos_profile,
-    }
+    payload = _replay_command_payload(replay)
     return AppCommand(
         command_type=action_to_command[action_id],
         target=payload["control_name"],
@@ -343,10 +334,22 @@ def build_replay_next_tag_command(
     This uses Replay Service remote administration to jump to a named tag.
     """
 
-    target = replay.selected_target
     clean_tag = str(tag_name or "").strip()
     if not clean_tag:
         raise ValueError("tag_name is required for replay.next_tag")
+    payload = _replay_command_payload(replay, tag_name=clean_tag)
+    return AppCommand(
+        command_type="replay.next_tag",
+        target=payload["control_name"],
+        payload=payload,
+    )
+
+
+def _replay_command_payload(
+        replay: ReplayTabViewModel,
+        tag_name: str = "",
+) -> Dict[str, Any]:
+    target = replay.selected_target
     payload: Dict[str, Any] = {
         "target_id": target.target_id if target is not None else "",
         "control_name": target.control_name if target is not None else "",
@@ -357,13 +360,10 @@ def build_replay_next_tag_command(
         "qos_file_path": replay.qos_file_path,
         "participant_qos_profile": replay.participant_qos_profile,
         "writer_qos_profile": replay.writer_qos_profile,
-        "tag_name": clean_tag,
     }
-    return AppCommand(
-        command_type="replay.next_tag",
-        target=payload["control_name"],
-        payload=payload,
-    )
+    if tag_name:
+        payload["tag_name"] = tag_name
+    return payload
 
 
 def _selected_target_id(targets: Tuple[ReplayTargetRow, ...], requested: str) -> str:
@@ -433,6 +433,13 @@ def _diagnostics(
     if any(target.conflict for target in targets):
         diagnostics.append("Duplicate Replay Service target detected")
     return tuple(diagnostics)
+
+
+def _presentation_replay_state(state: object) -> str:
+    normalized = str(state or "").strip()
+    if not normalized:
+        return "unknown"
+    return normalized.lower()
 
 
 def _launch_command_preview(launch: ReplayLaunchViewModel) -> str:

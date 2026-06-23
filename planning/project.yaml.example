@@ -1,0 +1,79 @@
+# planning/project.yaml
+# ============================================================================
+# PROJECT CONFIGURATION — Created by /rti_dev Phase 0 (Project Initialization)
+# ============================================================================
+#
+# LOCKED — These choices are PERMANENT. Changing them requires:
+#   1. Deleting all generated code in apps/ and dds/
+#   2. Re-scaffolding all processes
+#   3. Re-implementing all process code
+#
+# To regenerate: /rti_dev project init (with destructive warning)
+#
+# This file is checked by the /rti_dev orchestrator on every invocation.
+# If it does not exist → Phase 0 runs (framework + API selection).
+# If it exists → skip Phase 0, check for system_config.yaml.
+# ============================================================================
+
+project:
+  # ── User-selected fields (asked during Phase 0) ──────────────────────────
+
+  framework: wrapper_class          # wrapper_class | xml_app_creation
+                                    #   wrapper_class:    entities created in code via
+                                    #                     DDSParticipantSetup, DDSReaderSetup<T>,
+                                    #                     DDSWriterSetup<T>. Full programmatic control.
+                                    #   xml_app_creation: entities defined in XML config files.
+                                    #                     App code is minimal — just callbacks.
+
+  api: modern_cpp                   # modern_cpp | python | java | c | modern_cpp_python
+                                    #   modern_cpp:        C++11 API, CMake build system
+                                    #   python:            Python API, pip/venv
+                                    #   java:              Java API, Maven/Gradle
+                                    #   c:                 C API, CMake build system
+                                    #   modern_cpp_python: C++ primary + Python secondary (both)
+
+  locked: true                      # Always true once created. Signals to /rti_dev
+                                    # that Phase 0 is complete and irreversible.
+
+  created: "2026-03-17T10:00:00Z"   # ISO 8601 timestamp of project initialization
+
+  # ── Derived fields (computed from api choice — read-only, not user-editable) ──
+
+  rtiddsgen_language: C++11         # rtiddsgen -language flag
+                                    #   modern_cpp       → C++11
+                                    #   python           → python
+                                    #   java             → java
+                                    #   c                → C
+                                    #   modern_cpp_python → C++11 (primary) + python (secondary)
+
+  build_system: cmake               # cmake | pip | maven | cmake+pip
+                                    #   modern_cpp / c   → cmake
+                                    #   python           → pip
+                                    #   java             → maven
+                                    #   modern_cpp_python → cmake+pip
+
+  test_framework: gtest             # gtest | pytest | junit
+                                    #   modern_cpp / c   → gtest
+                                    #   python           → pytest
+                                    #   java             → junit
+                                    #   modern_cpp_python → gtest+pytest
+
+  app_dir: apps/cxx11               # Where application code is placed
+                                    #   modern_cpp       → apps/cxx11
+                                    #   python           → apps/python
+                                    #   java             → apps/java
+                                    #   c                → apps/c
+                                    #   modern_cpp_python → apps/cxx11 + apps/python
+
+# ============================================================================
+# DERIVED FIELDS REFERENCE TABLE
+# ============================================================================
+#
+# | API Choice        | rtiddsgen_language | build_system | test_framework | app_dir             |
+# |-------------------|--------------------|--------------|----------------|---------------------|
+# | modern_cpp        | C++11              | cmake        | gtest          | apps/cxx11          |
+# | python            | python             | pip          | pytest         | apps/python         |
+# | java              | java               | maven        | junit          | apps/java           |
+# | c                 | C                  | cmake        | gtest          | apps/c              |
+# | modern_cpp_python | C++11 + python     | cmake+pip    | gtest+pytest   | apps/cxx11 + python |
+# ============================================================================

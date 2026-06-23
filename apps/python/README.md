@@ -73,8 +73,8 @@ connext_dds_env/            # Shared virtual environment (at repository root)
 ## Detailed Setup
 
 ### Prerequisites
-- RTI Connext DDS 7.3.0+ installed
-- Python 3.8+
+- RTI Connext DDS 7.7.0+ installed
+- Python 3.10
 - Built DDS Python bindings (from top-level cmake build)
 - RTI license file
 
@@ -107,7 +107,7 @@ cd apps/python
 
 The install script:
 - Auto-detects `NDDSHOME` from `~/rti_connext_dds-*` (uses latest version)
-- Creates a shared virtual environment at the repository root (`connext_dds_env/`)
+- Creates a shared Python 3.10 virtual environment at the repository root (`connext_dds_env/`)
 - Installs dependencies from `requirements.txt`
 - Triggers DDS Python binding generation if missing
 

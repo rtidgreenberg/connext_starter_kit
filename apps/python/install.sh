@@ -1,8 +1,7 @@
 #!/bin/bash
-# Installation script for Connext DDS Python Applications
-# Sets up virtual environment and installs dependencies
+# Installation script for Connext DDS Python Applications.
 
-set -e  # Exit on any error
+set -euo pipefail
 
 echo "=== Connext DDS Python Application Setup ==="
 echo
@@ -11,69 +10,13 @@ echo
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 VENV_DIR="$REPO_ROOT/connext_dds_env"
+source "$REPO_ROOT/scripts/python_env.sh"
 
-# --- NDDSHOME Auto-Detection ---
-if [ -z "$NDDSHOME" ]; then
-    echo "NDDSHOME not set. Searching for RTI Connext installation..."
-    
-    # Find latest version in ~/rti_connext_dds-*
-    LATEST_RTI=$(ls -d ~/rti_connext_dds-* 2>/dev/null | sort -V | tail -n 1)
-    
-    if [ -n "$LATEST_RTI" ] && [ -d "$LATEST_RTI" ]; then
-        export NDDSHOME="$LATEST_RTI"
-        echo "✓ Found RTI installation: $NDDSHOME"
-    else
-        echo "ERROR: NDDSHOME not set and no RTI installation found in ~/rti_connext_dds-*"
-        echo ""
-        echo "Please either:"
-        echo "  1. Set NDDSHOME environment variable:"
-        echo "     export NDDSHOME=/path/to/rti_connext_dds-x.x.x"
-        echo ""
-        echo "  2. Install RTI Connext DDS in your home directory"
-        echo ""
-        exit 1
-    fi
-else
-    echo "✓ NDDSHOME: $NDDSHOME"
-fi
-
-# --- Virtual Environment Setup ---
-echo
-if [ -d "$VENV_DIR" ]; then
-    echo "✓ Virtual environment already exists at: $VENV_DIR"
-else
-    echo "Creating virtual environment at repository root..."
-    python3 -m venv "$VENV_DIR"
-    echo "✓ Virtual environment created at: $VENV_DIR"
-fi
-
-# Activate virtual environment
-echo
-echo "Activating virtual environment..."
-source "$VENV_DIR/bin/activate" 2>/dev/null || true
-export PATH="$VENV_DIR/bin:$PATH"
-echo "✓ Virtual environment activated"
-
-# Upgrade pip
-echo
-echo "Upgrading pip..."
-pip install --upgrade pip
-
-# --- Install Dependencies ---
-echo
-echo "Installing dependencies from requirements.txt..."
-pip install -r "$SCRIPT_DIR/requirements.txt"
-echo "✓ Dependencies installed successfully"
-
-# Verify RTI installation
-echo
-echo "Verifying RTI Python API installation..."
-if python -c "import rti.connextdds" 2>/dev/null; then
-    echo "✓ RTI Python API verification successful"
-else
-    echo "⚠️  WARNING: RTI Python API verification failed"
-    echo "   The API was installed but may not be working correctly"
-fi
+python_env_init "apps_python_install" "$REPO_ROOT"
+python_env_resolve_nddshome
+python_env_ensure_venv
+python_env_activate_venv
+python_env_sync_requirements "$SCRIPT_DIR/requirements.txt" "rti.connextdds:RTI Connext DDS Python API"
 
 # --- Generate Python Bindings if Missing ---
 echo
@@ -100,13 +43,7 @@ else
 fi
 
 # --- License File Check ---
-echo
-echo "Checking for RTI license file..."
-if [ -n "$RTI_LICENSE_FILE" ] && [ -f "$RTI_LICENSE_FILE" ]; then
-    echo "✓ RTI_LICENSE_FILE is set: $RTI_LICENSE_FILE"
-elif [ -f "$NDDSHOME/rti_license.dat" ]; then
-    echo "✓ Found license file at: $NDDSHOME/rti_license.dat"
-else
+if ! python_env_resolve_license_file; then
     echo "⚠️  WARNING: No RTI license file found"
     echo ""
     echo "   Python applications require a license file to run."

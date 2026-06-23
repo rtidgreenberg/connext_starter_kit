@@ -10,6 +10,7 @@ Configuration files for RTI Recording, Replay, and Converter Services - capture,
 - [I want to convert my recorded data to CSV for post-processing](#i-want-to-convert-my-recorded-data-to-csv-for-post-processing)
 - [I want to replay my recorded data](#i-want-to-replay-my-recorded-data)
 - [I want to replay converted JSON data](#i-want-to-replay-converted-json-data)
+- [I want to control Recording Service with a GUI](#i-want-to-control-recording-service-with-a-gui)
 
 ---
 
@@ -135,7 +136,7 @@ cd services
 - ✅ Application topics: `Button`, `Command`, `Position`
 - ❌ RTI internal topics: `rti/*`
 
-**Configuration File**: `replay_service_config.xml` (uses `xcdr` configuration)
+**Configuration File**: `dds/qos/replay_service.xml` (uses `xcdr` configuration)
 
 **Running**:
 ```bash
@@ -143,7 +144,7 @@ cd services
 ./start_replay.sh
 ```
 
-**Playback Options**: Edit `replay_service_config.xml` to configure:
+**Playback Options**: Edit `dds/qos/replay_service.xml` to configure:
 - Playback rate (speed multiplier)
 - Looping behavior
 - Time range selection
@@ -163,7 +164,7 @@ cd services
 
 **Prerequisites**: First convert your recorded data to JSON (see [convert to JSON](#i-want-to-convert-my-recorded-data-to-json-for-post-processing))
 
-**Configuration File**: `replay_service_config.xml` (uses `json` configuration)
+**Configuration File**: `dds/qos/replay_service.xml` (uses `json` configuration)
 
 **Running**:
 ```bash
@@ -177,6 +178,41 @@ cd services
 
 ---
 
+## I want to control Recording Service with a GUI
+
+**Objective**: Launch, monitor, pause/resume, shut down, and tag Recording Service from a tkinter desktop GUI — with live DDS monitoring data (state, CPU, memory, uptime, database, topics).
+
+**Running**:
+```bash
+cd services/rs_gui
+./run_rs_gui.sh
+```
+
+See [rs_gui/README.md](rs_gui/README.md) for prerequisites, setup, and usage details.
+
+---
+
+## Tests
+
+End-to-end tests for the services start scripts live in `test/`:
+
+```bash
+cd services
+
+# Run services E2E tests (7 tests: record → convert CSV → replay)
+python3 test/run_all_tests.py -v
+
+# Run a specific test standalone
+python3 test/test_e2e_services.py -v
+```
+
+See [test/README.md](test/README.md) for details on the test pipeline.
+
+GUI-specific tests (unit, widget, integration, E2E tags) live in
+[rs_gui/test/](rs_gui/test/README.md).
+
+---
+
 ## Configuration Files
 
 | File | Purpose |
@@ -184,7 +220,7 @@ cd services
 | `recording_service_config.xml` | Main recording configuration - selective topic recording |
 | `recording_service_config_external_types.xml` | Recording with external XML type definitions |
 | `converter_service_config.xml` | Conversion configurations (XCDR to JSON/CSV) |
-| `replay_service_config.xml` | Replay configurations (XCDR and JSON) |
+| `dds/qos/replay_service.xml` | Replay configurations (XCDR and JSON) |
 
 ## Scripts
 
@@ -204,6 +240,10 @@ cd services
 
 ```
 services/
+├── test/
+│   ├── run_all_tests.py            # Services test suite runner
+│   ├── test_e2e_services.py        # E2E: record → convert → replay
+│   └── README.md
 ├── log_dir/
 │   └── xcdr/                   # Recorded XCDR data (deploy mode)
 │   └── <timestamped dirs>/     # Recorded JSON data (debug mode)
@@ -213,17 +253,18 @@ services/
 ├── recording_service_config.xml
 ├── recording_service_config_external_types.xml
 ├── converter_service_config.xml
-├── replay_service_config.xml
+├── ../dds/qos/replay_service.xml
 ├── start_record.sh
 ├── start_record_external_types.sh
 ├── start_convert.sh
-└── start_replay.sh
+├── start_replay.sh
+└── rs_gui/                      # tkinter GUI, monitoring, and tests
 ```
 
 ## Resources
 
 - [RTI Recording Service Manual (7.3.0)](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/manuals/connext_dds_professional/services/recording_service/)
-- [RTI Recording Service Manual (7.3.1)](https://community.rti.com/static/documentation/connext-dds/7.3.1/doc/manuals/connext_dds_professional/services/recording_service/index.html)
+- [RTI Recording Service Manual (7.6.0)](https://community.rti.com/static/documentation/connext-dds/7.6.0/doc/manuals/connext_dds_professional/services/recording_service/index.html)
 - [RTI Replay Service Manual](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/manuals/connext_dds_professional/services/replay_service/)
 - [RTI Converter Service Manual](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/manuals/connext_dds_professional/services/converter_service/)
 

@@ -95,6 +95,20 @@ module example_types {
     };
     
     /**
+     * AppConfig - Application configuration published once on startup
+     * Uses RELIABLE + TRANSIENT_LOCAL so late-joiners receive the config
+     */
+    struct AppConfig {
+        @key string<MAX_ID_LENGTH> app_id;          // Application identifier
+        string<MAX_NAME_LENGTH> app_name;            // Human-readable application name
+        unsigned long domain_id;                     // Domain this app is running on
+        string<MAX_VALUE_LENGTH> version;             // Application version string
+        double publish_rate_hz;                       // Configured publish rate
+        boolean debug_enabled;                        // Debug mode flag
+        string<MAX_MESSAGE_LENGTH> description;       // Application description
+    };
+    
+    /**
      * Image - Basic image data structure
      */
     struct Image {

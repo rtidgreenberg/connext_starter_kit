@@ -52,7 +52,7 @@ class ConfigPublisherApp:
 
         # Create Topic
         config_topic = dds.Topic(
-            participant, topics.CONFIG_TOPIC, example_types.AppConfig
+            participant, topics.APP_CONFIG_TOPIC, example_types.AppConfig
         )
 
         # Create DataWriter with ParameterQoS (RELIABLE + TRANSIENT_LOCAL)

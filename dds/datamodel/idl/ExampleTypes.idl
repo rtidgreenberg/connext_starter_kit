@@ -52,6 +52,17 @@ module example_types {
     };
     
     /**
+     * Config - Basic configuration structure
+     */
+    struct Config {
+        @key string<MAX_ID_LENGTH> destination_id;      // Configuration identifier
+        string<MAX_NAME_LENGTH> parameter_name;    // Parameter name
+        string<MAX_VALUE_LENGTH> parameter_value; // Parameter value
+        double numeric_value;                       // Numeric parameter value
+        boolean enabled;                           // Enable/disable flag
+    };
+    
+    /**
      * Position - Current location reporting structure
      */
     struct Position {

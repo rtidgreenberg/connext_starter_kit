@@ -51,7 +51,10 @@ module topics {
     const string IMAGE_TOPIC = "Image";
     const string FINAL_FLAT_IMAGE_TOPIC = "FinalFlatImage";
     const string POINT_CLOUD_TOPIC = "PointCloud";
-    const string CONFIG_TOPIC = "AppConfig";
+    const string CONFIG_TOPIC = "Config";
+    const string APP_CONFIG_TOPIC = "AppConfig";
+    const string GEOJSON_TOPIC = "GeoJSON";
+    const string TRANSFORM_TOPIC = "FrameTransform";
     
     // ROS2-style Parameter Topics
     const string PARAMETER_EVENTS_TOPIC = "ParameterEvents";

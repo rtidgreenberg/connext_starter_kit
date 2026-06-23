@@ -54,7 +54,7 @@ cd /path/to/connext_starter_kit
 
 Options:
   -d, --domain <int>    Domain ID (default: 1)
-  -v, --verbosity <int> Verbosity 0-3 (default: 1)
+  -v, --verbosity <int> Verbosity 0-5 (default: 1)
   -q, --qos-file <str>  QoS XML path
   -h, --help           Show help
 ```
@@ -79,9 +79,8 @@ command_override/
 ├── command_override.cxx    # Main application logic
 ├── application.hpp        # Command line parsing utilities  
 ├── CMakeLists.txt        # Build configuration
-├── README.md             # This file
-└── build/                # Build output directory
-    └── command_override   # Executable
+├── run.sh                # Run script
+└── README.md             # This file
 ```
 
 ## Dependencies

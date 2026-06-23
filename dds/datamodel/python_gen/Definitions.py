@@ -109,9 +109,13 @@ topics_POINT_CLOUD_TOPIC = "PointCloud"
 
 topics.POINT_CLOUD_TOPIC = topics_POINT_CLOUD_TOPIC
 
-topics_CONFIG_TOPIC = "AppConfig"
+topics_CONFIG_TOPIC = "Config"
 
 topics.CONFIG_TOPIC = topics_CONFIG_TOPIC
+
+topics_APP_CONFIG_TOPIC = "AppConfig"
+
+topics.APP_CONFIG_TOPIC = topics_APP_CONFIG_TOPIC
 
 topics_PARAMETER_EVENTS_TOPIC = "ParameterEvents"
 

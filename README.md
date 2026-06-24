@@ -53,7 +53,6 @@ Cross-language DDS system/application templates to accelerate development.
 ## Table of Contents - What Do You Want to Do?
 
 ### 🚀 Getting Started
-- [I want to generate DDS applications using GitHub Copilot](apps/cxx11/README.md#creating-new-c-dds-applications)
 - [I want to learn basic DDS patterns with example apps](apps/cxx11/example_io_app/README.md)
 - [I want to understand the system architecture](ARCHITECTURE.md)
 
@@ -94,7 +93,6 @@ Cross-language DDS system/application templates to accelerate development.
 - **[Monitoring Tools](tools/README.md)** - Real-time monitoring and debugging
 
 ### Reference
-- **[GitHub Copilot Prompts](.github/prompts/)** - AI-powered app generation templates
 - **[RTI Community](https://community.rti.com/)** - Support and resources
 - **[RTI Documentation](https://community.rti.com/static/documentation/)** - Official documentation
 

@@ -18,9 +18,28 @@ if [[ -z "${NDDSHOME}" ]]; then
     exit 1;
 fi
 
+if [[ -z "${RTI_LICENSE_FILE:-}" ]]; then
+  for candidate in \
+    "$NDDSHOME/rti_license.dat" \
+    "$NDDSHOME/rti_license.txt" \
+    "$HOME/.rti/rti_license.dat" \
+    "$HOME/rti_license.dat"; do
+    if [[ -f "$candidate" ]]; then
+      export RTI_LICENSE_FILE="$candidate"
+      break
+    fi
+  done
+fi
+
 
 # Converter Service configuration file
 xml="./converter_service_config.xml"
+
+# QoS XML file — listed for reference; converter does not use DDS QoS
+# profiles since it is a file-to-file tool (not a DDS application).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+qos_file="$REPO_ROOT/dds/qos/DDS_QOS_PROFILES.xml"
 
 if [ "$1" == "json" ] || [ "$1" == "csv" ] ; then
   config=$1
@@ -62,6 +81,7 @@ verbosity=ERROR:ERROR
 echo "
 ------------------------CONVERTER SERVICE CONFIGS: -----------------------------
 XML FILES used:  $xml
+QoS FILE:        $qos_file
 Logging Verbosity: $verbosity
 CONFIG = $config
 

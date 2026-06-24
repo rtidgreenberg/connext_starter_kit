@@ -149,23 +149,23 @@ cmake --build .
 
 #### Step 4: Create Application Using GitHub Copilot
 
-1. **Use Build Prompt**: Open `.github/prompts/build_cxx.prompt.md`
+1. **Use the Existing C++ Guidance**: Start from `apps/cxx11/example_io_app/` and the conventions documented in this README.
 
-2. **Define Your Application**: Use GitHub Copilot Chat with a command like:
+2. **Define Your Application**: Use GitHub Copilot Chat with a request like:
    ```
-   Follow instructions in build_cxx.prompt.md. Create a new cxx app with [TYPE using TOPIC NAME] as reader(s) and [TYPE using TOPIC NAME] as writer(s)
+    Create a new cxx app using `example_io_app` as the reference. Add [TYPE using TOPIC NAME] as reader(s) and [TYPE using TOPIC NAME] as writer(s).
    ```
    
    **Example Commands:**
    ```bash
    # Sensor monitoring app
-   Follow instructions in build_cxx.prompt.md. Create a new cxx app with Position and State as readers and Command as writer
+    Create a new cxx app using `example_io_app` as the reference with Position and State as readers and Command as writer
    
    # Control system app  
-   Follow instructions in build_cxx.prompt.md. Create a new cxx app with Button using ButtonTopic as reader and Config, State, Command as writers
+    Create a new cxx app using `example_io_app` as the reference with Button using ButtonTopic as reader and Config, State, Command as writers
    
    # Data collection app
-   Follow instructions in build_cxx.prompt.md. Create a new cxx app with Button, Position, State as readers and Image as writer
+    Create a new cxx app using `example_io_app` as the reference with Button, Position, State as readers and Image as writer
    ```
 
 3. **Copilot Will**:
@@ -344,7 +344,7 @@ All applications automatically link against:
 ## Getting Started
 
 1. **Try the Example**: Build and run `example_io_app`
-2. **Follow the Prompt**: Use `.github/prompts/build_cxx.prompt.md` with GitHub Copilot
+2. **Follow the Guidance**: Use this README together with `apps/cxx11/example_io_app/` as the reference when prompting GitHub Copilot
 3. **Create Your App**: Define readers/writers and let Copilot generate the code
 4. **Test Integration**: Verify cross-language communication works
 5. **Monitor with RTI Tools**: Use Admin Console to observe system behavior

@@ -1,6 +1,6 @@
 # System Templates
 
-This directory contains all parameterized templates used by the `/rti_dev` RTI Rapid Prototyping
+This directory contains all parameterized templates used by the `the workflow` RTI Rapid Prototyping
 to generate DDS applications during Phases 2-4 of the workflow.
 
 ## Directory Structure

@@ -2,10 +2,10 @@
 
 **One-time, irreversible.** These choices determine the entire project file structure, build system, code templates, and wrapper classes. Once scaffolded, changing them requires regenerating the entire project.
 
-This runs on first `/rti_dev` invocation when no `planning/project.yaml` exists.
+This runs on first `the workflow` invocation when no `planning/project.yaml` exists.
 
 ```
-/rti_dev — Welcome! Let's initialize your DDS project.
+the workflow — Welcome! Let's initialize your DDS project.
 
 ⚠ These choices are PERMANENT. They determine the project's
   file structure, build system, and code templates. Changing
@@ -39,7 +39,7 @@ This creates `planning/project.yaml`:
 ```yaml
 # planning/project.yaml
 # LOCKED — changing requires full project regeneration.
-# Created on first /rti_dev invocation.
+# Created on first the workflow invocation.
 
 project:
   framework: wrapper_class        # wrapper_class | xml_app_creation
@@ -170,7 +170,7 @@ project:
 
 **Re-entry guard:**
 
-If the user says `/rti_dev project init` after the project is already initialized:
+If the user says `the workflow project init` after the project is already initialized:
 
 ```
 ⚠ Project is already initialized:

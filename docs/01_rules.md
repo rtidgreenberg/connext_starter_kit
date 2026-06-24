@@ -126,8 +126,8 @@ A concise version of these rules is also loaded via `.github/copilot-instruction
 | ID | Rule | Severity |
 |----|------|----------|
 | MCP-1 | Before defining any type: (1) query internal MCP `search_type_library` for reference types, (2) query internal MCP `ask_connext_question` for IDL syntax, (3) scan workspace IDL, (4) scan other process YAMLs | **MUST** |
-| MCP-2 | `/rti_dev` does NOT query MCP directly — loads the appropriate sub-prompt which contains MCP instructions | **MUST** |
-| MCP-3 | The user NEVER needs to know sub-prompts exist — `/rti_dev` is the only visible prompt | **NEVER** expose |
+| MCP-2 | `the workflow` does NOT query MCP directly — loads the appropriate sub-prompt which contains MCP instructions | **MUST** |
+| MCP-3 | The user NEVER needs to know sub-prompts exist — `the workflow` is the only visible prompt | **NEVER** expose |
 | MCP-4 | GitHub MCP (`github_repo`) is used ONLY during Phase 0 bootstrap to fetch reference content. After bootstrap, all queries go through the internal MCP server. | **MUST** |
 | MCP-5 | Internal MCP server (`rti-connext-mcp`) is the single knowledge layer for Phases 1–4. Three tools: `ask_connext_question` (docs RAG), `search_reference_code` (starter kit examples), `search_type_library` (IDL type references). | **MUST** |
 

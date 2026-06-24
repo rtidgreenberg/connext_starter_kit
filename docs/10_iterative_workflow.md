@@ -3,7 +3,7 @@
 ## Typical Session: First Process (Fresh Workspace)
 
 ```
-/rti_dev
+the workflow
 
 State: No project initialized. Fresh workspace.
 
@@ -60,7 +60,7 @@ User: 1 (Add New)
 ## Adding a Second Process (Incremental)
 
 ```
-/rti_dev
+the workflow
 
 Project: Wrapper Class | Modern C++ [locked]
 System: Failover (Hot Standby), Health Monitoring | domain 0 | v1
@@ -103,7 +103,7 @@ User: 2 (Add New)
 The user can stay in planning mode to design several processes before implementing any of them:
 
 ```
-/rti_dev
+the workflow
 
 State: Fresh workspace.
 User: 1 (Design Mode) → 1 (➕ Add New)
@@ -168,7 +168,7 @@ User: 4 (Implement ALL)
 After implementing processes, the user can always go back to design mode to add I/O, modify types, or add entirely new processes:
 
 ```
-/rti_dev
+the workflow
 
 State: ✓ gps_tracker implemented
        ✓ command_controller implemented
@@ -233,7 +233,7 @@ User: 3 (Implement ALL)
 The user can also skip the menus with a direct request:
 
 ```
-/rti_dev modify gps_tracker — add a HealthStatus output at 1Hz
+the workflow modify gps_tracker — add a HealthStatus output at 1Hz
 
 → Agent loads planning/processes/gps_tracker.yaml
 → Jumps straight to Step 2 (I/O):
@@ -256,7 +256,7 @@ User: 1 (Implement Now)
 ## Fixing a Test Failure
 
 ```
-/rti_dev
+the workflow
 
 State: ✓ gps_tracker: implemented, tests pass
        ⚠ command_controller: implemented, 1 TEST FAILING

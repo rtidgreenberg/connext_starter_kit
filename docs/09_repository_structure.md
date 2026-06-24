@@ -6,14 +6,11 @@ This section defines the **template repo** — the workflow infrastructure artif
 
 ```
 .github/
-├── copilot-instructions.md               # Workspace-level rules, points to /rti_dev
+├── copilot-instructions.md               # Workspace-level rules and RTI-specific routing
 └── prompts/
-    ├── rti_dev.prompt.md                 # /rti_dev — orchestrator prompt definition
-    ├── build_cxx.prompt.md               # Sub-prompt: C++ build rules
-    ├── datamodel.prompt.md               # Sub-prompt: type definitions, IDL design
-    ├── patterns.prompt.md                # Sub-prompt: data pattern + QoS selection
-    ├── builder.prompt.md                 # Sub-prompt: code gen, scaffold, CMake
-    └── tester.prompt.md                  # Sub-prompt: test gen, pytest
+  ├── framework_selector.prompt.md      # Framework selection guidance
+  ├── wrapper_classes.prompt.md         # Wrapper-class framework setup notes
+  └── clear_logs.prompt.md              # Utility prompt for log cleanup
 ```
 
 ## MCP Configuration
@@ -206,7 +203,7 @@ docs/
 ├── 09_repository_structure.md            # This file — template repo layout
 ├── 10_iterative_workflow.md              # Session examples and workflow scenarios
 ├── 11_sub_prompts.md                     # Sub-prompt architecture + embedded definitions
-└── 12_orchestrator_prompt.md             # /rti_dev prompt + menu system + MCP tools
+└── 12_orchestrator_prompt.md             # Historical orchestration notes
 ```
 
 ## What Gets Generated (NOT part of the template)

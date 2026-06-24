@@ -1,6 +1,6 @@
 # Implementation Roadmap
 
-Phased build plan for the RTI Rapid Prototyping — from empty template slots to a fully operational `/rti_dev` workflow backed by an internal MCP server. Each phase produces testable deliverables. Phases are ordered by dependency; independent phases can run in parallel.
+Phased build plan for the RTI Rapid Prototyping — from empty template slots to a fully operational `the workflow` workflow backed by an internal MCP server. Each phase produces testable deliverables. Phases are ordered by dependency; independent phases can run in parallel.
 
 ---
 
@@ -11,10 +11,10 @@ Phased build plan for the RTI Rapid Prototyping — from empty template slots to
 | Artifact | Path | Notes |
 |----------|------|-------|
 | Architecture docs | `RTI_RAPID_PROTOTYPING.md` + `docs/01-12` | 12 split docs + summary |
-| Orchestrator prompt | `.github/prompts/rti_dev.prompt.md` | Basic — state detection + framework selector, needs full rewrite |
+| Workflow entrypoint | Removed prompt file | Historical orchestrator prompt was removed from `.github/prompts/` |
 | Framework selector prompt | `.github/prompts/framework_selector.prompt.md` | Exists |
 | Wrapper classes prompt | `.github/prompts/wrapper_classes.prompt.md` | Exists |
-| Build C++ prompt | `.github/prompts/build_cxx.prompt.md` | Exists |
+| C++ build guidance | `apps/cxx11/README.md` | Guidance consolidated into repository docs |
 | Copilot instructions | `.github/copilot-instructions.md` | Minimal routing — needs update |
 | Wrapper class headers | `dds/utils/cxx11/DDS*.hpp` | 7 complete headers |
 | Example IDL types | `dds/datamodel/idl/*.idl` | ExampleTypes.idl, Definitions.idl |
@@ -254,7 +254,7 @@ Phased build plan for the RTI Rapid Prototyping — from empty template slots to
 
 ## Phase R6: Sub-Prompt Files
 
-**Goal:** Create the 4 specialized sub-prompts that `/rti_dev` loads contextually. These are the "expertise modules" for type definition, pattern selection, code generation, and testing.
+**Goal:** Create the 4 specialized sub-prompts that `the workflow` loads contextually. These are the "expertise modules" for type definition, pattern selection, code generation, and testing.
 
 **Depends on:** R2 (patterns.prompt.md references QoS profiles), R4 (builder.prompt.md references blueprints)
 
@@ -272,7 +272,7 @@ Phased build plan for the RTI Rapid Prototyping — from empty template slots to
 - Each with YAML frontmatter (`mode: agent`, `description`, `tools` list)
 
 ### Validation
-- Each prompt loads correctly when referenced by `/rti_dev`
+- Each prompt loads correctly when referenced by `the workflow`
 - MCP tool names match the `rti-connext-mcp` server tool names
 - Rules match the spec in [docs/11](docs/11_sub_prompts.md)
 
@@ -280,7 +280,7 @@ Phased build plan for the RTI Rapid Prototyping — from empty template slots to
 
 ## Phase R7: Orchestrator Prompt Rewrite
 
-**Goal:** Replace the current basic `rti_dev.prompt.md` (120 lines, framework selector only) with the full five-phase orchestrator. Update `copilot-instructions.md` to match.
+**Goal:** Replace the current basic `the workflow entrypoint` (120 lines, framework selector only) with the full five-phase orchestrator. Update `copilot-instructions.md` to match.
 
 **Depends on:** R6 (dispatches to sub-prompts), R1 (reads manifests)
 
@@ -288,11 +288,11 @@ Phased build plan for the RTI Rapid Prototyping — from empty template slots to
 
 | # | Task | Artifact | Description |
 |---|------|----------|-------------|
-| R7.1 | Rewrite rti_dev.prompt.md | `.github/prompts/rti_dev.prompt.md` | Full orchestrator: state detection scan, Phase 0 routing (framework + API + bootstrap), Phase 1 routing (system design), Phase 2 automation (system implementation via manifest), Level 1 menu (Design / Implement / System Design / Done), Level 2a (process picker + modify sub-menu), Level 2b (implement picker), sub-prompt dispatch, direct request handling. Follow spec in [docs/12](docs/12_orchestrator_prompt.md). |
-| R7.2 | Update copilot-instructions.md | `.github/copilot-instructions.md` | Update to describe all 5 phases. Point to `/rti_dev`. Reference `RTI_RAPID_PROTOTYPING.md` and `docs/` for details. |
-| R7.3 | Wire sub-prompt loading | In `rti_dev.prompt.md` | Add explicit instructions for when to load each sub-prompt file (Step 2b → datamodel, Step 2c → patterns, Phase 4 Step 4 → builder, Phase 4 Step 5/7 → tester). |
-| R7.4 | Add direct request parsing | In `rti_dev.prompt.md` | Handle natural language shortcuts: "/rti_dev add a Button input to gps_tracker" → load YAML → jump to Step 2 → add I/O → offer re-implement. |
-| R7.5 | Add phase review & knowledge capture step | In `rti_dev.prompt.md` + `.github/prompts/phase_review.prompt.md` | At the end of every implementation phase (after Phase 4 completes for a process or batch), the orchestrator automatically triggers a review step. The review: (1) scans `/memories/session/` for design decisions, API observations, workarounds, and QoS reasoning captured during implementation, (2) flags concerns from memory + generated code (QoS tuning, tradeoffs, cross-language issues, fragile assumptions), (3) writes a structured review entry to `knowledge/reviews/<process_name>_<timestamp>.md` with sections: Design Decisions, Concerns, Discoveries, Workarounds, (4) stages `knowledge/` + all generated files and commits with message `[rti_dev] Phase 4 complete: <process_name> — review captured`, (5) pushes to current branch. **During implementation**, the agent writes observations to session memory in real time — the review step harvests these notes rather than reconstructing reasoning after the fact. The `phase_review.prompt.md` sub-prompt defines the review template and categorization rules. This is a **mandatory, automatic** step — not user-triggered. |
+| R7.1 | Rewrite the workflow entrypoint | Removed prompt file | Full orchestrator: state detection scan, Phase 0 routing (framework + API + bootstrap), Phase 1 routing (system design), Phase 2 automation (system implementation via manifest), Level 1 menu (Design / Implement / System Design / Done), Level 2a (process picker + modify sub-menu), Level 2b (implement picker), sub-prompt dispatch, direct request handling. Follow spec in [docs/12](docs/12_orchestrator_prompt.md). |
+| R7.2 | Update copilot-instructions.md | `.github/copilot-instructions.md` | Update to describe all 5 phases. Point to `the workflow`. Reference `RTI_RAPID_PROTOTYPING.md` and `docs/` for details. |
+| R7.3 | Wire sub-prompt loading | In `the workflow entrypoint` | Add explicit instructions for when to load each sub-prompt file (Step 2b → datamodel, Step 2c → patterns, Phase 4 Step 4 → builder, Phase 4 Step 5/7 → tester). |
+| R7.4 | Add direct request parsing | In `the workflow entrypoint` | Handle natural language shortcuts: "the workflow add a Button input to gps_tracker" → load YAML → jump to Step 2 → add I/O → offer re-implement. |
+| R7.5 | Add phase review & knowledge capture step | In `the workflow entrypoint` + `.github/prompts/phase_review.prompt.md` | At the end of every implementation phase (after Phase 4 completes for a process or batch), the orchestrator automatically triggers a review step. The review: (1) scans `/memories/session/` for design decisions, API observations, workarounds, and QoS reasoning captured during implementation, (2) flags concerns from memory + generated code (QoS tuning, tradeoffs, cross-language issues, fragile assumptions), (3) writes a structured review entry to `knowledge/reviews/<process_name>_<timestamp>.md` with sections: Design Decisions, Concerns, Discoveries, Workarounds, (4) stages `knowledge/` + all generated files and commits with message `[workflow] Phase 4 complete: <process_name> — review captured`, (5) pushes to current branch. **During implementation**, the agent writes observations to session memory in real time — the review step harvests these notes rather than reconstructing reasoning after the fact. The `phase_review.prompt.md` sub-prompt defines the review template and categorization rules. This is a **mandatory, automatic** step — not user-triggered. |
 
 ### Deliverables
 - Complete orchestrator prompt (~300-400 lines)
@@ -301,13 +301,13 @@ Phased build plan for the RTI Rapid Prototyping — from empty template slots to
 - `knowledge/` directory structure (`knowledge/reviews/`, `knowledge/.gitkeep`)
 
 ### Validation
-- `/rti_dev` on fresh workspace → detects no project.yaml → starts Phase 0
-- `/rti_dev` with project.yaml only → starts Phase 1
-- `/rti_dev` with both configs → shows Level 1 menu with correct state summary
-- `/rti_dev design` → jumps to Level 2a
-- `/rti_dev implement` → jumps to Level 2b
+- `the workflow` on fresh workspace → detects no project.yaml → starts Phase 0
+- `the workflow` with project.yaml only → starts Phase 1
+- `the workflow` with both configs → shows Level 1 menu with correct state summary
+- `the workflow design` → jumps to Level 2a
+- `the workflow implement` → jumps to Level 2b
 - After any process implementation completes → review entry auto-created in `knowledge/reviews/`
-- Review commit appears in git log with `[rti_dev]` prefix
+- Review commit appears in git log with `[workflow]` prefix
 
 ---
 
@@ -321,9 +321,9 @@ Phased build plan for the RTI Rapid Prototyping — from empty template slots to
 
 | # | Task | Description |
 |---|------|-------------|
-| R8.1 | Fresh workspace test | Invoke `/rti_dev` on clean workspace. Walk through Phase 0 (pick Wrapper Class + C++11) → Phase 1 (domain 0, failover + health monitoring) → Phase 2 (verify baseline generated). Verify `knowledge/` directory created. |
+| R8.1 | Fresh workspace test | Invoke `the workflow` on clean workspace. Walk through Phase 0 (pick Wrapper Class + C++11) → Phase 1 (domain 0, failover + health monitoring) → Phase 2 (verify baseline generated). Verify `knowledge/` directory created. |
 | R8.2 | Single process design test | Design `gps_tracker`: 1 input (CommandTopic, Command pattern), 1 output (PositionTopic, Status at 2Hz). Verify PROCESS_DESIGN.yaml matches schema. Verify IDL written to `dds/datamodel/idl/gps_types.idl`. |
-| R8.3 | Single process implementation test | Implement `gps_tracker`. Verify: scaffold created at correct `destination` paths, rtiddsgen runs, QoS assembled, app code has clean architecture (main.cxx vs logic), tests generated, build succeeds, tests run. **Verify phase review auto-triggers:** `knowledge/reviews/gps_tracker_<ts>.md` created, git commit with `[rti_dev]` prefix, push succeeds. |
+| R8.3 | Single process implementation test | Implement `gps_tracker`. Verify: scaffold created at correct `destination` paths, rtiddsgen runs, QoS assembled, app code has clean architecture (main.cxx vs logic), tests generated, build succeeds, tests run. **Verify phase review auto-triggers:** `knowledge/reviews/gps_tracker_<ts>.md` created, git commit with `[workflow]` prefix, push succeeds. |
 | R8.4 | Second process with type reuse | Design `command_controller` that reuses `gps_types::Command`. Verify type gate correctly offers "Select Existing". Implement and verify shared type support. |
 | R8.5 | System design change + sweep | Go back to System Design, add Leader Election. Verify version increments, sweep flags existing processes, re-implementation works. |
 | R8.6 | Batch design + implement all | Design 2 processes without implementing. Then "Implement ALL". Verify sequential execution, both pass. |
@@ -398,7 +398,7 @@ Phased build plan for the RTI Rapid Prototyping — from empty template slots to
 | R10.3 | Implement `validate_process_design` tool | `mcp-server/tools/validate_process_design.{ts,py}` | Validate PROCESS_DESIGN.yaml against the schema in [docs/05](docs/05_phase_3_process_design.md). Input: YAML file path. Output: schema violations, missing required fields, invalid references. |
 | R10.4 | Implement `list_workspace_types` tool | `mcp-server/tools/list_workspace_types.{ts,py}` | Return all IDL types in workspace with metadata. Input: none (scans workspace). Output: list of `{module, type_name, key_fields, used_by_processes[], file_path}`. |
 | R10.5 | Wire validation tools into sub-prompts | Update `.github/prompts/*.prompt.md` | datamodel.prompt.md calls `validate_idl` after type definition. patterns.prompt.md calls `check_qos_conflicts` after pairing reader/writer profiles. |
-| R10.6 | Wire design validation into orchestrator | Update `rti_dev.prompt.md` | Phase 3 Step 4 (Review) calls `validate_process_design` before saving. Phase 3 Step 2b calls `list_workspace_types` for the "Select Existing" flow. |
+| R10.6 | Wire design validation into orchestrator | Update `the workflow entrypoint` | Phase 3 Step 4 (Review) calls `validate_process_design` before saving. Phase 3 Step 2b calls `list_workspace_types` for the "Select Existing" flow. |
 
 ### Deliverables
 - 4 new MCP tools
@@ -429,7 +429,7 @@ Phased build plan for the RTI Rapid Prototyping — from empty template slots to
 | R11.4 | Implement `build_process` tool | `mcp-server/tools/build_process.{ts,py}` | Runs cmake/pip/maven based on project.yaml. Input: process name, config (Debug/Release). Output: build stdout/stderr + success/failure. |
 | R11.5 | Implement `run_tests` tool | `mcp-server/tools/run_tests.{ts,py}` | Runs pytest for a process. Input: process name, test type (unit/integration/all). Output: test results (pass/fail per test, stdout, JUnit XML path). |
 | R11.6 | Implement `generate_tests` tool | `mcp-server/tools/generate_tests.{ts,py}` | Reads design YAML → generates pytest files from templates. Input: process name. Output: list of test files created. |
-| R11.7 | Update orchestrator for MCP tools | Update `rti_dev.prompt.md` | Phase 4 steps 1-3, 5-7 now call MCP tools instead of manual agent sequences. Step 4 (app code) remains agent-driven (creative work). |
+| R11.7 | Update orchestrator for MCP tools | Update `the workflow entrypoint` | Phase 4 steps 1-3, 5-7 now call MCP tools instead of manual agent sequences. Step 4 (app code) remains agent-driven (creative work). |
 | R11.8 | Update sub-prompts for MCP tools | Update `.github/prompts/builder.prompt.md`, `tester.prompt.md` | builder calls `scaffold_process`, `run_rtiddsgen`, `build_process`. tester calls `generate_tests`, `run_tests`. |
 
 ### Deliverables
@@ -458,8 +458,8 @@ Phased build plan for the RTI Rapid Prototyping — from empty template slots to
 |---|------|----------|-------------|
 | R12.1 | Implement `bootstrap_references` tool | `mcp-server/tools/bootstrap_references.{ts,py}` | Reads `reference_manifest.yaml`. For each empty template slot, fetches content from the configured GitHub source (using GitHub API, not MCP). Writes to local `system_templates/` paths. Tracks what was fetched (checksum, timestamp). |
 | R12.2 | Implement `rebuild_index` tool | `mcp-server/tools/rebuild_index.{ts,py}` | Triggers a full re-index of the RAG pipeline. Called after bootstrap or when workspace content changes significantly. Input: optional scope (all, code, docs, types). Output: index stats (documents indexed, chunks created). |
-| R12.3 | Wire bootstrap into Phase 0 | Update `rti_dev.prompt.md` | After framework selection, before creating project.yaml: call `bootstrap_references` → then `rebuild_index`. Show progress to user. |
-| R12.4 | Add bootstrap re-entry guard | In `rti_dev.prompt.md` | If `reference_manifest.yaml` shows all slots filled (checksums present), skip bootstrap. Offer "Re-bootstrap?" only if user explicitly requests or manifest version changes. |
+| R12.3 | Wire bootstrap into Phase 0 | Update `the workflow entrypoint` | After framework selection, before creating project.yaml: call `bootstrap_references` → then `rebuild_index`. Show progress to user. |
+| R12.4 | Add bootstrap re-entry guard | In `the workflow entrypoint` | If `reference_manifest.yaml` shows all slots filled (checksums present), skip bootstrap. Offer "Re-bootstrap?" only if user explicitly requests or manifest version changes. |
 | R12.5 | Create bootstrap test | `mcp-server/tests/test_bootstrap.py` | Mock GitHub API. Verify: correct files fetched, written to correct paths, manifest updated with checksums, re-index triggered. |
 
 ### Deliverables
@@ -468,7 +468,7 @@ Phased build plan for the RTI Rapid Prototyping — from empty template slots to
 - Updated orchestrator with bootstrap integration
 
 ### Validation
-- Fresh workspace: `/rti_dev` → Phase 0 → bootstrap fetches reference content → indexes it
+- Fresh workspace: `the workflow` → Phase 0 → bootstrap fetches reference content → indexes it
 - Second invocation: bootstrap skips (all slots filled)
 - `search_reference_code` returns results from bootstrapped content
 - `search_type_library` returns results from bootstrapped type libraries
@@ -539,7 +539,7 @@ R12: Bootstrap & Self-Host ◄──   (R12 depends on R11)
 |-----------|-------------|------------|
 | **M0: Schemas Corrected** | R0 | `participant_qos_profile`, per-process `language`, `downsample_hz`, FlatData constraints, Python import rules — all documented. Downstream phases build against a stable, validated contract. |
 | **M1: Templates Ready** | R4 | All template slots populated including FlatData ZC and downsampled blueprints. Agent can manually read templates and generate code. |
-| **M2: Prompts Complete** | R7 | `/rti_dev` orchestrates the full 5-phase workflow with sub-prompt dispatch. Prompts encode FlatData detection, cross-language constraints, participant QoS derivation. Phase review auto-captures concerns and commits after every implementation. |
+| **M2: Prompts Complete** | R7 | `the workflow` orchestrates the full 5-phase workflow with sub-prompt dispatch. Prompts encode FlatData detection, cross-language constraints, participant QoS derivation. Phase review auto-captures concerns and commits after every implementation. |
 | **M3: End-to-End Verified** | R8 | Both dry-run use cases pass: Python SHMEM large data + C++ zero-copy with Python downsampled viewer. |
 | **M4: MCP Knowledge** | R9 | Sub-prompts query MCP for documentation, reference code, and type libraries. |
 | **M5: MCP Validation** | R10 | Automated validation of IDL, QoS conflicts, and process designs. |

@@ -1,11 +1,11 @@
 # RTI Rapid Prototyping — Architecture
 
-Five-phase system for designing and building RTI Connext DDS applications: **Init → Design System → Build Baseline → Design Process → Build Process.** Invoked as `/rti_dev` in VS Code Copilot Chat.
+Five-phase system for designing and building RTI Connext DDS applications: **Init → Design System → Build Baseline → Design Process → Build Process.**
 
 
 ## High-Level Overview
 
-The RTI Rapid Prototyping is a guided, agent-driven workflow for designing and implementing RTI Connext DDS applications. It runs as `/rti_dev` inside VS Code Copilot Chat and walks the user through every decision — from selecting a framework to publishing data on the wire.
+The RTI Rapid Prototyping is a guided, agent-driven workflow for designing and implementing RTI Connext DDS applications. It walks the user through every decision — from selecting a framework to publishing data on the wire.
 
 ### What it does
 
@@ -42,7 +42,7 @@ The workflow is split into **five phases** that execute in order. The first thre
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                            /rti_dev                                    │
+│                     RTI Rapid Prototyping Workflow                     │
 │                                                                        │
 │  PHASE 0: PROJECT INIT (one-time, irreversible)                        │
 │  ┌──────────────────────────────────────────────────────────────────┐  │
@@ -121,6 +121,6 @@ Each section of the architecture is documented in its own file for easier naviga
 | 9 | [Repository Structure](docs/09_repository_structure.md) | Template repo layout, manifest files, generated output tree |
 | 10 | [Iterative Workflow](docs/10_iterative_workflow.md) | 6 workflow scenarios — fresh, incremental, batch, return-to-design, direct command, fix |
 | 11 | [Sub-Prompt Architecture](docs/11_sub_prompts.md) | 4 sub-prompts (datamodel, patterns, builder, tester), MCP tools, trigger flow |
-| 12 | [Orchestrator & Prompt Reference](docs/12_orchestrator_prompt.md) | Five Phases table, `/rti_dev` prompt, interactive menu, embedded prompt definitions |
+| 12 | [Orchestrator & Prompt Reference](docs/12_orchestrator_prompt.md) | Five Phases table, interactive menu, and embedded workflow definitions |
 | 13 | [Implementation Roadmap](docs/13_implementation_roadmap.md) | 12-phase build plan — from template slots to MCP-backed workflow, with per-task deliverables |
 | 14 | [Use-Case Dry Runs & Gap Analysis](docs/14_use_case_dry_run.md) | End-to-end walkthrough of two README use cases against the proposed workflow, with identified gaps |

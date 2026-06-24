@@ -1,6 +1,6 @@
 # Use-Case Dry Runs & Gap Analysis
 
-Two end-to-end walkthroughs of the `/rti_dev` workflow executed against the
+Two end-to-end walkthroughs of the `the workflow` workflow executed against the
 README use cases. Each step records what the agent would do, what artifacts it
 needs, and whether those artifacts exist today.
 
@@ -18,10 +18,10 @@ app that publishes/subscribes ~900 KB images over shared-memory transport using
 
 | Step | Agent Action | Artifact Needed | Exists? |
 |------|-------------|-----------------|---------|
-| Detect state | Check for `planning/project.yaml` | – | ✅ Logic in rti_dev.prompt.md |
-| Framework prompt | Ask: "Wrapper Class or XML App Creation?" | rti_dev.prompt.md | ⚠️ Basic — works for this step |
+| Detect state | Check for `planning/project.yaml` | – | ✅ Logic in the workflow entrypoint |
+| Framework prompt | Ask: "Wrapper Class or XML App Creation?" | the workflow entrypoint | ⚠️ Basic — works for this step |
 | User answer | "Wrapper Class" | – | – |
-| API prompt | Ask: "Which API?" | rti_dev.prompt.md | ⚠️ Basic — works for this step |
+| API prompt | Ask: "Which API?" | the workflow entrypoint | ⚠️ Basic — works for this step |
 | User answer | "Python" | – | – |
 | Write project.yaml | Create `planning/project.yaml` with `framework: wrapper_class, api: python` | project.yaml.example (schema reference) | ✅ |
 | Derive fields | `rtiddsgen_language: Python`, `build_system: pip`, `app_dir: apps/python` | Derivation rules in docs/02 | ✅ Documented |
@@ -796,7 +796,7 @@ Option C: Record with RTI Recording Service, convert to MCAP, open in Foxglove
 | P2 | No patterns.prompt.md | Auto-resolve engine, QoS mapping, constraint rules | R6 |
 | P3 | No builder.prompt.md | Code generation with clean architecture, template substitution | R6 |
 | P4 | No tester.prompt.md | Test auto-proposal, pytest fixtures, integration patterns | R6 |
-| P5 | rti_dev.prompt.md is basic | Full orchestrator with Phase 3-4 loops, menu system | R7 |
+| P5 | the workflow entrypoint is basic | Full orchestrator with Phase 3-4 loops, menu system | R7 |
 
 ### Process/Documentation Gaps
 

@@ -34,6 +34,6 @@ You have selected the **Wrapper Classes** framework for your DDS application.
    - The Wrapper Classes framework has been selected
    - Their application will use the `example_io_app` as the reference template
    - Next step: provide a name and description for their new DDS application
-   - The build prompt at `.github/prompts/build_cxx.prompt.md` contains the coding standards to follow
+   - Use the C++ guidance in `apps/cxx11/README.md` and `apps/cxx11/example_io_app/` as the coding reference
 
 3. **Ask the user** for their application name and a brief description of what it should do.

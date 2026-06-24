@@ -5,7 +5,7 @@ System-level decisions that apply to all processes. These are **modifiable** —
 This runs after Phase 0 completes (first invocation) or when the user selects "System Design" from the main menu.
 
 ```
-/rti_dev — System Design
+the workflow — System Design
 
   Project: Wrapper Class, Modern C++ (CMake) [locked]
 
@@ -56,7 +56,7 @@ system:
 
 - **First invocation**: Phase 1 runs immediately after Phase 0. The user must complete it before proceeding.
 - **Subsequent invocations**: System config is loaded silently. The main menu shows "System: Wrapper Class, Modern C++ | Failover (Hot Standby), Health Monitoring | domain 0" in the state summary.
-- **Changing later**: `/rti_dev system design` or "System Design" from menu re-opens this phase. The version is incremented and a sweep runs (see below).
+- **Changing later**: `the workflow system design` or "System Design" from menu re-opens this phase. The version is incremented and a sweep runs (see below).
 
 ## System Config Versioning
 

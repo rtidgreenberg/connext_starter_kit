@@ -1,6 +1,6 @@
 # Wrapper Class Scaffold Templates
 
-These parameterized templates are used by the `/rti_dev` RTI Rapid Prototyping to generate
+These parameterized templates are used by the `the workflow` RTI Rapid Prototyping to generate
 new Wrapper Class processes during **Phase 4 (Process Implementation)**.
 
 ## Files

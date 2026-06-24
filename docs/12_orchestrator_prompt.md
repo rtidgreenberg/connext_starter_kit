@@ -36,24 +36,24 @@
 
 ---
 
-## /rti_dev Prompt
+## Workflow Prompt
 
-`/rti_dev` is a VS Code custom prompt defined in `.github/prompts/rti_dev.prompt.md`. It is the single entry point for all DDS development.
+This document describes the historical workflow entrypoint and menu structure that previously coordinated DDS development in this repository.
 
 ### Invoking
 
 ```
-/rti_dev                          → scans state, shows Level 1 menu
-/rti_dev design                   → jumps straight to Level 2a (process picker)
-/rti_dev design gps_tracker       → jumps to modify sub-menu for gps_tracker
-/rti_dev new process              → jumps straight to Step 1 (new process)
-/rti_dev add an input for GPS     → adds I/O to current/specified design
-/rti_dev implement                → jumps to Level 2b (implement picker)
-/rti_dev implement all            → implements all ready designs
-/rti_dev show design              → prints current PROCESS_DESIGN.yaml
+the workflow                          → scans state, shows Level 1 menu
+the workflow design                   → jumps straight to Level 2a (process picker)
+the workflow design gps_tracker       → jumps to modify sub-menu for gps_tracker
+the workflow new process              → jumps straight to Step 1 (new process)
+the workflow add an input for GPS     → adds I/O to current/specified design
+the workflow implement                → jumps to Level 2b (implement picker)
+the workflow implement all            → implements all ready designs
+the workflow show design              → prints current PROCESS_DESIGN.yaml
 ```
 
-The user can jump to any level directly, or just type `/rti_dev` to get the guided interactive menu.
+The user can jump to any level directly, or just type `the workflow` to get the guided interactive menu.
 
 ### What It Does on Every Invocation
 
@@ -96,7 +96,7 @@ The menu uses a **two-level interaction**. First, the agent shows the state summ
 Always presented first. Options adapt to state:
 
 ```
-/rti_dev — RTI Rapid Prototyping
+the workflow — RTI Rapid Prototyping
 
 Project: Wrapper Class | Modern C++ (CMake) [locked]
 System: Failover (Hot Standby), Health Monitoring | domain 0 | v2
@@ -118,7 +118,7 @@ If there are no designs yet, only "Design Mode" is shown (Implement is grayed ou
 
 "System Design" re-enters Phase 1. If system patterns change, the version increments and a sweep runs across all existing process designs.
 
-Note: Project Init (framework/API) is not shown in the menu — it's locked. The user can force re-init with `/rti_dev project init` (with a destructive warning).
+Note: Project Init (framework/API) is not shown in the menu — it's locked. The user can force re-init with `the workflow project init` (with a destructive warning).
 
 #### Level 2a: Design Mode → Process Picker
 
@@ -188,7 +188,7 @@ Implement — which process?
 #### Full Interaction Flow Example
 
 ```
-User: /rti_dev
+User: the workflow
 
   [Level 1]
   Agent shows state + top-level menu
@@ -233,9 +233,9 @@ User: /rti_dev
 
 ---
 
-## Prompt File Reference
+## Historical Prompt Reference
 
-### `.github/prompts/rti_dev.prompt.md`
+### Removed Workflow Prompt File
 
 ````markdown
 ---
@@ -248,7 +248,7 @@ tools: ["file_search", "read_file", "list_dir", "grep_search",
         "multi_replace_string_in_file"]
 ---
 
-# /rti_dev — RTI Rapid Prototyping
+# the workflow — RTI Rapid Prototyping
 
 You are a RTI Rapid Prototyping. You help users design and implement
 RTI Connext DDS applications through five phases:
@@ -406,7 +406,7 @@ After implementation, return to main menu.
 
 ## Handling Direct Requests
 
-If user says "/rti_dev add a Button input to gps_tracker":
+If user says "the workflow add a Button input to gps_tracker":
 1. Load gps_tracker.yaml
 2. Go directly to Step 2 (I/O)
 3. Add the Button input
@@ -415,7 +415,7 @@ If user says "/rti_dev add a Button input to gps_tracker":
 
 ## MCP Tools
 
-MCP tools are scoped to sub-prompts. /rti_dev does not query MCP directly —
+MCP tools are scoped to sub-prompts. the workflow does not query MCP directly —
 it loads the appropriate sub-prompt prompt, which contains the MCP instructions.
 
 | Sub-Prompt | MCP Tool | What It Queries |
@@ -433,7 +433,7 @@ it loads the appropriate sub-prompt prompt, which contains the MCP instructions.
 ```markdown
 # Connext DDS Development
 
-Type `/rti_dev` in Copilot Chat to plan and build DDS processes.
+Type `the workflow` in Copilot Chat to plan and build DDS processes.
 
 The builder guides you through five phases:
 0. **Project Init** — framework + API (locked, one-time)

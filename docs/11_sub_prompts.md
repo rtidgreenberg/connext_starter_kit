@@ -1,6 +1,6 @@
 ## Sub-Prompt Architecture
 
-`/rti_dev` is the only agent the user talks to. But when the user's action requires specialized knowledge (type definitions, pattern/QoS selection, code generation, testing), `/rti_dev` loads a **sub-prompt prompt file** — a focused instruction set with specific MCP tool bindings.
+`the workflow` is the only agent the user talks to. But when the user's action requires specialized knowledge (type definitions, pattern/QoS selection, code generation, testing), `the workflow` loads a **sub-prompt prompt file** — a focused instruction set with specific MCP tool bindings.
 
 ### Why Sub-Prompts
 
@@ -14,7 +14,7 @@
 ### The Sub-Prompts
 
 ```
-/rti_dev (orchestrator)
+the workflow (orchestrator)
   │
   ├── 📐 datamodel.prompt.md    — type definitions, IDL syntax, field annotations
   │     MCP: rti-connext-mcp → ask_connext_question (IDL syntax)
@@ -57,17 +57,17 @@ All sub-prompts query one internal MCP server (`rti-connext-mcp`) with three too
 ### When Each Sub-Prompt Is Triggered
 
 ```
-User invokes /rti_dev
+User invokes the workflow
   │
   ├─ Level 1 → Level 2a → "Add New Process"
-  │   └─ Step 1 (Process Identity)     → /rti_dev handles directly (no sub-prompt)
+  │   └─ Step 1 (Process Identity)     → the workflow handles directly (no sub-prompt)
   │   └─ Step 2 (Define I/O)
   │       ├─ Step 2b "Data type gate"   → loads datamodel.prompt.md (Define New)
   │       │                                or scans existing types (Select Existing)
   │       ├─ Step 2c "Pattern & QoS"    → loads patterns.prompt.md
-  │       └─ "Set callbacks"            → /rti_dev handles directly
+  │       └─ "Set callbacks"            → the workflow handles directly
   │   └─ Step 3 (Tests)                → loads tester.prompt.md
-  │   └─ Step 4 (Review)               → /rti_dev handles directly
+  │   └─ Step 4 (Review)               → the workflow handles directly
   │
   ├─ Level 1 → Level 2b → "Implement"
   │   └─ Steps 1-3 (scaffold, IDL, rtiddsgen)  → loads builder.prompt.md
@@ -78,13 +78,13 @@ User invokes /rti_dev
   ├─ Level 2a → Modify sub-menu
   │   └─ "Add Input/Output"            → datamodel + patterns sub-prompts
   │   └─ "Modify I/O"                  → patterns sub-prompt
-  │   └─ "Modify Process Settings"      → /rti_dev handles directly
+  │   └─ "Modify Process Settings"      → the workflow handles directly
   │   └─ "Modify Tests"                → tester sub-prompt
 ```
 
 ### Sub-Prompt Files
 
-Each sub-prompt is a `.github/prompts/*.prompt.md` file. The `/rti_dev` agent loads them contextually — the user never needs to know they exist.
+Each sub-prompt is a `.github/prompts/*.prompt.md` file. The `the workflow` agent loads them contextually — the user never needs to know they exist.
 
 #### `.github/prompts/datamodel.prompt.md`
 
@@ -171,7 +171,7 @@ For each type, present:
 
 ## On Completion
 
-Return the following to /rti_dev:
+Return the following to the workflow:
 - Complete type definition in **IDL syntax** (with module wrapper)
 - Module name
 - List of types defined (struct names, enum names)
@@ -179,7 +179,7 @@ Return the following to /rti_dev:
 - Whether this is a new type or reuse of existing
 - Source of reuse if applicable (which process/file)
 
-/rti_dev then **writes the IDL directly to `dds/datamodel/idl/<module>.idl`**
+the workflow then **writes the IDL directly to `dds/datamodel/idl/<module>.idl`**
 during design (Phase 3 Step 2b). The PROCESS_DESIGN.yaml records a file
 path reference in `idl_files:`, not the IDL content itself.
 During implementation, `rtiddsgen` generates code from those `.idl` files
@@ -260,7 +260,7 @@ Auto-resolve: `@final @language_binding(FLAT_DATA)` → LargeData.2
 
 ## On Completion
 
-Return to /rti_dev:
+Return to the workflow:
 - pattern: event|status|command|parameter|large_data
 - pattern_option: 1|2|3
 - qos_profile: "DataPatternsLibrary::XXX"
@@ -413,7 +413,7 @@ Use the pattern from existing apps:
 
 ## On Completion
 
-Return to /rti_dev:
+Return to the workflow:
 - List of files created/modified
 - Build command to use
 - Confirm logic/infrastructure separation is correct
@@ -478,22 +478,22 @@ For each I/O in the design, propose:
 
 ## On Completion
 
-Return to /rti_dev:
+Return to the workflow:
 - List of test files generated
 - pytest command to run them
 - Expected pass/fail status
 ```
 
-### How /rti_dev Loads Sub-Prompts
+### How the workflow Loads Sub-Prompts
 
-In the `/rti_dev` prompt file, the instructions reference sub-prompts like this:
+In the `the workflow` prompt file, the instructions reference sub-prompts like this:
 
 ```
 ### Step 2: Define I/O
 
 For each I/O the user describes, walk through the **mandatory 3-step sub-loop**:
 
-1. **Step 2a — Topic name & direction** — /rti_dev handles directly.
+1. **Step 2a — Topic name & direction** — the workflow handles directly.
 
 2. **Step 2b — Data type (mandatory gate)** — Load `.github/prompts/datamodel.prompt.md`
    and follow its instructions. The sub-prompt will:
@@ -516,11 +516,11 @@ For each I/O the user describes, walk through the **mandatory 3-step sub-loop**:
 ### Interaction Example with Sub-Prompts
 
 ```
-User: /rti_dev → Design Mode → ➕ Add New → "gps_tracker"
-→ Step 1: name, domain ID, transports, system pattern opt-in (handled by /rti_dev directly)
+User: the workflow → Design Mode → ➕ Add New → "gps_tracker"
+→ Step 1: name, domain ID, transports, system pattern opt-in (handled by the workflow directly)
 → Step 2: "It subscribes to Commands and publishes Position at 2Hz"
 
-  /rti_dev parses: 2 I/O items — 1 input (Command), 1 output (Position)
+  the workflow parses: 2 I/O items — 1 input (Command), 1 output (Position)
 
   ── Starting I/O #1: input "CommandTopic" ──
 
@@ -615,7 +615,7 @@ User: /rti_dev → Design Mode → ➕ Add New → "gps_tracker"
 
   ── I/O #2 complete ──
 
-  ── back to /rti_dev ──
+  ── back to the workflow ──
 
   Agent: "2 I/O defined. Add more?
           [Add Input / Add Output / Done with I/O]"
@@ -625,7 +625,7 @@ User: /rti_dev → Design Mode → ➕ Add New → "gps_tracker"
 
   ── tester.prompt.md activated ──
   Agent proposes tests based on I/O...
-  ── back to /rti_dev ──
+  ── back to the workflow ──
 
-→ Step 4: Review (handled by /rti_dev)
+→ Step 4: Review (handled by the workflow)
 ```

@@ -535,13 +535,25 @@ def _apply_command_state_override(
     if not latest.ok:
         return selection
     observed_state = str(latest.payload.get("observed_state", "")).strip()
+    process_exit_observed = bool(latest.payload.get("process_exit_observed"))
     if not observed_state:
         return selection
     request_service = latest.request.service
+    shutdown_exit_evidence = False
+    if observed_state.upper() == "SHUTDOWN":
+        shutdown_exit_evidence = any(
+            candidate.service.key == request_service.key
+            and str(candidate.observed_state).strip().lower() in {"exited", "start_failed"}
+            for candidate in selection.candidates
+        )
     updated = []
     changed = False
     for candidate in selection.candidates:
         if candidate.service.key == request_service.key:
+            if str(observed_state).upper() == "SHUTDOWN" and (process_exit_observed or shutdown_exit_evidence):
+                updated.append(replace(candidate, observed_state="exited"))
+                changed = True
+                continue
             if (
                     observed_state.upper() == "SHUTDOWN"
                     and candidate.owns_process

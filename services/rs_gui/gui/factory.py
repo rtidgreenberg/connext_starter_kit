@@ -247,6 +247,7 @@ def build_gui_shell_assembly(
                 display_label=config.replay_label,
                 local_hostnames=local_hostnames,
                 launch_label=config.replay_label,
+                qos_file_path=_default_replay_qos_path(config.replay_config_paths),
                 launch_config_paths=config.replay_config_paths,
                 launch_config_name=config.replay_config_name,
                 launch_data_domain_id=config.topics_domain_id,
@@ -343,6 +344,16 @@ def _mock_recording_launch_request(config: GuiShellSessionFactoryConfig) -> Serv
         config_name=config.recording_config_name,
         executable="rtirecordingservice",
     )
+
+
+def _default_replay_qos_path(config_paths) -> str:
+    for path in config_paths:
+        normalized = str(path).strip()
+        if not normalized:
+            continue
+        if normalized.lower().endswith("dds_qos_profiles.xml"):
+            return normalized
+    return ""
 
 
 def _admin_client_for_mode(config: GuiShellSessionFactoryConfig) -> Optional[ServiceAdminClient]:

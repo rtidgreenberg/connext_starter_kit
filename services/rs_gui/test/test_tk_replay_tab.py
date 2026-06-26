@@ -138,6 +138,30 @@ tag_name    timestamp_ms   tag_description
         finally:
             root.destroy()
 
+    def test_replay_tab_ignores_stale_target_selection(self):
+        tk, ttk = _tk_modules()
+        try:
+            root = tk.Tk()
+        except tk.TclError as exc:
+            self.skipTest(str(exc))
+        root.withdraw()
+        adapter = ReplayTabAdapter(
+            command_sink=lambda command: True,
+            select_target=lambda target_id: (_ for _ in ()).throw(ValueError(f"Unknown Replay target: {target_id}")),
+        )
+        try:
+            widget = TkReplayTab(root, ttk, tk, adapter=adapter)
+            view = build_mock_shell_view_model().replay_tab
+            widget.render(view)
+
+            first_value = widget.target_combo["values"][0]
+            widget.target_select_var.set(first_value)
+            widget._on_target_selected()
+
+            self.assertIn("Unknown Replay target", widget.error_var.get())
+        finally:
+            root.destroy()
+
     def test_replay_launch_normalizes_selected_database_file_to_directory(self):
         tk, ttk = _tk_modules()
         try:

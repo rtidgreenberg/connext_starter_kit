@@ -203,7 +203,7 @@ Profile names are centralized in `Definitions.idl` (qos_profiles module) for cro
 - **RTI Connext DDS 7.3.0+** installed and licensed
 - **CMake 3.12+** for build automation
 - **C++14 compiler** (GCC 7.3+, Clang, MSVC)
-- **Python 3.6+** with RTI Connext Python API (for Python generation)
+- **Python 3.10** with RTI Connext DDS Python API 7.7.x from PyPI (`rti.connext==7.7.*`) for Python apps/tools
 
 ### Quick Start
 

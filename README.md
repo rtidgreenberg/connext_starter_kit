@@ -4,9 +4,10 @@ Cross-language DDS system/application templates to accelerate development.
 
 ## Prerequisites
 
-- **RTI Connext DDS 7.3.0+** [installed and licensed](https://community.rti.com/static/documentation/connext-dds/current/doc/manuals/connext_dds_professional/installation_guide/index.html)
+- **RTI Connext DDS 7.3.0+** [installed and licensed](https://community.rti.com/static/documentation/connext-dds/current/doc/manuals/connext_dds_professional/installation_guide/index.html) for C++ apps, DDS type support, and command-line services
+- **RTI Connext DDS Python API 7.7.x** for Python apps and Python GUI/tools, installed from PyPI as `rti.connext==7.7.*`
 - **C++14 compiler** (GCC 7.3.0+ or equivalent) for C++ apps
-- **Python 3.8+** with virtual environment support for Python apps
+- **Python 3.10** with virtual environment support for Python apps and tools
 - **CMake 3.12+** for build configuration
 - **Git submodules**: Clone with `--recurse-submodules` or run `git submodule update --init --recursive`
 
@@ -43,10 +44,11 @@ Cross-language DDS system/application templates to accelerate development.
    cmake --build .
    ```
 
-5. **For Python apps - set the license file location:**
+5. **For Python apps and tools - set the license file location:**
    ```bash
    export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
    ```
+   Python dependencies are installed from PyPI and pinned to `rti.connext==7.7.*`.
    
    Get a free trial license at https://www.rti.com/get-connext
 
@@ -75,9 +77,11 @@ Cross-language DDS system/application templates to accelerate development.
 - [I want to record DDS topics for debugging](services/README.md#i-want-to-record-a-selective-group-of-topics)
 - [I want to convert recorded data to JSON/CSV](services/README.md#i-want-to-convert-my-recorded-data-to-json-for-post-processing)
 - [I want to replay recorded data](services/README.md#i-want-to-replay-my-recorded-data)
+- [I want to record/replay as well as tag items of interest using a Python GUI tool](services/README.md#i-want-to-control-recording-and-replay-services-with-a-gui)
 
 ### 🔧 Development Tools
 - [I want to monitor DDS topics in real-time](tools/README.md)
+- [I want to generate plotter visuals that can dynamically subscribe to data](tools/README.md#rti_view)
 - [I want to use distributed logging](tools/README.md)
 
 ## Documentation

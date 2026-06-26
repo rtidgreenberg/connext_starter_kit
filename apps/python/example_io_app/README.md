@@ -143,8 +143,8 @@ DEFAULT_CONFIG_DESTINATION = "config_target"   # Modify config targets
 
 ## Dependencies
 
-- **RTI Connext DDS 7.3.0+** with Python API
-- **Python 3.6-3.12** (RTI-compatible versions)
+- **RTI Connext DDS Python API 7.7.x**, installed from PyPI as `rti.connext==7.7.*`
+- **Python 3.10**
 - **Generated Python DDS types** (ExampleTypes.py, Definitions.py)
 - **QoS profile XML file** (DDS_QOS_PROFILES.xml)
 - **Virtual environment** (recommended for RTI API isolation)

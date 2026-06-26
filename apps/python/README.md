@@ -26,10 +26,9 @@ That's it! The `run.sh` script automatically handles NDDSHOME detection, virtual
 ## Table of Contents
 - [Application Structure](#application-structure)
 - [Current Applications](#current-applications)
-- [Setup](#setup)
+- [Detailed Setup](#detailed-setup)
 - [Installation](#installation)
 - [Running Applications](#running-applications)
-- [Building DDS Python Bindings](#building-dds-python-bindings)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
 
@@ -73,9 +72,8 @@ connext_dds_env/            # Shared virtual environment (at repository root)
 ## Detailed Setup
 
 ### Prerequisites
-- RTI Connext DDS 7.7.0+ installed
+- RTI Connext DDS Python API 7.7.x, installed from PyPI as `rti.connext==7.7.*`
 - Python 3.10
-- Built DDS Python bindings (from top-level cmake build)
 - RTI license file
 
 #### Getting an RTI License
@@ -109,7 +107,7 @@ The install script:
 - Auto-detects `NDDSHOME` from `~/rti_connext_dds-*` (uses latest version)
 - Creates a shared Python 3.10 virtual environment at the repository root (`connext_dds_env/`)
 - Installs dependencies from `requirements.txt`
-- Triggers DDS Python binding generation if missing
+- Installs the RTI Connext DDS Python API from PyPI (`rti.connext==7.7.*`)
 
 ### Run Application
 
@@ -216,13 +214,6 @@ The application uses QoS profiles from `../../dds/qos/DDS_QOS_PROFILES.xml`:
 - **DomainParticipant**: `DPLibrary::DefaultParticipant` 
 - **DataWriter/DataReader**: `DataPatternsLibrary::AssignerQoS` (topic-based QoS assignment)
 
-## Prerequisites
-
-- **RTI Connext DDS 7.3.0** or later 
-- **Python 3.6-3.12** (RTI Connext DDS 7.3.0 compatible versions)
-- **CMake 3.12+** for automatic code generation
-- **RTI Connext Python API** (automatically installed by install script)
-
 ## Setup Notes
 
 **Note**: Each app's `run.sh` script handles all setup automatically:
@@ -230,7 +221,7 @@ The application uses QoS profiles from `../../dds/qos/DDS_QOS_PROFILES.xml`:
 - Validates license file existence
 - Activates/creates the shared virtual environment
 - Installs dependencies if missing
-- Triggers Python binding generation if needed
+- Installs the RTI Connext DDS Python API from PyPI (`rti.connext==7.7.*`)
 
 **⚠️ Important**: If you cloned this repository, ensure you have the git submodules:
 ```bash

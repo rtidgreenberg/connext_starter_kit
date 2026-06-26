@@ -221,7 +221,7 @@ def read_field(sample: dds.DynamicData, field_path: str):
 ## Startup String Format
 
 ```
-rti_view -d <domain> -t <topic_name> -f <field_path> -m <text|plot> [--history <seconds>]
+rti_view -d <domain> -t <topic_name> -f <field_path> -m <text|plot> [--history <seconds>] [--direct-view]
 ```
 
 The copied command is regenerated whenever the user changes domain, process,
@@ -237,10 +237,10 @@ specific writer can launch interactively and select the desired process/particip
 Examples:
 ```bash
 # Print the 'x' field of Square topic on domain 0
-rti_view -d 0 -t Square -f x -m text
+rti_view -d 0 -t Square -f x -m text --direct-view
 
 # Plot the 'temperature' field from SensorData on domain 5
-rti_view -d 5 -t SensorData -f temperature -m plot --history 60
+rti_view -d 5 -t SensorData -f temperature -m plot --history 60 --direct-view
 
 # Interactive mode on domain 1
 rti_view -d 1

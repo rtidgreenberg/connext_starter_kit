@@ -18,17 +18,23 @@ class TestConfig(unittest.TestCase):
 
         self.assertEqual(
             config.to_startup_string(),
-            "./run_rti_view.sh -d 5 -t SensorData -f position.x -m plot --history 60",
+            "./run_rti_view.sh -d 5 -t SensorData -f position.x -m plot --history 60 --direct-view",
         )
 
     def test_startup_string_round_trip(self):
-        config = ViewConfig.from_startup_string("./run_rti_view.sh -d 5 -t SensorData -f position.x -m plot --history 60")
+        config = ViewConfig.from_startup_string("./run_rti_view.sh -d 5 -t SensorData -f position.x -m plot --history 60 --direct-view")
 
         self.assertEqual(config.domain_id, 5)
         self.assertEqual(config.topic_name, "SensorData")
         self.assertEqual(config.field_path, "position.x")
         self.assertEqual(config.mode, "plot")
         self.assertEqual(config.history_seconds, 60)
+        self.assertTrue(config.direct_view)
+
+    def test_legacy_startup_string_defaults_direct_view_for_field_shortcuts(self):
+        config = ViewConfig.from_startup_string("./run_rti_view.sh -d 5 -t SensorData -f position.x -m plot --history 60")
+
+        self.assertTrue(config.direct_view)
 
 
 if __name__ == "__main__":

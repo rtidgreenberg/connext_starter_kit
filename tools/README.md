@@ -21,7 +21,7 @@ Use `rti_view` when you want to browse a domain by process/participant, select o
 
 ```bash
 ./tools/rti_view/run_rti_view.sh -d 0
-./tools/rti_view/run_rti_view.sh -d 0 -t Telemetry -f position.x -m plot --history 30
+./tools/rti_view/run_rti_view.sh -d 0 -t Telemetry -f position.x -m plot --history 30 --direct-view
 ```
 
 Related docs:

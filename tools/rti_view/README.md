@@ -55,8 +55,13 @@ The app entrypoint accepts:
 The portable startup string format is:
 
 ```bash
-rti_view -d <domain> -t <topic> -f <field> -m <text|plot> [--history <seconds>]
+rti_view -d <domain> -t <topic> -f <field> -m <text|plot> [--history <seconds>] [--direct-view]
 ```
+
+When `--direct-view` is present, `rti_view` skips the browser shell and opens only
+the selected field output. In plot mode this restores the single plot window used
+by saved shortcuts. Copied startup commands include `--direct-view` by default
+when a topic and field are selected.
 
 ## Development
 

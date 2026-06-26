@@ -14,6 +14,7 @@ class ViewConfig:
     field_path: str = ""
     mode: str = "text"  # "text" or "plot"
     history_seconds: int = 30
+    direct_view: bool = True
 
     def to_startup_string(self) -> str:
         """Serialize to a CLI invocation string."""
@@ -26,6 +27,8 @@ class ViewConfig:
         parts.extend(["-m", self.mode])
         if self.mode == "plot":
             parts.extend(["--history", str(self.history_seconds)])
+        if self.direct_view and self.topic_name and self.field_path:
+            parts.append("--direct-view")
         return " ".join(parts)
 
     @classmethod
@@ -39,6 +42,7 @@ class ViewConfig:
         parser.add_argument("-f", "--field", type=str, default="")
         parser.add_argument("-m", "--mode", choices=["text", "plot"], default="text")
         parser.add_argument("--history", type=int, default=30)
+        parser.add_argument("--direct-view", action="store_true")
 
         tokens = shlex.split(s)
         # Skip the program name (./rti_view.sh, rti_view, etc.)
@@ -49,6 +53,7 @@ class ViewConfig:
             field_path=args.field,
             mode=args.mode,
             history_seconds=args.history,
+            direct_view=args.direct_view or bool(args.topic and args.field),
         )
 
 

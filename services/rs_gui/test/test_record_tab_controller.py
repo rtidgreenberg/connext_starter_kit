@@ -181,7 +181,7 @@ class TestRecordTabController(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(first_view.candidates), 1)
         self.assertTrue(first_view.selected_candidate_id.startswith("monitoring:"))
-        self.assertEqual(first_view.selected_candidate.pid, "9001")
+        self.assertEqual(first_view.selected_candidate.pid, "4218")
         self.assertEqual(first_view.observed_state, "observed")
         self.assertEqual(first_view.selected_candidate.current_file, "log_dir/recording/data_0.db")
         self.assertIn(("current_file", "log_dir/recording/data_0.db"), first_view.monitoring_summary)

@@ -82,7 +82,7 @@ tag_name    timestamp_ms   tag_description
             self.assertEqual(widget.content_frame.grid_slaves(row=2, column=0)[0]["text"], "Replay Status")
             self.assertEqual(int(widget.monitoring_text.cget("height")), 5)
             self.assertIn("request+reply matched", widget.readiness_var.get())
-            self.assertIn("STOPPED", widget.state_var.get())
+            self.assertIn("State: stopped", widget.state_var.get())
             self.assertIn("robot_run_03", widget.database_var.get())
             monitoring_text = widget.monitoring_text.get("1.0", "end-1c")
             self.assertIn("playback_rate", monitoring_text)

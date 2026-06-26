@@ -669,7 +669,10 @@ class TkReplayTab:
     def _on_target_selected(self, _event=None) -> None:
         target_id = self._target_display_to_id.get(self.target_select_var.get(), "")
         if target_id and self._adapter is not None:
-            self._adapter.select_target(target_id)
+            try:
+                self._adapter.select_target(target_id)
+            except ValueError as exc:
+                self.error_var.set(str(exc))
 
     def _on_launch_clicked(self) -> None:
         if self._adapter is None or self._view is None:

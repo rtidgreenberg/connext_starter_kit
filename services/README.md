@@ -4,14 +4,23 @@ Configuration files for RTI Recording, Replay, and Converter Services - capture,
 
 ## Table of Contents
 
-- [I want to control Recording and Replay Services with a GUI](#i-want-to-control-recording-and-replay-services-with-a-gui)
-- [Command-line service scripts](#command-line-service-scripts)
-- [I want to record a selective group of topics](#i-want-to-record-a-selective-group-of-topics)
-- [I want to record topics using external XML type definitions](#i-want-to-record-topics-using-external-xml-type-definitions)
-- [I want to convert my recorded data to JSON for post-processing](#i-want-to-convert-my-recorded-data-to-json-for-post-processing)
-- [I want to convert my recorded data to CSV for post-processing](#i-want-to-convert-my-recorded-data-to-csv-for-post-processing)
-- [I want to replay my recorded data](#i-want-to-replay-my-recorded-data)
-- [I want to replay converted JSON data](#i-want-to-replay-converted-json-data)
+- [RTI Services Configuration](#rti-services-configuration)
+  - [Table of Contents](#table-of-contents)
+  - [I want to control Recording and Replay Services with a GUI](#i-want-to-control-recording-and-replay-services-with-a-gui)
+  - [Command-line service scripts](#command-line-service-scripts)
+  - [I want to record a selective group of topics](#i-want-to-record-a-selective-group-of-topics)
+  - [I want to record topics using external XML type definitions](#i-want-to-record-topics-using-external-xml-type-definitions)
+  - [I want to convert my recorded data to JSON for post-processing](#i-want-to-convert-my-recorded-data-to-json-for-post-processing)
+  - [I want to convert my recorded data to CSV for post-processing](#i-want-to-convert-my-recorded-data-to-csv-for-post-processing)
+  - [I want to replay my recorded data](#i-want-to-replay-my-recorded-data)
+  - [I want to replay converted JSON data](#i-want-to-replay-converted-json-data)
+  - [Tests](#tests)
+  - [Configuration Files](#configuration-files)
+  - [Scripts](#scripts)
+  - [Prerequisites](#prerequisites)
+  - [Directory Structure](#directory-structure)
+  - [Resources](#resources)
+  - [Questions or Feedback?](#questions-or-feedback)
 
 ---
 

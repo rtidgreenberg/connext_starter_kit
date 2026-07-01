@@ -4,13 +4,59 @@ Configuration files for RTI Recording, Replay, and Converter Services - capture,
 
 ## Table of Contents
 
-- [I want to record a selective group of topics](#i-want-to-record-a-selective-group-of-topics)
-- [I want to record topics using external XML type definitions](#i-want-to-record-topics-using-external-xml-type-definitions)
-- [I want to convert my recorded data to JSON for post-processing](#i-want-to-convert-my-recorded-data-to-json-for-post-processing)
-- [I want to convert my recorded data to CSV for post-processing](#i-want-to-convert-my-recorded-data-to-csv-for-post-processing)
-- [I want to replay my recorded data](#i-want-to-replay-my-recorded-data)
-- [I want to replay converted JSON data](#i-want-to-replay-converted-json-data)
-- [I want to control Recording Service with a GUI](#i-want-to-control-recording-service-with-a-gui)
+- [RTI Services Configuration](#rti-services-configuration)
+  - [Table of Contents](#table-of-contents)
+  - [I want to control Recording and Replay Services with a GUI](#i-want-to-control-recording-and-replay-services-with-a-gui)
+  - [Command-line service scripts](#command-line-service-scripts)
+  - [I want to record a selective group of topics](#i-want-to-record-a-selective-group-of-topics)
+  - [I want to record topics using external XML type definitions](#i-want-to-record-topics-using-external-xml-type-definitions)
+  - [I want to convert my recorded data to JSON for post-processing](#i-want-to-convert-my-recorded-data-to-json-for-post-processing)
+  - [I want to convert my recorded data to CSV for post-processing](#i-want-to-convert-my-recorded-data-to-csv-for-post-processing)
+  - [I want to replay my recorded data](#i-want-to-replay-my-recorded-data)
+  - [I want to replay converted JSON data](#i-want-to-replay-converted-json-data)
+  - [Tests](#tests)
+  - [Configuration Files](#configuration-files)
+  - [Scripts](#scripts)
+  - [Prerequisites](#prerequisites)
+  - [Directory Structure](#directory-structure)
+  - [Resources](#resources)
+  - [Questions or Feedback?](#questions-or-feedback)
+
+---
+
+## I want to control Recording and Replay Services with a GUI
+
+**Objective**: Launch, monitor, pause/resume, tag, replay, and shut down RTI Recording and Replay Services from a Python tkinter desktop GUI.
+
+Use the GUI when you want an operator-friendly workflow for live capture and playback without manually coordinating service processes and Admin Console commands.
+
+**What the GUI supports**:
+- Launch Recording Service with selectable domains, configuration files, topic allow/deny filters, verbosity, and storage settings.
+- Monitor GUI-launched and discovered Recording/Replay Service processes, including state, ownership, host, PID, uptime, readiness, output logs, and live DDS monitoring data.
+- Control process lifecycle from the desktop: pause, resume, stop, request graceful shutdown, terminate local processes, and clean up GUI-launched services on close.
+- Send tags to Recording Service so operators can mark items or time ranges of interest while data is being captured.
+- Launch Replay Service against recorded databases, choose playback settings, and control replay start/pause/resume/stop/shutdown from the Replay tab.
+- Inspect replay readiness, playback status, database path, progress, and monitoring details while replay is running.
+
+**Running**:
+```bash
+cd services/rs_gui
+./run_rs_gui.sh
+```
+
+See [rs_gui/README.md](rs_gui/README.md) for prerequisites, setup, troubleshooting, and usage details.
+
+---
+
+## Command-line service scripts
+
+Use these scripts when you want repeatable terminal workflows for Recording, Replay, and Converter Services, or when you are running automation without the GUI.
+
+Available scripts:
+- `start_record.sh` starts Recording Service with selective topics or debug recording.
+- `start_record_external_types.sh` starts Recording Service with external XML type definitions.
+- `start_convert.sh` converts recorded data to JSON or CSV.
+- `start_replay.sh` replays XCDR or converted JSON data.
 
 ---
 
@@ -176,22 +222,6 @@ cd services
 ./start_replay.sh json 1
 ```
 
----
-
-## I want to control Recording Service with a GUI
-
-**Objective**: Launch, monitor, pause/resume, shut down, and tag Recording Service from a tkinter desktop GUI — with live DDS monitoring data (state, CPU, memory, uptime, database, topics).
-
-**Running**:
-```bash
-cd services/rs_gui
-./run_rs_gui.sh
-```
-
-See [rs_gui/README.md](rs_gui/README.md) for prerequisites, setup, and usage details.
-
----
-
 ## Tests
 
 End-to-end tests for the services start scripts live in `test/`:
@@ -233,7 +263,8 @@ GUI-specific tests (unit, widget, integration, E2E tags) live in
 
 ## Prerequisites
 
-- RTI Connext DDS 7.3.0+ with Recording, Replay, and Converter Services
+- RTI Connext DDS 7.3.0+ with Recording, Replay, and Converter Services for command-line scripts
+- Python 3.10 and `rti.connext==7.7.*` from PyPI for the `rs_gui` Python GUI
 - Set `NDDSHOME` environment variable pointing to your RTI Connext installation
 
 ## Directory Structure

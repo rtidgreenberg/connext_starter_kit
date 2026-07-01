@@ -52,6 +52,7 @@ cd /path/to/connext_starter_kit
 
 ### Command-line Options
 
+```text
 Options:
   -d, --domain <int>    Domain ID (default: 1)
   -v, --verbosity <int> Verbosity 0-5 (default: 1)

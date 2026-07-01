@@ -19,7 +19,7 @@ Publishes `foxglove::PointCloud` messages for visualization in Foxglove Studio, 
 
 ## Foxglove omg idl types
 
-Type used is taken from [Foxglove Schemas](https://github.com/foxglove/foxglove-sdk/tree/main/schemas/omgidl/foxglove) so they are compatible with builtit Foxglove panels such as 3d, video, audio, map and others.
+These types come from [Foxglove Schemas](https://github.com/foxglove/foxglove-sdk/tree/main/schemas/omgidl/foxglove), so they are compatible with built-in Foxglove panels such as 3D, video, audio, map, and others.
 
 You can modify these types by including **keys and extra members** and Foxglove will still be able to interpret data to display in builtin panels.
 

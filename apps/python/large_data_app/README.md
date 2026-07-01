@@ -34,8 +34,8 @@ This application publishes and subscribes to Image data (~900 KB per sample) usi
 
 ## Prerequisites
 
-- RTI Connext DDS 7.3.0+ with Python API
-- Python 3.6+
+- RTI Connext DDS Python API 7.7.x, installed from PyPI as `rti.connext==7.7.*`
+- Python 3.10
 - Virtual environment configured (see [apps/python/README.md](../README.md))
 
 ## Usage

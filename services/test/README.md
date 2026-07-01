@@ -29,7 +29,7 @@ python3 test/test_e2e_services.py -v
 
 - `$NDDSHOME` set (auto-detected from `~/rti_connext_dds-*` if not set)
 - `rtirecordingservice`, `rtireplayservice`, `rticonverter` binaries available
-- `rti.connextdds` Python package (`== 7.6.0`)
+- `rti.connext` Python package from PyPI (`== 7.7.*`)
 - Centralized QoS profiles at `dds/qos/DDS_QOS_PROFILES.xml`
 
 Tests are automatically skipped when prerequisites are unavailable.

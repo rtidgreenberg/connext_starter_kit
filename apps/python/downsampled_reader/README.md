@@ -182,8 +182,8 @@ position_reader.set_listener(
 
 ### Prerequisites
 
-1. Python 3.8 or later
-2. RTI Connext DDS 7.3.0 or later
+1. Python 3.10
+2. RTI Connext DDS Python API 7.7.x, installed from PyPI as `rti.connext==7.7.*`
 3. Python virtual environment with RTI Connext Python API
 
 ### Setup

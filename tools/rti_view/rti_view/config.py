@@ -37,6 +37,7 @@ class ViewConfig:
         import argparse
 
         parser = argparse.ArgumentParser(prog="rti_view", add_help=False)
+        parser.error = _raise_parse_error
         parser.add_argument("-d", "--domain", type=int, default=0)
         parser.add_argument("-t", "--topic", type=str, default="")
         parser.add_argument("-f", "--field", type=str, default="")
@@ -44,9 +45,12 @@ class ViewConfig:
         parser.add_argument("--history", type=int, default=30)
         parser.add_argument("--direct-view", action="store_true")
 
-        tokens = shlex.split(s)
-        # Skip the program name (./rti_view.sh, rti_view, etc.)
-        args = parser.parse_args(tokens[1:] if tokens else [])
+        try:
+            tokens = shlex.split(s)
+            # Skip the program name (./rti_view.sh, rti_view, etc.)
+            args = parser.parse_args(tokens[1:] if tokens else [])
+        except (SystemExit, ValueError) as exc:
+            raise ValueError(f"Invalid startup string: {s!r}") from exc
         return cls(
             domain_id=args.domain,
             topic_name=args.topic,
@@ -55,6 +59,10 @@ class ViewConfig:
             history_seconds=args.history,
             direct_view=args.direct_view or bool(args.topic and args.field),
         )
+
+
+def _raise_parse_error(message: str) -> None:
+    raise ValueError(message)
 
 
 def save_config(config: ViewConfig, filepath: str) -> None:
@@ -70,6 +78,6 @@ def load_config(filepath: str) -> Optional[ViewConfig]:
             line = f.readline().strip()
             if line:
                 return ViewConfig.from_startup_string(line)
-    except (FileNotFoundError, OSError):
+    except (OSError, ValueError):
         pass
     return None

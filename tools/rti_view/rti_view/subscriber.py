@@ -13,7 +13,7 @@ from typing import Callable, Deque, Iterable, Optional, Tuple
 import rti.connextdds as dds
 import rti.asyncio
 
-from .discovery import DiscoveryDiagnostic, DiscoveredEndpoint, create_participant, registry
+from .discovery import DiscoveryDiagnostic, DiscoveredEndpoint, create_participant, refresh_endpoints, registry
 from .fields import FieldDescriptor, enumerate_fields, get_field_value, is_numeric_value
 
 
@@ -24,6 +24,7 @@ class ReaderSetupResult:
     reader: object = None
     subscriber: object = None
     diagnostic: Optional[DiscoveryDiagnostic] = None
+    warning: Optional[DiscoveryDiagnostic] = None
 
     @property
     def ok(self) -> bool:
@@ -78,6 +79,26 @@ def _is_numeric(value: object) -> bool:
     return is_numeric_value(value) and math.isfinite(float(value))
 
 
+def _incompatible_qos_warning(reader, topic_name: str) -> Optional[DiscoveryDiagnostic]:
+    """Check for QoS incompatibility right after reader creation.
+
+    A freshly created reader matches asynchronously, so total_count here only
+    catches incompatibilities against writers already discovered locally; it
+    is a best-effort diagnostic, not a guarantee of eventual match.
+    """
+    try:
+        status = reader.requested_incompatible_qos_status
+        if status.total_count > 0:
+            policy_name = getattr(status, "last_policy_name", None) or getattr(status, "last_policy_id", "unknown")
+            return DiscoveryDiagnostic(
+                "incompatible_qos",
+                f"Reader for topic '{topic_name}' has incompatible QoS with a discovered writer (policy: {policy_name}).",
+            )
+    except Exception:
+        pass
+    return None
+
+
 def setup_matched_reader(
         participant: dds.DomainParticipant,
         endpoint: DiscoveredEndpoint,
@@ -105,6 +126,10 @@ def setup_matched_reader(
         subscriber = dds.Subscriber(participant, subscriber_qos) if qos_set else dds.Subscriber(participant)
 
         reader_qos = dds.DataReaderQos()
+        # Deep enough to not drop samples from fast writers between UI pumps
+        # (default KEEP_LAST(1) would decimate anything faster than the frame rate).
+        reader_qos.history.kind = dds.HistoryKind.KEEP_LAST
+        reader_qos.history.depth = 256
         if endpoint.reliability:
             reader_qos.reliability.kind = endpoint.reliability.kind
             max_blocking_time = getattr(endpoint.reliability, "max_blocking_time", None)
@@ -116,9 +141,14 @@ def setup_matched_reader(
             reader_qos.deadline.period = endpoint.deadline.period
         if endpoint.ownership:
             reader_qos.ownership.kind = endpoint.ownership.kind
+        if endpoint.liveliness:
+            reader_qos.liveliness.kind = endpoint.liveliness.kind
+            lease_duration = getattr(endpoint.liveliness, "lease_duration", None)
+            if lease_duration is not None:
+                reader_qos.liveliness.lease_duration = lease_duration
 
         reader = dds.DynamicData.DataReader(subscriber, dynamic_topic, reader_qos)
-        return ReaderSetupResult(reader=reader, subscriber=subscriber)
+        return ReaderSetupResult(reader=reader, subscriber=subscriber, warning=_incompatible_qos_warning(reader, endpoint.topic_name))
     except Exception as exc:
         return ReaderSetupResult(diagnostic=DiscoveryDiagnostic(
             "reader_setup_failed",
@@ -140,10 +170,17 @@ async def wait_for_topic(
         timeout: float = 10.0,
         poll_interval: float = 0.2,
         target_registry=registry,
+        participant=None,
 ) -> Optional[DiscoveredEndpoint]:
-    """Wait until a writer for the named topic is discovered, or timeout."""
+    """Wait until a writer for the named topic is discovered, or timeout.
+
+    When a participant is given, its builtin readers are polled each iteration
+    so discovery does not depend on listener attachment timing.
+    """
     deadline = time.monotonic() + float(timeout)
     while time.monotonic() < deadline:
+        if participant is not None:
+            refresh_endpoints(participant, target_registry)
         endpoint, diagnostics = target_registry.select_writer_for_topic(topic_name)
         if endpoint and not any(diag.code == "type_unavailable" for diag in diagnostics):
             return endpoint
@@ -164,6 +201,7 @@ def pump_reader_once(
         field_path: str,
         buffer: FieldSampleBuffer,
         clock: Callable[[], float] = time.time,
+        on_row: Optional[Callable[[float, object], None]] = None,
 ) -> int:
     """Take available samples once and append selected field values to the buffer."""
     accepted = 0
@@ -176,7 +214,10 @@ def pump_reader_once(
         except Exception:
             buffer.append_invalid()
             continue
-        buffer.append(clock(), value)
+        timestamp = clock()
+        buffer.append(timestamp, value)
+        if on_row is not None:
+            on_row(timestamp, value)
         accepted += 1
     return accepted
 
@@ -189,10 +230,7 @@ async def stream_field(
     """Continuously read samples and deliver field values via callback."""
     buffer = FieldSampleBuffer()
     while True:
-        before = len(buffer.messages)
-        pump_reader_once(reader, field_path, buffer)
-        for row in buffer.messages[before:]:
-            callback(row.timestamp, row.value)
+        pump_reader_once(reader, field_path, buffer, on_row=callback)
         await asyncio.sleep(0.05)
 
 
@@ -219,7 +257,7 @@ def run_direct_view(
     async def _run():
         participant = create_participant(domain_id)
 
-        endpoint = await wait_for_topic(topic_name, timeout=timeout)
+        endpoint = await wait_for_topic(topic_name, timeout=timeout, participant=participant)
         if endpoint is None:
             print(f"ERROR: Topic '{topic_name}' not discovered within {timeout}s on domain {domain_id}")
             return

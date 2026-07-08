@@ -47,6 +47,7 @@ class DiscoveredEndpoint:
     durability: Optional[object] = None
     deadline: Optional[object] = None
     ownership: Optional[object] = None
+    liveliness: Optional[object] = None
     presentation: Optional[object] = None
     partition: Optional[object] = None
     type_debug: Tuple[str, ...] = ()
@@ -155,7 +156,7 @@ class DiscoveryRegistry:
         if len(writers) > 1:
             diagnostics.append(DiscoveryDiagnostic(
                 "multiple_writers",
-                f"Multiple writers found for topic '{topic_name}'; using the first compatible writer.",
+                f"Multiple writers found for topic '{topic_name}'; using the most recently observed writer with type information.",
             ))
         endpoint = preferred_endpoint(None, *writers)
         if not endpoint.type_available:
@@ -205,6 +206,7 @@ def _merge_endpoint(previous: DiscoveredEndpoint, current: DiscoveredEndpoint) -
         durability=_coalesce_defined(current.durability, previous.durability),
         deadline=_coalesce_defined(current.deadline, previous.deadline),
         ownership=_coalesce_defined(current.ownership, previous.ownership),
+        liveliness=_coalesce_defined(current.liveliness, previous.liveliness),
         presentation=_coalesce_defined(current.presentation, previous.presentation),
         partition=_coalesce_defined(current.partition, previous.partition),
         type_debug=_coalesce(current.type_debug, previous.type_debug),
@@ -294,9 +296,13 @@ def participant_from_builtin_data(participant_data, observed_at: Optional[float]
 
 
 def endpoint_from_builtin_data(data, kind: str, observed_at: Optional[float] = None) -> DiscoveredEndpoint:
-    # Prefer TypeObject v2 ("type") from 7.7.0+ remotes; fall back to
-    # TypeObject v1 ("type_code") from 6.1.2/7.3.0 remotes.
-    dynamic_type = getattr(data, "type", None) or getattr(data, "type_code", None)
+    # "type" is populated whenever the remote propagates any usable type
+    # representation. Verified live against 7.2.0, 7.3.1, and 7.7.0 writers
+    # (including one forced to legacy TypeObject-v1-only QoS): "type" was
+    # always populated in that case and "type_code" was never observed to be
+    # the only populated field, so there is no known live remote for which a
+    # "type_code" fallback would matter.
+    dynamic_type = getattr(data, "type", None)
     return DiscoveredEndpoint(
         key=_key_string(data.key.value),
         topic_name=str(data.topic_name),
@@ -308,6 +314,7 @@ def endpoint_from_builtin_data(data, kind: str, observed_at: Optional[float] = N
         durability=getattr(data, "durability", None),
         deadline=getattr(data, "deadline", None),
         ownership=getattr(data, "ownership", None),
+        liveliness=getattr(data, "liveliness", None),
         presentation=getattr(data, "presentation", None),
         partition=getattr(data, "partition", None),
         type_debug=_type_debug_lines(data),
@@ -413,24 +420,31 @@ def configure_type_lookup_qos(qos: dds.DomainParticipantQos) -> bool:
 
 
 def create_participant(domain_id: int, name: str = "rti_view") -> dds.DomainParticipant:
-    """Create a DomainParticipant with builtin topic listeners attached."""
-    factory_qos = dds.DomainParticipantFactoryQos()
-    factory_qos.entity_factory.autoenable_created_entities = False
-    dds.DomainParticipant.participant_factory_qos = factory_qos
+    """Create a DomainParticipant with builtin topic listeners attached.
 
+    Listeners are attached after the participant enables, so announcements that
+    arrive before attachment do not fire them. That is fine: they stay cached in
+    the builtin readers, and consumers must poll refresh_endpoints/
+    refresh_participants (the GUI refresh loop and wait_for_topic both do).
+    """
     qos = dds.DomainParticipantQos()
     qos.participant_name.name = name
     configure_type_lookup_qos(qos)
 
-    try:
-        participant = dds.DomainParticipant(domain_id, qos=qos)
-        publication_listener = PublicationListener()
-        subscription_listener = SubscriptionListener()
-        participant.publication_reader.set_listener(publication_listener, dds.StatusMask.DATA_AVAILABLE)
-        participant.subscription_reader.set_listener(subscription_listener, dds.StatusMask.DATA_AVAILABLE)
-        _listener_refs[id(participant)] = (publication_listener, subscription_listener)
-        participant.enable()
-    finally:
-        factory_qos.entity_factory.autoenable_created_entities = True
-        dds.DomainParticipant.participant_factory_qos = factory_qos
+    participant = dds.DomainParticipant(domain_id, qos=qos)
+    publication_listener = PublicationListener()
+    subscription_listener = SubscriptionListener()
+    participant.publication_reader.set_listener(publication_listener, dds.StatusMask.DATA_AVAILABLE)
+    participant.subscription_reader.set_listener(subscription_listener, dds.StatusMask.DATA_AVAILABLE)
+    _listener_refs[id(participant)] = (publication_listener, subscription_listener)
     return participant
+
+
+def close_participant(participant) -> None:
+    """Close a participant created by create_participant and release its listener refs."""
+    if participant is None:
+        return
+    _listener_refs.pop(id(participant), None)
+    close = getattr(participant, "close", None)
+    if callable(close):
+        close()

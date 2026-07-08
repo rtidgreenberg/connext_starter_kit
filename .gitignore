@@ -58,3 +58,7 @@ __pycache__/
 *.db
 debug_logs/
 log_dir/
+
+__pycache__/
+.pytest_cache/
+rti_view_debug.log

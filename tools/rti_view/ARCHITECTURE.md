@@ -80,7 +80,6 @@ V1 intentionally excludes:
 | `subscriber.py` | QoS matching, DynamicData topic/reader creation, sample delivery |
 | `fields.py` | DynamicType introspection, field enumeration, path-based access |
 | `views/main_window.py` | Dear PyGui application shell for discovery, field selection, toggle, and plotting |
-| `views/text_view.py` | Optional stdout helper for diagnostics; not the primary v1 GUI path |
 | `views/plot_view.py` | Dear PyGui plot rendering for numeric field values over time |
 | `config.py` | Load/save startup strings, serialize user selections |
 
@@ -146,7 +145,9 @@ endpoints: dict[str, Endpoint] = {}
 ```
 
 Key points from rtispy reference:
-- Create participant with `autoenable_created_entities = False` to attach listeners first.
+- Create the participant normally and attach listeners right after; announcements that
+    arrive before attachment stay cached in the builtin readers and are picked up by
+    polling (`refresh_endpoints`), so no factory QoS changes are needed.
 - Refresh participant/process-like rows from `participant.discovered_participants()` and
     `participant.discovered_participant_data(handle)`.
 - Use endpoint `participant_key` values from builtin publication/subscription data to

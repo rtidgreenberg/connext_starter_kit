@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from ..config import ViewConfig
 from ..debug_log import debug
-from ..discovery import DiscoveredEndpoint, create_participant, refresh_endpoints, refresh_participants, registry
+from ..discovery import DiscoveredEndpoint, close_participant, create_participant, refresh_endpoints, refresh_participants, registry
 from ..fields import enumerate_fields, enumerate_sample_fields, format_sample_items
 from ..subscriber import FieldSampleBuffer, pump_reader_once, setup_matched_reader
 
@@ -95,6 +95,7 @@ class RtiViewShell:
         self._logged_topic_type_keys: Set[str] = set()
         self._direct_target = bool(initial_topic and initial_field)
         self._direct_target_failed = False
+        self._plot_fallback_active = False
 
     @property
     def selection(self) -> UiSelection:
@@ -169,6 +170,7 @@ class RtiViewShell:
                 tag=DOMAIN_INPUT_TAG,
                 width=100,
                 default_value=self._selection.domain_id,
+                on_enter=True,
                 callback=self._domain_callback(dpg),
             )
             dpg.add_button(label="Refresh", width=100, callback=self._refresh_callback(dpg))
@@ -256,16 +258,14 @@ class RtiViewShell:
             self._set_exception_status(dpg, f"Failed to open domain {self._selection.domain_id}: {exc}")
 
     def _close_participant(self) -> None:
+        self._close_subscription()
         participant = self._participant
         self._participant = None
         self._participant_domain = None
-        close = getattr(participant, "close", None)
-        if callable(close):
-            try:
-                close()
-            except Exception:
-                pass
-        self._close_subscription()
+        try:
+            close_participant(participant)
+        except Exception as exc:
+            debug("teardown", f"participant close failed: {exc}")
 
     def _update_discovery_view(self, dpg, force: bool = False) -> None:
         if self._participant is None:
@@ -498,7 +498,11 @@ class RtiViewShell:
         )
         suffix = f".{field_path}" if field_path else ""
         debug("subscribe", f"OK: reader created, field_path={field_path!r}, mode={self._selection.mode}")
-        self._set_status(dpg, f"Subscribed to {endpoint.topic_name}{suffix}")
+        if result.warning:
+            debug("subscribe", f"WARNING: {result.warning.message}")
+            self._set_status(dpg, result.warning.message)
+        else:
+            self._set_status(dpg, f"Subscribed to {endpoint.topic_name}{suffix}")
         return True
 
     def _pump_subscription(self, dpg) -> None:
@@ -558,6 +562,8 @@ class RtiViewShell:
             debug("sync_view", f"text updated: {len(messages)} messages, last_value={messages[-1].value!r} type={type(messages[-1].value).__name__}")
         points = self._subscription.buffer.points
         if points:
+            cutoff = points[-1].timestamp - max(1, self._selection.history_seconds)
+            points = tuple(point for point in points if point.timestamp >= cutoff)
             x_data = [point.timestamp - points[0].timestamp for point in points]
             y_data = [point.value for point in points]
             debug("sync_view", f"PLOT UPDATE: {len(points)} points, x_range=[{x_data[0]:.3f},{x_data[-1]:.3f}], y_range=[{min(y_data):.2f},{max(y_data):.2f}]")
@@ -569,11 +575,25 @@ class RtiViewShell:
                 debug("sync_view", "fit_axis_data called on both axes")
             else:
                 debug("sync_view", "WARNING: fit_axis_data not available in dpg")
+            self._set_plot_fallback(dpg, False)
         elif self._subscription.last_sample is not None:
             debug("sync_view", f"NO POINTS - showing raw sample (msgs={len(messages)}, skipped_non_numeric={self._subscription.buffer.skipped_non_numeric})")
             lines = format_sample_items(self._subscription.last_sample)
             if lines:
                 set_value(MESSAGE_DATA_TAG, "\n".join(lines[:80]))
+                self._set_plot_fallback(dpg, True)
+
+    def _set_plot_fallback(self, dpg, active: bool) -> None:
+        """Swap the hidden message widget in for the plot when no numeric data exists."""
+        if self._selection.mode != "plot" or active == self._plot_fallback_active:
+            return
+        self._plot_fallback_active = active
+        configure_item = getattr(dpg, "configure_item", None)
+        if callable(configure_item):
+            configure_item(MESSAGE_DATA_TAG, show=active)
+            configure_item(PLOT_GROUP_TAG, show=not active)
+        if active:
+            self._set_status(dpg, "No numeric data for this field — showing raw samples")
 
     def _maybe_auto_subscribe_direct_view(
             self,
@@ -704,6 +724,12 @@ class RtiViewShell:
 
     def _refresh_callback(self, dpg):
         def _callback(_sender=None, _app_data=None, _user_data=None):
+            # Pick up a typed-but-not-entered domain value before refreshing.
+            try:
+                domain_id = int(self._get_value(dpg, DOMAIN_INPUT_TAG))
+            except (TypeError, ValueError):
+                domain_id = self._selection.domain_id
+            self._set_selection(dpg, replace(self._selection, domain_id=domain_id))
             self._ensure_participant(dpg)
             self._update_discovery_view(dpg, force=True)
             self._set_status(dpg, f"Refreshed domain {self._selection.domain_id}")
@@ -714,6 +740,7 @@ class RtiViewShell:
             mode = "plot" if app_data == "Plot" else "text"
             debug("mode", f"mode changed to {mode!r}")
             self._set_selection(dpg, replace(self._selection, mode=mode))
+            self._plot_fallback_active = False
             configure_item = getattr(dpg, "configure_item", None)
             if callable(configure_item):
                 configure_item(MESSAGE_DATA_TAG, show=(mode != "plot"))

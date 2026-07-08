@@ -43,6 +43,19 @@ class TestSubscriberRuntime(unittest.TestCase):
         self.assertEqual([row.value for row in buffer.messages], [1.5, 2.5])
         self.assertEqual(buffer.skipped_invalid, 1)
 
+    def test_pump_reader_once_delivers_every_row_past_buffer_capacity(self):
+        buffer = FieldSampleBuffer(max_messages=5)
+        delivered = []
+
+        total = 0
+        for batch in range(3):
+            reader = FakeReader([({"x": float(total + i)}, FakeInfo(valid=True)) for i in range(4)])
+            total += 4
+            pump_reader_once(reader, "x", buffer, clock=lambda: 100.0, on_row=lambda ts, value: delivered.append(value))
+
+        self.assertEqual(delivered, [float(i) for i in range(total)])
+        self.assertEqual(len(buffer.messages), 5)
+
     def test_missing_dynamic_type_returns_diagnostic(self):
         endpoint = DiscoveredEndpoint(
             key="writer-1",

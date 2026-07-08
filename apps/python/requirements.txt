@@ -1,2 +1,2 @@
 # RTI Connext DDS Python API - Shared runtime dependency
-rti.connext==7.7.*
+rti.connext==7.7.0

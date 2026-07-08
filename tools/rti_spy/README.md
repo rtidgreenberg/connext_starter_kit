@@ -33,7 +33,7 @@ domain `1`. In non-interactive runs it falls back to domain `1`.
 - RTI Connext DDS 7.7.x available locally
 - A valid RTI license file
 
-`tools/rti_spy/requirements.txt` currently pins `rti.connext==7.7.*` and the
+`tools/rti_spy/requirements.txt` currently pins `rti.connext==7.7.0` and the
 Textual UI dependencies.
 
 ## CLI

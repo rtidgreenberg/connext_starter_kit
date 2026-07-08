@@ -98,6 +98,6 @@ echo "Starting Example I/O Application..."
 echo "-----------------------------------"
 # Set the versioned types path so the app can find python_gen package
 export DDS_PYTHON_GEN_DIR="$TYPES_CACHE_DIR/$RTI_PYTHON_VERSION"
-export PYTHONPATH="$TYPES_CACHE_DIR/$RTI_PYTHON_VERSION:$PYTHONPATH"
+export PYTHONPATH="$TYPES_CACHE_DIR/$RTI_PYTHON_VERSION${PYTHONPATH:+:$PYTHONPATH}"
 cd "$SCRIPT_DIR"
 python example_io_app.py "$@"

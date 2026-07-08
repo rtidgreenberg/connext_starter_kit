@@ -36,7 +36,7 @@ If you already know the target topic and field:
 - A valid RTI license file
 
 `tools/rti_view/requirements.txt` currently pins `dearpygui==1.11.1` and
-`rti.connext==7.7.*`.
+`rti.connext==7.7.0`.
 
 ## CLI
 

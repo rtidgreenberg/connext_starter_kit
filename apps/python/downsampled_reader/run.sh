@@ -39,6 +39,6 @@ fi
 echo
 echo "Starting Downsampled Reader Application..."
 echo "------------------------------------------"
-export PYTHONPATH="$REPO_ROOT/build/dds:$PYTHONPATH"
+export PYTHONPATH="$REPO_ROOT/build/dds${PYTHONPATH:+:$PYTHONPATH}"
 cd "$SCRIPT_DIR"
 python downsampled_reader.py "$@"

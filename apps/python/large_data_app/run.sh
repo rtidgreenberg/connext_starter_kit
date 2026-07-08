@@ -39,6 +39,6 @@ fi
 echo
 echo "Starting Large Data Application..."
 echo "----------------------------------"
-export PYTHONPATH="$REPO_ROOT/build/dds:$PYTHONPATH"
+export PYTHONPATH="$REPO_ROOT/build/dds${PYTHONPATH:+:$PYTHONPATH}"
 cd "$SCRIPT_DIR"
 python large_data_app.py "$@"

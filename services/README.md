@@ -264,7 +264,7 @@ GUI-specific tests (unit, widget, integration, E2E tags) live in
 ## Prerequisites
 
 - RTI Connext DDS 7.3.0+ with Recording, Replay, and Converter Services for command-line scripts
-- Python 3.10 and `rti.connext==7.7.*` from PyPI for the `rs_gui` Python GUI
+- Python 3.10 and `rti.connext==7.7.0` from PyPI for the `rs_gui` Python GUI
 - Set `NDDSHOME` environment variable pointing to your RTI Connext installation
 
 ## Directory Structure

@@ -5,7 +5,7 @@ Cross-language DDS system/application templates to accelerate development.
 ## Prerequisites
 
 - **RTI Connext DDS 7.3.0+** [installed and licensed](https://community.rti.com/static/documentation/connext-dds/current/doc/manuals/connext_dds_professional/installation_guide/index.html) for C++ apps, DDS type support, and command-line services
-- **RTI Connext DDS Python API 7.7.x** for Python apps and Python GUI/tools, installed from PyPI as `rti.connext==7.7.*`
+- **RTI Connext DDS Python API 7.7.0** for Python apps and Python GUI/tools, installed from PyPI as `rti.connext==7.7.0`
 - **C++14 compiler** (GCC 7.3.0+ or equivalent) for C++ apps
 - **Python 3.10** with virtual environment support for Python apps and tools
 - **CMake 3.12+** for build configuration
@@ -48,7 +48,7 @@ Cross-language DDS system/application templates to accelerate development.
    ```bash
    export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
    ```
-   Python dependencies are installed from PyPI and pinned to `rti.connext==7.7.*`.
+   Python dependencies are installed from PyPI and pinned to `rti.connext==7.7.0`.
    
    Get a free trial license at https://www.rti.com/get-connext
 

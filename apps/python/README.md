@@ -72,7 +72,7 @@ connext_dds_env/            # Shared virtual environment (at repository root)
 ## Detailed Setup
 
 ### Prerequisites
-- RTI Connext DDS Python API 7.7.x, installed from PyPI as `rti.connext==7.7.*`
+- RTI Connext DDS Python API 7.7.0, installed from PyPI as `rti.connext==7.7.0`
 - Python 3.10
 - RTI license file
 
@@ -107,7 +107,7 @@ The install script:
 - Auto-detects `NDDSHOME` from `~/rti_connext_dds-*` (uses latest version)
 - Creates a shared Python 3.10 virtual environment at the repository root (`connext_dds_env/`)
 - Installs dependencies from `requirements.txt`
-- Installs the RTI Connext DDS Python API from PyPI (`rti.connext==7.7.*`)
+- Installs the RTI Connext DDS Python API from PyPI (`rti.connext==7.7.0`)
 
 ### Run Application
 
@@ -221,7 +221,7 @@ The application uses QoS profiles from `../../dds/qos/DDS_QOS_PROFILES.xml`:
 - Validates license file existence
 - Activates/creates the shared virtual environment
 - Installs dependencies if missing
-- Installs the RTI Connext DDS Python API from PyPI (`rti.connext==7.7.*`)
+- Installs the RTI Connext DDS Python API from PyPI (`rti.connext==7.7.0`)
 
 **⚠️ Important**: If you cloned this repository, ensure you have the git submodules:
 ```bash

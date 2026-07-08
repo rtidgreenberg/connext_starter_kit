@@ -15,16 +15,7 @@ python_env_ensure_venv
 python_env_activate_venv
 python_env_sync_requirements "$REPO_ROOT/apps/python/requirements.txt" "rti.connextdds:RTI Connext DDS Python API"
 python_env_resolve_license_file
-
-# --- Generate Python types if needed ---
-PYTHON_GEN_DIR="$REPO_ROOT/dds/datamodel/python_gen"
-if [ ! -d "$PYTHON_GEN_DIR/ExampleTypes" ]; then
-    echo "Generating Python type support..."
-    cd "$REPO_ROOT/dds/datamodel"
-    rtiddsgen -language python -d python_gen/ idl/ExampleTypes.idl -replace
-    rtiddsgen -language python -d python_gen/ idl/Definitions.idl -replace
-    cd "$SCRIPT_DIR"
-fi
+python_env_ensure_versioned_types
 
 # --- Run ---
 echo "Starting config_publisher..."

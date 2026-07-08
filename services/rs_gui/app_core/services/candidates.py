@@ -67,6 +67,7 @@ def candidate_from_monitoring_snapshot(
     """Build a service candidate from normalized RTI service monitoring data."""
 
     details = dict(snapshot.details)
+    observed_state = _candidate_state_from_monitoring(snapshot.state)
     application_guid = str(details.get("application_guid", ""))
     process_id = _optional_int(details.get("process_id"))
     hostname = str(details.get("host_name", ""))
@@ -80,10 +81,10 @@ def candidate_from_monitoring_snapshot(
         hostname=hostname,
         application_guid=application_guid,
         config_paths=snapshot.service.config_paths,
-        observed_state=snapshot.state,
+        observed_state=observed_state,
         metrics=snapshot.metrics,
         details=details,
-        alive=_state_is_alive(snapshot.state),
+        alive=_state_is_alive(observed_state),
         confidence=0.85 if application_guid or process_id is not None else 0.5,
         first_seen_at=snapshot.observed_at,
         last_seen_at=snapshot.observed_at,
@@ -369,4 +370,11 @@ def _same_service_target(left: ServiceInstanceRef, right: ServiceInstanceRef) ->
 
 
 def _state_is_alive(state: str) -> bool:
-    return str(state).strip().lower() not in {"stopped", "deleted", "not_alive", "dead"}
+    return str(state).strip().lower() not in {"exited", "stopped", "shutdown", "deleted", "not_alive", "dead"}
+
+
+def _candidate_state_from_monitoring(state: str) -> str:
+    normalized = str(state).strip()
+    if normalized.upper() == "SHUTDOWN":
+        return "exited"
+    return normalized

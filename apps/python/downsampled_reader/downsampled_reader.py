@@ -16,9 +16,13 @@ import rti.asyncio
 import rti.logging.distlog as distlog
 
 # Add the DDS Python codegen path to Python path
-sys.path.insert(
-    0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "dds", "datamodel")
-)
+_gen_dir = os.environ.get("DDS_PYTHON_GEN_DIR")
+if _gen_dir and os.path.isdir(_gen_dir):
+    sys.path.insert(0, _gen_dir)
+else:
+    sys.path.insert(
+        0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "dds", "datamodel")
+    )
 
 # Import DDS Data Types, Topics and config constants
 from python_gen.ExampleTypes import example_types

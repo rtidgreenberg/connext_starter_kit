@@ -24,6 +24,13 @@ _EXITED_STATES = {"exited", "start_failed", "stopped", "shutdown", "terminated",
 _ACTIVE_CONVERT_STATES = {"queued", "running", "cancel_requested"}
 
 
+def _record_process_display_state(state: str) -> str:
+    normalized = str(state).strip()
+    if normalized.upper() == "SHUTDOWN":
+        return "exited"
+    return normalized
+
+
 @dataclass(frozen=True)
 class GuiShellSessionConfig:
     """Presentation and queue-processing options for one GUI shell session."""
@@ -492,12 +499,26 @@ class GuiShellSession:
                 (row for row in record_view.candidates if row.candidate_id == candidate_id),
                 None,
             )
+            backing_candidate = next(
+                (
+                    item for item in self._record_controller.last_selection.candidates
+                    if item.candidate_id == candidate_id
+                ),
+                None,
+            )
             if candidate is None:
                 return True
             exited_states = {"exited", "start_failed"}
-            if not candidate.owned:
+            owned_process = candidate.owned or bool(
+                backing_candidate and (backing_candidate.owns_process or backing_candidate.launch_id)
+            )
+            if not owned_process:
                 exited_states = exited_states | {"stopped", "shutdown"}
-            if str(candidate.state).lower() in exited_states:
+            state_exited = str(candidate.state).lower() in exited_states
+            local_exit_verified = bool(
+                owned_process and self._record_controller.local_process_has_exited(candidate_id)
+            )
+            if state_exited and (not owned_process or local_exit_verified):
                 return True
             if asyncio.get_running_loop().time() >= deadline:
                 return False
@@ -526,7 +547,7 @@ class GuiShellSession:
             key = candidate.launch_id or candidate.candidate_id
             if not key:
                 continue
-            state = str(candidate.observed_state)
+            state = _record_process_display_state(candidate.observed_state)
             previous = self._record_process_states.get(key)
             if previous == state:
                 continue

@@ -23,6 +23,7 @@ from app_core.services import (
     ServiceInstanceRef,
     ServiceKind,
     ServiceLaunchIntent,
+    ServiceCandidateSource,
     ServiceMonitoringFacade,
     ServiceProcessCandidate,
     ServiceProcessLaunch,
@@ -87,7 +88,7 @@ class RecordTabControllerConfig:
 class RecordTabController:
     """Build Record tab snapshots and dispatch selected service actions."""
 
-    _LOCAL_SHUTDOWN_REAP_TIMEOUT_SEC = 1.0
+    _LOCAL_SHUTDOWN_REAP_TIMEOUT_SEC = 8.0
     _LOCAL_SHUTDOWN_REAP_POLL_SEC = 0.05
 
     def __init__(
@@ -142,6 +143,17 @@ class RecordTabController:
 
     def mark_graceful_shutdown_failed(self) -> None:
         self._graceful_shutdown_failed = True
+
+    def local_process_has_exited(self, candidate_id: str) -> bool:
+        selection = self._last_selection.select(candidate_id)
+        selected = selection.selected_candidate
+        if selected is None:
+            return False
+        launch_id = selected.launch_id or selected.candidate_id
+        if not launch_id:
+            return False
+        launch = self._process_manager.refresh(launch_id)
+        return launch is None or not launch.alive
 
     async def refresh_view(self) -> RecordTabViewModel:
         """Collect latest app-core snapshots and return a Record-tab view."""
@@ -314,7 +326,13 @@ class RecordTabController:
         service = self._target_service()
         selection = self._selection(service, self._latest_monitoring)
         if self._config.selected_candidate_id:
-            selection = selection.select(self._config.selected_candidate_id)
+            try:
+                selection = selection.select(self._config.selected_candidate_id)
+            except ValueError:
+                selected = selection.selected_candidate
+                if selected is None:
+                    raise
+                self._config = replace(self._config, selected_candidate_id=selected.candidate_id)
         selected = selection.selected_candidate
         if selected is None:
             raise ValueError("No Recording Service candidate is selected")
@@ -445,7 +463,7 @@ class RecordTabController:
             extra_candidates.extend(extra_sel.candidates)
         if not extra_candidates:
             return primary
-        all_candidates = list(primary.candidates) + extra_candidates
+        all_candidates = _collapse_same_process_candidates(list(primary.candidates) + extra_candidates)
         all_candidates.sort(key=lambda c: (not c.alive, -c.confidence, -c.last_seen_at, c.candidate_id))
         return ServiceCandidateSelection(
             candidates=tuple(all_candidates),
@@ -525,6 +543,67 @@ def _observed_state_for_action(action_id: str) -> str:
     return ""
 
 
+def _collapse_same_process_candidates(candidates: Iterable[ServiceProcessCandidate]) -> List[ServiceProcessCandidate]:
+    collapsed: List[ServiceProcessCandidate] = []
+    index_by_key: Dict[Tuple[str, str], int] = {}
+    for candidate in candidates:
+        key = _record_candidate_process_key(candidate)
+        if key is None or key not in index_by_key:
+            if key is not None:
+                index_by_key[key] = len(collapsed)
+            collapsed.append(candidate)
+            continue
+        index = index_by_key[key]
+        collapsed[index] = _combine_record_candidate_rows(collapsed[index], candidate)
+    return collapsed
+
+
+def _record_candidate_process_key(candidate: ServiceProcessCandidate) -> Optional[Tuple[str, str]]:
+    if candidate.launch_id:
+        return ("launch", candidate.launch_id)
+    if candidate.application_guid:
+        return ("application_guid", candidate.application_guid)
+    if candidate.hostname and candidate.pid is not None:
+        return ("host_pid", f"{candidate.hostname.lower()}:{candidate.pid}")
+    return None
+
+
+def _combine_record_candidate_rows(
+        existing: ServiceProcessCandidate,
+        incoming: ServiceProcessCandidate,
+) -> ServiceProcessCandidate:
+    details = dict(existing.details)
+    details.update(dict(incoming.details))
+    metrics = dict(existing.metrics)
+    metrics.update(dict(incoming.metrics))
+    newer = incoming if incoming.last_seen_at >= existing.last_seen_at else existing
+    owner = existing if existing.owns_process else incoming if incoming.owns_process else existing
+    source = newer.source
+    if ServiceCandidateSource.MONITORING in {existing.source, incoming.source}:
+        source = ServiceCandidateSource.MONITORING
+    return replace(
+        owner,
+        candidate_id=owner.candidate_id,
+        service=owner.service if owner.service.name else newer.service,
+        source=source,
+        display_label=owner.display_label or newer.display_label,
+        launch_id=owner.launch_id or newer.launch_id,
+        pid=owner.pid if owner.pid is not None else newer.pid,
+        hostname=owner.hostname or newer.hostname,
+        participant_key=owner.participant_key or newer.participant_key,
+        participant_name=owner.participant_name or newer.participant_name,
+        application_guid=owner.application_guid or newer.application_guid,
+        config_paths=owner.config_paths or newer.config_paths,
+        observed_state=newer.observed_state if newer.observed_state != "unknown" else owner.observed_state,
+        metrics=metrics,
+        details=details,
+        alive=owner.alive and newer.alive,
+        confidence=max(owner.confidence, newer.confidence),
+        first_seen_at=min(owner.first_seen_at, newer.first_seen_at),
+        last_seen_at=max(owner.last_seen_at, newer.last_seen_at),
+    )
+
+
 def _apply_command_state_override(
         selection: ServiceCandidateSelection,
         command_history: Tuple[ServiceCommandOutcome, ...],
@@ -550,7 +629,12 @@ def _apply_command_state_override(
     changed = False
     for candidate in selection.candidates:
         if candidate.service.key == request_service.key:
-            if str(observed_state).upper() == "SHUTDOWN" and (process_exit_observed or shutdown_exit_evidence):
+            candidate_state = str(candidate.observed_state).strip().lower()
+            if str(observed_state).upper() == "SHUTDOWN" and (
+                    process_exit_observed
+                    or shutdown_exit_evidence
+                    or candidate_state in {"exited", "start_failed"}
+            ):
                 updated.append(replace(candidate, observed_state="exited"))
                 changed = True
                 continue
@@ -558,7 +642,7 @@ def _apply_command_state_override(
                     observed_state.upper() == "SHUTDOWN"
                     and candidate.owns_process
                     and not candidate.alive
-                    and str(candidate.observed_state).strip().lower() in {"exited", "start_failed"}
+                    and candidate_state in {"exited", "start_failed"}
             ):
                 updated.append(candidate)
             else:

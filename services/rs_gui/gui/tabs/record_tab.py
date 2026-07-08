@@ -176,12 +176,13 @@ def build_record_tab_view_model(
     diagnostics = tuple(availability.reasons)
     if readiness and not readiness.ready and readiness.message:
         diagnostics = diagnostics + (readiness.message,)
+    observed_state = _record_display_state(selected.observed_state) if selected else "no service"
     return RecordTabViewModel(
         target_label=_target_label(selected, service),
         admin_domain=service.admin_domain_id,
         monitoring_domain=service.monitoring_domain_id,
         readiness=_readiness_text(readiness),
-        observed_state=selected.observed_state if selected else "no service",
+        observed_state=observed_state,
         selected_candidate_id=selected.candidate_id if selected else "",
         candidates=rows,
         actions=_record_actions(selected, availability, tag_value),
@@ -348,7 +349,7 @@ def _candidate_row(
         source=str(display["source"]),
         pid=str(display["pid"]),
         hostname=str(display["hostname"]),
-        state=candidate.observed_state,
+        state=_record_display_state(candidate.observed_state),
         current_file=_current_file(candidate.details),
         age=str(display["age"]),
         confidence=str(display["confidence"]),
@@ -356,6 +357,13 @@ def _candidate_row(
         conflict=conflict,
         owned=bool(display["owned"]),
     )
+
+
+def _record_display_state(state: str) -> str:
+    normalized = str(state).strip()
+    if normalized.upper() == "SHUTDOWN":
+        return "exited"
+    return normalized
 
 
 def _record_actions(

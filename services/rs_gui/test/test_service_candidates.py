@@ -78,6 +78,25 @@ class TestCandidateComposition(unittest.TestCase):
         self.assertEqual(candidate.observed_state, "RUNNING")
         self.assertEqual(candidate.metrics["cpu_percent"], 2.0)
 
+    def test_monitoring_shutdown_state_maps_to_exited_candidate(self):
+        service = ServiceInstanceRef(ServiceKind.RECORDING, "record_main_11111111")
+        snapshot = MonitoringSnapshot(
+            service=service,
+            kind=MonitoringSnapshotKind.EVENT,
+            state="SHUTDOWN",
+            details={
+                "application_guid": "app-guid-1",
+                "process_id": 100,
+                "host_name": "dev-host",
+            },
+            observed_at=20.0,
+        )
+
+        candidate = candidate_from_monitoring_snapshot(snapshot, display_label="Record Main")
+
+        self.assertEqual(candidate.observed_state, "exited")
+        self.assertFalse(candidate.alive)
+
     def test_discovery_endpoints_are_grouped_by_participant(self):
         service = ServiceInstanceRef(ServiceKind.REPLAY, "replay_aaaaaaaa")
         endpoints = (

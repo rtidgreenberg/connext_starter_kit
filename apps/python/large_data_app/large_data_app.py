@@ -15,7 +15,6 @@ import asyncio
 import argparse
 import rti.connextdds as dds
 import rti.asyncio
-import rti.logging.distlog as distlog
 
 # Add the DDS Python codegen path to Python path
 _gen_dir = os.environ.get("DDS_PYTHON_GEN_DIR")
@@ -51,11 +50,6 @@ async def process_image_data(reader):
         print(f"  Format: {data.format}")
         print(f"  Data Size: {len(data.data)} bytes")
 
-        # Log image data
-        distlog.Logger.info(
-            f"Received Image data - id:{data.image_id}, size:{len(data.data)} bytes, {data.width}x{data.height}"
-        )
-
 
 class LargeDataApp:
 
@@ -81,16 +75,6 @@ class LargeDataApp:
             f"DomainParticipant created with QoS profile: {qos_profiles.LARGE_DATA_PARTICIPANT}"
         )
         print(f"DOMAIN ID: {domain_id}")
-
-        # Initialize RTI Distributed Logger using the existing participant
-        # This ensures the logger uses the same large data configuration
-        logger_options = distlog.LoggerOptions()
-        logger_options.domain_id = domain_id
-        logger_options.application_kind = app_name + "-DistLogger"
-        logger_options.participant = participant
-        distlog.Logger.init(logger_options)
-        print(f"RTI Distributed Logger configured using existing participant")
-        distlog.Logger.info("LargeDataApp initialized with distributed logging enabled")
 
         # Create Image Topic
         image_topic = dds.Topic(participant, topics.IMAGE_TOPIC, example_types.Image)
@@ -139,31 +123,25 @@ class LargeDataApp:
                     print(
                         f"[IMAGE_PUBLISHER] Published Image - ID: {image_sample.image_id}, Size: {len(image_sample.data)} bytes"
                     )
-                    distlog.Logger.info(
-                        f"Published Image - id:{image_sample.image_id}, size:{len(image_sample.data)} bytes, {IMAGE_WIDTH}x{IMAGE_HEIGHT}"
-                    )
 
                     image_count += 1
 
                     await asyncio.sleep(PUBLISHER_SLEEP_INTERVAL)
 
                 except asyncio.CancelledError:
-                    distlog.Logger.warning("Publisher task cancelled")
+                    print("[PUBLISHER] Publisher task cancelled")
                     break
                 except Exception as e:
                     print(f"[PUBLISHER] Error publishing data: {e}")
-                    distlog.Logger.error(f"Error publishing data: {e}")
                     await asyncio.sleep(PUBLISHER_SLEEP_INTERVAL)
 
             print("[PUBLISHER] Publisher task finished.")
-            distlog.Logger.info("Publisher task completed successfully")
 
         # Main application coroutine
         async def main_task():
             count = 0
             while True:
                 print(f"[MAIN] LargeDataApp processing loop - iteration {count}")
-                distlog.Logger.info(f"Large Data processing loop - iteration: {count}")
 
                 count += 1
                 await asyncio.sleep(MAIN_TASK_SLEEP_INTERVAL)
@@ -176,11 +154,6 @@ class LargeDataApp:
             )
         except KeyboardInterrupt:
             print("[MAIN] Shutting down RTI asyncio tasks...")
-            distlog.Logger.warning("Application shutdown requested by user")
-        finally:
-            # Finalize distributed logger
-            print("[MAIN] Finalizing distributed logger...")
-            distlog.Logger.finalize()
 
 
 def main():

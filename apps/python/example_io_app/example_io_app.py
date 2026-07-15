@@ -15,7 +15,6 @@ import asyncio
 import argparse
 import rti.connextdds as dds
 import rti.asyncio
-import rti.logging.distlog as distlog
 
 # Add the DDS Python codegen path to Python path
 # Prefer versioned types from DDS_PYTHON_GEN_DIR (set by run.sh)
@@ -33,28 +32,25 @@ from python_gen.ExampleTypes import example_types
 from python_gen.Definitions import topics, qos_profiles, domains
 
 # Application constants
-PUBLISHER_SLEEP_INTERVAL = 2  # seconds for command/button/config publishing
+PUBLISHER_SLEEP_INTERVAL = 2  # seconds for button/config publishing
+# Published well above the downsampled_reader's 1Hz time-based filter so that
+# app visibly demonstrates the downsampling (DataPatternsLibrary::Status1HzQoS).
+POSITION_PUBLISH_INTERVAL = 0.1  # seconds (10Hz) for position publishing
 MAIN_TASK_SLEEP_INTERVAL = 5  # seconds
 DEFAULT_APP_NAME = "Example Python IO App"
-DEFAULT_COMMAND_DESTINATION = "target_system"
 
-async def process_position_data(reader):
-    """Process incoming Position data"""
+async def process_command_data(reader):
+    """Process incoming Command data"""
     # Print data as it arrives, suspending the coroutine until data is
     # available.
     async for data in reader.take_data_async():
-        # Take all available position samples
-        print(f"[POSITION_SUBSCRIBER] Position Received:")
-        print(f"  Source ID: {data.source_id}")
-        print(f"  Latitude: {data.latitude}")
-        print(f"  Longitude: {data.longitude}")
-        print(f"  Altitude: {data.altitude}")
-        print(f"  Timestamp: {data.timestamp_sec}")
-
-        # Log position data
-        distlog.Logger.info(
-            f"Received Position data - source:{data.source_id}, lat:{data.latitude}, lon:{data.longitude}, alt:{data.altitude}"
-        )
+        # Take all available command samples
+        print(f"[COMMAND_SUBSCRIBER] Command Received:")
+        print(f"  Command ID: {data.command_id}")
+        print(f"  Destination ID: {data.destination_id}")
+        print(f"  Command Type: {data.command_type}")
+        print(f"  Message: {data.message}")
+        print(f"  Urgent: {data.urgent}")
 
 
 class ExampleIOApp:
@@ -83,17 +79,6 @@ class ExampleIOApp:
         )
         print(f"DOMAIN ID: {domain_id}")
 
-        # Initialize RTI Distributed Logger
-        logger_options = distlog.LoggerOptions()
-        logger_options.domain_id = domain_id
-        logger_options.application_kind = app_name + "-DistLogger"
-        logger_options.participant = participant
-        distlog.Logger.init(logger_options)
-        print(
-            f"RTI Distributed Logger configured for domain {domain_id} with application kind: {app_name}"
-        )
-        distlog.Logger.info("ExampleIOApp initialized with distributed logging enabled")
-
         # Create Topics
         command_topic = dds.Topic(
             participant, topics.COMMAND_TOPIC, example_types.Command
@@ -107,19 +92,19 @@ class ExampleIOApp:
         # Create DataReaders with QoS configured from DDS_QOS_PROFILES.xml
         # Using set_topic_data_reader_qos APUI allows us to use the external Assign QoS Profile
         # Otherwise can just use the regular datareader_qos_from_profile API
-        position_reader_qos = qos_provider.set_topic_datareader_qos(
-            qos_profiles.ASSIGNER, topics.POSITION_TOPIC
+        command_reader_qos = qos_provider.set_topic_datareader_qos(
+            qos_profiles.ASSIGNER, topics.COMMAND_TOPIC
         )
-        position_reader = dds.DataReader(
-            participant.implicit_subscriber, position_topic, position_reader_qos
+        command_reader = dds.DataReader(
+            participant.implicit_subscriber, command_topic, command_reader_qos
         )
 
         # Create DataWriters with QoS configured from DDS_QOS_PROFILES.xml
-        command_writer_qos = qos_provider.set_topic_datawriter_qos(
-            qos_profiles.ASSIGNER, topics.COMMAND_TOPIC
+        position_writer_qos = qos_provider.set_topic_datawriter_qos(
+            qos_profiles.ASSIGNER, topics.POSITION_TOPIC
         )
-        command_writer = dds.DataWriter(
-            participant.implicit_publisher, command_topic, command_writer_qos
+        position_writer = dds.DataWriter(
+            participant.implicit_publisher, position_topic, position_writer_qos
         )
 
         button_writer_qos = qos_provider.set_topic_datawriter_qos(
@@ -129,38 +114,48 @@ class ExampleIOApp:
             participant.implicit_publisher, button_topic, button_writer_qos
         )
 
-        print("[SUBSCRIBER] RTI Asyncio reader configured for Position data...")
+        print("[SUBSCRIBER] RTI Asyncio reader configured for Command data...")
         print(
-            "[PUBLISHER] RTI Asyncio writers configured for Command and Button data..."
+            "[PUBLISHER] RTI Asyncio writers configured for Position and Button data..."
         )
 
-        # Publisher coroutine for Command, Button, Config
-        async def publisher_task():
+        # Publisher coroutine for Position, published fast enough to
+        # demonstrate the downsampled_reader's 1Hz time-based filter
+        async def position_publisher_task():
 
-            command_count = 0
+            while True:
+                try:
+                    position_sample = example_types.Position()
+                    position_sample.source_id = app_name
+                    position_sample.latitude = 37.7749
+                    position_sample.longitude = -122.4194
+                    position_sample.altitude = 15.0
+                    position_sample.timestamp_sec = int(time.time())
+
+                    position_writer.write(position_sample)
+                    print(
+                        f"[POSITION_PUBLISHER] Published Position - Source: {position_sample.source_id}, Lat: {position_sample.latitude}, Lon: {position_sample.longitude}, Alt: {position_sample.altitude}"
+                    )
+
+                    await asyncio.sleep(POSITION_PUBLISH_INTERVAL)
+
+                except asyncio.CancelledError:
+                    print("[POSITION_PUBLISHER] Position publisher task cancelled")
+                    break
+                except Exception as e:
+                    print(f"[POSITION_PUBLISHER] Error publishing data: {e}")
+                    await asyncio.sleep(POSITION_PUBLISH_INTERVAL)
+
+            print("[POSITION_PUBLISHER] Position publisher task finished.")
+
+        # Publisher coroutine for Button, Config
+        async def button_publisher_task():
+
             button_count = 0
 
             while True:
                 try:
                     current_time = int(time.time())
-
-                    # Publish Command message
-                    command_sample = example_types.Command()
-                    command_sample.command_id = f"cmd_{command_count:04d}"
-                    command_sample.destination_id = DEFAULT_COMMAND_DESTINATION
-                    command_sample.command_type = (
-                        example_types.CommandType.START
-                    )
-                    command_sample.message = f"Command from {app_name}"
-                    command_sample.urgent = 0
-
-                    command_writer.write(command_sample)
-                    print(
-                        f"[COMMAND_PUBLISHER] Published Command - ID: {command_sample.command_id}"
-                    )
-                    distlog.Logger.info(
-                        f"Published Command - id:{command_sample.command_id}, type:{command_sample.command_type}"
-                    )
 
                     # Publish Button message
                     button_sample = example_types.Button()
@@ -177,32 +172,25 @@ class ExampleIOApp:
                     print(
                         f"[BUTTON_PUBLISHER] Published Button - ID: {button_sample.button_id}, Count: {button_count}"
                     )
-                    distlog.Logger.info(
-                        f"Published Button - id:{button_sample.button_id}, state:{button_sample.button_state}, count:{button_count}"
-                    )
 
-                    command_count += 1
                     button_count += 1
 
                     await asyncio.sleep(PUBLISHER_SLEEP_INTERVAL)
 
                 except asyncio.CancelledError:
-                    distlog.Logger.warning("Publisher task cancelled")
+                    print("[BUTTON_PUBLISHER] Button publisher task cancelled")
                     break
                 except Exception as e:
-                    print(f"[PUBLISHER] Error publishing data: {e}")
-                    distlog.Logger.error(f"Error publishing data: {e}")
+                    print(f"[BUTTON_PUBLISHER] Error publishing data: {e}")
                     await asyncio.sleep(PUBLISHER_SLEEP_INTERVAL)
 
-            print("[PUBLISHER] Publisher task finished.")
-            distlog.Logger.info("Publisher task completed successfully")
+            print("[BUTTON_PUBLISHER] Button publisher task finished.")
 
         # Main application coroutine
         async def main_task():
             count = 0
             while True:
                 print(f"[MAIN] ExampleIOApp processing loop - iteration {count}")
-                distlog.Logger.info(f"Example IO processing loop - iteration: {count}")
 
                 count += 1
                 await asyncio.sleep(MAIN_TASK_SLEEP_INTERVAL)
@@ -211,21 +199,19 @@ class ExampleIOApp:
         print("[MAIN] Starting RTI asyncio tasks...")
         try:
             await asyncio.gather(
-                publisher_task(), process_position_data(position_reader), main_task()
+                position_publisher_task(),
+                button_publisher_task(),
+                process_command_data(command_reader),
+                main_task(),
             )
         except KeyboardInterrupt:
             print("[MAIN] Shutting down RTI asyncio tasks...")
-            distlog.Logger.warning("Application shutdown requested by user")
-        finally:
-            # Finalize distributed logger
-            print("[MAIN] Finalizing distributed logger...")
-            distlog.Logger.finalize()
 
 
 def main():
     """Main entry point for the example_io_app application."""
     parser = argparse.ArgumentParser(
-        description="Example I/O Application - Publishes Command/Button/Config, Subscribes to Position"
+        description="Example I/O Application - Publishes Position/Button/Config, Subscribes to Command"
     )
 
     parser.add_argument(

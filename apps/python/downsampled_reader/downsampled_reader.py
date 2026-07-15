@@ -13,7 +13,6 @@ import os
 import argparse
 import rti.connextdds as dds
 import rti.asyncio
-import rti.logging.distlog as distlog
 
 # Add the DDS Python codegen path to Python path
 _gen_dir = os.environ.get("DDS_PYTHON_GEN_DIR")
@@ -40,10 +39,7 @@ class PositionReaderListener(dds.DataReaderListener):
         print(f"  Total count: {status.total_count}")
         print(f"  Total count change: {status.total_count_change}")
         print(f"  Last instance handle: {status.last_instance_handle}")
-        distlog.Logger.warning(
-            f"Requested deadline missed - total: {status.total_count}, change: {status.total_count_change}"
-        )
-    
+
     def on_subscription_matched(self, reader, status):
         """Callback for when subscription is matched or unmatched with a publication"""
         if status.current_count_change > 0:
@@ -51,17 +47,11 @@ class PositionReaderListener(dds.DataReaderListener):
             print(f"  Current count: {status.current_count}")
             print(f"  Current count change: {status.current_count_change}")
             print(f"  Last publication handle: {status.last_publication_handle}")
-            distlog.Logger.info(
-                f"Subscription matched - publishers: {status.current_count}"
-            )
         elif status.current_count_change < 0:
             print(f"[SUBSCRIPTION_UNMATCHED] Lost connection to a publisher!")
             print(f"  Current count: {status.current_count}")
             print(f"  Current count change: {status.current_count_change}")
-            distlog.Logger.warning(
-                f"Subscription unmatched - publishers: {status.current_count}"
-            )
-    
+
     def on_liveliness_changed(self, reader, status):
         """Callback for when liveliness of a matched publication changes"""
         if status.alive_count_change > 0:
@@ -69,17 +59,11 @@ class PositionReaderListener(dds.DataReaderListener):
             print(f"  Alive count: {status.alive_count}")
             print(f"  Not alive count: {status.not_alive_count}")
             print(f"  Last publication handle: {status.last_publication_handle}")
-            distlog.Logger.info(
-                f"Liveliness gained - alive publishers: {status.alive_count}"
-            )
         elif status.not_alive_count_change > 0:
             print(f"[LIVELINESS_LOST] Publisher lost liveliness!")
             print(f"  Alive count: {status.alive_count}")
             print(f"  Not alive count: {status.not_alive_count}")
             print(f"  Last publication handle: {status.last_publication_handle}")
-            distlog.Logger.warning(
-                f"Liveliness lost - not alive publishers: {status.not_alive_count}"
-            )
 
 
 async def process_position_data(reader):
@@ -91,10 +75,6 @@ async def process_position_data(reader):
         print(f"  Longitude: {data.longitude}")
         print(f"  Altitude: {data.altitude}")
         print(f"  Timestamp: {data.timestamp_sec}")
-
-        distlog.Logger.info(
-            f"Received Position data - source:{data.source_id}, lat:{data.latitude}, lon:{data.longitude}"
-        )
 
 
 class DownsampledReaderApp:
@@ -120,17 +100,6 @@ class DownsampledReaderApp:
             f"DomainParticipant created with QoS profile: {qos_profiles.DEFAULT_PARTICIPANT}"
         )
         print(f"DOMAIN ID: {domain_id}")
-
-        # Initialize RTI Distributed Logger
-        logger_options = distlog.LoggerOptions()
-        logger_options.domain_id = domain_id
-        logger_options.application_kind = app_name + "-DistLogger"
-        logger_options.participant = participant
-        distlog.Logger.init(logger_options)
-        print(
-            f"RTI Distributed Logger configured for domain {domain_id} with application kind: {app_name}"
-        )
-        distlog.Logger.info("Downsampled Reader initialized with distributed logging enabled")
 
         # Create Position Topic
         position_topic = dds.Topic(
@@ -168,10 +137,6 @@ class DownsampledReaderApp:
             await process_position_data(position_reader)
         except KeyboardInterrupt:
             print("[MAIN] Shutting down RTI asyncio tasks...")
-            distlog.Logger.warning("Application shutdown requested by user")
-        finally:
-            print("[MAIN] Finalizing distributed logger...")
-            distlog.Logger.finalize()
 
 
 def main():

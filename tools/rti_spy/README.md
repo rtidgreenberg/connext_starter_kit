@@ -38,6 +38,35 @@ It will:
 Switching between a Connext 7.3.x and 7.7.x install (via `NDDSHOME`) reuses each
 version's own venv, so no rebuild/reinstall is needed when switching back and forth.
 
+## Installing the RTI Connext Python API
+
+You don't need to install `rti.connext` yourself — `run_rtispy.sh` does it for
+you automatically, and prefers a local install over a PyPI download:
+
+1. **Bundled, pre-activated wheel (preferred).** Every native Connext install
+   ships a pre-activated Python wheel (no separate `RTI_LICENSE_FILE` needed
+   for the wheel itself) under
+   `$NDDSHOME/resource/python_api/rti_connext_activated-<version>-cp<XY>-*.whl`.
+   If a wheel matching the detected Connext version and target Python version
+   is found there, the launcher installs it directly from disk — no network
+   access required.
+2. **PyPI fallback.** If no matching bundled wheel is found (e.g. `NDDSHOME`
+   isn't set, or it's a nonstandard/custom build), the launcher installs the
+   public `rti.connext==<version>` package from PyPI instead.
+
+Both packages provide the same `rti.connextdds` module, so this is transparent
+to the app. To use it:
+
+```bash
+export NDDSHOME=/path/to/your/rti_connext_dds-X.Y.Z
+./tools/rti_spy/run_rtispy.sh
+```
+
+That's it — the launcher detects the version from `NDDSHOME`, picks the
+matching Python/venv (table above), installs the bundled wheel if present, and
+starts `rtispy.py`. Re-running is fast: once the correct version is installed,
+the launcher skips reinstalling on subsequent runs.
+
 ## Requirements
 
 - RTI Connext DDS 7.3.x or 7.7.x available locally

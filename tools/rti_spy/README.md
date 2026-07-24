@@ -18,23 +18,37 @@ domain `1`. In non-interactive runs it falls back to domain `1`.
 
 ## What the Launcher Does
 
-`run_rtispy.sh` uses the shared repository Python environment in
-`connext_dds_env/` and will:
+`run_rtispy.sh` auto-detects the Connext version from `NDDSHOME` and picks a
+matching, isolated Python environment and `rti.connext` version:
 
-- detect `NDDSHOME`
+| NDDSHOME version | Python  | venv                    | rti.connext |
+|-------------------|---------|-------------------------|-------------|
+| 7.3.x              | 3.9     | `connext_dds_env_7.3/`  | 7.3.1       |
+| 7.7.x (default)    | 3.10    | `connext_dds_env/`      | 7.7.0       |
+
+It will:
+
+- detect `NDDSHOME` (or use `$NDDSHOME` if already set/exported)
+- detect the Connext version and select the matching Python/venv/`rti.connext` above
 - detect `RTI_LICENSE_FILE`
-- create or rebuild the shared Python 3.10 virtual environment if needed
-- install packages from `tools/rti_spy/requirements.txt`
+- create or rebuild the matching versioned virtual environment if needed
+- install the matching `rti.connext` version, then the rest of `tools/rti_spy/requirements.txt`
 - start `rtispy.py`
+
+Switching between a Connext 7.3.x and 7.7.x install (via `NDDSHOME`) reuses each
+version's own venv, so no rebuild/reinstall is needed when switching back and forth.
 
 ## Requirements
 
-- Python 3.10 available as `python3.10`
-- RTI Connext DDS 7.7.x available locally
+- RTI Connext DDS 7.3.x or 7.7.x available locally
+- Python 3.10 available as `python3.10` (for 7.7.x), and/or Python 3.9 available
+  as `python3.9` (for 7.3.x). If missing, the launcher prints the exact
+  `sudo apt install python3.9 python3.9-venv` command needed and stops.
 - A valid RTI license file
 
-`tools/rti_spy/requirements.txt` currently pins `rti.connext==7.7.0` and the
-Textual UI dependencies.
+`tools/rti_spy/requirements.txt` no longer pins `rti.connext`; the version is
+selected automatically to match `NDDSHOME`. The Textual UI dependencies are
+still listed there.
 
 ## CLI
 

@@ -86,6 +86,7 @@ fi
 python_env_resolve_nddshome
 python_env_ensure_venv
 python_env_activate_venv
+python_env_sync_rti_connext
 python_env_sync_requirements "$REQUIREMENTS_FILE" "rti.connextdds:RTI Connext DDS Python API"
 
 export PYTHONNOUSERSITE=1

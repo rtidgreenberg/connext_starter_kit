@@ -14,6 +14,7 @@ python_env_init "example_io_app" "$REPO_ROOT"
 python_env_resolve_nddshome
 python_env_ensure_venv
 python_env_activate_venv
+python_env_sync_rti_connext
 python_env_sync_requirements "$REPO_ROOT/apps/python/requirements.txt" "rti.connextdds:RTI Connext DDS Python API"
 python_env_resolve_license_file
 python_env_ensure_versioned_types

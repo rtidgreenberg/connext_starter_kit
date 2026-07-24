@@ -51,7 +51,11 @@ class TestRtiSpyStartupLive(unittest.TestCase):
         rtispy.participants.clear()
 
     def test_main_starts_with_real_connext_participant(self):
-        domain_id = random.randint(231, 280)
+        # Domain IDs are kept <= 232 (RTI's documented safe max for the
+        # default port formula) to avoid 16-bit UDP port overflow/wraparound,
+        # which can otherwise land on a privileged (<1024) port and fail to
+        # bind for non-root users. See python_env_multi_version.md repo memory.
+        domain_id = random.randint(1, 77)
         probe = _make_participant_or_skip(self, domain_id, "rti_spy_env_probe")
         probe.close()
 
@@ -70,7 +74,8 @@ class TestRtiSpyStartupLive(unittest.TestCase):
             sys.argv = original_argv
 
     def test_launcher_reaches_running_state_without_domainparticipant_failure(self):
-        domain_id = random.randint(281, 330)
+        # See note above: keep domain IDs <= 232 to avoid port wraparound.
+        domain_id = random.randint(78, 154)
         probe = _make_participant_or_skip(self, domain_id, "rti_spy_launcher_probe")
         probe.close()
 

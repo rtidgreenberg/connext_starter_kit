@@ -57,7 +57,11 @@ class TestRtiSpyLiveE2EIntegration(unittest.TestCase):
 
     def test_detects_writer_and_receives_dynamicdata_samples_with_log_output(self):
         token = random.randrange(1_000_000, 9_999_999)
-        domain_id = random.randint(331, 380)
+        # Domain IDs are kept <= 232 (RTI's documented safe max for the
+        # default port formula) to avoid 16-bit UDP port overflow/wraparound,
+        # which can otherwise land on a privileged (<1024) port and fail to
+        # bind for non-root users. See python_env_multi_version.md repo memory.
+        domain_id = random.randint(155, 231)
         topic_name = f"RtiSpyE2ETopic_{token}"
         type_name = f"RtiSpyE2EType_{token}"
         field_name = f"value_{token}"

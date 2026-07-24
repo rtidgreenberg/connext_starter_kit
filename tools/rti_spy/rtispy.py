@@ -61,7 +61,16 @@ def configure_type_lookup_qos(qos):
   """Enable remote DynamicType discovery on Connext 7.7+ and earlier inline-type peers."""
   try:
     discovery_config = qos.discovery_config
-    discovery_config.enabled_builtin_channels = dds.DiscoveryConfigBuiltinChannelKindMask.ALL
+    # Deliberately do NOT set enabled_builtin_channels here. The QoS default
+    # already enables everything each Connext version needs for remote
+    # DynamicType discovery: on 7.3.x the default is SERVICE_REQUEST (3), and
+    # on 7.6+/7.7 the default already includes TYPE_LOOKUP_SERVICE (their
+    # DiscoveryConfigBuiltinChannelKindMask.ALL == the default, 61443).
+    # Explicitly overriding it caused two bugs: on 7.3.x, ALL (127) is a
+    # fine-grained bitmask the 7.3.x core's QoS consistency check rejects
+    # (only 0, SERVICE_REQUEST=3, or 0xFFFFFFFF are valid there); and setting
+    # it to SERVICE_REQUEST alone on 7.6+/7.7 narrowed the default down and
+    # disabled TYPE_LOOKUP_SERVICE, breaking remote type/writer discovery.
     discovery_config.endpoint_type_object_lb_serialization_threshold = -1
     try:
       discovery_config.request_types_filter = "*"

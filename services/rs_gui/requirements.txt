@@ -1,1 +1,2 @@
-rti.connext==7.7.0
+# rti.connext version is installed automatically by python_env_sync_rti_connext
+# based on the detected NDDSHOME Connext version (7.3.x -> 7.3.1, 7.7.x -> 7.7.0).

@@ -4,11 +4,101 @@
 python_env_init() {
     PYTHON_ENV_LABEL="${1:?python_env_init requires a label}"
     PYTHON_ENV_REPO_ROOT="${2:?python_env_init requires a repo root}"
-    PYTHON_ENV_REQUIRED_PYTHON_BIN="${3:-python3.10}"
-    PYTHON_ENV_REQUIRED_PYTHON_VERSION="${4:-3.10}"
+    if [[ -n "${3:-}" || -n "${4:-}" ]]; then
+        # Caller pinned an explicit interpreter; skip Connext-version auto-detection.
+        PYTHON_ENV_REQUIRED_PYTHON_BIN="${3:-python3.10}"
+        PYTHON_ENV_REQUIRED_PYTHON_VERSION="${4:-3.10}"
+        PYTHON_ENV_VERSION_EXPLICIT=1
+    else
+        PYTHON_ENV_REQUIRED_PYTHON_BIN="python3.10"
+        PYTHON_ENV_REQUIRED_PYTHON_VERSION="3.10"
+        PYTHON_ENV_VERSION_EXPLICIT=0
+    fi
+    PYTHON_ENV_CONNEXT_VERSION=""
+    PYTHON_ENV_RTI_CONNEXT_PIP_VERSION="7.7.0"
     PYTHON_ENV_VENV_DIR="${PYTHON_ENV_REPO_ROOT}/connext_dds_env"
     PYTHON_ENV_VENV_PYTHON="${PYTHON_ENV_VENV_DIR}/bin/python"
     PYTHON_ENV_STEP_COUNTER=0
+}
+
+# Extracts the full Connext version (major.minor.patch) from an NDDSHOME path,
+# e.g. "/home/rti/rti_connext_dds-7.3.1" -> "7.3.1". Returns non-zero if it
+# can't be parsed.
+python_env_connext_full_version_from_path() {
+    local path="${1:?python_env_connext_full_version_from_path requires a path}"
+    local base
+    base="$(basename "$path")"
+    if [[ "$base" =~ rti_connext_dds-([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+        return 0
+    fi
+    return 1
+}
+
+# Looks for a Connext-bundled "rti.connext.activated" wheel matching the given
+# full Connext version and Python tag (e.g. "39" for cp39) under
+# $NDDSHOME/resource/python_api/. This wheel is pre-activated (no separate
+# license file needed) and ships with every native Connext install, so prefer
+# it over downloading the public rti.connext package from PyPI. Prints the
+# matched wheel path and returns 0 if found, otherwise returns 1.
+python_env_local_activated_wheel_path() {
+    local version="${1:?python_env_local_activated_wheel_path requires a Connext version}"
+    local pytag="${2:?python_env_local_activated_wheel_path requires a python tag (e.g. 39)}"
+    local wheel_dir="${NDDSHOME:-}/resource/python_api"
+    local candidate
+
+    if [[ ! -d "$wheel_dir" ]]; then
+        return 1
+    fi
+
+    candidate=$(ls "$wheel_dir"/rti_connext_activated-"$version"-cp"$pytag"-*.whl 2>/dev/null | head -n 1 || true)
+    if [[ -n "$candidate" && -f "$candidate" ]]; then
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+    return 1
+}
+
+# Selects the Python interpreter, venv directory, and rti.connext pip version
+# to use based on the detected NDDSHOME Connext version, so that Connext 7.3.x
+# (Python 3.9) and Connext 7.7.x (Python 3.10) can both be supported without
+# manually reconfiguring or rebuilding a shared venv every time NDDSHOME changes.
+python_env_configure_for_connext_version() {
+    local nddshome="${1:?python_env_configure_for_connext_version requires an NDDSHOME path}"
+    local full_version
+    local version_mm
+
+    if [[ "${PYTHON_ENV_VERSION_EXPLICIT:-0}" == "1" ]]; then
+        return 0
+    fi
+
+    full_version="$(python_env_connext_full_version_from_path "$nddshome" 2>/dev/null || true)"
+    version_mm="${full_version%.*}"
+    PYTHON_ENV_CONNEXT_VERSION="$version_mm"
+
+    case "$version_mm" in
+        7.3)
+            PYTHON_ENV_REQUIRED_PYTHON_BIN="python3.9"
+            PYTHON_ENV_REQUIRED_PYTHON_VERSION="3.9"
+            PYTHON_ENV_RTI_CONNEXT_PIP_VERSION="7.3.1"
+            PYTHON_ENV_VENV_DIR="${PYTHON_ENV_REPO_ROOT}/connext_dds_env_7.3"
+            ;;
+        *)
+            PYTHON_ENV_REQUIRED_PYTHON_BIN="python3.10"
+            PYTHON_ENV_REQUIRED_PYTHON_VERSION="3.10"
+            PYTHON_ENV_RTI_CONNEXT_PIP_VERSION="7.7.0"
+            PYTHON_ENV_VENV_DIR="${PYTHON_ENV_REPO_ROOT}/connext_dds_env"
+            ;;
+    esac
+
+    # Prefer the exact patch version reported by NDDSHOME itself over the
+    # hardcoded per-bucket default above, so the fallback PyPI install and the
+    # local bundled-wheel lookup both target the version the user actually
+    # has installed rather than an assumed patch release.
+    if [[ -n "$full_version" ]]; then
+        PYTHON_ENV_RTI_CONNEXT_PIP_VERSION="$full_version"
+    fi
+    PYTHON_ENV_VENV_PYTHON="${PYTHON_ENV_VENV_DIR}/bin/python"
 }
 
 python_env_log_step() {
@@ -75,6 +165,15 @@ python_env_resolve_nddshome() {
 
     export NDDSHOME="$detected_nddshome"
     echo "NDDSHOME: $NDDSHOME"
+
+    python_env_configure_for_connext_version "$NDDSHOME"
+    if [[ -n "$PYTHON_ENV_CONNEXT_VERSION" ]]; then
+        echo "Detected Connext version: $PYTHON_ENV_CONNEXT_VERSION"
+    else
+        echo "Could not detect Connext version from NDDSHOME; defaulting to Connext 7.7.x settings."
+    fi
+    echo "Target Python: $PYTHON_ENV_REQUIRED_PYTHON_BIN (rti.connext==$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION)"
+    echo "Virtual environment: $PYTHON_ENV_VENV_DIR"
 }
 
 python_env_ensure_venv() {
@@ -85,6 +184,9 @@ python_env_ensure_venv() {
     if ! required_python="$(python_env_find_required_python)"; then
         echo "ERROR: $PYTHON_ENV_REQUIRED_PYTHON_BIN is required to create $PYTHON_ENV_VENV_DIR."
         echo "Install Python $PYTHON_ENV_REQUIRED_PYTHON_VERSION and rerun the launcher."
+        if [[ "$PYTHON_ENV_REQUIRED_PYTHON_BIN" == "python3.9" ]]; then
+            echo "  sudo apt install python3.9 python3.9-venv"
+        fi
         return 1
     fi
 
@@ -111,6 +213,110 @@ python_env_activate_venv() {
     export PATH="$PYTHON_ENV_VENV_DIR/bin:$PATH"
     export PYTHONNOUSERSITE=1
     echo "Using Python interpreter: $PYTHON_ENV_VENV_PYTHON"
+}
+
+# Removes stale dist-info metadata for the "other" rti.connext distribution
+# (the one we are NOT about to install), so switching between the PyPI
+# "rti.connext" package and the bundled "rti.connext.activated" wheel across
+# runs doesn't leave two conflicting dist-info directories installed side by
+# side. `pip uninstall` is unreliable here: rti.connext's dotted name isn't
+# always matched by pip's uninstall name resolution (observed: `pip show
+# rti.connext` finds it, but `pip uninstall -y rti.connext` reports "not
+# installed" and leaves the dist-info directory on disk), so remove the
+# metadata directory directly via importlib.metadata instead.
+python_env_remove_other_rti_connext_dist_info() {
+    local keep_name="${1:?python_env_remove_other_rti_connext_dist_info requires the distribution name to keep}"
+    "$PYTHON_ENV_VENV_PYTHON" - "$keep_name" <<'PY'
+import importlib.metadata as metadata
+import shutil
+import sys
+
+
+def canon(name):
+    return name.replace(".", "-").replace("_", "-").lower()
+
+
+keep = canon(sys.argv[1])
+targets = {"rti-connext", "rti-connext-activated"} - {keep}
+
+for dist in metadata.distributions():
+    name = dist.metadata.get("Name") or ""
+    if canon(name) in targets:
+        path = getattr(dist, "_path", None)
+        if path is not None:
+            print(f"Removing stale distribution metadata: {name} ({path})")
+            shutil.rmtree(str(path), ignore_errors=True)
+PY
+}
+
+# Prints the installed version of the given distribution (matched by
+# canonicalized name, so dots/dashes/underscores are treated as equivalent),
+# or nothing if it isn't installed. Used to fast-skip reinstalling the local
+# activated wheel: `pip install /path/to/local.whl` re-hashes the whole wheel
+# file on every invocation to verify "already satisfied" (unlike a version-
+# pinned PyPI requirement, which pip can confirm from metadata alone), which
+# is slow for RTI's large native wheels and was adding multiple seconds to
+# every single launcher invocation.
+python_env_installed_dist_version() {
+    local dist_name="${1:?python_env_installed_dist_version requires a distribution name}"
+    "$PYTHON_ENV_VENV_PYTHON" - "$dist_name" <<'PY'
+import importlib.metadata as metadata
+import sys
+
+
+def canon(name):
+    return name.replace(".", "-").replace("_", "-").lower()
+
+
+target = canon(sys.argv[1])
+for dist in metadata.distributions():
+    name = dist.metadata.get("Name") or ""
+    if canon(name) == target:
+        print(dist.version)
+        break
+PY
+}
+
+# Installs the rti.connext Python API version matching the detected NDDSHOME
+# Connext version (set by python_env_configure_for_connext_version). Call this
+# after python_env_activate_venv so both Connext 7.3.x (Python 3.9) and
+# Connext 7.7.x (Python 3.10) get the correct wheel automatically.
+#
+# Prefers the "rti.connext.activated" wheel bundled with the local NDDSHOME
+# install (under $NDDSHOME/resource/python_api/) since it is pre-activated
+# (no separate license file needed) and requires no network access. Falls
+# back to downloading the public "rti.connext" package from PyPI only if no
+# matching bundled wheel is found.
+python_env_sync_rti_connext() {
+    local pytag="${PYTHON_ENV_REQUIRED_PYTHON_VERSION//./}"
+    local local_wheel
+    local installed_version
+
+    python_env_log_step "Synchronizing rti.connext (Connext ${PYTHON_ENV_CONNEXT_VERSION:-7.7} -> $PYTHON_ENV_RTI_CONNEXT_PIP_VERSION, cp$pytag)"
+
+    if local_wheel="$(python_env_local_activated_wheel_path "$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION" "$pytag")"; then
+        echo "Found bundled rti.connext.activated wheel: $local_wheel"
+        installed_version="$(python_env_installed_dist_version rti.connext.activated)"
+        if [[ "$installed_version" == "$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION" ]]; then
+            echo "rti.connext.activated==$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION already installed; skipping reinstall."
+        else
+            echo "Installing from local wheel (no PyPI download required)."
+            # Both distributions install into the same "rti" namespace package, so
+            # remove the other one's stale dist-info first (see helper above).
+            python_env_remove_other_rti_connext_dist_info "rti.connext.activated"
+            "$PYTHON_ENV_VENV_PYTHON" -m pip install -v --progress-bar on "$local_wheel"
+        fi
+    else
+        echo "No bundled rti.connext.activated wheel found for cp$pytag under \$NDDSHOME/resource/python_api."
+        installed_version="$(python_env_installed_dist_version rti.connext)"
+        if [[ "$installed_version" == "$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION" ]]; then
+            echo "rti.connext==$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION already installed; skipping PyPI download."
+        else
+            echo "Falling back to downloading rti.connext==$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION from PyPI."
+            python_env_remove_other_rti_connext_dist_info "rti.connext"
+            "$PYTHON_ENV_VENV_PYTHON" -m pip install -v --progress-bar on "rti.connext==$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION"
+        fi
+    fi
 }
 
 python_env_sync_requirements() {

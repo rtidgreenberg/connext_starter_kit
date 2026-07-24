@@ -13,8 +13,11 @@ From the repository root:
 ```
 
 If `--domain` is omitted and the launcher is running in an interactive terminal,
-`rti_spy` prompts for a DDS domain before opening the UI. Press Enter to use
-domain `1`. In non-interactive runs it falls back to domain `1`.
+`rti_spy` first asks you to either type a DDS domain ID directly, or press
+Enter to listen for active DDS domains (up to 32s, see "Active Domain
+Scanning" below). If you choose to listen, it then prompts for a domain,
+defaulting to the lowest domain ID it found; press Enter to accept the
+default. In non-interactive runs it falls back to domain `1` without prompting.
 
 ## What the Launcher Does
 
@@ -84,9 +87,11 @@ still listed there.
 The app entrypoint accepts:
 
 ```text
--d, --domain      DDS domain ID
--i, --interval    Refresh interval in seconds (default: 10)
---debug-log       Optional log file for discovery/subscription events
+-d, --domain          DDS domain ID
+-i, --interval        Refresh interval in seconds (default: 10)
+--debug-log           Optional log file for discovery/subscription events
+--scan-timeout        Seconds to scan for active domains before prompting (default: 32.0)
+--no-domain-scan      Skip scanning for active domains before prompting
 ```
 
 Direct invocation:
@@ -94,6 +99,34 @@ Direct invocation:
 ```bash
 ./connext_dds_env/bin/python tools/rti_spy/rtispy.py --domain 1
 ```
+
+## Active Domain Scanning
+
+When no `--domain` is given interactively, `rti_spy` first asks whether to
+type a domain ID directly or listen for active domains. If you choose to
+listen (press Enter at that prompt), it passively listens for RTI Connext's
+"default domain announcement" traffic (RTPX-magic packets sent by every
+participant to domain 0's default discovery multicast address/port,
+`239.255.0.1:7400`) to discover which domain IDs currently have active
+participants, then offers the lowest one found as the next prompt's default.
+
+This is best-effort:
+
+- It relies on the default UDPv4 multicast discovery address/port mapping;
+  participants using custom multicast addresses, custom port mappings, or
+  with UDPv4 discovery disabled won't be seen.
+- A remote participant only sends this announcement when created and then
+  every `default_domain_announcement_period` (30s by default) afterward -
+  there's no catch-up resend for a listener that starts later. Because our
+  scan starts at an arbitrary point in that cycle, it defaults to just over
+  30s (`--scan-timeout 32.0`) so already-running domains are reliably caught.
+- Cross-domain announcements are only visible through the participant
+  built-in reader (`participant.participant_reader`), not through
+  `discovered_participants()`/`discovered_participant_data()`, which only
+  reflect normal same-domain SPDP matching.
+
+Use `--scan-timeout` to shorten/lengthen the wait, or `--no-domain-scan` to
+skip straight to the domain prompt (still defaults to `1`).
 
 ## Testing
 

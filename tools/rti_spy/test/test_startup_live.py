@@ -100,6 +100,38 @@ class TestRtiSpyStartupLive(unittest.TestCase):
         self.assertNotIn("Traceback", combined_output)
         self.assertIn(result.returncode, (0, 124), combined_output)
 
+    def test_scan_active_domains_detects_live_participant(self):
+        # See note above: keep domain IDs <= 232 to avoid port wraparound.
+        domain_id = random.randint(155, 200)
+        qos = dds.DomainParticipantQos()
+        qos.participant_name.name = "rti_spy_scan_probe"
+        # Leave discovery_config.default_domain_announcement_period at its
+        # default (enabled, 30s) so this participant sends the RTPX-style
+        # default domain announcement that scan_active_domains listens for.
+        try:
+            participant = dds.DomainParticipant(domain_id, qos=qos)
+            participant.enable()
+        except Exception as exc:
+            self.skipTest(f"Connext live participant unavailable: {exc}")
+
+        # A remote participant only (re)sends its default domain announcement
+        # every default_domain_announcement_period (30s default), with no
+        # catch-up resend for a listener that starts later - confirmed live
+        # against a 7.7.0 install. This probe was already created above, so
+        # the scan below starts at an arbitrary phase of its 30s cycle and
+        # must wait close to a full period to reliably observe it.
+        try:
+            discovered = rtispy.scan_active_domains(timeout=33.0)
+            if domain_id not in discovered:
+                self.skipTest(
+                    "Default domain announcement not observed within scan window "
+                    f"(discovered={discovered}); likely multicast loopback is blocked "
+                    "in this environment."
+                )
+            self.assertIn(domain_id, discovered)
+        finally:
+            participant.close()
+
     def test_main_prompts_for_domain_before_gui_when_missing(self):
         created_domains = []
         original_argv = sys.argv[:]
@@ -118,15 +150,151 @@ class TestRtiSpyStartupLive(unittest.TestCase):
 
         try:
             sys.argv = ["rtispy.py", "--interval", "1"]
-            with patch("builtins.input", return_value="37") as input_mock, \
+            with patch("builtins.input", side_effect=["", "37"]) as input_mock, \
                  patch("sys.stdin.isatty", return_value=True), \
+                 patch.object(rtispy, "scan_active_domains", return_value=set()) as scan_mock, \
                  patch.object(rtispy, "create_participant", side_effect=fake_create_participant), \
                  patch.object(rtispy, "configure_rti_environment"), \
                  patch.object(rtispy, "configure_logging"), \
                  patch.object(rtispy.RTISPY, "run", autospec=True, side_effect=fake_run):
                 rtispy.main()
-            input_mock.assert_called_once_with("DDS domain ID [1]: ")
+            scan_mock.assert_called_once()
+            input_mock.assert_any_call("Enter domain ID to inspect, or press Enter to listen for active domains: ")
+            input_mock.assert_any_call("Enter domain ID to inspect [1]: ")
             self.assertEqual(created_domains, [37])
+        finally:
+            sys.argv = original_argv
+
+    def test_main_prompts_with_discovered_domain_default(self):
+        created_domains = []
+        original_argv = sys.argv[:]
+
+        class FakeParticipant:
+            def close(self):
+                return None
+
+        def fake_create_participant(domain_id, name="RTI SPY"):
+            created_domains.append(domain_id)
+            return FakeParticipant()
+
+        def fake_run(app_self, *args, **kwargs):
+            app_self.participant.close()
+            return None
+
+        try:
+            sys.argv = ["rtispy.py", "--interval", "1"]
+            with patch("builtins.input", side_effect=["", ""]) as input_mock, \
+                 patch("sys.stdin.isatty", return_value=True), \
+                 patch.object(rtispy, "scan_active_domains", return_value={5, 2}) as scan_mock, \
+                 patch.object(rtispy, "create_participant", side_effect=fake_create_participant), \
+                 patch.object(rtispy, "configure_rti_environment"), \
+                 patch.object(rtispy, "configure_logging"), \
+                 patch.object(rtispy.RTISPY, "run", autospec=True, side_effect=fake_run):
+                rtispy.main()
+            scan_mock.assert_called_once()
+            # Empty input accepts the default, which is the lowest discovered domain ID.
+            input_mock.assert_any_call("Enter domain ID to inspect [2]: ")
+            self.assertEqual(created_domains, [2])
+        finally:
+            sys.argv = original_argv
+
+    def test_main_entering_domain_id_upfront_skips_scan(self):
+        created_domains = []
+        original_argv = sys.argv[:]
+
+        class FakeParticipant:
+            def close(self):
+                return None
+
+        def fake_create_participant(domain_id, name="RTI SPY"):
+            created_domains.append(domain_id)
+            return FakeParticipant()
+
+        def fake_run(app_self, *args, **kwargs):
+            app_self.participant.close()
+            return None
+
+        try:
+            sys.argv = ["rtispy.py", "--interval", "1"]
+            with patch("builtins.input", return_value="42") as input_mock, \
+                 patch("sys.stdin.isatty", return_value=True), \
+                 patch.object(rtispy, "scan_active_domains") as scan_mock, \
+                 patch.object(rtispy, "create_participant", side_effect=fake_create_participant), \
+                 patch.object(rtispy, "configure_rti_environment"), \
+                 patch.object(rtispy, "configure_logging"), \
+                 patch.object(rtispy.RTISPY, "run", autospec=True, side_effect=fake_run):
+                rtispy.main()
+            # Typing a domain ID at the upfront prompt should skip listening entirely.
+            scan_mock.assert_not_called()
+            input_mock.assert_called_once_with("Enter domain ID to inspect, or press Enter to listen for active domains: ")
+            self.assertEqual(created_domains, [42])
+        finally:
+            sys.argv = original_argv
+
+    def test_main_rejects_invalid_input_at_upfront_prompt_without_scanning(self):
+        created_domains = []
+        original_argv = sys.argv[:]
+
+        class FakeParticipant:
+            def close(self):
+                return None
+
+        def fake_create_participant(domain_id, name="RTI SPY"):
+            created_domains.append(domain_id)
+            return FakeParticipant()
+
+        def fake_run(app_self, *args, **kwargs):
+            app_self.participant.close()
+            return None
+
+        try:
+            sys.argv = ["rtispy.py", "--interval", "1"]
+            # First reply is garbage (non-integer), then a negative domain ID,
+            # then a valid domain ID. Neither invalid reply should trigger the
+            # scan or be accepted as-is.
+            with patch("builtins.input", side_effect=["abc", "-5", "42"]) as input_mock, \
+                 patch("sys.stdin.isatty", return_value=True), \
+                 patch.object(rtispy, "scan_active_domains") as scan_mock, \
+                 patch.object(rtispy, "create_participant", side_effect=fake_create_participant), \
+                 patch.object(rtispy, "configure_rti_environment"), \
+                 patch.object(rtispy, "configure_logging"), \
+                 patch.object(rtispy.RTISPY, "run", autospec=True, side_effect=fake_run):
+                rtispy.main()
+            scan_mock.assert_not_called()
+            self.assertEqual(input_mock.call_count, 3)
+            self.assertEqual(created_domains, [42])
+        finally:
+            sys.argv = original_argv
+
+    def test_main_skips_domain_scan_with_flag(self):
+        created_domains = []
+        original_argv = sys.argv[:]
+
+        class FakeParticipant:
+            def close(self):
+                return None
+
+        def fake_create_participant(domain_id, name="RTI SPY"):
+            created_domains.append(domain_id)
+            return FakeParticipant()
+
+        def fake_run(app_self, *args, **kwargs):
+            app_self.participant.close()
+            return None
+
+        try:
+            sys.argv = ["rtispy.py", "--interval", "1", "--no-domain-scan"]
+            with patch("builtins.input", return_value="9") as input_mock, \
+                 patch("sys.stdin.isatty", return_value=True), \
+                 patch.object(rtispy, "scan_active_domains") as scan_mock, \
+                 patch.object(rtispy, "create_participant", side_effect=fake_create_participant), \
+                 patch.object(rtispy, "configure_rti_environment"), \
+                 patch.object(rtispy, "configure_logging"), \
+                 patch.object(rtispy.RTISPY, "run", autospec=True, side_effect=fake_run):
+                rtispy.main()
+            scan_mock.assert_not_called()
+            input_mock.assert_called_once_with("Enter domain ID to inspect [1]: ")
+            self.assertEqual(created_domains, [9])
         finally:
             sys.argv = original_argv
 

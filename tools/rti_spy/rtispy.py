@@ -103,6 +103,82 @@ def merge_endpoint(existing, incoming):
   )
 
 
+def scan_active_domains(timeout=32.0, progress_callback=None):
+  """Passively discover which DDS domain IDs currently have active participants.
+
+  RTI Connext participants send a "default domain announcement" (an RTPX-magic
+  packet, see community.rti.com/kb/why-do-i-see-packet-starts-rtpx-instead-rtps)
+  to domain 0's default discovery multicast address/port (239.255.0.1:7400)
+  regardless of which domain they actually run in. This is controlled by
+  DiscoveryConfigQosPolicy.default_domain_announcement_period (default: 30s,
+  enabled by default) and lets a single domain-0 listener discover the
+  domain_id of participants running on other domains.
+
+  This creates a temporary domain-0 participant with
+  ignore_default_domain_announcements=False, listens for `timeout` seconds,
+  and returns the set of domain IDs seen in the participant built-in reader's
+  ParticipantBuiltinTopicData samples. `progress_callback`, if given, is
+  called periodically as `progress_callback(elapsed_seconds, timeout,
+  domain_ids_so_far)` so callers can show liveness during a long scan.
+
+  Two things were confirmed empirically against a live 7.7.0 install and are
+  NOT well documented:
+
+  1. Cross-domain RTPX announcements only surface through the participant
+     built-in reader (participant.participant_reader.take()/.read()). They
+     are NOT included in participant.discovered_participants() /
+     discovered_participant_data(), which only reflects normal same-domain
+     SPDP matching and stayed empty in testing even while
+     participant_reader.take() correctly saw the remote domain_id.
+  2. A remote participant only sends its announcement on creation and then
+     every `default_domain_announcement_period` (30s default) afterward -
+     there is no periodic "catch-up" resend for a listener that starts
+     later. So for an already-running remote participant, our scan window
+     starts at an arbitrary phase of its 30s cycle and may need to wait
+     nearly the full 30s to see it. `timeout` therefore defaults to just
+     over one full period (32s) to make detection of already-running
+     domains close to guaranteed rather than a coin flip.
+
+  Best-effort only: participants that disable UDPv4 discovery, use a custom
+  multicast address, or disabled their own default_domain_announcement_period
+  won't be seen.
+  """
+  qos = dds.DomainParticipantQos()
+  qos.discovery_config.ignore_default_domain_announcements = False
+
+  domain_ids = set()
+  try:
+    participant = dds.DomainParticipant(0, qos=qos)
+  except Exception as e:
+    logging.warning(f"[scan_active_domains] Could not create scan participant: {e}")
+    return domain_ids
+
+  try:
+    start = time.monotonic()
+    deadline = start + timeout
+    while time.monotonic() < deadline:
+      for sample in participant.participant_reader.take():
+        if not sample.info.valid:
+          continue
+        try:
+          domain_ids.add(sample.data.domain_id)
+        except Exception as e:
+          logging.debug(f"[scan_active_domains] Skipping unreadable participant data: {e}")
+      if progress_callback is not None:
+        try:
+          progress_callback(time.monotonic() - start, timeout, domain_ids)
+        except Exception as e:
+          logging.debug(f"[scan_active_domains] progress_callback failed: {e}")
+      time.sleep(0.2)
+  finally:
+    try:
+      participant.close()
+    except Exception as e:
+      logging.warning(f"[scan_active_domains] Error closing scan participant: {e}")
+
+  return domain_ids
+
+
 def create_participant(domain_id, name="RTI SPY"):
   """Create a participant with builtin publication/subscription listeners attached."""
   participant_factory_qos = dds.DomainParticipantFactoryQos()
@@ -1236,21 +1312,78 @@ class RTISPY(App):
     self.exit()
 
 def main():
-  def resolve_domain_id(domain_arg):
+  def resolve_domain_id(domain_arg, scan_timeout=32.0, do_scan=True):
     if domain_arg is not None:
       return domain_arg
 
     if not sys.stdin.isatty():
       return 1
 
+    default_domain = 1
+    if do_scan:
+      while True:
+        try:
+          response = input(
+              "Enter domain ID to inspect, or press Enter to listen for active domains: "
+          ).strip()
+        except EOFError:
+          return default_domain
+        except KeyboardInterrupt:
+          print()
+          raise
+
+        if not response:
+          break
+
+        try:
+          domain_id = int(response)
+        except ValueError:
+          print("Please enter an integer domain ID, or press Enter to listen for active domains.", file=sys.stderr)
+          continue
+
+        if domain_id < 0:
+          print("Please enter a non-negative domain ID.", file=sys.stderr)
+          continue
+
+        return domain_id
+
+      print(f"Listening for active DDS domains (up to {scan_timeout:.0f}s, via default domain announcements)...")
+      print("(Remote apps only re-announce every ~30s, so this can take that long to find ones already running.)")
+
+      last_shown = {"second": -1, "line_len": 0}
+
+      def _show_scan_progress(elapsed, total, domains_so_far):
+        second = int(elapsed)
+        if second == last_shown["second"]:
+          return
+        last_shown["second"] = second
+        found = ", ".join(str(d) for d in sorted(domains_so_far)) if domains_so_far else "none yet"
+        line = f"  listening... {second}s / {int(total)}s (found: {found})"
+        # Pad with spaces to clear any leftover characters from a longer previous line.
+        padded = line.ljust(last_shown["line_len"])
+        last_shown["line_len"] = len(line)
+        print(f"\r{padded}", end="", flush=True)
+
+      discovered = scan_active_domains(timeout=scan_timeout, progress_callback=_show_scan_progress)
+      print()
+      if discovered:
+        ordered = sorted(discovered)
+        default_domain = ordered[0]
+        print("Active domains detected: " + ", ".join(str(d) for d in ordered))
+      else:
+        print("No active domains detected (none seen, or remote apps have default domain announcements disabled).")
+
     while True:
       try:
-        response = input("DDS domain ID [1]: ").strip()
+        response = input(f"Enter domain ID to inspect [{default_domain}]: ").strip()
       except EOFError:
-        return 1
+        return default_domain
+      except KeyboardInterrupt:
+        print()
+        raise
 
       if not response:
-        return 1
+        return default_domain
 
       try:
         domain_id = int(response)
@@ -1268,8 +1401,10 @@ def main():
   parser.add_argument("-d", "--domain", type=int, default=None, help="DDS domain ID (prompts on startup; defaults to 1 when non-interactive)")
   parser.add_argument("-i", "--interval", type=float, default=10, help="Refresh interval in seconds (default: 2.0)")
   parser.add_argument("--debug-log", default=os.environ.get("RTI_SPY_DEBUG_LOG"), help="Optional path for discovery/subscription log output")
+  parser.add_argument("--scan-timeout", type=float, default=32.0, help="Seconds to listen for default domain announcements before prompting for a domain (default: 32.0, just over the 30s default announcement period)")
+  parser.add_argument("--no-domain-scan", action="store_true", help="Skip scanning for active domains before prompting")
   args = parser.parse_args()
-  domain_id = resolve_domain_id(args.domain)
+  domain_id = resolve_domain_id(args.domain, scan_timeout=args.scan_timeout, do_scan=not args.no_domain_scan)
 
   configure_rti_environment()
   configure_logging(args.debug_log)
@@ -1279,4 +1414,8 @@ def main():
   app.run()
 
 if __name__ == "__main__":
-    main()
+    try:
+      main()
+    except KeyboardInterrupt:
+      print("Aborted.")
+      sys.exit(130)

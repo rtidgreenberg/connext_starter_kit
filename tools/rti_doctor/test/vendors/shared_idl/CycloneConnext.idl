@@ -1,0 +1,15 @@
+module DoctorShared {
+  @appendable
+  struct Nested {
+    @id(0) long n_id;
+    @id(1) double n_val;
+  };
+
+  @appendable
+  struct Sample {
+    @key @id(0) long id;
+    @id(1) string<255> label;
+    @id(2) Nested nested;
+    @id(3) sequence<double, 100> scores;
+  };
+};

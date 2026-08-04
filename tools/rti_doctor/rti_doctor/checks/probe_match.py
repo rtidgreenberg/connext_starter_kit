@@ -1,0 +1,229 @@
+"""Rung 4 checks: did the reader match, and if not, which policy blocked it?"""
+
+from .. import compat, records
+from ..findings import RUNG_MATCH, Finding, Severity
+
+#: RxO rules in plain English, keyed by the substring Connext reports in
+#: last_policy. Stated as the rule the reader must satisfy, since the reader is
+#: the side that drives matching.
+RXO_RULES = {
+    "RELIABILITY": ("A RELIABLE reader cannot match a BEST_EFFORT writer. The "
+                    "reader may request BEST_EFFORT from a RELIABLE writer, but "
+                    "not the reverse."),
+    "DURABILITY": ("The reader's durability must be no stronger than the "
+                   "writer's: VOLATILE < TRANSIENT_LOCAL < TRANSIENT < PERSISTENT."),
+    "DEADLINE": ("The reader's deadline period must be greater than or equal to "
+                 "the writer's."),
+    "LATENCYBUDGET": ("The reader's latency budget must be greater than or equal "
+                      "to the writer's."),
+    "LIVELINESS": ("The reader's liveliness kind must be no stronger than the "
+                   "writer's, and its lease duration no shorter."),
+    "OWNERSHIP": "Ownership kind must match exactly: SHARED and EXCLUSIVE never mix.",
+    "DESTINATIONORDER": ("The reader's destination order must be no stronger than "
+                         "the writer's: BY_RECEPTION_TIMESTAMP < BY_SOURCE_TIMESTAMP."),
+    "PRESENTATION": ("The reader's presentation access scope must be no broader "
+                     "than the writer's, and coherent/ordered access must be "
+                     "compatible."),
+    "PARTITION": ("Reader and writer must share at least one partition name. "
+                  "Partitions are matched as strings, with wildcards allowed on "
+                  "one side only."),
+    "DATAREPRESENTATION": ("The reader must offer at least one data "
+                           "representation the writer also offers (XCDR1/XCDR2)."),
+    "TYPECONSISTENCYENFORCEMENT": ("The reader's type-consistency requirement "
+                                   "rejected the writer's type."),
+}
+
+
+def _policy_rule(policy_text):
+  key = str(policy_text).upper().replace("_", "").replace(" ", "")
+  for name, rule in RXO_RULES.items():
+    if name in key:
+      return rule
+  return None
+
+
+def check_probe_error(context):
+  """The probe could not even create a reader."""
+  probe = context.probe
+  if probe is None or not probe.attempted or probe.created:
+    return []
+  return [Finding(
+      id="probe.not_created",
+      rung=RUNG_MATCH,
+      severity=Severity.ERROR,
+      title="Could not create a reader for this endpoint",
+      observed=probe.create_error or "unknown failure",
+      root_cause=(
+          "Without a reader nothing downstream can be measured. If the cause is "
+          "missing type information, the rung-3 finding explains it; otherwise "
+          "this is a local failure, not a property of the peer."),
+      remedy="Resolve the error above, then re-run the probe.",
+      evidence={"error": probe.create_error},
+  )]
+
+
+def check_incompatible_qos(context):
+  """RequestedIncompatibleQos, with the offending policy named."""
+  probe = context.probe
+  if probe is None or not probe.created:
+    return []
+
+  status = probe.requested_incompatible_qos
+  total = compat.get_int(status, "total_count")
+  if not total:
+    return []
+
+  policy = compat.get(status, "last_policy", "unknown")
+  rule = _policy_rule(policy)
+  policies = compat.get(status, "policies", None)
+  policy_detail = ""
+  try:
+    entries = [f"{compat.get(p, 'policy', '?')}={compat.get_int(p, 'count')}"
+               for p in (policies or ())]
+    policy_detail = ", ".join(e for e in entries if e)
+  except TypeError:
+    policy_detail = ""
+
+  observed = [f"requested_incompatible_qos total_count = {total}",
+              f"last_policy = {policy}"]
+  if policy_detail:
+    observed.append(f"policies = {policy_detail}")
+  if probe.applied_reader_qos:
+    observed.append("probe reader requested: " + ", ".join(
+        f"{k}={v}" for k, v in sorted(probe.applied_reader_qos.items())))
+
+  root = ("A reader and writer only communicate when every requested-offered "
+          "(RxO) policy is compatible. ")
+  if rule:
+    root += f"The reported policy's rule: {rule}"
+  else:
+    root += ("The reported policy could not be mapped to a known RxO rule; treat "
+             "the policy name as authoritative.")
+  # Worth stating: the probe mirrors the writer's QoS, so an incompatibility here
+  # is not an artefact of the probe's own choices.
+  root += (" Note that rti_doctor's probe mirrors the discovered writer's QoS, so "
+           "this mismatch is not caused by the probe requesting something unusual "
+           "- it reflects a policy the writer offers that no compliant reader can "
+           "accept, or one that could not be mirrored on this version.")
+
+  return [Finding(
+      id="match.incompatible_qos",
+      rung=RUNG_MATCH,
+      severity=Severity.ERROR,
+      title=f"Incompatible QoS: {policy}",
+      observed="; ".join(observed),
+      root_cause=root,
+      remedy=(f"Align the {policy} policy between writer and reader. The reader is "
+              f"the constrained side: it must request no more than the writer offers."),
+      evidence={"total_count": total, "last_policy": str(policy),
+                "policies": policy_detail,
+                "probe_reader_qos": probe.applied_reader_qos},
+  )]
+
+
+def check_matched(context):
+  """Did the reader match at all?"""
+  probe = context.probe
+  if probe is None or not probe.created:
+    return []
+
+  current = compat.get_int(probe.subscription_matched, "current_count")
+  total = compat.get_int(probe.subscription_matched, "total_count")
+
+  if probe.matched:
+    return [Finding(
+        id="match.ok",
+        rung=RUNG_MATCH,
+        severity=Severity.OK,
+        title="Reader matched the writer",
+        observed=(f"subscription_matched current_count = {current}, "
+                  f"total_count = {total} after {probe.elapsed:.1f}s"),
+        evidence={"current_count": current, "total_count": total},
+    )]
+
+  return [Finding(
+      id="match.none",
+      rung=RUNG_MATCH,
+      severity=Severity.ERROR,
+      title="Reader never matched the writer",
+      observed=(f"subscription_matched current_count = {current}, "
+                f"total_count = {total} after {probe.elapsed:.1f}s"),
+      root_cause=(
+          "The reader was created on the same topic with QoS mirroring the writer, "
+          "and still did not match. In order of likelihood: an RxO policy could "
+          "not be mirrored (see any incompatible-QoS finding); type consistency "
+          "rejected the type; partitions do not overlap; or the writer's "
+          "advertised locators are unreachable so the endpoints never completed "
+          "discovery with each other."),
+      remedy=("Work upward from the lowest-rung ERROR in this report - a rung 0-3 "
+              "failure explains this one entirely."),
+      evidence={"current_count": current, "total_count": total,
+                "elapsed_seconds": round(probe.elapsed, 2)},
+  )]
+
+
+def check_inconsistent_topic(context):
+  """Local topic definition conflicts with a remote definition of the same name."""
+  probe = context.probe
+  if probe is None or not probe.created:
+    return []
+  count = probe.inconsistent_topic_count
+  if not count:
+    return []
+  return [Finding(
+      id="match.topic_inconsistent",
+      rung=RUNG_MATCH,
+      severity=Severity.WARN,
+      title="Topic reported as inconsistent",
+      observed=f"InconsistentTopicStatus.total_count = {count}",
+      root_cause=(
+          "Another entity uses this topic name with a different type definition. "
+          "This is a Topic-level status, not a per-writer one, so it flags a "
+          "clash somewhere on the topic rather than with this specific writer."),
+      remedy="Check every application publishing this topic name for a type mismatch.",
+      evidence={"inconsistent_topic_total_count": count},
+  )]
+
+
+def check_partition_overlap(context):
+  """Writer in a named partition while the probe could not mirror it."""
+  probe = context.probe
+  endpoint = context.endpoint
+  if probe is None or not probe.created or endpoint is None:
+    return []
+  if probe.matched:
+    return []
+
+  names = compat.get(endpoint.partition, "name", None)
+  try:
+    listed = [str(n) for n in (names or ())]
+  except TypeError:
+    listed = []
+  if not listed:
+    return []
+
+  applied = probe.applied_reader_qos.get("partition")
+  if applied and "not applied" not in str(applied):
+    return []
+
+  return [Finding(
+      id="match.partition",
+      rung=RUNG_MATCH,
+      severity=Severity.WARN,
+      title="Writer is in a named partition the probe could not mirror",
+      observed=f"writer partitions = {', '.join(listed)}; probe partition = {applied}",
+      root_cause=("Readers and writers must share at least one partition name. A "
+                  "reader in the default partition cannot see a writer in a named "
+                  "one."),
+      remedy=f"Place the reader in one of: {', '.join(listed)}.",
+      evidence={"writer_partitions": listed, "probe_partition": applied},
+  )]
+
+
+CHECKS = (
+    check_probe_error,
+    check_incompatible_qos,
+    check_matched,
+    check_inconsistent_topic,
+    check_partition_overlap,
+)

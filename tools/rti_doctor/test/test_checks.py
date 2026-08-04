@@ -1,0 +1,640 @@
+"""Unit tests for the check catalog, using fake discovery records.
+
+Every check is a function over a CheckContext, so the whole catalog is testable
+without a participant. These are the tests that would catch a check that fires on
+a healthy system - the failure mode that makes a diagnostic tool useless.
+"""
+
+import os
+import sys
+import unittest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from rti_doctor import discovery, findings as f, records  # noqa: E402
+from rti_doctor.checks import CheckContext, blind_spots, static_discovery  # noqa: E402
+from rti_doctor.checks import probe_payload, qos_match, type_compat  # noqa: E402
+
+
+# --- Fakes -------------------------------------------------------------------
+
+class FakeProperty(dict):
+  """Stands in for a PropertyQosPolicy, which behaves like a mapping."""
+
+
+class FakeDiscovery:
+  def __init__(self, initial_peers=(), accept_unknown_peers=True,
+               multicast_receive_addresses=("239.255.0.1",)):
+    self.initial_peers = list(initial_peers)
+    self.accept_unknown_peers = accept_unknown_peers
+    self.multicast_receive_addresses = list(multicast_receive_addresses)
+
+
+class FakeDiscoveryConfig:
+  def __init__(self, builtin_discovery_plugins=None):
+    if builtin_discovery_plugins is not None:
+      self.builtin_discovery_plugins = builtin_discovery_plugins
+
+
+class FakePorts:
+  def __init__(self, **overrides):
+    defaults = {"port_base": 7400, "domain_id_gain": 250, "participant_id_gain": 2,
+                "builtin_multicast_port_offset": 0, "builtin_unicast_port_offset": 10,
+                "user_multicast_port_offset": 1, "user_unicast_port_offset": 11}
+    defaults.update(overrides)
+    for name, value in defaults.items():
+      setattr(self, name, value)
+
+
+class FakeWireProtocol:
+  def __init__(self, ports=None):
+    self.rtps_well_known_ports = ports or FakePorts()
+
+
+class FakeQos:
+  """Minimal stand-in for DomainParticipantQos."""
+
+  def __init__(self, properties=None, discovery=None, discovery_config=None,
+               wire_protocol=None):
+    self.property = FakeProperty(properties or {})
+    self.discovery = discovery or FakeDiscovery()
+    self.discovery_config = discovery_config or FakeDiscoveryConfig()
+    self.wire_protocol = wire_protocol or FakeWireProtocol()
+
+
+class FakeVendorId:
+  def __init__(self, octets):
+    self.value = list(octets)
+
+
+class FakeProtocolVersion:
+  def __init__(self, major, minor):
+    self.major_version = major
+    self.minor_version = minor
+
+
+class FakeLocator:
+  def __init__(self, ip, port=7410, kind=1):
+    self.address = [0] * 12 + [int(p) for p in ip.split(".")]
+    self.port = port
+    self.kind = kind
+
+
+class FakeRegistry:
+  def __init__(self, participants=None, endpoints=None):
+    self.participants = {p.key: p for p in (participants or [])}
+    self.endpoints = {e.key: e for e in (endpoints or [])}
+
+  def endpoints_for(self, key):
+    return [e for e in self.endpoints.values() if e.participant_key == key]
+
+  def endpoints_on_topic(self, topic):
+    return [e for e in self.endpoints.values() if e.topic_name == topic]
+
+  def participant_for(self, endpoint):
+    return self.participants.get(endpoint.participant_key)
+
+
+def participant_record(**kwargs):
+  defaults = dict(key="p1", name="peer", ip="10.0.0.9",
+                  vendor_id=FakeVendorId((0x01, 0x0F)),
+                  protocol_version=FakeProtocolVersion(2, 3),
+                  default_unicast_locators=[FakeLocator("10.0.0.9")])
+  defaults.update(kwargs)
+  return records.ParticipantRecord(**defaults)
+
+
+def endpoint_record(**kwargs):
+  defaults = dict(key="e1", kind="Writer", participant_key="p1",
+                  topic_name="T", type_name="MyType")
+  defaults.update(kwargs)
+  return records.EndpointRecord(**defaults)
+
+
+def ids(result):
+  return sorted({x.id for x in result})
+
+
+# --- Blind spots -------------------------------------------------------------
+
+class TestBlindSpots(unittest.TestCase):
+
+  def test_clean_config_produces_no_blind_spot_errors(self):
+    """The most important test here: a healthy config must stay silent."""
+    context = CheckContext(own_qos=FakeQos(), registry=FakeRegistry([participant_record()]),
+                           domain_id=1)
+    result = [x for x in blind_spots.CHECKS for x in x(context)]
+    errors = [x for x in result if x.severity >= f.Severity.ERROR]
+    self.assertEqual(errors, [], f"healthy config produced {ids(errors)}")
+
+  def test_domain_tag_fires(self):
+    qos = FakeQos(properties={"dds.domain_participant.domain_tag": "prod"})
+    result = blind_spots.check_domain_tag(CheckContext(own_qos=qos))
+    self.assertEqual(ids(result), ["blind.domain_tag"])
+    self.assertEqual(result[0].severity, f.Severity.ERROR)
+
+  def test_empty_domain_tag_does_not_fire(self):
+    qos = FakeQos(properties={"dds.domain_participant.domain_tag": ""})
+    self.assertEqual(blind_spots.check_domain_tag(CheckContext(own_qos=qos)), [])
+
+  def test_spdp2_fires(self):
+    qos = FakeQos(discovery_config=FakeDiscoveryConfig("SPDP2_DISCOVERY"))
+    result = blind_spots.check_spdp2(CheckContext(own_qos=qos))
+    self.assertEqual(ids(result), ["blind.spdp2"])
+
+  def test_standard_spdp_does_not_fire(self):
+    qos = FakeQos(discovery_config=FakeDiscoveryConfig("SDP"))
+    self.assertEqual(blind_spots.check_spdp2(CheckContext(own_qos=qos)), [])
+
+  def test_missing_plugin_field_does_not_fire(self):
+    """On a version without the field, SPDP2 cannot be enabled at all."""
+    qos = FakeQos(discovery_config=FakeDiscoveryConfig(None))
+    self.assertEqual(blind_spots.check_spdp2(CheckContext(own_qos=qos)), [])
+
+  def test_accept_unknown_peers_disabled_fires(self):
+    qos = FakeQos(discovery=FakeDiscovery(accept_unknown_peers=False))
+    result = blind_spots.check_accept_unknown_peers(CheckContext(own_qos=qos))
+    self.assertEqual(ids(result), ["blind.unknown_peers_rejected"])
+
+  def test_nonstandard_ports_fire(self):
+    qos = FakeQos(wire_protocol=FakeWireProtocol(FakePorts(port_base=8400)))
+    result = blind_spots.check_nonstandard_ports(CheckContext(own_qos=qos))
+    self.assertEqual(ids(result), ["blind.nonstandard_ports"])
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+    self.assertIn("8400", result[0].observed)
+
+  def test_default_ports_do_not_fire(self):
+    result = blind_spots.check_nonstandard_ports(CheckContext(own_qos=FakeQos()))
+    self.assertEqual(result, [])
+
+  def test_no_multicast_receive_addresses_fires(self):
+    qos = FakeQos(discovery=FakeDiscovery(multicast_receive_addresses=()))
+    result = blind_spots.check_multicast_and_peers(CheckContext(own_qos=qos))
+    self.assertEqual(ids(result), ["blind.no_multicast_no_peers"])
+
+  def test_empty_domain_fires_with_no_participants(self):
+    context = CheckContext(registry=FakeRegistry([]), domain_id=7)
+    result = blind_spots.check_empty_domain(context)
+    self.assertEqual(ids(result), ["blind.empty_domain"])
+
+  def test_empty_domain_silent_when_participants_exist(self):
+    context = CheckContext(registry=FakeRegistry([participant_record()]), domain_id=7)
+    self.assertEqual(blind_spots.check_empty_domain(context), [])
+
+  def test_other_domain_active_fires_only_after_a_scan(self):
+    registry = FakeRegistry([])
+    unscanned = CheckContext(registry=registry, domain_id=1, active_domains={5},
+                             domain_scan_ran=False)
+    self.assertEqual(blind_spots.check_other_domain_active(unscanned), [])
+    scanned = CheckContext(registry=registry, domain_id=1, active_domains={5},
+                           domain_scan_ran=True)
+    result = blind_spots.check_other_domain_active(scanned)
+    self.assertEqual(ids(result), ["blind.other_domain_active"])
+    self.assertIn("5", result[0].title)
+
+  def test_other_domain_ignores_the_selected_domain(self):
+    context = CheckContext(registry=FakeRegistry([]), domain_id=5,
+                           active_domains={5}, domain_scan_ran=True)
+    self.assertEqual(blind_spots.check_other_domain_active(context), [])
+
+
+# --- Static discovery --------------------------------------------------------
+
+class TestStaticDiscovery(unittest.TestCase):
+
+  def test_vendor_identified(self):
+    context = CheckContext(participant_record=participant_record())
+    result = static_discovery.check_vendor_identify(context)
+    self.assertEqual(ids(result), ["vendor.identify"])
+    self.assertIn("Fast DDS", result[0].title)
+
+  def test_unrecognized_vendor_warns_and_does_not_guess(self):
+    record = participant_record(vendor_id=FakeVendorId((0x09, 0x99)))
+    result = static_discovery.check_vendor_identify(
+        CheckContext(participant_record=record))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+    self.assertIn("unrecognized", result[0].observed.lower())
+
+  def test_cyclone_notes_are_advisory_and_include_observer_limits(self):
+    record = participant_record(vendor_id=FakeVendorId((0x01, 0x10)))
+    result = static_discovery.check_vendor_notes(
+        CheckContext(participant_record=record))
+    self.assertEqual(ids(result), ["vendor.known_issues"])
+    self.assertTrue(all(item.severity == f.Severity.INFO for item in result))
+    observed = " ".join(item.observed for item in result)
+    self.assertIn("TypeObject-v1-only", observed)
+    self.assertIn("not carried in standard RTPS", observed)
+    self.assertIn("not provide an authoritative Cyclone product version", observed)
+
+  def test_shared_memory_locator_is_not_judged_as_an_ip(self):
+    """Regression: a SHMEM locator carries 0.0.0.0 and must not be flagged."""
+    record = participant_record(
+        default_unicast_locators=[FakeLocator("203.0.113.9", kind=1),
+                                  FakeLocator("0.0.0.0", kind=16777216)])
+    result = static_discovery.check_locators(
+        CheckContext(participant_record=record, endpoint=endpoint_record()))
+    self.assertEqual(result, [], "SHMEM locator produced a false unroutable finding")
+
+  def test_link_local_address_is_flagged(self):
+    record = participant_record(
+        default_unicast_locators=[FakeLocator("169.254.3.4", kind=1)])
+    result = static_discovery.check_locators(
+        CheckContext(participant_record=record, endpoint=endpoint_record()))
+    self.assertEqual(ids(result), ["locator.unroutable"])
+    self.assertIn("link-local", result[0].observed)
+
+  def test_no_locators_at_all_is_flagged(self):
+    record = participant_record(default_unicast_locators=[])
+    result = static_discovery.check_locators(
+        CheckContext(participant_record=record, endpoint=endpoint_record()))
+    self.assertEqual(ids(result), ["locator.unroutable"])
+
+  def test_participant_with_no_endpoints_is_flagged(self):
+    record = participant_record()
+    context = CheckContext(registry=FakeRegistry([record]), participant_record=record)
+    result = static_discovery.check_no_endpoints(context)
+    self.assertEqual(ids(result), ["endpoint.none"])
+
+  def test_participant_with_endpoints_is_silent(self):
+    record = participant_record()
+    registry = FakeRegistry([record], [endpoint_record()])
+    context = CheckContext(registry=registry, participant_record=record)
+    self.assertEqual(static_discovery.check_no_endpoints(context), [])
+
+
+# --- Type resolution ---------------------------------------------------------
+
+class FakeDynamicType:
+  """Only what the checks touch: a name and an assignability answer."""
+
+  def __init__(self, name, assignable=True):
+    self.name = name
+    self._assignable = assignable
+    self.extensibility_kind = None
+
+  def is_assignable_from(self, other):
+    return self._assignable
+
+  def members(self):
+    return []
+
+  def is_aggregation_type(self):
+    return True
+
+  def is_collection_type(self):
+    return False
+
+
+class TestTypeState(unittest.TestCase):
+
+  def test_pending_is_informational_not_an_error(self):
+    """A type still resolving must not be reported as unavailable."""
+    endpoint = endpoint_record(type_state=records.TYPE_PENDING)
+    result = type_compat.check_type_state(
+        CheckContext(endpoint=endpoint, type_wait=5.0))
+    self.assertEqual(result[0].severity, f.Severity.INFO)
+    self.assertIn("still in flight", result[0].title)
+
+  def test_unavailable_is_an_error_and_lists_causes(self):
+    endpoint = endpoint_record(type_state=records.TYPE_UNAVAILABLE)
+    context = CheckContext(endpoint=endpoint, type_wait=5.0,
+                           type_lookup_settings={"request_types_filter": "*"})
+    result = type_compat.check_type_state(context)
+    self.assertEqual(result[0].severity, f.Severity.ERROR)
+    self.assertEqual(result[0].id, "type.no_type_info")
+    self.assertIn("TypeLookup", result[0].root_cause)
+
+  def test_our_own_filter_is_named_first_when_it_could_be_our_fault(self):
+    endpoint = endpoint_record(type_state=records.TYPE_UNAVAILABLE)
+    context = CheckContext(endpoint=endpoint, type_wait=5.0,
+                           type_lookup_settings={"request_types_filter": "n/a"})
+    result = type_compat.check_type_state(context)
+    self.assertIn("on our side", result[0].root_cause)
+
+  def test_resolved_is_ok(self):
+    endpoint = endpoint_record(type_state=records.TYPE_RESOLVED)
+    result = type_compat.check_type_state(CheckContext(endpoint=endpoint))
+    self.assertEqual(result[0].severity, f.Severity.OK)
+
+  def test_name_conflict_detected(self):
+    a = endpoint_record(key="a", type_name="TypeA")
+    b = endpoint_record(key="b", type_name="TypeB")
+    context = CheckContext(endpoint=a, registry=FakeRegistry([], [a, b]))
+    result = type_compat.check_type_name_conflict(context)
+    self.assertEqual(ids(result), ["type.name_conflict"])
+
+  def test_same_name_is_no_conflict(self):
+    a = endpoint_record(key="a", type_name="Same")
+    b = endpoint_record(key="b", type_name="Same")
+    context = CheckContext(endpoint=a, registry=FakeRegistry([], [a, b]))
+    self.assertEqual(type_compat.check_type_name_conflict(context), [])
+
+  def test_assignability_failure_reported_directionally(self):
+    writer = endpoint_record(key="writer", kind="Writer", type_name="WriterType",
+                             type=FakeDynamicType("WriterType", assignable=True))
+    reader = endpoint_record(key="reader", kind="Reader", type_name="ReaderType",
+                             type=FakeDynamicType("ReaderType", assignable=False))
+    context = CheckContext(endpoint=writer, registry=FakeRegistry([], [writer, reader]))
+    result = type_compat.check_assignability(context)
+    self.assertEqual(ids(result), ["type.assignability"])
+    self.assertEqual(result[0].severity, f.Severity.ERROR)
+    self.assertIn("ReaderType <- WriterType = False", result[0].observed)
+
+  def test_assignable_writer_and_reader_are_confirmed(self):
+    writer = endpoint_record(key="writer", kind="Writer",
+                             type=FakeDynamicType("Writer", True))
+    reader = endpoint_record(key="reader", kind="Reader",
+                             type=FakeDynamicType("Reader", True))
+    context = CheckContext(endpoint=writer, registry=FakeRegistry([], [writer, reader]))
+    result = type_compat.check_assignability(context)
+    self.assertEqual(ids(result), ["type.assignability"])
+    self.assertEqual(result[0].severity, f.Severity.OK)
+
+  def test_reader_endpoint_does_not_duplicate_writer_monitoring(self):
+    writer = endpoint_record(key="writer", kind="Writer",
+                             type=FakeDynamicType("Writer", True))
+    reader = endpoint_record(key="reader", kind="Reader",
+                             type=FakeDynamicType("Reader", True))
+    context = CheckContext(endpoint=reader, registry=FakeRegistry([], [writer, reader]))
+    self.assertEqual(type_compat.check_assignability(context), [])
+
+  def test_empty_representation_is_not_reported_as_incompatible(self):
+    """A default-QoS writer advertises an empty sequence; that is not a fault."""
+    endpoint = endpoint_record(representation=None)
+    result = type_compat.check_representation(CheckContext(endpoint=endpoint))
+    self.assertEqual(ids(result), ["repr.not_advertised"])
+    self.assertEqual(result[0].severity, f.Severity.INFO)
+
+
+class TestDiscoveryLifecycle(unittest.TestCase):
+
+  def test_removing_participant_also_removes_its_endpoints(self):
+    participant = participant_record(key="p1")
+    endpoint = endpoint_record(key="w1", participant_key="p1")
+    registry = discovery.DiscoveryRegistry()
+    registry.upsert_participant(participant)
+    registry.upsert_endpoint(endpoint)
+    registry.remove_participant("p1")
+    self.assertEqual(registry.participant_list(), [])
+    self.assertEqual(registry.endpoint_list(), [])
+
+  def test_removing_disposed_endpoint_excludes_it_from_sweeps(self):
+    registry = discovery.DiscoveryRegistry()
+    registry.upsert_endpoint(endpoint_record(key="w1", kind="Writer"))
+    registry.remove_endpoint("w1")
+    self.assertEqual(registry.writers(), [])
+
+  def test_publication_listener_removes_an_invalid_builtin_sample(self):
+    class Value:
+      value = "w1"
+    class Data:
+      key = Value()
+    class Info:
+      valid = False
+    class Reader:
+      def take(self):
+        return [(Data(), Info())]
+
+    registry = discovery.DiscoveryRegistry()
+    registry.upsert_endpoint(endpoint_record(key="w1", kind="Writer"))
+    discovery.PublicationListener(registry).on_data_available(Reader())
+    self.assertEqual(registry.writers(), [])
+
+
+# --- Payload -----------------------------------------------------------------
+
+class FakeProbe:
+  def __init__(self, **kwargs):
+    self.attempted = True
+    self.created = True
+    self.create_error = None
+    self.matched_count = 1
+    self.samples_taken = 1
+    self.walk = None
+    self.protocol = {}
+    self.cache = {}
+    self.sample_lost = None
+    self.sample_rejected = None
+    self.requested_incompatible_qos = None
+    self.subscription_matched = None
+    self.inconsistent_topic_count = 0
+    self.applied_reader_qos = {}
+    self.elapsed = 1.0
+    self.listener_events = []
+    self.__dict__.update(kwargs)
+
+  @property
+  def matched(self):
+    return self.matched_count > 0
+
+
+class TestPayloadChecks(unittest.TestCase):
+
+  def test_dropped_fragments_alone_are_not_an_error(self):
+    """Regression: healthy large data showed fragments=6/reassembled=6/dropped=6."""
+    probe = FakeProbe(samples_taken=1, protocol={
+        "received_fragment_count": 6, "reassembled_sample_count": 6,
+        "dropped_fragment_count": 6, "sent_nack_fragment_count": 0})
+    result = probe_payload.check_fragmentation(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.INFO)
+
+  def test_no_sample_and_no_reassembly_is_an_error(self):
+    probe = FakeProbe(samples_taken=0, protocol={
+        "received_fragment_count": 12, "reassembled_sample_count": 0,
+        "dropped_fragment_count": 4, "sent_nack_fragment_count": 9})
+    result = probe_payload.check_fragmentation(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.ERROR)
+
+  def test_no_fragmentation_is_silent(self):
+    probe = FakeProbe(protocol={"received_fragment_count": 0})
+    self.assertEqual(probe_payload.check_fragmentation(CheckContext(probe=probe)), [])
+
+  def test_silent_with_heartbeats_blames_the_writer_not_the_path(self):
+    probe = FakeProbe(samples_taken=0, protocol={
+        "received_heartbeat_count": 20, "received_sample_count": 0,
+        "received_gap_count": 0})
+    result = probe_payload.check_silent(CheckContext(probe=probe))
+    self.assertEqual(ids(result), ["data.silent"])
+    self.assertIn("Heartbeats are arriving", result[0].root_cause)
+
+  def test_silent_with_nothing_blames_the_data_path(self):
+    probe = FakeProbe(samples_taken=0, protocol={
+        "received_heartbeat_count": 0, "received_sample_count": 0})
+    result = probe_payload.check_silent(CheckContext(probe=probe))
+    self.assertIn("Nothing arrived at all", result[0].root_cause)
+
+  def test_silent_is_skipped_when_samples_arrived(self):
+    probe = FakeProbe(samples_taken=3)
+    self.assertEqual(probe_payload.check_silent(CheckContext(probe=probe)), [])
+
+
+if __name__ == "__main__":
+  unittest.main()
+
+
+class TestOffSubnetIsNotAWarning(unittest.TestCase):
+  """A peer on another subnet is normal in a routed network and must stay silent."""
+
+  def test_remote_subnet_does_not_warn(self):
+    record = participant_record(
+        default_unicast_locators=[FakeLocator("203.0.113.7", kind=1)])
+    result = static_discovery.check_locators(
+        CheckContext(participant_record=record, endpoint=endpoint_record()))
+    self.assertEqual(result, [], "off-subnet peer produced a false warning")
+
+
+class TestRxO(unittest.TestCase):
+  """RxO comparison between two DISCOVERED endpoints in a running system."""
+
+  @staticmethod
+  def _policy(kind_name):
+    class Kind:
+      name = kind_name
+    class Policy:
+      kind = Kind()
+    return Policy()
+
+  def _pair(self, writer_kwargs=None, reader_kwargs=None):
+    writer = endpoint_record(key="w", kind="Writer", **(writer_kwargs or {}))
+    reader = endpoint_record(key="r", kind="Reader", **(reader_kwargs or {}))
+    registry = FakeRegistry([participant_record()], [writer, reader])
+    return writer, reader, registry
+
+  def test_reliable_reader_vs_best_effort_writer_is_incompatible(self):
+    writer, reader, registry = self._pair(
+        {"reliability": self._policy("BEST_EFFORT")},
+        {"reliability": self._policy("RELIABLE")})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.rxo_mismatch"])
+    self.assertIn("RELIABILITY", result[0].title)
+
+  def test_best_effort_reader_vs_reliable_writer_is_fine(self):
+    writer, reader, registry = self._pair(
+        {"reliability": self._policy("RELIABLE")},
+        {"reliability": self._policy("BEST_EFFORT")})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.compatible"])
+
+  def test_ownership_must_match_exactly(self):
+    writer, reader, registry = self._pair(
+        {"ownership": self._policy("SHARED")},
+        {"ownership": self._policy("EXCLUSIVE")})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertIn("OWNERSHIP", result[0].title)
+
+  def test_latency_budget_writer_slower_than_reader_is_incompatible(self):
+    class Duration:
+      def __init__(self, seconds):
+        self.seconds = seconds
+      def to_seconds(self):
+        return self.seconds
+    class Budget:
+      def __init__(self, seconds):
+        self.duration = Duration(seconds)
+    writer, reader, registry = self._pair(
+        {"latency_budget": Budget(2)}, {"latency_budget": Budget(1)})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertIn("LATENCY_BUDGET", result[0].title)
+
+  def test_reader_presentation_requirement_must_be_offered(self):
+    class Presentation:
+      def __init__(self, coherent_access):
+        self.coherent_access = coherent_access
+        self.ordered_access = False
+    writer, reader, registry = self._pair(
+        {"presentation": Presentation(False)}, {"presentation": Presentation(True)})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertIn("PRESENTATION coherent_access", result[0].title)
+
+  def test_every_runtime_matrix_condition_has_a_named_diagnostic(self):
+    class Duration:
+      def __init__(self, seconds):
+        self.seconds = seconds
+      def to_seconds(self):
+        return self.seconds
+
+    class Policy:
+      def __init__(self, kind=None, period=None, duration=None, lease_duration=None):
+        self.kind = kind
+        self.period = period
+        self.duration = duration
+        self.lease_duration = lease_duration
+
+    class Kind:
+      def __init__(self, name):
+        self.name = name
+
+    class Presentation:
+      def __init__(self, scope, coherent_access=False, ordered_access=False):
+        self.kind = Kind(scope)
+        self.coherent_access = coherent_access
+        self.ordered_access = ordered_access
+
+    class Representation:
+      def __init__(self, value):
+        self.value = value
+
+    class Partition:
+      def __init__(self, names):
+        self.name = names
+
+    cases = (
+        ("DURABILITY", {"durability": Policy(Kind("VOLATILE"))},
+         {"durability": Policy(Kind("TRANSIENT_LOCAL"))}),
+        ("LIVELINESS", {"liveliness": Policy(Kind("AUTOMATIC"), duration=Duration(2))},
+         {"liveliness": Policy(Kind("MANUAL_BY_TOPIC"), duration=Duration(1))}),
+        ("LIVELINESS lease_duration", {"liveliness": Policy(Kind("AUTOMATIC"), lease_duration=Duration(2))},
+         {"liveliness": Policy(Kind("AUTOMATIC"), lease_duration=Duration(1))}),
+        ("DESTINATION_ORDER", {"destination_order": Policy(Kind("BY_RECEPTION_TIMESTAMP"))},
+         {"destination_order": Policy(Kind("BY_SOURCE_TIMESTAMP"))}),
+        ("PRESENTATION", {"presentation": Presentation("INSTANCE")},
+         {"presentation": Presentation("GROUP")}),
+        ("PRESENTATION coherent_access", {"presentation": Presentation("INSTANCE")},
+         {"presentation": Presentation("INSTANCE", coherent_access=True)}),
+        ("PRESENTATION ordered_access", {"presentation": Presentation("INSTANCE")},
+         {"presentation": Presentation("INSTANCE", ordered_access=True)}),
+        ("DEADLINE", {"deadline": Policy(period=Duration(2))},
+         {"deadline": Policy(period=Duration(1))}),
+        ("LATENCY_BUDGET", {"latency_budget": Policy(duration=Duration(2))},
+         {"latency_budget": Policy(duration=Duration(1))}),
+        ("OWNERSHIP", {"ownership": Policy(Kind("SHARED"))},
+         {"ownership": Policy(Kind("EXCLUSIVE"))}),
+        ("DATA_REPRESENTATION", {"representation": Representation([0])},
+         {"representation": Representation([2])}),
+        ("PARTITION", {"partition": Partition(["writer"])},
+         {"partition": Partition(["reader"])}),
+    )
+    for expected, writer_kwargs, reader_kwargs in cases:
+      with self.subTest(policy=expected):
+        writer, reader, registry = self._pair(writer_kwargs, reader_kwargs)
+        result = qos_match.check_rxo_pairs(
+            CheckContext(endpoint=writer, registry=registry))
+        self.assertEqual(ids(result), ["qos.rxo_mismatch"])
+        self.assertIn(expected, result[0].title)
+
+  def test_stronger_reader_durability_is_incompatible(self):
+    writer, reader, registry = self._pair(
+        {"durability": self._policy("VOLATILE")},
+        {"durability": self._policy("TRANSIENT_LOCAL")})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertIn("DURABILITY", result[0].title)
+
+  def test_weaker_reader_durability_is_fine(self):
+    writer, reader, registry = self._pair(
+        {"durability": self._policy("TRANSIENT_LOCAL")},
+        {"durability": self._policy("VOLATILE")})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.compatible"])
+
+  def test_unreadable_policies_produce_no_claim(self):
+    """Missing QoS must never be reported as an incompatibility."""
+    writer, reader, registry = self._pair()
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.compatible"])
+
+  def test_no_counterpart_is_reported_as_info(self):
+    writer = endpoint_record(key="w", kind="Writer")
+    registry = FakeRegistry([participant_record()], [writer])
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.no_counterpart"])
+    self.assertEqual(result[0].severity, f.Severity.INFO)

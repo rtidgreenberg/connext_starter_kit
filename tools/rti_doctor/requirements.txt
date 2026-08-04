@@ -1,0 +1,5 @@
+# RTI Doctor Tool Dependencies
+# rti.connext version is installed automatically by python_env_sync_rti_connext
+# based on the detected NDDSHOME Connext version.
+textual
+textual-dev

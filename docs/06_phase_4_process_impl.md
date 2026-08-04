@@ -48,7 +48,7 @@ Step 2: RUN RTIDDSGEN (terminal command)
     - IDL files already exist (written during Phase 3 design)
     - Reads project.yaml for api → maps to rtiddsgen -language flag:
         modern_cpp       → -language C++11  → dds/build/cxx11_gen/
-        python           → -language python → dds/build/python_gen/
+        python           → -language Python → build/dds/python_types/<rti.connext version>/python_gen/
         java             → -language java   → dds/build/java_gen/
         c                → -language C      → dds/build/c_gen/
         modern_cpp_python → runs BOTH C++11 and python

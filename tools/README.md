@@ -11,7 +11,29 @@ From the repository root:
 ./tools/rti_spy/run_rtispy.sh --domain 1
 ```
 
-Both tools use the shared repository virtual environment at `connext_dds_env/` and auto-detect `NDDSHOME` when possible.
+Both tools use the shared repository virtual environment at `connext_dds_env/`.
+They run with either the public Python API package plus an RTI license file or
+an activated wheel; `NDDSHOME` is optional for these Python-only tools.
+
+For a public PyPI deployment:
+
+```bash
+RTI_PYTHON_SOURCE=pypi \
+RTI_LICENSE_FILE=/secure/path/rti_license.dat \
+./tools/rti_doctor/run_rti_doctor.sh
+```
+
+For an air-gapped or no-separate-license-file deployment, provide an activated
+wheel from an RTI Connext installation:
+
+```bash
+RTI_PYTHON_SOURCE=activated-wheel \
+RTI_PYTHON_WHEEL=/opt/rti-wheels/rti_connext_activated-<version>-cp<python>-<platform>.whl \
+./tools/rti_doctor/run_rti_doctor.sh
+```
+
+The activated-wheel path is not license-free; use and redistribution remain
+subject to the applicable RTI license terms.
 
 ## rti_view/
 
@@ -56,11 +78,15 @@ This sets `rmem_max` and `wmem_max` to 10 MB for improved UDP performance.
 
 ## RTI License
 
-If the tools report a missing license, set `RTI_LICENSE_FILE` or place `rti_license.dat` under your Connext installation:
+When using the public PyPI package, set `RTI_LICENSE_FILE` or place
+`rti_license.dat` under your Connext installation:
 
 ```bash
 export RTI_LICENSE_FILE=/path/to/rti_license.dat
 ```
+
+An activated `rti.connext.activated` wheel does not need separate
+`RTI_LICENSE_FILE` configuration.
 
 For RTI Connext DDS support:
 

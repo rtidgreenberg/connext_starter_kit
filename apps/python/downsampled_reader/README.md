@@ -323,8 +323,8 @@ DDS Topic (e.g., POSITION_TOPIC)
 ## Files
 
 - **QoS Profiles**: `../../../dds/qos/DDS_QOS_PROFILES.xml`
-- **Topic Definitions**: `../../../dds/datamodel/python_gen/Definitions.py`
-- **Data Types**: `../../../dds/datamodel/python_gen/ExampleTypes.py`
+- **Topic Definitions**: generated at initialization under `build/dds/python_types/<rti.connext version>/python_gen/Definitions.py`
+- **Data Types**: generated at initialization under `build/dds/python_types/<rti.connext version>/python_gen/ExampleTypes.py`
 
 ## Integration with Distributed Logger
 

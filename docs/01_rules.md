@@ -107,9 +107,9 @@ A concise version of these rules is also loaded via `.github/copilot-instruction
 
 | ID | Rule | Example |
 |----|------|---------|
-| PYTHON-1 | Use `sys.path.insert(0, ...)` to add the `dds/datamodel/` directory to the Python path. The path is relative to the script location: `os.path.join(os.path.dirname(__file__), "..", "..", "..", "dds", "datamodel")` (adjusts to the app's nesting level under `apps/python/<process>/`). | `sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "dds", "datamodel"))` |
+| PYTHON-1 | Launchers must remove any prior output and regenerate versioned type support under `build/dds/python_types/<rti.connext version>/` during initialization, then export that directory as `DDS_PYTHON_GEN_DIR`. Applications add this directory to `sys.path`; they must not fall back to generated files in the source tree. | `sys.path.insert(0, os.environ["DDS_PYTHON_GEN_DIR"])` |
 | PYTHON-2 | Import IDL-generated types using the `python_gen/` subdirectory convention: IDL file `ExampleTypes.idl` with module `example_types` → `from python_gen.ExampleTypes import example_types`. The Python package name matches the `.idl` filename (PascalCase), and the module import matches the IDL module name (snake_case). | `from python_gen.ExampleTypes import example_types` |
-| PYTHON-3 | rtiddsgen Python output goes to `dds/datamodel/python_gen/` (via `-d dds/datamodel/python_gen/` flag). For build-time generated code, the path is `dds/datamodel/python_gen/<IdlFileName>/`. Pre-existing IDL in `dds/datamodel/idl/` is the source; `python_gen/` is the generated output directory at the same level as `idl/`. | `rtiddsgen -language python -d dds/datamodel/python_gen/ dds/datamodel/idl/gps_types.idl` |
+| PYTHON-3 | IDL in `dds/datamodel/idl/` is the source of truth. `rtiddsgen` output is regenerated during every initialization into `build/dds/python_types/<rti.connext version>/python_gen/` and is never committed. | `rtiddsgen -language Python -d build/dds/python_types/<version>/python_gen dds/datamodel/idl/ExampleTypes.idl -replace` |
 
 ## Test Rules
 

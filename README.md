@@ -5,7 +5,7 @@ Cross-language DDS system/application templates to accelerate development.
 ## Prerequisites
 
 - **RTI Connext DDS 7.3.0+** [installed and licensed](https://community.rti.com/static/documentation/connext-dds/current/doc/manuals/connext_dds_professional/installation_guide/index.html) for C++ apps, DDS type support, and command-line services
-- **RTI Connext DDS Python API 7.7.0** for Python apps and Python GUI/tools, installed from PyPI as `rti.connext==7.7.0`
+- **RTI Connext DDS Python API** for Python apps and Python GUI/tools. Launchers can install the public PyPI package with an RTI license file, or use an activated wheel from an RTI Connext installation.
 - **C++14 compiler** (GCC 7.3.0+ or equivalent) for C++ apps
 - **Python 3.10** with virtual environment support for Python apps and tools
 - **CMake 3.12+** for build configuration
@@ -44,11 +44,24 @@ Cross-language DDS system/application templates to accelerate development.
    cmake --build .
    ```
 
-5. **For Python apps and tools - set the license file location:**
+5. **For Python apps and tools - select a Python API source:**
    ```bash
+   # Public PyPI package: requires an RTI license file.
+   export RTI_PYTHON_SOURCE=pypi
    export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
    ```
-   Python dependencies are installed from PyPI and pinned to `rti.connext==7.7.0`.
+
+   Or use an activated wheel from a Professional installation, with no
+   separate license-file configuration:
+   ```bash
+   export RTI_PYTHON_SOURCE=activated-wheel
+   export RTI_PYTHON_WHEEL=/path/to/rti_connext_activated-<version>-cp<python>-<platform>.whl
+   ```
+
+   With `RTI_PYTHON_SOURCE=auto` (the default), Python launchers reuse a
+   compatible installed package, then prefer an explicitly supplied or
+   `NDDSHOME`-bundled activated wheel. Interactive launchers prompt when no
+   source is available; unattended runs must set one of the variables above.
    
    Get a free trial license at https://www.rti.com/get-connext
 

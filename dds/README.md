@@ -226,7 +226,9 @@ ls build/dds/xml_gen/*.xml
 
 This generates all type support files automatically:
 - **C++**: `ExampleTypes.hpp/cxx`, `Definitions.hpp/cxx` with plugins → `build/lib/libdds_typesupport.so`
-- **Python**: `ExampleTypes.py`, `Definitions.py` with module structure  
+- **Python**: `ExampleTypes.py`, `Definitions.py` in `build/dds/python_gen/`
+    for the CMake build. Python launchers separately generate their runtime cache
+    under `build/dds/python_types/<rti.connext version>/python_gen/`.
 - **XML**: `ExampleTypes.xml`, `Definitions.xml` for documentation
 
 ### CMake Build Options

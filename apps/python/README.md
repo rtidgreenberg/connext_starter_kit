@@ -78,7 +78,7 @@ connext_dds_env/            # Shared virtual environment (at repository root)
 
 #### Getting an RTI License
 
-If you don't have an RTI Connext license:
+When using the public PyPI Python API, you need an RTI Connext license file:
 
 1. Visit https://www.rti.com/get-connext
 2. Fill out the form to request a free trial license
@@ -92,7 +92,38 @@ If you don't have an RTI Connext license:
 
 > **Tip**: Add the `export RTI_LICENSE_FILE=...` line to your `~/.bashrc` or `~/.bash_profile` to make it permanent.
 
-> **Note**: The `run.sh` scripts will automatically check for the license file and provide helpful error messages if not found.
+> **Note**: The `run.sh` scripts automatically check for the license file when
+> using the public PyPI package. A local `rti.connext.activated` wheel from an
+> RTI Connext installation does not need separate license-file configuration.
+
+### Python API Source
+
+Each launcher uses `RTI_PYTHON_SOURCE=auto` by default. It reuses a compatible
+installed package, then looks for a supplied or bundled activated wheel. For
+unattended deployment, select the source explicitly.
+
+Public package with a license file:
+
+```bash
+RTI_PYTHON_SOURCE=pypi \
+RTI_LICENSE_FILE=/secure/path/rti_license.dat \
+./example_io_app/run.sh --domain_id 1
+```
+
+Activated wheel with no separate license-file configuration:
+
+```bash
+RTI_PYTHON_SOURCE=activated-wheel \
+RTI_PYTHON_WHEEL=/opt/rti-wheels/rti_connext_activated-<version>-cp<python>-<platform>.whl \
+./example_io_app/run.sh --domain_id 1
+```
+
+The activated-wheel path is not license-free; use and redistribution remain
+subject to the applicable RTI license terms. Python examples generate their
+IDL type support during initialization, so they need a native Connext
+installation with `rtiddsgen`. Each initialization removes prior generated
+Python types and regenerates them under `build/`; generated files are never
+committed.
 
 ### Installation
 
@@ -104,10 +135,10 @@ cd apps/python
 ```
 
 The install script:
-- Auto-detects `NDDSHOME` from `~/rti_connext_dds-*` (uses latest version)
+- Auto-detects `NDDSHOME` when native type-generation tooling is available
 - Creates a shared Python 3.10 virtual environment at the repository root (`connext_dds_env/`)
 - Installs dependencies from `requirements.txt`
-- Installs the RTI Connext DDS Python API from PyPI (`rti.connext==7.7.0`)
+- Selects the RTI Connext DDS Python API from PyPI or an activated local wheel
 
 ### Run Application
 
@@ -119,8 +150,8 @@ cd example_io_app
 ```
 
 The run script handles all environment setup automatically, including:
-- NDDSHOME detection
-- License file validation
+- Python API source selection
+- License file validation for PyPI installations
 - Virtual environment activation
 - PYTHONPATH configuration for DDS bindings
 
@@ -267,8 +298,13 @@ pip install -r requirements.txt
 ```
 
 ### Generated Python Modules
-The following are automatically created via CMake (from top-level build):
-- `dds/build/python_gen/` - Generated Python DDS types
+The launcher or `install.sh` generates versioned Python DDS types at
+initialization time:
+
+- `build/dds/python_types/<rti.connext version>/python_gen/`
+
+This directory is ignored by Git. `DDS_PYTHON_GEN_DIR` points applications to
+the matching generated package.
 
 ## Running Applications
 

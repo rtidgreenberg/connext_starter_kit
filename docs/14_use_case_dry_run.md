@@ -271,7 +271,7 @@ The mapping from IDL module path → Python import statement is not documented
 anywhere. The agent must know:
 - IDL module `example_types` → Python package `python_gen.ExampleTypes`
 - Class access: `example_types.Image`
-- The build directory: `dds/datamodel` or `build/dds/python_gen/`
+- The initialization-generated type directory: `build/dds/python_types/<rti.connext version>/`
 
 The existing `large_data_app.py` shows the pattern but it's never codified as a
 rule for the agent.
@@ -280,8 +280,8 @@ rule for the agent.
 
 ```
 PYTHON IMPORT RULES:
-- sys.path insert: PROJECT_ROOT / "dds" / "datamodel"  (for pre-built)
-  OR: PROJECT_ROOT / "build" / "dds" / "python_gen"  (for build-time)
+- sys.path insert: PROJECT_ROOT / "build" / "dds" / "python_types" / <rti.connext version>
+  (set by the launcher as DDS_PYTHON_GEN_DIR)
 - Import statement: from python_gen.<IdlFileName> import <module_name>
 - Example: ExampleTypes.idl with module example_types
   → from python_gen.ExampleTypes import example_types
@@ -292,7 +292,7 @@ PYTHON IMPORT RULES:
 
 | Action | Artifact Needed | Exists? |
 |--------|-----------------|---------|
-| Run `rtiddsgen -language Python -d dds/build/python_gen/ dds/datamodel/idl/ExampleTypes.idl` | rtiddsgen binary | ✅ (Connext installed) |
+| Run `rtiddsgen -language Python -d build/dds/python_types/<version>/python_gen/ dds/datamodel/idl/ExampleTypes.idl -replace` | rtiddsgen binary | ✅ (Connext installed) |
 
 No gaps — types already exist, rtiddsgen is a standard command.
 

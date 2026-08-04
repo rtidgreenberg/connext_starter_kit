@@ -14,6 +14,7 @@ apps/python/example_io_app/__pycache__/
 dds/python/build/
 
 dds/python/codegen/
+dds/datamodel/python_gen/
 
 .vscode/
 

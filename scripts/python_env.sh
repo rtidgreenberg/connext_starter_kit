@@ -18,7 +18,93 @@ python_env_init() {
     PYTHON_ENV_RTI_CONNEXT_PIP_VERSION="7.7.0"
     PYTHON_ENV_VENV_DIR="${PYTHON_ENV_REPO_ROOT}/connext_dds_env"
     PYTHON_ENV_VENV_PYTHON="${PYTHON_ENV_VENV_DIR}/bin/python"
+    PYTHON_ENV_REQUESTED_SOURCE="${RTI_PYTHON_SOURCE:-auto}"
+    PYTHON_ENV_SELECTED_SOURCE=""
+    PYTHON_ENV_INSTALLED_DISTRIBUTION=""
     PYTHON_ENV_STEP_COUNTER=0
+}
+
+# Validates the user-facing package source selection. "installed" is an
+# internal selected value, while users select auto, pypi, or activated-wheel.
+python_env_validate_requested_source() {
+    case "$PYTHON_ENV_REQUESTED_SOURCE" in
+        auto|pypi|activated-wheel)
+            return 0
+            ;;
+        *)
+            echo "ERROR: RTI_PYTHON_SOURCE must be one of: auto, pypi, activated-wheel."
+            echo "Received: $PYTHON_ENV_REQUESTED_SOURCE"
+            return 1
+            ;;
+    esac
+}
+
+python_env_is_interactive() {
+    [[ -t 0 && -t 1 ]]
+}
+
+# Selects a package source after the virtual environment is available. Auto
+# mode reuses a matching installed distribution before considering a supplied
+# activated wheel, a wheel under NDDSHOME, or interactive input.
+python_env_select_rti_connext_source() {
+    local activated_version
+    local public_version
+    local choice
+
+    if ! python_env_validate_requested_source; then
+        return 1
+    fi
+
+    case "$PYTHON_ENV_REQUESTED_SOURCE" in
+        pypi|activated-wheel)
+            PYTHON_ENV_SELECTED_SOURCE="$PYTHON_ENV_REQUESTED_SOURCE"
+            ;;
+        auto)
+            activated_version="$(python_env_installed_dist_version rti.connext.activated)"
+            public_version="$(python_env_installed_dist_version rti.connext)"
+            if [[ "$activated_version" == "$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION" ]]; then
+                PYTHON_ENV_SELECTED_SOURCE="installed"
+                PYTHON_ENV_INSTALLED_DISTRIBUTION="rti.connext.activated"
+            elif [[ "$public_version" == "$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION" ]]; then
+                PYTHON_ENV_SELECTED_SOURCE="installed"
+                PYTHON_ENV_INSTALLED_DISTRIBUTION="rti.connext"
+            elif [[ -n "${RTI_PYTHON_WHEEL:-}" ]]; then
+                PYTHON_ENV_SELECTED_SOURCE="activated-wheel"
+            elif [[ -n "${NDDSHOME:-}" ]] && python_env_local_activated_wheel_path "$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION" "${PYTHON_ENV_REQUIRED_PYTHON_VERSION//./}" >/dev/null; then
+                PYTHON_ENV_SELECTED_SOURCE="activated-wheel"
+            elif python_env_is_interactive; then
+                echo "RTI Connext DDS Python API is not installed."
+                echo "1) Install rti.connext from PyPI (requires RTI_LICENSE_FILE)"
+                echo "2) Install a local rti.connext.activated wheel (no separate license-file configuration)"
+                echo "3) Cancel"
+                read -r -p "Select package source [1-3]: " choice
+                case "$choice" in
+                    1)
+                        PYTHON_ENV_SELECTED_SOURCE="pypi"
+                        ;;
+                    2)
+                        read -r -p "Path to rti.connext.activated wheel: " RTI_PYTHON_WHEEL
+                        if [[ -z "$RTI_PYTHON_WHEEL" ]]; then
+                            echo "ERROR: An activated wheel path is required."
+                            return 1
+                        fi
+                        export RTI_PYTHON_WHEEL
+                        PYTHON_ENV_SELECTED_SOURCE="activated-wheel"
+                        ;;
+                    *)
+                        echo "ERROR: Python API setup cancelled."
+                        return 1
+                        ;;
+                esac
+            else
+                echo "ERROR: RTI Connext DDS Python API is not installed and no package source was selected."
+                echo "Set RTI_PYTHON_SOURCE=pypi with RTI_LICENSE_FILE, or set RTI_PYTHON_SOURCE=activated-wheel with RTI_PYTHON_WHEEL=/path/to/rti_connext_activated-*.whl."
+                return 1
+            fi
+            ;;
+    esac
+
+    echo "Python package source: $PYTHON_ENV_SELECTED_SOURCE"
 }
 
 # Extracts the full Connext version (major.minor.patch) from an NDDSHOME path,
@@ -158,9 +244,9 @@ python_env_resolve_nddshome() {
     python_env_log_step "Resolving NDDSHOME"
     local detected_nddshome
     if ! detected_nddshome="$(python_env_find_nddshome)"; then
-        echo "ERROR: NDDSHOME is not set and no RTI Connext installation was found."
-        echo "Install RTI Connext 7.7 and/or set NDDSHOME before launching ${PYTHON_ENV_LABEL}."
-        return 1
+        echo "No native RTI Connext installation found; using Python API defaults."
+        echo "Native tooling is still required when this launcher needs rtiddsgen or RTI services."
+        return 0
     fi
 
     export NDDSHOME="$detected_nddshome"
@@ -292,9 +378,31 @@ python_env_sync_rti_connext() {
     local local_wheel
     local installed_version
 
-    python_env_log_step "Synchronizing rti.connext (Connext ${PYTHON_ENV_CONNEXT_VERSION:-7.7} -> $PYTHON_ENV_RTI_CONNEXT_PIP_VERSION, cp$pytag)"
+    python_env_log_step "Synchronizing RTI Connext DDS Python API (Connext ${PYTHON_ENV_CONNEXT_VERSION:-7.7} -> $PYTHON_ENV_RTI_CONNEXT_PIP_VERSION, cp$pytag)"
 
-    if local_wheel="$(python_env_local_activated_wheel_path "$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION" "$pytag")"; then
+    if ! python_env_select_rti_connext_source; then
+        return 1
+    fi
+
+    case "$PYTHON_ENV_SELECTED_SOURCE" in
+        installed)
+            echo "$PYTHON_ENV_INSTALLED_DISTRIBUTION==$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION already installed; skipping installation."
+            return 0
+            ;;
+        activated-wheel)
+            if [[ -n "${RTI_PYTHON_WHEEL:-}" ]]; then
+                local_wheel="$RTI_PYTHON_WHEEL"
+                if [[ ! -f "$local_wheel" || "$local_wheel" != *.whl ]]; then
+                    echo "ERROR: RTI_PYTHON_WHEEL must point to an existing .whl file."
+                    echo "Received: $local_wheel"
+                    return 1
+                fi
+            elif ! local_wheel="$(python_env_local_activated_wheel_path "$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION" "$pytag")"; then
+                echo "ERROR: No activated wheel was found."
+                echo "Set RTI_PYTHON_WHEEL=/path/to/rti_connext_activated-*.whl or set NDDSHOME to a matching native installation."
+                return 1
+            fi
+
         echo "Found bundled rti.connext.activated wheel: $local_wheel"
         installed_version="$(python_env_installed_dist_version rti.connext.activated)"
         if [[ "$installed_version" == "$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION" ]]; then
@@ -306,8 +414,8 @@ python_env_sync_rti_connext() {
             python_env_remove_other_rti_connext_dist_info "rti.connext.activated"
             "$PYTHON_ENV_VENV_PYTHON" -m pip install -v --progress-bar on "$local_wheel"
         fi
-    else
-        echo "No bundled rti.connext.activated wheel found for cp$pytag under \$NDDSHOME/resource/python_api."
+        ;;
+        pypi)
         installed_version="$(python_env_installed_dist_version rti.connext)"
         if [[ "$installed_version" == "$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION" ]]; then
             echo "rti.connext==$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION already installed; skipping PyPI download."
@@ -316,7 +424,12 @@ python_env_sync_rti_connext() {
             python_env_remove_other_rti_connext_dist_info "rti.connext"
             "$PYTHON_ENV_VENV_PYTHON" -m pip install -v --progress-bar on "rti.connext==$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION"
         fi
-    fi
+        ;;
+        *)
+            echo "ERROR: Internal error: unknown selected package source '$PYTHON_ENV_SELECTED_SOURCE'."
+            return 1
+            ;;
+    esac
 }
 
 python_env_sync_requirements() {
@@ -373,7 +486,14 @@ python_env_detect_rti_python_version() {
     "$PYTHON_ENV_VENV_PYTHON" - <<'PY'
 import importlib.metadata
 
-print(importlib.metadata.version("rti-connext"))
+for distribution in ("rti-connext-activated", "rti-connext"):
+    try:
+        print(importlib.metadata.version(distribution))
+        break
+    except importlib.metadata.PackageNotFoundError:
+        continue
+else:
+    raise importlib.metadata.PackageNotFoundError("rti.connext is not installed")
 PY
 }
 
@@ -385,7 +505,7 @@ python_env_generated_rtiddsgen_version() {
 }
 
 python_env_ensure_versioned_types() {
-    python_env_log_step "Checking versioned Python type support"
+    python_env_log_step "Regenerating versioned Python type support"
 
     local rti_python_version
     local types_cache_dir
@@ -408,55 +528,49 @@ python_env_ensure_versioned_types() {
     versioned_dir="$types_cache_dir/$rti_python_version/python_gen"
     idl_dir="$PYTHON_ENV_REPO_ROOT/dds/datamodel/idl"
 
-    if [[ -f "$versioned_dir/ExampleTypes.py" ]]; then
-        generated_version="$(python_env_generated_rtiddsgen_version "$versioned_dir/ExampleTypes.py")"
-        echo "Using cached Python types: $versioned_dir"
-        if [[ -n "$generated_version" ]]; then
-            echo "Generated by rtiddsgen $generated_version"
-        fi
-    else
-        echo "Generating Python type support for rti.connext $rti_python_version..."
+    echo "Regenerating Python type support for rti.connext $rti_python_version..."
 
-        rtiddsgen="$NDDSHOME/bin/rtiddsgen"
-        if [[ ! -x "$rtiddsgen" ]]; then
-            echo "ERROR: rtiddsgen not found at $rtiddsgen"
-            echo "Ensure NDDSHOME points to a valid Connext installation."
-            return 1
-        fi
-
-        mkdir -p "$versioned_dir"
-        xtypes_mask=$("$PYTHON_ENV_VENV_PYTHON" -c "import rti.connextdds as dds; print(hex(int(dds.compliance.get_xtypes_mask())))" 2>/dev/null || true)
-
-        for idl_file in "$idl_dir"/*.idl; do
-            idl_basename=$(basename "$idl_file" .idl)
-            echo "  Generating: $idl_basename..."
-            if [[ -n "$xtypes_mask" ]]; then
-                "$rtiddsgen" -language Python -d "$versioned_dir" \
-                    -I "$idl_dir" -xTypesComplianceMask "$xtypes_mask" \
-                    "$idl_file" -replace 2>&1 | grep -v "^$" || true
-            else
-                "$rtiddsgen" -language Python -d "$versioned_dir" \
-                    -I "$idl_dir" "$idl_file" -replace 2>&1 | grep -v "^$" || true
-            fi
-        done
-
-        if [[ ! -f "$versioned_dir/__init__.py" ]]; then
-            touch "$versioned_dir/__init__.py"
-        fi
-
-        if [[ ! -f "$versioned_dir/ExampleTypes.py" ]]; then
-            echo "ERROR: Type generation failed. ExampleTypes.py not created."
-            return 1
-        fi
-
-        generated_version="$(python_env_generated_rtiddsgen_version "$versioned_dir/ExampleTypes.py")"
-        echo "Generated Python types at: $versioned_dir"
-        if [[ -n "$generated_version" ]]; then
-            echo "Generated by rtiddsgen $generated_version"
-        fi
+    rtiddsgen="${NDDSHOME:-<unset>}/bin/rtiddsgen"
+    if [[ ! -x "$rtiddsgen" ]]; then
+        echo "ERROR: rtiddsgen was not found."
+        echo "Expected native code generator: $rtiddsgen"
+        echo "Set NDDSHOME to a valid Connext installation to generate type support."
+        return 1
     fi
 
+    rm -rf "$versioned_dir"
+    mkdir -p "$versioned_dir"
+    xtypes_mask=$("$PYTHON_ENV_VENV_PYTHON" -c "import rti.connextdds as dds; print(hex(int(dds.compliance.get_xtypes_mask())))" 2>/dev/null || true)
+
+    for idl_file in "$idl_dir"/*.idl; do
+        idl_basename=$(basename "$idl_file" .idl)
+        echo "  Generating: $idl_basename..."
+        if [[ -n "$xtypes_mask" ]]; then
+            "$rtiddsgen" -language Python -d "$versioned_dir" \
+                -I "$idl_dir" -xTypesComplianceMask "$xtypes_mask" \
+                "$idl_file" -replace 2>&1 | grep -v "^$" || true
+        else
+            "$rtiddsgen" -language Python -d "$versioned_dir" \
+                -I "$idl_dir" "$idl_file" -replace 2>&1 | grep -v "^$" || true
+        fi
+    done
+
+    if [[ ! -f "$versioned_dir/__init__.py" ]]; then
+        touch "$versioned_dir/__init__.py"
+    fi
+
+    if [[ ! -f "$versioned_dir/ExampleTypes.py" || ! -f "$versioned_dir/Definitions.py" ]]; then
+        echo "ERROR: Type generation failed. ExampleTypes.py and Definitions.py are required."
+        return 1
+    fi
+
+    generated_version="$(python_env_generated_rtiddsgen_version "$versioned_dir/ExampleTypes.py")"
+    echo "Generated Python types at: $versioned_dir"
+    if [[ -n "$generated_version" ]]; then
+        echo "Generated by rtiddsgen $generated_version"
+    fi
     export DDS_PYTHON_GEN_DIR="$types_cache_dir/$rti_python_version"
+
     export PYTHONPATH="$DDS_PYTHON_GEN_DIR${PYTHONPATH:+:$PYTHONPATH}"
     echo "DDS_PYTHON_GEN_DIR: $DDS_PYTHON_GEN_DIR"
 }
@@ -466,6 +580,11 @@ python_env_resolve_license_file() {
     local candidate
     local dir
 
+    if [[ "$PYTHON_ENV_SELECTED_SOURCE" == "activated-wheel" || ( "$PYTHON_ENV_SELECTED_SOURCE" == "installed" && "$PYTHON_ENV_INSTALLED_DISTRIBUTION" == "rti.connext.activated" ) ]]; then
+        echo "Using rti.connext.activated; no separate license-file configuration is required."
+        return 0
+    fi
+
     if [[ -n "${RTI_LICENSE_FILE:-}" ]]; then
         if [[ -f "$RTI_LICENSE_FILE" ]]; then
             echo "Using RTI_LICENSE_FILE from environment: $RTI_LICENSE_FILE"
@@ -474,17 +593,19 @@ python_env_resolve_license_file() {
         echo "WARNING: RTI_LICENSE_FILE is set but file is missing: $RTI_LICENSE_FILE"
     fi
 
-    for candidate in \
-        "$NDDSHOME/rti_license.dat" \
-        "$NDDSHOME/rti_license.txt" \
-        "$NDDSHOME/resource/rti_license.dat" \
-        "$NDDSHOME/resource/licenses/rti_license.dat"; do
-        if [[ -f "$candidate" ]]; then
-            export RTI_LICENSE_FILE="$candidate"
-            echo "Detected RTI license file: $RTI_LICENSE_FILE"
-            return 0
-        fi
-    done
+    if [[ -n "${NDDSHOME:-}" ]]; then
+        for candidate in \
+            "$NDDSHOME/rti_license.dat" \
+            "$NDDSHOME/rti_license.txt" \
+            "$NDDSHOME/resource/rti_license.dat" \
+            "$NDDSHOME/resource/licenses/rti_license.dat"; do
+            if [[ -f "$candidate" ]]; then
+                export RTI_LICENSE_FILE="$candidate"
+                echo "Detected RTI license file: $RTI_LICENSE_FILE"
+                return 0
+            fi
+        done
+    fi
 
     for dir in "$HOME"/rti_connext_dds-* /opt/rti_connext_dds-* /opt/rti/rti_connext_dds-*; do
         if [[ -d "$dir" ]]; then

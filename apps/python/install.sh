@@ -19,29 +19,7 @@ python_env_activate_venv
 python_env_sync_rti_connext
 python_env_sync_requirements "$SCRIPT_DIR/requirements.txt" "rti.connextdds:RTI Connext DDS Python API"
 
-# --- Generate Python Bindings if Missing ---
-echo
-BINDINGS_FILE="$REPO_ROOT/build/dds/python_gen/ExampleTypes.py"
-if [ ! -f "$BINDINGS_FILE" ]; then
-    echo "Python bindings not found. Running top-level cmake build..."
-    echo ""
-    
-    mkdir -p "$REPO_ROOT/build"
-    cd "$REPO_ROOT/build"
-    cmake ..
-    cmake --build .
-    cd "$SCRIPT_DIR"
-    
-    if [ ! -f "$BINDINGS_FILE" ]; then
-        echo "⚠️  WARNING: Failed to generate Python bindings."
-        echo "   Please check cmake build output for errors."
-        echo "   You may need to set CONNEXTDDS_ARCH for C++ builds."
-    else
-        echo "✓ Python bindings generated successfully"
-    fi
-else
-    echo "✓ Python bindings already exist"
-fi
+python_env_ensure_versioned_types
 
 # --- License File Check ---
 if ! python_env_resolve_license_file; then

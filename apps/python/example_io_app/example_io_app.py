@@ -17,15 +17,13 @@ import rti.connextdds as dds
 import rti.asyncio
 
 # Add the DDS Python codegen path to Python path
-# Prefer versioned types from DDS_PYTHON_GEN_DIR (set by run.sh)
 _gen_dir = os.environ.get("DDS_PYTHON_GEN_DIR")
-if _gen_dir and os.path.isdir(_gen_dir):
-    sys.path.insert(0, _gen_dir)
-else:
-    # Fallback: use the checked-in types in dds/datamodel/
-    sys.path.insert(
-        0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "dds", "datamodel")
+if not _gen_dir or not os.path.isdir(_gen_dir):
+    raise RuntimeError(
+        "DDS_PYTHON_GEN_DIR is not configured. Run this application through run.sh "
+        "or initialize generated Python type support first."
     )
+sys.path.insert(0, _gen_dir)
 
 # Import DDS Data Types, Topics and config constants
 from python_gen.ExampleTypes import example_types

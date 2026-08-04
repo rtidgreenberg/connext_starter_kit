@@ -51,6 +51,19 @@ connext_dds_env_py38_backup/
 # RTI Rapid Prototyping test output
 test_output/
 
+# RTI Doctor local vendor-fixture artifacts
+tools/rti_doctor/test/vendors/fastdds/CMakeCache.txt
+tools/rti_doctor/test/vendors/fastdds/CMakeFiles/
+tools/rti_doctor/test/vendors/fastdds/Makefile
+tools/rti_doctor/test/vendors/fastdds/build.ninja
+tools/rti_doctor/test/vendors/fastdds/cmake_install.cmake
+tools/rti_doctor/test/vendors/fastdds/compile_commands.json
+tools/rti_doctor/test/vendors/fastdds/doctor_fastdds_final
+tools/rti_doctor/test/vendors/fastdds/doctor_fastdds_appendable
+tools/rti_doctor/test/vendors/fastdds/generated/
+tools/rti_doctor/test/**/*.pcap
+tools/rti_doctor/test/**/*.pcapng
+
 # Global ignores
 __pycache__/
 *.pyc

@@ -132,8 +132,17 @@ def _merge_participant(existing, incoming):
       "partial_configuration", "rtps_host_id", "rtps_app_id",
   ):
     value = getattr(incoming, name, None)
-    if value not in (None, "", 0):
-      setattr(existing, name, value)
+    # Only genuine absence is skipped. The old predicate was
+    # `value not in (None, "", 0)`, which compares by equality - and False == 0
+    # is True in Python. An incoming partial_configuration=False, the sample
+    # that says discovery has now completed, was therefore read as "field
+    # absent" and never applied: check_partial_configuration then fired on
+    # every later report for that peer, with a remedy ("re-run once discovery
+    # has settled") the user could never satisfy. A legitimate domain_id of 0
+    # and a genuinely-zero endpoint mask were lost the same way.
+    if value is None or value == "":
+      continue
+    setattr(existing, name, value)
   for name in ("default_unicast_locators", "transport_info"):
     value = getattr(incoming, name, None)
     if value:
@@ -289,6 +298,31 @@ def _endpoint_from_data(data, kind):
   )
 
 
+def _drain_endpoints(reader, registry, kind, label):
+  """Apply every sample in one take(), isolating per-sample failures.
+
+  take() removes the samples from the reader's cache, so they are never
+  redelivered. A single unparseable sample - one vendor's SEDP field that will
+  not read, a locator whose str() raises - must not take the rest of the batch
+  with it: losing endpoints silently makes rti_doctor report "none of its
+  endpoints are visible", a fabricated diagnosis caused by its own dropped
+  samples.
+  """
+  try:
+    batch = list(reader.take())
+  except Exception as e:
+    logging.error(f"[{label}] take failed: {e}")
+    return
+  for index, (data, info) in enumerate(batch):
+    try:
+      if info.valid:
+        registry.upsert_endpoint(_endpoint_from_data(data, kind))
+      else:
+        registry.remove_endpoint(_sample_key(data, info, reader))
+    except Exception as e:
+      logging.error(f"[{label}] sample {index + 1}/{len(batch)} skipped: {e}")
+
+
 class PublicationListener(dds.PublicationBuiltinTopicData.DataReaderListener):
   """Discovers DataWriters via the DCPSPublication builtin topic."""
 
@@ -297,14 +331,7 @@ class PublicationListener(dds.PublicationBuiltinTopicData.DataReaderListener):
     self.registry = registry
 
   def on_data_available(self, reader):
-    try:
-      for data, info in reader.take():
-        if info.valid:
-          self.registry.upsert_endpoint(_endpoint_from_data(data, "Writer"))
-        else:
-          self.registry.remove_endpoint(_sample_key(data, info, reader))
-    except Exception as e:
-      logging.error(f"[PublicationListener] {e}")
+    _drain_endpoints(reader, self.registry, "Writer", "PublicationListener")
 
 
 class SubscriptionListener(dds.SubscriptionBuiltinTopicData.DataReaderListener):
@@ -320,25 +347,47 @@ class SubscriptionListener(dds.SubscriptionBuiltinTopicData.DataReaderListener):
     self.registry = registry
 
   def on_data_available(self, reader):
-    try:
-      for data, info in reader.take():
-        if info.valid:
-          self.registry.upsert_endpoint(_endpoint_from_data(data, "Reader"))
-        else:
-          self.registry.remove_endpoint(_sample_key(data, info, reader))
-    except Exception as e:
-      logging.error(f"[SubscriptionListener] {e}")
+    _drain_endpoints(reader, self.registry, "Reader", "SubscriptionListener")
+
+
+def _key_text(holder):
+  """`holder.key.value` rendered exactly as EndpointRecord.key stores it."""
+  value = compat.get(compat.get(holder, "key", None), "value", None)
+  if value is None:
+    return None
+  text = str(value)
+  # A BuiltinTopicKey of all zeros is the unpopulated default, not an identity.
+  # Keys with no digits at all are left alone - only an all-zero numeric key is
+  # rejected.
+  digits = [ch for ch in text if ch.isdigit()]
+  if digits and all(ch == "0" for ch in digits):
+    return None
+  return text
 
 
 def _sample_key(data, info, reader):
-  """Builtin key for either a valid or disposed discovery sample."""
-  key = compat.get(compat.get(data, "key", None), "value", None)
+  """Builtin key for either a valid or disposed discovery sample.
+
+  A disposal sample's `data` is often unpopulated - that is why the reader
+  fallback exists. key_value() returns an instance of the topic's DATA type
+  (PublicationBuiltinTopicData), not a BuiltinTopicKey, so the key is at
+  `.key.value`: the previous one-hop `.value` read always returned None, making
+  remove_endpoint("") a silent no-op and leaving departed endpoints in the
+  registry forever.
+  """
+  key = _key_text(data)
+  if key is not None:
+    return key
+  try:
+    key = _key_text(reader.key_value(info.instance_handle))
+  except Exception as e:
+    logging.warning(f"[discovery] disposal sample could not be keyed: {e}")
+    return ""
   if key is None:
-    try:
-      key = compat.get(reader.key_value(info.instance_handle), "value", None)
-    except Exception:
-      key = None
-  return str(key) if key is not None else ""
+    logging.warning("[discovery] disposal sample carried no usable key; the "
+                    "departed endpoint stays in the registry")
+    return ""
+  return key
 
 
 def refresh_participants(participant, registry):

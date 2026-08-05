@@ -900,3 +900,128 @@ class TestProbeMatchScoping(unittest.TestCase):
     result = probe_match.check_matched(
         CheckContext(probe=FakeProbe(correlated=True, matched_other_count=3)))
     self.assertIn("3 other writer(s)", result[0].observed)
+
+
+# --- Discovery lifecycle and merge (H4, M5, M6) ------------------------------
+
+def _builtin_key(value):
+  """An object shaped like PublicationBuiltinTopicData: .key.value."""
+  class Key:
+    pass
+  class Holder:
+    pass
+  key, holder = Key(), Holder()
+  key.value = value
+  holder.key = key
+  return holder
+
+
+class TestDisposalKeyRecovery(unittest.TestCase):
+  """A departed endpoint must actually leave the registry (H4)."""
+
+  class _Info:
+    valid = False
+    instance_handle = "ih1"
+
+  def test_key_is_recovered_from_the_reader_when_the_sample_is_unpopulated(self):
+    """key_value() returns the DATA type, so the key is at .key.value."""
+    class Reader:
+      def key_value(self, handle):
+        return _builtin_key("w1")
+
+    registry = discovery.DiscoveryRegistry()
+    registry.upsert_endpoint(endpoint_record(key="w1", kind="Writer"))
+    key = discovery._sample_key(_builtin_key("[0, 0, 0, 0]"), self._Info(), Reader())
+    registry.remove_endpoint(key)
+    self.assertEqual(key, "w1")
+    self.assertEqual(registry.writers(), [])
+
+  def test_all_zero_key_is_not_treated_as_an_identity(self):
+    class Reader:
+      def key_value(self, handle):
+        return _builtin_key("[0, 0, 0, 0]")
+
+    key = discovery._sample_key(_builtin_key("[0, 0, 0, 0]"), self._Info(), Reader())
+    self.assertEqual(key, "")
+
+  def test_unreadable_key_does_not_raise(self):
+    class Reader:
+      def key_value(self, handle):
+        raise RuntimeError("no key for this handle")
+
+    key = discovery._sample_key(_builtin_key(None), self._Info(), Reader())
+    self.assertEqual(key, "")
+
+  def test_populated_sample_key_is_used_directly(self):
+    class Reader:
+      def key_value(self, handle):
+        raise AssertionError("must not consult the reader when data carries the key")
+
+    key = discovery._sample_key(_builtin_key("w1"), self._Info(), Reader())
+    self.assertEqual(key, "w1")
+
+
+class TestListenerBatchIsolation(unittest.TestCase):
+  """One bad sample must not discard its siblings (M6)."""
+
+  def test_a_failing_sample_does_not_drop_the_rest_of_the_batch(self):
+    class GoodInfo:
+      valid = True
+    class ExplodingInfo:
+      @property
+      def valid(self):
+        raise RuntimeError("this vendor's SEDP field will not read")
+
+    def data(key):
+      class Key:
+        pass
+      class Data:
+        pass
+      k, d = Key(), Data()
+      k.value = key
+      d.key = k
+      d.topic_name = "T"
+      d.type_name = "MyType"
+      d.participant_key = k
+      return d
+
+    class Reader:
+      def take(self):
+        return [(data("w1"), GoodInfo()),
+                (data("w2"), ExplodingInfo()),
+                (data("w3"), GoodInfo())]
+
+    registry = discovery.DiscoveryRegistry()
+    discovery.PublicationListener(registry).on_data_available(Reader())
+    self.assertEqual(sorted(e.key for e in registry.writers()), ["w1", "w3"])
+
+  def test_a_failing_take_is_contained(self):
+    class Reader:
+      def take(self):
+        raise RuntimeError("reader unusable")
+
+    registry = discovery.DiscoveryRegistry()
+    discovery.PublicationListener(registry).on_data_available(Reader())
+    self.assertEqual(registry.writers(), [])
+
+
+class TestParticipantMerge(unittest.TestCase):
+  """False and 0 are values, not absences (M5)."""
+
+  def test_partial_configuration_can_be_cleared_by_a_later_sample(self):
+    registry = discovery.DiscoveryRegistry()
+    registry.upsert_participant(participant_record(key="p1", partial_configuration=True))
+    registry.upsert_participant(participant_record(key="p1", partial_configuration=False))
+    self.assertIs(registry.participants["p1"].partial_configuration, False)
+
+  def test_domain_zero_is_applied(self):
+    registry = discovery.DiscoveryRegistry()
+    registry.upsert_participant(participant_record(key="p1", domain_id=None))
+    registry.upsert_participant(participant_record(key="p1", domain_id=0))
+    self.assertEqual(registry.participants["p1"].domain_id, 0)
+
+  def test_absent_fields_still_do_not_erase_what_is_known(self):
+    registry = discovery.DiscoveryRegistry()
+    registry.upsert_participant(participant_record(key="p1", name="peer"))
+    registry.upsert_participant(participant_record(key="p1", name=None))
+    self.assertEqual(registry.participants["p1"].name, "peer")

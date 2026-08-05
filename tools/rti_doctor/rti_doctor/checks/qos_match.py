@@ -20,20 +20,33 @@ RELIABILITY_ORDER = {"BEST_EFFORT": 0, "RELIABLE": 1}
 DURABILITY_ORDER = {"VOLATILE": 0, "TRANSIENT_LOCAL": 1, "TRANSIENT": 2, "PERSISTENT": 3}
 LIVELINESS_ORDER = {"AUTOMATIC": 0, "MANUAL_BY_PARTICIPANT": 1, "MANUAL_BY_TOPIC": 2}
 DESTINATION_ORDER_ORDER = {"BY_RECEPTION_TIMESTAMP": 0, "BY_SOURCE_TIMESTAMP": 1}
-PRESENTATION_ORDER = {"INSTANCE": 0, "TOPIC": 1, "GROUP": 2, "HIGHEST_OFFERED": 3}
+#: HIGHEST_OFFERED is deliberately absent. It applies only to a Subscriber and
+#: means "use whatever each remote Publisher offers", so it is compatible with
+#: every writer. Leaving it unranked makes _ordered_rule decline to evaluate,
+#: which is the correct answer; ranking it above GROUP would fail every writer.
+PRESENTATION_ORDER = {"INSTANCE": 0, "TOPIC": 1, "GROUP": 2}
 
 
-def _kind_name(policy):
-  """Trailing name of a policy's kind enum, e.g. "RELIABLE", or None."""
-  kind = compat.get(policy, "kind", None)
-  if kind is None:
+def _enum_name(value):
+  """Trailing name of an enum value, e.g. "RELIABLE", or None."""
+  if value is None:
     return None
-  name = compat.get(kind, "name", None) or str(kind)
+  name = compat.get(value, "name", None) or str(value)
   return str(name).rsplit(".", 1)[-1].upper()
 
 
-def _rank(policy, order):
-  name = _kind_name(policy)
+def _kind_name(policy, attributes=("kind",)):
+  """Trailing name of a policy's kind enum, e.g. "RELIABLE", or None.
+
+  Presentation names its enum `access_scope` rather than `kind`, so the
+  attribute is a parameter: reading a field the policy does not have would
+  silently disable the comparison.
+  """
+  return _enum_name(compat.first(policy, attributes, None))
+
+
+def _rank(policy, order, attributes=("kind",)):
+  name = _kind_name(policy, attributes)
   if name is None:
     return None, None
   return order.get(name), name
@@ -61,10 +74,11 @@ def _seconds(duration):
   return float(sec) + (float(nanosec or 0) / 1e9)
 
 
-def _ordered_rule(label, writer_policy, reader_policy, order, explanation):
+def _ordered_rule(label, writer_policy, reader_policy, order, explanation,
+                  attributes=("kind",)):
   """Compare an ordered policy. Returns a mismatch dict or None."""
-  offered, offered_name = _rank(writer_policy, order)
-  requested, requested_name = _rank(reader_policy, order)
+  offered, offered_name = _rank(writer_policy, order, attributes)
+  requested, requested_name = _rank(reader_policy, order, attributes)
   if offered is None or requested is None:
     return None  # cannot evaluate; say nothing rather than guess
   if offered >= requested:
@@ -161,9 +175,11 @@ def compare_endpoints(writer, reader):
     mismatches.append(rule)
 
   rule = _ordered_rule(
-      "PRESENTATION", writer.presentation, reader.presentation, PRESENTATION_ORDER,
+      "PRESENTATION access_scope", writer.presentation, reader.presentation,
+      PRESENTATION_ORDER,
       "The writer's presentation access scope must be at least as broad as the "
-      "reader's: INSTANCE < TOPIC < GROUP.")
+      "reader's: INSTANCE < TOPIC < GROUP.",
+      attributes=("access_scope", "kind"))
   if rule:
     mismatches.append(rule)
 
@@ -214,17 +230,21 @@ def compare_endpoints(writer, reader):
         "rule": "Ownership kind must match exactly; SHARED and EXCLUSIVE never mix.",
     })
 
-  # DATA_REPRESENTATION: the reader must accept something the writer can produce.
+  # DATA_REPRESENTATION is directional, not a set intersection. A writer offers
+  # exactly one effective representation - the first in its list - while the
+  # reader's list is the set it will accept. Writer [XCDR1, XCDR2] against reader
+  # [XCDR2] intersects, but the writer serializes XCDR1 and the reader rejects it.
   writer_ids = records.representation_ids(writer.representation)
   reader_ids = records.representation_ids(reader.representation)
   if writer_ids and reader_ids and -1 not in writer_ids and -1 not in reader_ids:
-    if not set(writer_ids) & set(reader_ids):
+    if writer_ids[0] not in set(reader_ids):
       mismatches.append({
           "policy": "DATA_REPRESENTATION",
           "offered": records.representation_text(writer.representation),
           "requested": records.representation_text(reader.representation),
-          "rule": "The reader must offer at least one data representation the "
-                  "writer also offers (XCDR1/XCDR2).",
+          "rule": "The reader must accept the writer's effective data "
+                  "representation, which is the first entry in the writer's list "
+                  "(XCDR1/XCDR2).",
       })
 
   overlap, writer_partitions, reader_partitions = _partitions_overlap(writer, reader)

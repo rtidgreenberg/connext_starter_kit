@@ -515,6 +515,67 @@ class TestRxO(unittest.TestCase):
     result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
     self.assertEqual(ids(result), ["qos.compatible"])
 
+  @staticmethod
+  def _presentation(scope):
+    class Kind:
+      name = scope
+    class Presentation:
+      access_scope = Kind()
+      coherent_access = False
+      ordered_access = False
+    return Presentation()
+
+  @staticmethod
+  def _representation(ids_):
+    class Representation:
+      value = list(ids_)
+    return Representation()
+
+  def test_broader_reader_access_scope_is_incompatible(self):
+    """Regression: the check read `kind`, which Presentation does not have."""
+    writer, reader, registry = self._pair(
+        {"presentation": self._presentation("INSTANCE")},
+        {"presentation": self._presentation("GROUP")})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.rxo_mismatch"])
+    self.assertEqual([m["policy"] for m in result[0].evidence["mismatches"]],
+                     ["PRESENTATION access_scope"])
+
+  def test_narrower_reader_access_scope_is_fine(self):
+    writer, reader, registry = self._pair(
+        {"presentation": self._presentation("GROUP")},
+        {"presentation": self._presentation("INSTANCE")})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.compatible"])
+
+  def test_highest_offered_reader_matches_every_writer(self):
+    """HIGHEST_OFFERED means "use what the Publisher offers", so it never fails."""
+    for scope in ("INSTANCE", "TOPIC", "GROUP"):
+      with self.subTest(writer_scope=scope):
+        writer, reader, registry = self._pair(
+            {"presentation": self._presentation(scope)},
+            {"presentation": self._presentation("HIGHEST_OFFERED")})
+        result = qos_match.check_rxo_pairs(
+            CheckContext(endpoint=writer, registry=registry))
+        self.assertEqual(ids(result), ["qos.compatible"])
+
+  def test_reader_must_accept_the_writers_first_representation(self):
+    """Regression: set intersection called [XCDR1, XCDR2] -> [XCDR2] compatible."""
+    writer, reader, registry = self._pair(
+        {"representation": self._representation([0, 2])},
+        {"representation": self._representation([2])})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.rxo_mismatch"])
+    self.assertEqual([m["policy"] for m in result[0].evidence["mismatches"]],
+                     ["DATA_REPRESENTATION"])
+
+  def test_reader_accepting_the_writers_first_representation_is_fine(self):
+    writer, reader, registry = self._pair(
+        {"representation": self._representation([2, 0])},
+        {"representation": self._representation([2])})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.compatible"])
+
   def test_ownership_must_match_exactly(self):
     writer, reader, registry = self._pair(
         {"ownership": self._policy("SHARED")},
@@ -565,8 +626,11 @@ class TestRxO(unittest.TestCase):
         self.name = name
 
     class Presentation:
+      # PresentationQosPolicy names its enum access_scope, NOT kind. A fake with
+      # a `kind` field silently passed while production read a field the real
+      # binding does not have, so the access-scope comparison never ran.
       def __init__(self, scope, coherent_access=False, ordered_access=False):
-        self.kind = Kind(scope)
+        self.access_scope = Kind(scope)
         self.coherent_access = coherent_access
         self.ordered_access = ordered_access
 
@@ -587,7 +651,7 @@ class TestRxO(unittest.TestCase):
          {"liveliness": Policy(Kind("AUTOMATIC"), lease_duration=Duration(1))}),
         ("DESTINATION_ORDER", {"destination_order": Policy(Kind("BY_RECEPTION_TIMESTAMP"))},
          {"destination_order": Policy(Kind("BY_SOURCE_TIMESTAMP"))}),
-        ("PRESENTATION", {"presentation": Presentation("INSTANCE")},
+        ("PRESENTATION access_scope", {"presentation": Presentation("INSTANCE")},
          {"presentation": Presentation("GROUP")}),
         ("PRESENTATION coherent_access", {"presentation": Presentation("INSTANCE")},
          {"presentation": Presentation("INSTANCE", coherent_access=True)}),
@@ -610,7 +674,11 @@ class TestRxO(unittest.TestCase):
         result = qos_match.check_rxo_pairs(
             CheckContext(endpoint=writer, registry=registry))
         self.assertEqual(ids(result), ["qos.rxo_mismatch"])
-        self.assertIn(expected, result[0].title)
+        # Exact, not a title substring: "PRESENTATION" is a substring of
+        # "DATA_REPRESENTATION", so a substring assertion can pass on the
+        # wrong policy.
+        self.assertEqual([m["policy"] for m in result[0].evidence["mismatches"]],
+                         [expected])
 
   def test_stronger_reader_durability_is_incompatible(self):
     writer, reader, registry = self._pair(

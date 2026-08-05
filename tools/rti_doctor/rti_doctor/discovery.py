@@ -228,8 +228,8 @@ def create_participant(domain_id, name="RTI DOCTOR", registry=None):
   """
   previous_factory_qos = dds.DomainParticipant.participant_factory_qos
   factory_qos = dds.DomainParticipantFactoryQos()
-  for name in ("entity_factory", "monitoring", "system_resource_limits"):
-    setattr(factory_qos, name, getattr(previous_factory_qos, name))
+  for policy_name in ("entity_factory", "monitoring", "system_resource_limits"):
+    setattr(factory_qos, policy_name, getattr(previous_factory_qos, policy_name))
   factory_qos.entity_factory.autoenable_created_entities = False
   dds.DomainParticipant.participant_factory_qos = factory_qos
 

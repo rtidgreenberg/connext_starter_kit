@@ -27,12 +27,12 @@ matching, isolated Python environment and `rti.connext` version:
 | NDDSHOME version | Python  | venv                    | rti.connext |
 |-------------------|---------|-------------------------|-------------|
 | 7.3.x              | 3.9     | `connext_dds_env_7.3/`  | 7.3.1       |
-| 7.7.x (default)    | 3.10    | `connext_dds_env/`      | 7.7.0       |
+| 7.7.x (default)    | newest installed 3.10-3.14 | `connext_dds_env/` for 3.10; `connext_dds_env_7.7_py<XY>/` otherwise | 7.7.0 |
 
 It will:
 
 - detect `NDDSHOME` (or use `$NDDSHOME` if already set/exported)
-- detect the Connext version and select the matching Python/venv/`rti.connext` above
+- detect the Connext version and select the matching Python/venv/`rti.connext` above; when a bundled activated wheel is available, prefer the newest installed Python with a matching wheel
 - detect `RTI_LICENSE_FILE`
 - create or rebuild the matching versioned virtual environment if needed
 - install the matching `rti.connext` version, then the rest of `tools/rti_spy/requirements.txt`

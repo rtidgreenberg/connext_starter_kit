@@ -20,23 +20,23 @@ If you already know the target topic and field:
 
 ## What the Launcher Does
 
-`run_rti_view.sh` uses the shared repository Python environment in
-`connext_dds_env/` and will:
+`run_rti_view.sh` uses a repository-local Python environment and will:
 
 - detect `NDDSHOME`
 - detect `RTI_LICENSE_FILE`
-- create or rebuild the shared Python 3.10 virtual environment if needed
+- select the newest installed Python supported by Connext 7.7 (3.10-3.14), preferring one with a matching bundled activated wheel
+- create or rebuild `connext_dds_env/` for Python 3.10, or an isolated `connext_dds_env_7.7_py<XY>/` environment for a newer interpreter
 - install packages from `tools/rti_view/requirements.txt`
 - start `rti_view`
 
 ## Requirements
 
-- Python 3.10 available as `python3.10`
+- Python 3.10 through 3.14 available as `python3.10` through `python3.14` (at least one is required)
 - RTI Connext DDS 7.7.x available locally
 - A valid RTI license file
 
-`tools/rti_view/requirements.txt` currently pins `dearpygui==1.11.1` and
-`rti.connext==7.7.0`.
+`tools/rti_view/requirements.txt` pins `dearpygui==1.11.1`; the matching
+`rti.connext` version is selected and installed by `scripts/python_env.sh`.
 
 ## CLI
 

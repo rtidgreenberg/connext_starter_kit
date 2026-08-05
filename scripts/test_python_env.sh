@@ -31,7 +31,17 @@ python_env_installed_dist_version() {
 
 python_env_local_activated_wheel_path() {
     [[ "${TEST_BUNDLED_WHEEL:-0}" == "1" ]] || return 1
+    if [[ -n "${TEST_BUNDLED_PYTHON_TAGS:-}" && ",${TEST_BUNDLED_PYTHON_TAGS}," != *",$2,"* ]]; then
+        return 1
+    fi
     printf '%s\n' "/tmp/rti_connext_activated.whl"
+}
+
+python_env_find_python_for_version() {
+    local version="${1:?Python version required}"
+    if [[ ",${TEST_AVAILABLE_PYTHONS:-}," == *",$version,"* ]]; then
+        printf '/test/python%s\n' "$version"
+    fi
 }
 
 python_env_find_nddshome() {
@@ -43,10 +53,31 @@ python_env_is_interactive() {
 }
 
 reset_environment() {
-    unset NDDSHOME RTI_PYTHON_WHEEL TEST_ACTIVATED_VERSION TEST_PUBLIC_VERSION TEST_BUNDLED_WHEEL TEST_INTERACTIVE
+    unset NDDSHOME RTI_PYTHON_WHEEL TEST_ACTIVATED_VERSION TEST_PUBLIC_VERSION TEST_BUNDLED_WHEEL TEST_BUNDLED_PYTHON_TAGS TEST_AVAILABLE_PYTHONS TEST_INTERACTIVE
     RTI_PYTHON_SOURCE=auto
     python_env_init "test" "$SCRIPT_DIR/.."
 }
+
+reset_environment
+TEST_AVAILABLE_PYTHONS="3.10,3.12"
+python_env_configure_for_connext_version "/opt/rti_connext_dds-7.7.0"
+assert_equals "/test/python3.12" "$PYTHON_ENV_REQUIRED_PYTHON_BIN" "Connext 7.7 should select the newest installed supported Python"
+assert_equals "3.12" "$PYTHON_ENV_REQUIRED_PYTHON_VERSION" "Connext 7.7 should record the selected Python version"
+assert_equals "$SCRIPT_DIR/../connext_dds_env_7.7_py312" "$PYTHON_ENV_VENV_DIR" "non-3.10 Connext 7.7 environments should be isolated"
+
+reset_environment
+TEST_AVAILABLE_PYTHONS="3.11,3.12"
+NDDSHOME="/opt/rti_connext_dds-7.7.0"
+TEST_BUNDLED_WHEEL=1
+TEST_BUNDLED_PYTHON_TAGS="311"
+python_env_configure_for_connext_version "$NDDSHOME"
+assert_equals "/test/python3.11" "$PYTHON_ENV_REQUIRED_PYTHON_BIN" "a matching bundled wheel should be preferred over a newer Python without one"
+
+reset_environment
+TEST_AVAILABLE_PYTHONS="3.10,3.12"
+python_env_configure_for_connext_version "/opt/rti_connext_dds-7.3.1"
+assert_equals "python3.9" "$PYTHON_ENV_REQUIRED_PYTHON_BIN" "Connext 7.3 should retain its Python 3.9 policy"
+assert_equals "$SCRIPT_DIR/../connext_dds_env_7.3" "$PYTHON_ENV_VENV_DIR" "Connext 7.3 should retain its existing venv"
 
 reset_environment
 TEST_ACTIVATED_VERSION="7.7.0"

@@ -11,7 +11,10 @@ From the repository root:
 ./tools/rti_spy/run_rtispy.sh --domain 1
 ```
 
-Both tools use the shared repository virtual environment at `connext_dds_env/`.
+Both tools use a repository-local virtual environment. Connext 7.7 uses the
+newest installed supported Python from 3.10 through 3.14, retaining
+`connext_dds_env/` for Python 3.10 and using an isolated versioned environment
+for newer interpreters.
 They run with either the public Python API package plus an RTI license file or
 an activated wheel; `NDDSHOME` is optional for these Python-only tools.
 

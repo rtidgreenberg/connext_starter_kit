@@ -22,6 +22,10 @@ python_env_init() {
     PYTHON_ENV_SELECTED_SOURCE=""
     PYTHON_ENV_INSTALLED_DISTRIBUTION=""
     PYTHON_ENV_STEP_COUNTER=0
+
+    if [[ "$PYTHON_ENV_VERSION_EXPLICIT" == "0" ]]; then
+        python_env_configure_for_connext_version ""
+    fi
 }
 
 # Validates the user-facing package source selection. "installed" is an
@@ -145,12 +149,72 @@ python_env_local_activated_wheel_path() {
     return 1
 }
 
+# Returns the path to the requested interpreter when it is installed.
+# Kept separate from the policy selector so shell tests can model available
+# interpreters without creating real virtual environments.
+python_env_find_python_for_version() {
+    local version="${1:?python_env_find_python_for_version requires a Python version}"
+    local candidate
+    local base_executable
+
+    candidate="$(command -v "python$version" 2>/dev/null || true)"
+    [[ -n "$candidate" ]] || return 0
+
+    # A launcher may be started from an activated repository venv. Resolve its
+    # versioned shim back to the base interpreter so a venv never becomes the
+    # source interpreter for another venv.
+    base_executable="$("$candidate" -c 'import sys; print(getattr(sys, "_base_executable", ""))' 2>/dev/null || true)"
+    if [[ -n "$base_executable" && -x "$base_executable" ]]; then
+        candidate="$base_executable"
+    fi
+
+    printf '%s\n' "$candidate"
+}
+
+# Selects the newest installed standard CPython that Connext 7.7 supports.
+# When a native installation supplies matching activated wheels, prefer the
+# newest interpreter with one so auto mode remains entirely local. Otherwise,
+# retain the newest supported interpreter for a PyPI or explicit-wheel source.
+python_env_select_python_for_connext_77() {
+    local version
+    local interpreter
+    local first_supported_interpreter=""
+    local first_supported_version=""
+    local pytag
+
+    for version in 3.14 3.13 3.12 3.11 3.10; do
+        interpreter="$(python_env_find_python_for_version "$version")"
+        [[ -n "$interpreter" ]] || continue
+
+        if [[ -z "$first_supported_interpreter" ]]; then
+            first_supported_interpreter="$interpreter"
+            first_supported_version="$version"
+        fi
+
+        pytag="${version//./}"
+        if [[ -n "${NDDSHOME:-}" ]] \
+            && python_env_local_activated_wheel_path "$PYTHON_ENV_RTI_CONNEXT_PIP_VERSION" "$pytag" >/dev/null; then
+            PYTHON_ENV_REQUIRED_PYTHON_BIN="$interpreter"
+            PYTHON_ENV_REQUIRED_PYTHON_VERSION="$version"
+            return 0
+        fi
+    done
+
+    if [[ -n "$first_supported_interpreter" ]]; then
+        PYTHON_ENV_REQUIRED_PYTHON_BIN="$first_supported_interpreter"
+        PYTHON_ENV_REQUIRED_PYTHON_VERSION="$first_supported_version"
+        return 0
+    fi
+
+    return 1
+}
+
 # Selects the Python interpreter, venv directory, and rti.connext pip version
-# to use based on the detected NDDSHOME Connext version, so that Connext 7.3.x
-# (Python 3.9) and Connext 7.7.x (Python 3.10) can both be supported without
-# manually reconfiguring or rebuilding a shared venv every time NDDSHOME changes.
+# to use based on the detected NDDSHOME Connext version. Connext 7.3.x keeps
+# its verified Python 3.9 environment, while 7.7.x selects the newest locally
+# installed supported Python version.
 python_env_configure_for_connext_version() {
-    local nddshome="${1:?python_env_configure_for_connext_version requires an NDDSHOME path}"
+    local nddshome="${1-}"
     local full_version
     local version_mm
 
@@ -158,7 +222,11 @@ python_env_configure_for_connext_version() {
         return 0
     fi
 
-    full_version="$(python_env_connext_full_version_from_path "$nddshome" 2>/dev/null || true)"
+    if [[ -n "$nddshome" ]]; then
+        full_version="$(python_env_connext_full_version_from_path "$nddshome" 2>/dev/null || true)"
+    else
+        full_version=""
+    fi
     version_mm="${full_version%.*}"
     PYTHON_ENV_CONNEXT_VERSION="$version_mm"
 
@@ -170,10 +238,7 @@ python_env_configure_for_connext_version() {
             PYTHON_ENV_VENV_DIR="${PYTHON_ENV_REPO_ROOT}/connext_dds_env_7.3"
             ;;
         *)
-            PYTHON_ENV_REQUIRED_PYTHON_BIN="python3.10"
-            PYTHON_ENV_REQUIRED_PYTHON_VERSION="3.10"
             PYTHON_ENV_RTI_CONNEXT_PIP_VERSION="7.7.0"
-            PYTHON_ENV_VENV_DIR="${PYTHON_ENV_REPO_ROOT}/connext_dds_env"
             ;;
     esac
 
@@ -183,6 +248,21 @@ python_env_configure_for_connext_version() {
     # has installed rather than an assumed patch release.
     if [[ -n "$full_version" ]]; then
         PYTHON_ENV_RTI_CONNEXT_PIP_VERSION="$full_version"
+    fi
+
+    if [[ "$version_mm" != "7.3" ]]; then
+        if ! python_env_select_python_for_connext_77; then
+            # Preserve the existing error path when no supported interpreter
+            # is installed; python_env_ensure_venv reports the remediation.
+            PYTHON_ENV_REQUIRED_PYTHON_BIN="python3.10"
+            PYTHON_ENV_REQUIRED_PYTHON_VERSION="3.10"
+        fi
+
+        if [[ "$PYTHON_ENV_REQUIRED_PYTHON_VERSION" == "3.10" ]]; then
+            PYTHON_ENV_VENV_DIR="${PYTHON_ENV_REPO_ROOT}/connext_dds_env"
+        else
+            PYTHON_ENV_VENV_DIR="${PYTHON_ENV_REPO_ROOT}/connext_dds_env_7.7_py${PYTHON_ENV_REQUIRED_PYTHON_VERSION//./}"
+        fi
     fi
     PYTHON_ENV_VENV_PYTHON="${PYTHON_ENV_VENV_DIR}/bin/python"
 }

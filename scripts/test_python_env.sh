@@ -130,6 +130,21 @@ if python_env_ensure_versioned_types >/dev/null 2>&1; then
     fail "type initialization without native tooling should fail"
 fi
 
+temporary_repo="$(mktemp -d)"
+cached_types="$temporary_repo/build/dds/python_types/7.7.0/python_gen"
+mkdir -p "$cached_types"
+touch "$cached_types/__init__.py" "$cached_types/ExampleTypes.py" "$cached_types/Definitions.py"
+printf '%s\n' "7.7.0" > "$cached_types/.rti-connext-version"
+reset_environment
+PYTHON_ENV_REPO_ROOT="$temporary_repo"
+PYTHON_ENV_VENV_PYTHON="$(command -v python3)"
+python_env_detect_rti_python_version() {
+    printf '%s\n' "7.7.0"
+}
+python_env_ensure_versioned_types >/dev/null
+assert_equals "$temporary_repo/build/dds/python_types/7.7.0" "$DDS_PYTHON_GEN_DIR" "matching cached types should be reused without native tooling"
+rm -rf "$temporary_repo"
+
 reset_environment
 temporary_home="$(mktemp -d)"
 if HOME="$temporary_home" python_env_resolve_license_file >/dev/null 2>&1; then

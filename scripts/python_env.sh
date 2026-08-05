@@ -584,8 +584,20 @@ python_env_generated_rtiddsgen_version() {
     fi
 }
 
+python_env_versioned_types_match_runtime() {
+    local versioned_dir="${1:?python_env_versioned_types_match_runtime requires a generated directory}"
+    local runtime_version="${2:?python_env_versioned_types_match_runtime requires a runtime version}"
+    local version_marker="$versioned_dir/.rti-connext-version"
+
+    [[ -f "$versioned_dir/__init__.py" ]] || return 1
+    [[ -f "$versioned_dir/ExampleTypes.py" ]] || return 1
+    [[ -f "$versioned_dir/Definitions.py" ]] || return 1
+    [[ -f "$version_marker" ]] || return 1
+    [[ "$(<"$version_marker")" == "$runtime_version" ]]
+}
+
 python_env_ensure_versioned_types() {
-    python_env_log_step "Regenerating versioned Python type support"
+    python_env_log_step "Ensuring versioned Python type support"
 
     local rti_python_version
     local types_cache_dir
@@ -607,6 +619,14 @@ python_env_ensure_versioned_types() {
     types_cache_dir="$PYTHON_ENV_REPO_ROOT/build/dds/python_types"
     versioned_dir="$types_cache_dir/$rti_python_version/python_gen"
     idl_dir="$PYTHON_ENV_REPO_ROOT/dds/datamodel/idl"
+
+    if python_env_versioned_types_match_runtime "$versioned_dir" "$rti_python_version"; then
+        echo "Reusing Python type support for rti.connext $rti_python_version: $versioned_dir"
+        export DDS_PYTHON_GEN_DIR="$types_cache_dir/$rti_python_version"
+        export PYTHONPATH="$DDS_PYTHON_GEN_DIR${PYTHONPATH:+:$PYTHONPATH}"
+        echo "DDS_PYTHON_GEN_DIR: $DDS_PYTHON_GEN_DIR"
+        return 0
+    fi
 
     echo "Regenerating Python type support for rti.connext $rti_python_version..."
 
@@ -644,6 +664,7 @@ python_env_ensure_versioned_types() {
         return 1
     fi
 
+    printf '%s\n' "$rti_python_version" > "$versioned_dir/.rti-connext-version"
     generated_version="$(python_env_generated_rtiddsgen_version "$versioned_dir/ExampleTypes.py")"
     echo "Generated Python types at: $versioned_dir"
     if [[ -n "$generated_version" ]]; then

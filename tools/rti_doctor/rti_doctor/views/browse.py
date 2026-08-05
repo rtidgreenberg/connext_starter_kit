@@ -12,15 +12,13 @@ from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static
 
 from .. import findings as f, records
-from .report_screen import ReportScreen, SweepScreen
+from .report_screen import ReportScreen
 
 
 class ParticipantListScreen(Screen):
   """Top-level screen: every participant on the domain, with vendor and health."""
 
   BINDINGS = [
-      ("d", "diagnose", "Diagnose"),
-      ("D", "sweep", "Sweep all"),
       ("q", "quit_app", "Quit"),
   ]
 
@@ -59,8 +57,6 @@ class ParticipantListScreen(Screen):
           f"any DDS vendor and diagnoses why communication fails.")
       yield Static("[yellow]Keys:[/yellow] "
                    "[bold green]Enter[/bold green] endpoints  "
-                   "[bold green]d[/bold green] diagnose selected  "
-                   "[bold green]D[/bold green] sweep all writers  "
                    "[bold green]q[/bold green] quit")
     self.blind_spot_panel = Static("", id="blind_spots")
     yield self.blind_spot_panel
@@ -142,16 +138,6 @@ class ParticipantListScreen(Screen):
     if participant is not None:
       await self.app.push_screen(EndpointListScreen(self.session, participant))
 
-  def action_diagnose(self):
-    if self.selected_key is None:
-      return
-    participant = self.session.registry.participants.get(self.selected_key)
-    if participant is not None:
-      self.app.push_screen(ReportScreen(self.session, participant=participant))
-
-  def action_sweep(self):
-    self.app.push_screen(SweepScreen(self.session))
-
   def action_quit_app(self):
     self.app.exit()
 
@@ -162,7 +148,8 @@ class EndpointListScreen(Screen):
   BINDINGS = [
       ("b", "back", "Back"),
       ("escape", "back", "Back"),
-      ("d", "diagnose", "Diagnose"),
+      ("d", "debug", "Debug writer"),
+      ("o", "open_report", "Open report"),
       ("q", "quit_app", "Quit"),
   ]
 
@@ -183,7 +170,9 @@ class EndpointListScreen(Screen):
     yield Static(
         f"[bold]{self.participant.name or '(unnamed)'}[/bold] "
         f"({self.participant.vendor_name})  -  "
-        "[bold green]Enter[/bold green]/[bold green]d[/bold green] diagnose  "
+        "[bold green]Enter[/bold green] details  "
+        "[bold green]d[/bold green] debug writer  "
+        "[bold green]o[/bold green] open report  "
         "[bold green]b[/bold green] back",
         id="directions")
     with Container(id="endpoint_container"):
@@ -212,13 +201,20 @@ class EndpointListScreen(Screen):
 
   async def on_data_table_row_selected(self, event):
     self.selected_key = event.row_key.value if event.row_key else None
-    self.action_diagnose()
+    self.action_open_report()
 
-  def action_diagnose(self):
+  def action_open_report(self):
     if self.selected_key is None:
       return
     endpoint = self.session.registry.endpoints.get(self.selected_key)
     if endpoint is not None:
+      self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=False))
+
+  def action_debug(self):
+    if self.selected_key is None:
+      return
+    endpoint = self.session.registry.endpoints.get(self.selected_key)
+    if endpoint is not None and endpoint.is_writer:
       self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=True))
 
   def action_back(self):

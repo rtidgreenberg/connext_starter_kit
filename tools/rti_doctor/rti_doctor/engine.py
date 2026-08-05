@@ -6,7 +6,7 @@ a report that differs depending on how it was invoked would be worthless.
 
 import logging
 
-from . import checks, probe as probe_mod, report, topology
+from . import checks, probe as probe_mod, report, system_scan, topology
 from .checks import CheckContext
 
 
@@ -50,6 +50,20 @@ class Session:
     """Blind-spot audit only: what might we not be seeing at all?"""
     context = self._context()
     return checks.run_checks(context, checks.blind_spot_checks())
+
+  def system_scan(self, captured_at=None):
+    """Passive issue/topology snapshot; never creates a diagnostic reader."""
+    self.registry.expire_type_waits()
+    return system_scan.scan(
+        registry=self.registry,
+        own_qos=self.own_qos,
+        type_lookup_settings=self.type_lookup_settings,
+        domain_id=self.domain_id,
+        active_domains=self.active_domains,
+        domain_scan_ran=self.domain_scan_ran,
+        type_wait=self.type_wait,
+        captured_at=captured_at,
+    )
 
   def diagnose_participant(self, participant_record):
     """Rungs 0-3 for a participant. No probing, so a keypress stays cheap."""

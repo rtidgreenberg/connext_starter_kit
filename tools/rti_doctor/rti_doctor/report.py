@@ -53,6 +53,7 @@ def _wrap(text, indent=15, width=WIDTH):
 
 def _labelled(label, text, indent=15):
   """"  Label   wrapped text..." with the label on the first line."""
+  indent = max(indent, len(label) + 3)
   block = _wrap(text, indent=indent)
   if not block:
     return []
@@ -66,6 +67,65 @@ def default_filename(domain_id, scope, timestamp=None):
   stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(timestamp or time.time()))
   safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(scope))
   return f"rti_doctor_{domain_id}_{safe}_{stamp}.txt"
+
+
+def system_filename(domain_id, timestamp=None):
+  """Ticket-friendly filename for a saved passive system scan."""
+  stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(timestamp or time.time()))
+  return f"rti_doctor_system_{domain_id}_{stamp}.txt"
+
+
+def render_system_text(snapshot, domain_id, environment=None):
+  """Render an immutable system-scan snapshot without refreshing it."""
+  environment = environment or compat.environment_info()
+  stamp = time.strftime("%Y-%m-%d %H:%M:%S %z", time.localtime(snapshot.captured_at))
+  topology_data = snapshot.topology
+  counts = {severity: 0 for severity in f.Severity}
+  for issue in snapshot.issues:
+    counts[issue.severity] = counts.get(issue.severity, 0) + 1
+  lines = [RULE, "RTI DOCTOR SYSTEM REPORT", RULE,
+           _kv("Generated", stamp),
+           _kv("Tool", "rti_doctor (tools/rti_doctor)"),
+           _kv("Command", environment.get("argv", "unknown")),
+           _kv("Host", f"{environment.get('host')}  {environment.get('os')}  "
+                       f"{environment.get('machine')}"),
+           _kv("Connext", f"{environment.get('connext')}  "
+                          f"(NDDSHOME={environment.get('nddshome')})"),
+           _kv("Python", environment.get("python")),
+           _kv("Domain", str(domain_id)), ""]
+  lines += render_topology_text(topology_data)
+  lines += _section("ISSUE SUMMARY")
+  lines += [_kv("Errors", str(counts[f.Severity.ERROR])),
+            _kv("Warnings", str(counts[f.Severity.WARN])),
+            _kv("Notes", str(counts[f.Severity.INFO])), ""]
+  lines += _section("ISSUES")
+  if not snapshot.issues:
+    lines += ["No active issues in this snapshot.", ""]
+  for number, issue in enumerate(snapshot.issues, 1):
+    lines.append(f"[{number}] [{issue.severity.label}] {', '.join(issue.finding_ids)}")
+    lines += _labelled("Title", issue.title)
+    lines += _labelled("Topic", issue.topic_name or "(domain-wide)")
+    lines += _labelled("Scope", issue.scope)
+    if issue.writer_keys:
+      lines += _labelled("Writers", ", ".join(issue.writer_keys))
+    if issue.reader_keys:
+      lines += _labelled("Readers", ", ".join(issue.reader_keys))
+    if issue.participant_keys:
+      lines += _labelled("Participants", ", ".join(issue.participant_keys))
+    lines += _labelled("Observed", issue.observed)
+    lines += _labelled("Root cause", issue.root_cause)
+    lines += _labelled("Recommendation", issue.recommendation)
+    lines.append("")
+  if snapshot.suppressed_findings:
+    lines += _section("SUPPRESSED FINDINGS")
+    for finding in snapshot.suppressed_findings:
+      lines.append(f"{finding.id} (explained by {finding.suppressed_by})")
+    lines.append("")
+  lines += _section("SNAPSHOT LIMITATIONS")
+  lines += ["This report is an observed passive snapshot, not proof of complete",
+            "historical topology or end-to-end data flow. Targeted writer debug",
+            "results are intentionally not run or refreshed while saving this report.", ""]
+  return "\n".join(lines) + "\n"
 
 
 class ReportData:

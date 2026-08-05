@@ -232,8 +232,10 @@ class TestTui(LiveFixtureTest):
     import asyncio
 
     from rti_doctor.app import RTIDoctorApp
-    from rti_doctor.views.browse import EndpointListScreen, ParticipantListScreen
-    from rti_doctor.views.report_screen import ReportScreen, SweepScreen
+    from rti_doctor.views.browse import EndpointListScreen
+    from rti_doctor.views.system_overview import (IssueListScreen,
+                            SystemOverviewScreen,
+                            TopologyHealthScreen)
 
     app = RTIDoctorApp(self.session, interval=1.0)
     seen = []
@@ -242,29 +244,25 @@ class TestTui(LiveFixtureTest):
       async with app.run_test() as pilot:
         await pilot.pause(0.8)
         seen.append(type(app.screen))
-        await pilot.press("enter")
+        await pilot.press("1")
         await pilot.pause(0.5)
         seen.append(type(app.screen))
         await pilot.press("b")
         await pilot.pause(0.3)
         seen.append(type(app.screen))
-        await pilot.press("d")
-        await pilot.pause(1.5)
+        await pilot.press("2")
+        await pilot.pause(0.5)
         seen.append(type(app.screen))
-        await pilot.press("b")
+        await pilot.press("enter")
         await pilot.pause(0.3)
-        await pilot.press("D")
-        await pilot.pause(8.0)
         seen.append(type(app.screen))
-        self.sweep_rows = getattr(app.screen, "rows", None)
 
     asyncio.run(drive())
     self.assertEqual(
         seen,
-        [ParticipantListScreen, EndpointListScreen, ParticipantListScreen,
-         ReportScreen, SweepScreen],
+        [SystemOverviewScreen, IssueListScreen, SystemOverviewScreen,
+         TopologyHealthScreen, EndpointListScreen],
         f"navigation went off course: {[c.__name__ for c in seen]}")
-    self.assertTrue(self.sweep_rows, "sweep produced no rows")
 
 
 if __name__ == "__main__":

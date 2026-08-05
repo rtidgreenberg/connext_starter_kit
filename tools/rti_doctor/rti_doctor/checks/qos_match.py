@@ -303,7 +303,11 @@ def check_rxo_pairs(context):
           title=f"No observable QoS mismatch: {writer_label} -> {reader_label}",
           observed=("No requested/offered incompatibility was observed in the "
                     "discovery QoS available for this pair."),
-          evidence={"writer": writer_label, "reader": reader_label},
+          evidence={"writer": writer_label, "reader": reader_label,
+              "writer_key": writer.key, "reader_key": reader.key,
+              "writer_participant_key": writer.participant_key,
+              "reader_participant_key": reader.participant_key,
+              "topic_name": writer.topic_name},
       ))
       continue
 
@@ -326,6 +330,10 @@ def check_rxo_pairs(context):
         remedy=(f"Change {policies} on one side. The reader is the constrained "
                 f"side - it must request no more than the writer offers."),
         evidence={"writer": writer_label, "reader": reader_label,
+            "writer_key": writer.key, "reader_key": reader.key,
+            "writer_participant_key": writer.participant_key,
+            "reader_participant_key": reader.participant_key,
+            "topic_name": writer.topic_name,
                   "mismatches": mismatches},
     ))
   return out

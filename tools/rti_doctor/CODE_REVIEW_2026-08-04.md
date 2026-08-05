@@ -760,12 +760,23 @@ still rendered.
 **Confirmed (binding-dependent).** Anchor:
 [blind_spots.py:70-77](rti_doctor/checks/blind_spots.py#L70-L77)
 
+> **Correction (2026-08-05).** The original text of this finding claimed "the
+> constant is `SDP2`, and `"SPDP2" in "SDP2"` is False". That is **wrong**.
+> `__init__.pyi:8446-8451` defines `NONE`, `SDP`, `SDP2`, `SEDP`, `SPDP` **and**
+> `SPDP2` — both constants exist. Disregard that sub-claim. The confidence on
+> the remainder is also lower than originally stated; see below.
+
 `discovery_config.builtin_discovery_plugins` is a
-`DiscoveryConfigBuiltinPluginKindMask` — a bitset wrapper whose `__str__` is
-documented as "Convert mask to string" (bit digits), not a name list.
-`"SPDP2" not in str(plugins).upper()` therefore returns early on every real
-participant. Even if the mask rendered names, the constant is `SDP2`, and
-`"SPDP2" in "SDP2"` is `False`.
+`DiscoveryConfigBuiltinPluginKindMask` (`__init__.pyi:7643`) — a bitset wrapper
+exposing `__and__`, `__contains__`, `test(pos)`, `count()`, `size()`, whose
+`__str__` is documented only as "Convert mask to string". If that renders
+`std::bitset::to_string()` binary digits, as the type's shape strongly suggests,
+then `"SPDP2" not in str(plugins).upper()` returns early on every real
+participant and the check cannot fire.
+
+**Confidence: ~80%, not proof.** `__str__`'s format is not documented and could
+not be established without executing the binding. What *is* certain is that the
+check is testing a rendering contract the binding never promises.
 
 **Failure scenario.** A Connext participant running SPDP2 against Fast DDS/Cyclone
 peers. `blind.spdp2` never fires, so the ERROR that would explain the empty table
@@ -844,11 +855,13 @@ Anchors: [report_screen.py:74](rti_doctor/views/report_screen.py#L74),
 
 Three defects from one root cause (Textual's worker API is bypassed):
 
-1. **Detached-widget exception escapes.** Popping the ReportScreen with `b` does
-   not cancel `_run_probe`. Ten seconds later it calls `self.body.update(...)` on
-   a removed widget; that is inside the `try`, but the handler then calls
-   `self.status.update(f"Probe failed: {e}")` on the same detached widget
-   **outside** any guard, so the exception escapes into the event loop.
+1. ~~**Detached-widget exception escapes.**~~ **Withdrawn (2026-08-05).** Verified
+   against the installed Textual 8.2.8: `Widget.refresh` short-circuits on an
+   unmounted widget (`textual/widget.py:4363-4366`), so writing to a detached
+   `Static` does not raise. The residual defect at this site is different and
+   real: popping the ReportScreen with `b` does not cancel `_run_probe`, so a
+   full `--probe-timeout` probe keeps creating DDS entities against the peer for
+   a screen the user has left, and discards the result.
 2. **Duplicate Topic → spurious ERROR.** Two ReportScreens on the same topic (or a
    ReportScreen opened while a sweep is probing that topic) both execute
    `dds.DynamicData.Topic(participant, endpoint.topic_name, endpoint.type)`. The
@@ -1193,6 +1206,91 @@ that `internal.check_failed` is produced or surfaced. Consider WARN, and add a t
 with a deliberately raising check.
 
 ---
+
+## Re-verification, 2026-08-05
+
+Every open finding was re-checked against the then-current source after the
+first fixes landed and after unrelated concurrent feature work touched
+`wire.py`, `report.py`, `engine.py`, `__main__.py` and `discovery.py`.
+
+**The wire batch is unchanged.** `git diff` confirms `wire.py` gained only
+`DiscoveryObservation`, `parse_discovery_fields`, `summarize_discovery` and
+`inspect_discovery_pcap`; every line H3/H6/M2/M3/M9/L5 targets is byte-identical
+to what was reviewed. Only line numbers moved. Earlier caution about these being
+stale was unnecessary.
+
+| Finding | Re-verified | Note |
+|---|---|---|
+| H3, H6, M9, L5 | CONFIRMED | Unchanged. |
+| M2, M3 | CONFIRMED structurally | The code defect is certain; the *magnitude* depends on tshark runtime behaviour that cannot be established statically. Worth fixing on the structural argument alone. |
+| H5 | CONFIRMED, worsened | The correlation fix added two more call sites inside the same unguarded `try`. |
+| H7 | CONFIRMED, premise now proven | Textual 8.2.8 `app.py:2346-2350` does call `asyncio.run`, so the executor-shutdown join is real rather than assumed. |
+| M11 | CONFIRMED | All three parts. |
+| M15 | CHANGED | Sub-claim 1 withdrawn — see the finding. Sub-claims 2 and 3 stand. |
+| M7, M13, M14, L1, L2, L3, L4 | CONFIRMED | M13 verified by direct enumeration of the stub class body; high confidence. |
+| M8 | CHANGED | Truncation is now disclosed in the finding's prose and `evidence`, but `WalkReport.verdict` still ignores `self.truncated`, so the headline verdict is still `payload FULL` at `Severity.OK`. |
+| M12 | PARTIALLY CONFIRMED | One sub-claim was **wrong** — see the correction in the finding. Confidence on the remainder is ~80%, not proof. |
+
+`match.incompatible_qos_topic` needs no registration anywhere: this codebase has
+no central finding-id registry or renderer dispatch table, ids are consumed
+polymorphically, and its deliberate absence from `SUPPRESSION_RULES` is the
+point. A README line distinguishing it from `match.incompatible_qos` would be a
+readability improvement, not a correctness one.
+
+### Regressions found in this review's own fixes — fixed in `d5d457d`
+
+The H2 correlation fix acquired the defect class it was written to remove. All
+three were confirmed in source before being corrected:
+
+- An **unreadable** matched publication was counted as "some other writer". The
+  bail-out only fired when *every* publication was unresolvable, so a mixed
+  result reported `correlated=True` with an empty target set — which the code
+  treats as proof the writer did not match. The unreadable one could have *been*
+  the selected writer. Result: `match.none` ERROR and exit 1 on a healthy pair,
+  under a scope line claiming publication-handle correlation.
+- `matched_other_count` was a running max but read as present tense, so a
+  neighbour matching for one poll iteration and departing permanently downgraded
+  a genuine ERROR to the topic-level WARN — exit 0 where CI needed 1 — and
+  permanently stopped crediting the target's own samples.
+- `samples_other` was written and never read while `samples_taken` changed
+  meaning, so `check_silent` compared a writer-scoped count against the
+  topic-wide `received_sample_count` and sent users to cache-drop findings that
+  did not exist.
+
+### New findings in the concurrent feature work
+
+Not part of the original review; recorded here because they were found while
+re-verifying. All are in work that was uncommitted at the time.
+
+- **N1 (High) — `NameError` in two headless entry points.** `topology` is used at
+  `__main__.py:378` and `:419` but the only import is function-local at `:306`,
+  inside `run_headless_topic`, where it is unused. A function-local `import`
+  binds a local, never a module global, so `rti_doctor --all` and the no-TTY
+  headless path crash *after* the full sweep completes. Fix: add `topology` to
+  the module-scope import at `__main__.py:9`.
+- **N2 (Medium)** — `inspect_discovery_pcap` repeats M9 exactly: no `timeout=`,
+  `capture_output=True`, and a `-Y rtps` filter that admits far more frames than
+  `inspect_pcap`'s encap-kind filter.
+- **N3 (Medium)** — `-E occurrence=f` across seven *per-submessage* fields takes
+  the first `wrEntityId` and the first `rdEntityId` found anywhere in a frame,
+  independently. Coalesced submessages therefore fabricate `(prefix, wr, rd)`
+  tuples that never appeared on the wire, and a batched SEDP message contributes
+  exactly one `topicName`, under-reporting topics.
+- **N4 (Medium)** — `summarize_discovery` labels its output participants and
+  endpoint observations, but `-Y rtps` admits ordinary user DATA/HEARTBEAT/ACKNACK,
+  so `participants` counts senders of any RTPS packet and one logical writer
+  yields several tuples. Same absence-of-scope problem the review flags elsewhere.
+- **N5 (Low)** — the discovery path returns `pcap_source` while every renderer
+  reads `source`; latent only because `inspect_discovery_pcap` has no caller.
+- **N6 (Low)** — `topology.snapshot` merges scanned domains into `domain_ids`
+  and prints them directly above counts drawn from a single-domain registry.
+- **T3 (Medium)** — `registry.writers()`, `readers()`, `endpoints_for()`,
+  `endpoints_on_topic()` and `topic_names()` comprehend over live `dict.values()`
+  rather than copies, contradicting `DiscoveryRegistry`'s docstring claim that
+  every consumer snapshots. `_drain_endpoints` mutates the same dict from Connext
+  receive threads, so a concurrent update raises `RuntimeError: dictionary
+  changed size during iteration`. Pre-existing, but `topology.snapshot` now walks
+  the endpoint dict twice per writer per sweep, greatly widening the window.
 
 ## Recommended order of work
 

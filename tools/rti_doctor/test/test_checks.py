@@ -13,7 +13,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from rti_doctor import discovery, findings as f, records  # noqa: E402
 from rti_doctor.checks import CheckContext, blind_spots, static_discovery  # noqa: E402
-from rti_doctor.checks import probe_payload, qos_match, type_compat  # noqa: E402
+from rti_doctor.checks import probe_match, probe_payload  # noqa: E402
+from rti_doctor.checks import qos_match, type_compat  # noqa: E402
 
 
 # --- Fakes -------------------------------------------------------------------
@@ -706,3 +707,35 @@ class TestRxO(unittest.TestCase):
     result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
     self.assertEqual(ids(result), ["qos.no_counterpart"])
     self.assertEqual(result[0].severity, f.Severity.INFO)
+
+
+class TestProbeMatchPolicyRules(unittest.TestCase):
+  """Every RXO_RULES key must resolve to its own rule.
+
+  _policy_rule matches on substring because Connext decorates last_policy with a
+  version-dependent prefix or suffix. Substring matching means keys can overlap:
+  PRESENTATION is contained in DATAREPRESENTATION, and first-match order
+  explained a data representation mismatch with the presentation rule.
+  """
+
+  def test_each_key_resolves_to_its_own_rule(self):
+    for name, rule in probe_match.RXO_RULES.items():
+      with self.subTest(policy=name):
+        self.assertEqual(probe_match._policy_rule(name), rule)
+
+  def test_decorated_policy_names_still_resolve(self):
+    for text, expected in (
+        ("DATA_REPRESENTATION", "DATAREPRESENTATION"),
+        ("QosPolicyId.DATA_REPRESENTATION_QOS_POLICY_ID", "DATAREPRESENTATION"),
+        ("data representation", "DATAREPRESENTATION"),
+        ("PRESENTATION", "PRESENTATION"),
+        ("QosPolicyId.PRESENTATION_QOS_POLICY_ID", "PRESENTATION"),
+        ("DESTINATION_ORDER", "DESTINATIONORDER"),
+        ("LATENCY_BUDGET", "LATENCYBUDGET"),
+    ):
+      with self.subTest(policy_text=text):
+        self.assertEqual(probe_match._policy_rule(text),
+                         probe_match.RXO_RULES[expected])
+
+  def test_unknown_policy_has_no_rule(self):
+    self.assertIsNone(probe_match._policy_rule("SOME_FUTURE_POLICY"))

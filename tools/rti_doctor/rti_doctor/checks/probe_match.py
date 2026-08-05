@@ -5,7 +5,7 @@ from ..findings import RUNG_MATCH, Finding, Severity
 
 #: RxO rules in plain English, keyed by the substring Connext reports in
 #: last_policy. Stated as the rule the reader must satisfy, since the reader is
-#: the side that drives matching.
+#: the side that drives matching. Keys may overlap - see _policy_rule.
 RXO_RULES = {
     "RELIABILITY": ("A RELIABLE reader cannot match a BEST_EFFORT writer. The "
                     "reader may request BEST_EFFORT from a RELIABLE writer, but "
@@ -35,11 +35,18 @@ RXO_RULES = {
 
 
 def _policy_rule(policy_text):
+  """The rule for a policy name, matching the most specific key.
+
+  Connext reports last_policy with a version-dependent prefix or suffix, so this
+  matches on substring rather than equality. Longest match wins: PRESENTATION is
+  a substring of DATAREPRESENTATION, and first-match would explain a data
+  representation mismatch with the presentation rule.
+  """
   key = str(policy_text).upper().replace("_", "").replace(" ", "")
-  for name, rule in RXO_RULES.items():
-    if name in key:
-      return rule
-  return None
+  matches = [name for name in RXO_RULES if name in key]
+  if not matches:
+    return None
+  return RXO_RULES[max(matches, key=len)]
 
 
 def check_probe_error(context):

@@ -119,11 +119,11 @@ RTI_PYTHON_WHEEL=/opt/rti-wheels/rti_connext_activated-<version>-cp<python>-<pla
 ```
 
 The activated-wheel path is not license-free; use and redistribution remain
-subject to the applicable RTI license terms. Python examples generate their
-IDL type support during initialization, so they need a native Connext
-installation with `rtiddsgen`. Each initialization removes prior generated
-Python types and regenerates them under `build/`; generated files are never
-committed.
+subject to the applicable RTI license terms. Python examples generate IDL type
+support under `build/` only when it is missing or was generated for a different
+`rti.connext` runtime version. Generated files are never committed. The first
+generation requires a native Connext installation with `rtiddsgen`; later
+launches reuse the matching versioned output.
 
 ### Installation
 
@@ -298,13 +298,12 @@ pip install -r requirements.txt
 ```
 
 ### Generated Python Modules
-The launcher or `install.sh` generates versioned Python DDS types at
-initialization time:
+The launcher or `install.sh` stores versioned Python DDS types at:
 
 - `build/dds/python_types/<rti.connext version>/python_gen/`
 
 This directory is ignored by Git. `DDS_PYTHON_GEN_DIR` points applications to
-the matching generated package.
+the generated package matching the installed `rti.connext` runtime.
 
 ## Running Applications
 

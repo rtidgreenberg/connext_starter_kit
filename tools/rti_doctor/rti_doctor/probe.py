@@ -61,6 +61,16 @@ class ProbeResult:
     self.samples_taken = 0
     self.walk = None
     self.sample_repr = ""
+    # Writer-identity correlation. The probe's reader is created on a TOPIC, so
+    # subscription_matched, requested_incompatible_qos and every sample can
+    # belong to a different writer publishing the same topic. matched_count and
+    # samples_taken above are scoped to the selected writer whenever
+    # `correlated` is True; when it is False the binding could not report
+    # matched publications and they fall back to topic-wide counts, which no
+    # finding may attribute to the selected writer.
+    self.correlated = False
+    self.matched_other_count = 0
+    self.samples_other = 0
     # Status snapshots, taken after the probe window.
     self.subscription_matched = None
     self.requested_incompatible_qos = None
@@ -209,6 +219,75 @@ def build_subscriber(participant, endpoint):
   return subscriber, applied
 
 
+def _publication_key(reader, handle):
+  """Builtin key text of one matched publication, or None when unreadable.
+
+  Formatted exactly as discovery._endpoint_from_data formats EndpointRecord.key,
+  so the two can be compared directly.
+  """
+  getter = compat.get(reader, "matched_publication_data", None)
+  if not callable(getter):
+    return None
+  try:
+    data = getter(handle)
+  except Exception:
+    return None
+  value = compat.get(compat.get(data, "key", None), "value", None)
+  return None if value is None else str(value)
+
+
+def _correlate(reader, endpoint, result):
+  """Instance handles among the reader's matched publications that ARE `endpoint`.
+
+  Returns None when the selected writer cannot be identified - the binding does
+  not expose matched publications, or none of their keys could be read. A None
+  return is not "no match": it means observations stay topic-scoped and no
+  finding may claim they describe the selected writer.
+
+  An empty set IS a conclusion: the reader matched, or failed to match, and the
+  selected writer was not among the publications it matched.
+  """
+  handles = compat.get(reader, "matched_publications", None)
+  if handles is None:
+    return None
+  try:
+    handles = list(handles)
+  except TypeError:
+    return None
+
+  target, others, unreadable = set(), 0, 0
+  for handle in handles:
+    key = _publication_key(reader, handle)
+    if key is None:
+      unreadable += 1
+    elif key == endpoint.key:
+      target.add(str(handle))
+    else:
+      others += 1
+
+  if handles and not target and not others:
+    return None  # nothing resolvable; do not pretend to have correlated
+
+  result.correlated = True
+  result.matched_other_count = max(result.matched_other_count, others + unreadable)
+  return target
+
+
+def _sample_is_target(sample, target_handles, exclusive):
+  """Is this sample from the selected writer?
+
+  When the reader matched only the selected writer, every sample on the topic is
+  necessarily its own, so an unreadable publication_handle is safe to attribute.
+  When other writers are matched too it is not, and the sample is counted as
+  another writer's rather than credited to the target - an unattributable sample
+  must never become evidence that the selected writer is delivering data.
+  """
+  handle = compat.get(sample.info, "publication_handle", None)
+  if handle is None:
+    return exclusive
+  return str(handle) in target_handles
+
+
 def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1):
   """Create a reader for `endpoint`, observe it for `timeout`, then tear down.
 
@@ -243,12 +322,21 @@ def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1):
 
     deadline = start + timeout
     while time.monotonic() < deadline:
-      matched = compat.get_int(reader.subscription_matched_status, "current_count")
-      if matched:
-        result.matched_count = max(result.matched_count, matched)
+      target_handles = _correlate(reader, endpoint, result)
+      if target_handles is None:
+        matched = compat.get_int(reader.subscription_matched_status, "current_count")
+        if matched:
+          result.matched_count = max(result.matched_count, matched)
+      else:
+        result.matched_count = max(result.matched_count, len(target_handles))
+      exclusive = result.matched_other_count == 0
 
       for sample in reader.take():
         if not sample.info.valid:
+          continue
+        if target_handles is not None and not _sample_is_target(
+            sample, target_handles, exclusive):
+          result.samples_other += 1
           continue
         result.samples_taken += 1
         if result.walk is None:
@@ -261,7 +349,7 @@ def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1):
         break
       time.sleep(poll)
 
-    _snapshot_statuses(reader, topic, result)
+    _snapshot_statuses(reader, topic, endpoint, result)
   except Exception as e:
     result.create_error = f"{type(e).__name__}: {e}"
     logging.error(f"[probe] {endpoint.topic_name}: {e}")
@@ -272,12 +360,18 @@ def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1):
   return result
 
 
-def _snapshot_statuses(reader, topic, result):
+def _snapshot_statuses(reader, topic, endpoint, result):
   """Authoritative post-window status read. Missing counters stay None."""
   result.subscription_matched = reader.subscription_matched_status
-  matched = compat.get_int(result.subscription_matched, "current_count")
-  if matched is not None:
-    result.matched_count = max(result.matched_count, matched)
+  # subscription_matched is topic-wide. Only fall back to it when the selected
+  # writer could not be identified among the matched publications.
+  target_handles = _correlate(reader, endpoint, result)
+  if target_handles is None:
+    matched = compat.get_int(result.subscription_matched, "current_count")
+    if matched is not None:
+      result.matched_count = max(result.matched_count, matched)
+  else:
+    result.matched_count = max(result.matched_count, len(target_handles))
 
   result.requested_incompatible_qos = compat.get(
       reader, "requested_incompatible_qos_status", None)

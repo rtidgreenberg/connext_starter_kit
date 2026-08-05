@@ -57,6 +57,7 @@ re-checked against the target Connext version before the fix is written.
 
 | Finding | Status | Resolution |
 |---|---|---|
+| H2 | **Fixed** | The probe now resolves the selected writer's instance handle from `reader.matched_publications` via `matched_publication_data(...).key`, scopes `matched_count` and `samples_taken` to it, and filters walked samples on `sample.info.publication_handle`. When the binding cannot report matched publications, or no key resolves, `correlated` stays False and observations remain topic-scoped — every rung-4 finding now states its scope rather than implying writer identity. An unattributable `requested_incompatible_qos` becomes `match.incompatible_qos_topic` at WARN, a distinct id deliberately absent from `SUPPRESSION_RULES` so a maybe cannot suppress `data.silent` or `match.none`. |
 | H8 | **Fixed** | `_policy_rule` selects the longest matching key instead of the first. Substring matching is retained deliberately — Connext decorates `last_policy` with version-dependent affixes — so longest-match also protects against the next overlapping key. |
 | H1 | **Fixed** | Added `_enum_name`; the enum attribute is now a parameter, and PRESENTATION reads `("access_scope", "kind")` — the `kind` fallback keeps it binding-agnostic. `HIGHEST_OFFERED` removed from `PRESENTATION_ORDER` so `_ordered_rule` declines to evaluate it. Mismatch label is now `PRESENTATION access_scope`. |
 | M1 | **Fixed** | Loop variable renamed to `policy_name`; the `name` parameter now reaches `qos.participant_name.name`. |
@@ -70,18 +71,20 @@ PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python -m unittest \
   tools.rti_doctor.test.test_checks tools.rti_doctor.test.test_wire \
   tools.rti_doctor.test.test_findings
 
-Ran 84 tests in 0.031s
+Ran 99 tests in 0.060s
 OK
 ```
 
-The new tests were verified to be load-bearing, not merely green: reverting all
-three production fixes (first-match `_policy_rule`, `attributes=("kind",)` for
+The new tests were verified to be load-bearing, not merely green. Reverting the
+static-QoS fixes (first-match `_policy_rule`, `attributes=("kind",)` for
 Presentation, and the DATA_REPRESENTATION set intersection) turns
 `test_checks.py` red with 7 failures, including
 `test_broader_reader_access_scope_is_incompatible` and
 `test_reader_must_accept_the_writers_first_representation` reporting
-`qos.compatible` where `qos.rxo_mismatch` is required. The fixes were then
-restored and the suite re-run green.
+`qos.compatible` where `qos.rxo_mismatch` is required. Reverting H2 — forcing
+`_correlate` to return None and `attributable` to True — turns it red with 6
+failures spanning both halves of the fix, the correlation core and the finding
+severity. The fixes were restored and the suite re-run green in each case.
 
 No DDS, network, docker or tshark was involved; the three suites above are the
 deterministic tier. Nothing else was run or built.

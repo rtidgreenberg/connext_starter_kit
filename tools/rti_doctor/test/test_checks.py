@@ -11,7 +11,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rti_doctor import discovery, findings as f, records  # noqa: E402
+from rti_doctor import discovery, findings as f, probe, records  # noqa: E402
 from rti_doctor.checks import CheckContext, blind_spots, static_discovery  # noqa: E402
 from rti_doctor.checks import probe_match, probe_payload  # noqa: E402
 from rti_doctor.checks import qos_match, type_compat  # noqa: E402
@@ -422,6 +422,11 @@ class FakeProbe:
     self.applied_reader_qos = {}
     self.elapsed = 1.0
     self.listener_events = []
+    # Default to the well-correlated single-writer case: the probe identified
+    # the selected writer and it was the only one the reader matched.
+    self.correlated = True
+    self.matched_other_count = 0
+    self.samples_other = 0
     self.__dict__.update(kwargs)
 
   @property
@@ -739,3 +744,159 @@ class TestProbeMatchPolicyRules(unittest.TestCase):
 
   def test_unknown_policy_has_no_rule(self):
     self.assertIsNone(probe_match._policy_rule("SOME_FUTURE_POLICY"))
+
+
+# --- Probe writer-identity correlation (H2) ----------------------------------
+
+class FakeMatchedPublicationReader:
+  """A reader that can report which publications it matched.
+
+  Maps an instance handle to the builtin key of the writer behind it. A None key
+  stands for a publication whose data could not be read.
+  """
+
+  def __init__(self, keys_by_handle):
+    self.matched_publications = list(keys_by_handle)
+    self._keys = keys_by_handle
+
+  def matched_publication_data(self, handle):
+    value = self._keys[handle]
+    if value is None:
+      raise RuntimeError("matched_publication_data unavailable")
+    class Key:
+      pass
+    class Data:
+      pass
+    key, data = Key(), Data()
+    key.value = value
+    data.key = key
+    return data
+
+
+class FakeUncorrelatableReader:
+  """A binding that does not expose matched publications at all."""
+
+
+class FakeSampleInfo:
+  def __init__(self, publication_handle=None):
+    if publication_handle is not None:
+      self.publication_handle = publication_handle
+
+
+class FakeSample:
+  def __init__(self, publication_handle=None):
+    self.info = FakeSampleInfo(publication_handle)
+
+
+class TestProbeCorrelation(unittest.TestCase):
+  """The probe's reader is topic-scoped; findings must not claim otherwise."""
+
+  def _correlate(self, reader, key="w1"):
+    result = probe.ProbeResult()
+    endpoint = endpoint_record(key=key, kind="Writer")
+    return probe._correlate(reader, endpoint, result), result
+
+  def test_selected_writer_is_identified_among_its_peers(self):
+    reader = FakeMatchedPublicationReader({"h1": "w1", "h2": "w2", "h3": "w3"})
+    target, result = self._correlate(reader)
+    self.assertEqual(target, {"h1"})
+    self.assertTrue(result.correlated)
+    self.assertEqual(result.matched_other_count, 2)
+
+  def test_sole_matched_writer_reports_no_others(self):
+    reader = FakeMatchedPublicationReader({"h1": "w1"})
+    target, result = self._correlate(reader)
+    self.assertEqual(target, {"h1"})
+    self.assertEqual(result.matched_other_count, 0)
+
+  def test_matching_only_another_writer_is_a_conclusion_not_a_failure(self):
+    """An empty target set means the selected writer did NOT match."""
+    reader = FakeMatchedPublicationReader({"h2": "w2"})
+    target, result = self._correlate(reader)
+    self.assertEqual(target, set())
+    self.assertTrue(result.correlated)
+    self.assertEqual(result.matched_other_count, 1)
+
+  def test_matching_nothing_is_correlated(self):
+    target, result = self._correlate(FakeMatchedPublicationReader({}))
+    self.assertEqual(target, set())
+    self.assertTrue(result.correlated)
+
+  def test_binding_without_matched_publications_is_not_correlated(self):
+    target, result = self._correlate(FakeUncorrelatableReader())
+    self.assertIsNone(target)
+    self.assertFalse(result.correlated)
+
+  def test_unreadable_publication_data_is_not_correlated(self):
+    """Never claim correlation when no matched publication could be resolved."""
+    reader = FakeMatchedPublicationReader({"h1": None, "h2": None})
+    target, result = self._correlate(reader)
+    self.assertIsNone(target)
+    self.assertFalse(result.correlated)
+
+  def test_sample_from_the_target_handle_is_attributed(self):
+    self.assertTrue(probe._sample_is_target(FakeSample("h1"), {"h1"}, False))
+
+  def test_sample_from_another_writer_is_not_attributed(self):
+    self.assertFalse(probe._sample_is_target(FakeSample("h2"), {"h1"}, False))
+
+  def test_unattributable_sample_counts_only_when_target_is_exclusive(self):
+    """With other writers matched, an unreadable handle must not be credited."""
+    self.assertTrue(probe._sample_is_target(FakeSample(None), {"h1"}, True))
+    self.assertFalse(probe._sample_is_target(FakeSample(None), {"h1"}, False))
+
+
+class TestProbeMatchScoping(unittest.TestCase):
+  """Rung-4 findings must state, and respect, what they actually observed."""
+
+  @staticmethod
+  def _status(policy):
+    class Status:
+      total_count = 1
+      last_policy = policy
+      policies = ()
+    return Status()
+
+  def test_incompatible_qos_is_an_error_only_when_attributable(self):
+    probe_result = FakeProbe(requested_incompatible_qos=self._status("DATA_REPRESENTATION"),
+                             correlated=True, matched_other_count=0)
+    result = probe_match.check_incompatible_qos(CheckContext(probe=probe_result))
+    self.assertEqual(ids(result), ["match.incompatible_qos"])
+    self.assertEqual(result[0].severity, f.Severity.ERROR)
+
+  def test_incompatible_qos_with_other_writers_is_a_topic_warning(self):
+    """The status is reader-side and does not name the writer that caused it."""
+    probe_result = FakeProbe(requested_incompatible_qos=self._status("RELIABILITY"),
+                             correlated=True, matched_other_count=2)
+    result = probe_match.check_incompatible_qos(CheckContext(probe=probe_result))
+    self.assertEqual(ids(result), ["match.incompatible_qos_topic"])
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_incompatible_qos_without_correlation_is_a_topic_warning(self):
+    probe_result = FakeProbe(requested_incompatible_qos=self._status("RELIABILITY"),
+                             correlated=False, matched_other_count=0)
+    result = probe_match.check_incompatible_qos(CheckContext(probe=probe_result))
+    self.assertEqual(ids(result), ["match.incompatible_qos_topic"])
+
+  def test_topic_scoped_rejection_cannot_suppress_data_silence(self):
+    """A maybe must never hide a real symptom. Regression on SUPPRESSION_RULES."""
+    self.assertNotIn("match.incompatible_qos_topic",
+                     f.SUPPRESSION_RULES.get("data.silent", ()))
+    self.assertNotIn("match.incompatible_qos_topic",
+                     f.SUPPRESSION_RULES.get("match.none", ()))
+
+  def test_match_ok_says_so_when_the_writer_was_not_identified(self):
+    correlated = probe_match.check_matched(
+        CheckContext(probe=FakeProbe(correlated=True)))
+    uncorrelated = probe_match.check_matched(
+        CheckContext(probe=FakeProbe(correlated=False)))
+    self.assertEqual(ids(correlated), ["match.ok"])
+    self.assertEqual(ids(uncorrelated), ["match.ok"])
+    self.assertIn("matched the writer", correlated[0].title)
+    self.assertIn("a writer on this topic", uncorrelated[0].title)
+    self.assertIn("topic-wide", uncorrelated[0].observed)
+
+  def test_match_ok_discloses_other_matched_writers(self):
+    result = probe_match.check_matched(
+        CheckContext(probe=FakeProbe(correlated=True, matched_other_count=3)))
+    self.assertIn("3 other writer(s)", result[0].observed)

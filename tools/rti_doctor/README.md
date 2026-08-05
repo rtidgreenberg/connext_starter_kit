@@ -77,6 +77,8 @@ scan, so "nothing is here" can become "something is alive, but on domain 5".
     --scan-timeout    Seconds to listen for active domains (default: 32.0)
     --no-domain-scan  Skip the active-domain scan before prompting
     --no-probe        Static checks only; never create a reader
+    --type-object-v1-only
+          Advertise TypeObject v1 and disable TypeLookup v2 for an experiment
     --pcap PATH       Analyze RTPS user-data packets in an existing capture
     --capture-interface IFACE
               Capture scoped RTPS UDP packets with tshark while probing one topic
@@ -302,8 +304,10 @@ PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
 Cross-vendor wire tests launch matching publisher/reader pairs for Cyclone DDS
 and Fast DDS, then run the complete `rti_doctor` CLI with a `tshark` capture.
 They assert that Wireshark decoded RTPS user data and an actual CDR
-encapsulation ID from the saved PCAPNG. The Fast DDS test uses a pinned Fast DDS
-2.14.6 Docker build; build it once before running the suite:
+encapsulation ID from the saved PCAPNG. The Fast DDS test uses the current Fast DDS
+3.6.2 Docker build. This fixture tracks the currently supported Fast DDS release;
+when diagnosing a vendor issue, update to the current fixture first, then retain
+the resulting evidence for follow-up. Build it once before running the suite:
 
 ```bash
 bash tools/rti_doctor/test/vendors/fastdds/build_image.sh
@@ -330,7 +334,7 @@ PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
 Type-extensibility data-flow matrices use a controlled, identical schema and
 XCDR1 in both directions. They cover every FINAL/APPENDABLE writer-reader pair
 for Connext/Cyclone and Connext/Fast DDS; each case requires endpoint matching
-and actual reader samples. The Fast DDS matrix uses the same pinned Docker image
+and actual reader samples. The Fast DDS matrix uses the same current Docker image
 as the wire test and builds two generated TypeObject fixtures, one per
 extensibility kind.
 

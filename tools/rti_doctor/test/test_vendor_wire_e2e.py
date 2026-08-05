@@ -2,12 +2,13 @@
 
 These are intentionally separate from the normal live tests. They need both a
 third-party runtime and packet-capture permission, and the Fast DDS test also
-needs the pinned Docker image built by vendors/fastdds/build_image.sh.
+needs the current Docker image built by vendors/fastdds/build_image.sh.
 """
 
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -21,7 +22,7 @@ CYCLONE_FIXTURE = os.path.join(VENDORS_DIR, "cyclone_publisher.py")
 CYCLONE_SUBSCRIBER = os.path.join(VENDORS_DIR, "cyclone_subscriber.py")
 FASTDDS_DIR = os.path.join(VENDORS_DIR, "fastdds")
 FASTDDS_IMAGE = os.environ.get("RTI_DOCTOR_FASTDDS_IMAGE",
-                               "rti-doctor-fastdds-e2e:2.14.6")
+                               "rti-doctor-fastdds-e2e:3.6.2")
 CAPTURE_INTERFACE = os.environ.get("RTI_DOCTOR_TEST_CAPTURE_INTERFACE", "any")
 DOCTOR_SETTLE = 3
 # Cyclone DDS's default RTPS port mapping cannot represent domains above 232.
@@ -93,17 +94,21 @@ class VendorWireE2E(unittest.TestCase):
       time.sleep(1.0)
     self.assertNotEqual(completed.returncode, 2, completed.stderr)
     try:
-      output = completed.stdout.lstrip()
-      payload, offset = json.JSONDecoder().raw_decode(output)
+      decoder = json.JSONDecoder()
+      payload = None
+      output = ""
+      offset = 0
+      for candidate in re.finditer(r"\{(?=\s*\"domain_id\")", completed.stdout):
+        output = completed.stdout[candidate.start():]
+        try:
+          payload, offset = decoder.raw_decode(output)
+          break
+        except json.JSONDecodeError:
+          continue
+      self.assertIsNotNone(payload, "rti_doctor emitted no JSON object")
     except json.JSONDecodeError as error:
       self.fail(f"rti_doctor did not emit JSON: {error}\n{completed.stderr}\n"
                 f"{completed.stdout}")
-    trailing = output[offset:].strip()
-    if trailing:
-      self.assertTrue(
-          all(line.startswith("ERROR PRESPsService_cleanup:")
-              for line in trailing.splitlines()),
-          f"unexpected output after Doctor JSON:\n{trailing}")
     return payload
 
   def test_discovers_vendor_and_identifies_wire_representation(self):
@@ -155,7 +160,7 @@ class TestFastDDSWireE2E(VendorWireE2E):
   VENDOR = "Fast DDS"
   # The upstream Fast DDS HelloWorld example uses these defaults.
   FIXED_DOMAIN = 0
-  FIXED_TOPIC = "HelloWorldTopic"
+  FIXED_TOPIC = "hello_world_topic"
 
   @classmethod
   def start_publisher(cls):

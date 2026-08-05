@@ -97,6 +97,9 @@ def parse_args(argv=None):
                       help="Skip scanning for active domains before prompting")
   parser.add_argument("--no-probe", action="store_true",
                       help="Static checks only; never create a reader")
+  parser.add_argument("--type-object-v1-only", action="store_true",
+                      help="Advertise inline TypeObject v1 and disable TypeLookup v2 "
+                           "for an interoperability experiment")
   packet_group = parser.add_mutually_exclusive_group()
   packet_group.add_argument("--pcap", default=None,
                             help="Analyze RTPS user-data packets in an existing PCAP/PCAPNG")
@@ -111,6 +114,8 @@ def parse_args(argv=None):
   parser.add_argument("--connext-verbosity", choices=tuple(CONNEXT_VERBOSITIES),
                       default="status-all", help="Native Connext log verbosity "
                       "(default: status-all; applies to --connext-log or stderr)")
+  parser.add_argument("--ready-file", default=None,
+                      help="Write PATH after Doctor creates its DDS participant")
 
   args = parser.parse_args(argv)
   if args.topic and args.all:
@@ -215,7 +220,8 @@ def build_session(domain_id, args, active_domains=None, domain_scan_ran=False,
 
   registry = discovery.DiscoveryRegistry(type_wait=args.type_wait)
   participant, type_lookup_settings = discovery.create_participant(
-      domain_id, name="RTI DOCTOR", registry=registry)
+      domain_id, name="RTI DOCTOR", registry=registry,
+      type_object_v1_only=args.type_object_v1_only)
 
   # Record the QoS we actually used, so the blind-spot audit inspects reality
   # rather than a freshly-defaulted object.
@@ -263,9 +269,21 @@ def _emit(text, output_path):
   return path
 
 
+def _write_ready_file(path):
+  """Signal that Doctor has joined the domain for an external test fixture."""
+  if not path:
+    return
+  normalized_path = os.path.abspath(path)
+  directory = os.path.dirname(normalized_path)
+  if directory:
+    os.makedirs(directory, exist_ok=True)
+  with open(normalized_path, "w", encoding="utf-8") as handle:
+    handle.write("ready\n")
+
+
 def run_headless_topic(session, args):
   """Diagnose one topic and emit a report. Returns a process exit code."""
-  from . import findings as f
+  from . import findings as f, topology
 
   _settle(session, args.settle)
 
@@ -337,12 +355,16 @@ def run_headless_all(session, args):
   session.registry.expire_type_waits()
 
   rows, _ = session.sweep(probe=not args.no_probe)
+  topology_data = topology.snapshot(
+      session.registry, session.domain_id, session.active_domains,
+      session.domain_scan_ran)
   if args.format == "json":
     import json
     payload = {
         "unstable_schema": True,
         "domain_id": session.domain_id,
         "environment": compat.environment_info(),
+        "topology": topology_data,
         "writers": [
             {"topic": row["topic"], "vendor": row["vendor"],
              "severity": row["severity"], "verdict": row["verdict"],
@@ -354,6 +376,7 @@ def run_headless_all(session, args):
     text = json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n"
   else:
     text = report.render_sweep_text(rows, session.domain_id)
+    text += "\n" + "\n".join(report.render_topology_text(topology_data))
 
   path = _emit(text, args.output)
   if path:
@@ -373,6 +396,8 @@ def run_headless_domain(session, args):
       scope="domain audit (no topic selected)",
       all_findings=audit,
       type_lookup_settings=session.type_lookup_settings,
+      topology=topology.snapshot(session.registry, session.domain_id,
+                 session.active_domains, session.domain_scan_ran),
   )
   text = (report.render_json(data) if args.format == "json"
           else report.render_text(data))
@@ -411,6 +436,7 @@ def main(argv=None):
       domain_id, args, active_domains=active_domains, domain_scan_ran=scanned,
       compliance=compliance)
   session.type_lookup_settings.update(connext_logging)
+  _write_ready_file(args.ready_file)
 
   try:
     if args.topic:

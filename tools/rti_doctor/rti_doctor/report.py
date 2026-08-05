@@ -74,7 +74,7 @@ class ReportData:
   def __init__(self, domain_id, scope, all_findings, probe_result=None,
                endpoint=None, participant=None, type_lookup_settings=None,
                environment=None, generated_at=None, blind_spot_findings=None,
-               wire_evidence=None):
+               wire_evidence=None, topology=None):
     self.domain_id = domain_id
     self.scope = scope
     self.findings = f.rank(f.suppress(list(all_findings)))
@@ -86,6 +86,7 @@ class ReportData:
     self.generated_at = generated_at or time.time()
     self.blind_spot_findings = blind_spot_findings or []
     self.wire_evidence = wire_evidence
+    self.topology = topology
 
   @property
   def outcome(self):
@@ -137,6 +138,7 @@ def render_text(data):
   lines += [data.verdict, ""]
 
   lines += _render_peer(data)
+  lines += _render_topology(data)
   lines += _render_findings(data)
   lines += _render_type_appendix(data)
   lines += _render_counter_appendix(data)
@@ -173,6 +175,27 @@ def _render_peer(data):
         participant.default_unicast_locators if participant else [])
     if locators:
       lines.append(_kv("Locators", ", ".join(records.locator_text(l) for l in locators)))
+  lines.append("")
+  return lines
+
+
+def _render_topology(data):
+  return render_topology_text(data.topology)
+
+
+def render_topology_text(topology):
+  """Render an observed-topology section for reports and sweep summaries."""
+  if topology is None:
+    return []
+  lines = _section("OBSERVED TOPOLOGY")
+  lines.append(_kv("Source", topology["source"]))
+  lines.append(_kv("Scope", topology["scope"]))
+  lines.append(_kv("Domain IDs", ", ".join(str(item) for item in topology["domain_ids"])))
+  lines.append(_kv("Participants", str(topology["participants"])))
+  lines.append(_kv("Readers", str(topology["readers"])))
+  lines.append(_kv("Writers", str(topology["writers"])))
+  lines.append(_kv("Topics", ", ".join(topology["topics"]) or "(none observed)"))
+  lines.append(_kv("Coverage", topology["completion_note"]))
   lines.append("")
   return lines
 
@@ -359,6 +382,7 @@ def render_json(data):
       "domain_id": data.domain_id,
       "scope": data.scope,
       "verdict": data.verdict,
+      "topology": _jsonable(data.topology),
       "findings": [
           {
               "id": finding.id,

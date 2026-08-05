@@ -6,7 +6,7 @@ a report that differs depending on how it was invoked would be worthless.
 
 import logging
 
-from . import checks, probe as probe_mod, report
+from . import checks, probe as probe_mod, report, topology
 from .checks import CheckContext
 
 
@@ -40,6 +40,10 @@ class Session:
         type_wait=self.type_wait,
     )
 
+  def _topology(self):
+    return topology.snapshot(
+        self.registry, self.domain_id, self.active_domains, self.domain_scan_ran)
+
   # --- Diagnoses -------------------------------------------------------------
 
   def diagnose_domain(self):
@@ -66,6 +70,7 @@ class Session:
         all_findings=findings,
         participant=participant_record,
         type_lookup_settings=self.type_lookup_settings,
+        topology=self._topology(),
     )
 
   def diagnose_endpoint(self, endpoint, probe=True):
@@ -95,6 +100,7 @@ class Session:
         endpoint=endpoint,
         participant=participant_record,
         type_lookup_settings=self.type_lookup_settings,
+        topology=self._topology(),
     )
 
   def sweep(self, progress=None, probe=True):

@@ -28,6 +28,19 @@ class WireObservation:
   reassembled_bytes: int = 0
 
 
+@dataclass
+class DiscoveryObservation:
+  """One SPDP/SEDP metadata observation decoded by tshark."""
+
+  guid_prefix: str = ""
+  writer_entity_id: str = ""
+  reader_entity_id: str = ""
+  builtin_endpoint_set: str = ""
+  topic_name: str = ""
+  type_name: str = ""
+  reliability_kind: str = ""
+
+
 def parse_tshark_fields(line):
   """Parse one tab-separated RTPS record from the tshark capture command."""
   fields = line.rstrip("\r\n").split("\t")
@@ -51,6 +64,45 @@ def _hex_bytes(value):
   if not value:
     return 0
   return len("".join(value.split(":"))) // 2
+
+def parse_discovery_fields(line):
+  """Parse RTPS discovery metadata emitted by tshark's fields formatter."""
+  fields = line.rstrip("\r\n").split("\t")
+  fields += [""] * (7 - len(fields))
+  return DiscoveryObservation(
+      guid_prefix=fields[0], writer_entity_id=fields[1],
+      reader_entity_id=fields[2], builtin_endpoint_set=fields[3],
+      topic_name=fields[4], type_name=fields[5], reliability_kind=fields[6])
+
+
+def summarize_discovery(observations, source, capture_filter=None):
+  """Summarize observed RTPS SPDP/SEDP metadata without decoding user data."""
+  participants = {item.guid_prefix for item in observations if item.guid_prefix}
+  topics = sorted({item.topic_name for item in observations if item.topic_name})
+  endpoints = {
+      (item.guid_prefix, item.writer_entity_id, item.reader_entity_id)
+      for item in observations
+      if item.writer_entity_id or item.reader_entity_id
+  }
+  return {
+      "source": "tshark RTPS discovery",
+      "pcap_source": source,
+      "capture_filter": capture_filter,
+      "participants": len(participants),
+      "endpoint_observations": len(endpoints),
+      "topics": topics,
+      "topic_count": len(topics),
+      "builtin_endpoint_sets": sorted({item.builtin_endpoint_set
+                                         for item in observations
+                                         if item.builtin_endpoint_set}),
+      "complete": False,
+      "completion_note": (
+          "RTPS discovery packets observed during a bounded capture. Counts "
+          "can miss participants or endpoints announced before capture began "
+          "and endpoint observations cannot be classified as readers or "
+          "writers unless their SEDP entity kind is decoded."
+      ),
+  }
 
 
 def summarize(observations, writer_entity_id=None, writer_guid_prefix=None):
@@ -190,6 +242,38 @@ def inspect_pcap(path, tshark_path=None, writer_entity_id=None, writer_guid_pref
   if writer_guid_prefix is not None:
     result["target_writer_guid_prefix"] = writer_guid_prefix
   return result
+
+
+def inspect_discovery_pcap(path, tshark_path=None, capture_filter=None):
+  """Return metadata-only RTPS topology evidence from a PCAP/PCAPNG.
+
+  This is deliberately separate from ``inspect_pcap``: it reads SPDP/SEDP
+  fields and never inspects serialized user payload.
+  """
+  tshark_path = tshark_path or shutil.which("tshark")
+  if not tshark_path:
+    return {"error": "tshark was not found on PATH", "pcap_source": path}
+  if not os.path.isfile(path):
+    return {"error": f"capture file does not exist: {path}", "pcap_source": path}
+
+  command = [
+      tshark_path, "-n", "-r", path, "-Y", "rtps",
+      "-T", "fields", "-E", "occurrence=f",
+      "-e", "rtps.guidPrefix.src", "-e", "rtps.sm.wrEntityId",
+      "-e", "rtps.sm.rdEntityId", "-e", "rtps.param.builtin_endpoint_set",
+      "-e", "rtps.param.topicName", "-e", "rtps.param.typeName",
+      "-e", "rtps.reliability_kind",
+  ]
+  try:
+    completed = subprocess.run(command, text=True, capture_output=True, check=False)
+  except OSError as error:
+    return {"error": f"could not run tshark: {error}", "pcap_source": path}
+  if completed.returncode:
+    error = completed.stderr.strip() or f"tshark exited with {completed.returncode}"
+    return {"error": error, "pcap_source": path}
+  observations = [parse_discovery_fields(line) for line in completed.stdout.splitlines()
+                  if line.strip()]
+  return summarize_discovery(observations, path, capture_filter=capture_filter)
 
 
 class LiveCapture:

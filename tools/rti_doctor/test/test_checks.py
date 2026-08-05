@@ -305,6 +305,19 @@ class TestTypeState(unittest.TestCase):
     self.assertEqual(result[0].id, "type.no_type_info")
     self.assertIn("TypeLookup", result[0].root_cause)
 
+  def test_fastdds_unavailable_recommends_upgrading_first(self):
+    endpoint = endpoint_record(type_state=records.TYPE_UNAVAILABLE,
+                               vendor_id=FakeVendorId((0x01, 0x0F)))
+    result = type_compat.check_type_state(CheckContext(endpoint=endpoint))
+    self.assertIn("upgrade the publisher to Fast DDS 3.6.2 or newer",
+                  result[0].remedy)
+
+  def test_other_vendor_unavailable_does_not_get_fastdds_advice(self):
+    endpoint = endpoint_record(type_state=records.TYPE_UNAVAILABLE,
+                               vendor_id=FakeVendorId((0x01, 0x10)))
+    result = type_compat.check_type_state(CheckContext(endpoint=endpoint))
+    self.assertNotIn("Fast DDS 3.6.2", result[0].remedy)
+
   def test_our_own_filter_is_named_first_when_it_could_be_our_fault(self):
     endpoint = endpoint_record(type_state=records.TYPE_UNAVAILABLE)
     context = CheckContext(endpoint=endpoint, type_wait=5.0,

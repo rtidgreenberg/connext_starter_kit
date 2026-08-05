@@ -177,6 +177,18 @@ def _merge_endpoint(existing, incoming):
 
 # --- QoS setup ---------------------------------------------------------------
 
+def configure_type_object_v1_only(qos):
+  """Advertise inline TypeObject v1 and disable the TypeLookup v2 channel."""
+  qos.resource_limits.type_code_max_serialized_length = 0
+  qos.resource_limits.type_object_max_serialized_length = 65536
+  type_lookup = getattr(dds.DiscoveryConfigBuiltinChannelKindMask,
+                        "TYPE_LOOKUP_SERVICE", None)
+  if type_lookup is not None:
+    channels = qos.discovery_config.enabled_builtin_channels
+    qos.discovery_config.enabled_builtin_channels = (
+        dds.DiscoveryConfigBuiltinChannelKindMask(int(channels) & ~int(type_lookup)))
+
+
 def configure_type_lookup_qos(qos):
   """Enable remote DynamicType discovery on Connext 7.7+ and earlier inline-type peers.
 
@@ -228,7 +240,8 @@ def configure_type_lookup_qos(qos):
   return applied
 
 
-def create_participant(domain_id, name="RTI DOCTOR", registry=None):
+def create_participant(domain_id, name="RTI DOCTOR", registry=None,
+                       type_object_v1_only=False):
   """Create a participant with builtin listeners attached before enabling.
 
   Listeners are installed while autoenable is off so no discovery sample is
@@ -247,7 +260,11 @@ def create_participant(domain_id, name="RTI DOCTOR", registry=None):
     qos.participant_name.name = name
   except Exception:
     pass
+  if type_object_v1_only:
+    configure_type_object_v1_only(qos)
   type_lookup_settings = configure_type_lookup_qos(qos)
+  type_lookup_settings["type_object_discovery"] = (
+      "v1-only" if type_object_v1_only else "default (v2 TypeLookup enabled)")
 
   participant = None
   try:

@@ -45,6 +45,8 @@ def main():
   parser.add_argument("--extensibility", choices=("final", "appendable"), required=True)
   parser.add_argument("--schema", choices=("keyed-int32", "fastdds"),
                       default="keyed-int32")
+  parser.add_argument("--reliability", choices=("reliable", "best-effort"),
+                      default="reliable")
   parser.add_argument("--duration", type=float, default=6.0)
   args = parser.parse_args()
 
@@ -59,6 +61,9 @@ def main():
   if args.role == "writer":
     writer_qos = dds.DataWriterQos()
     writer_qos.data_representation.value = [int(dds.DataRepresentation.XCDR)]
+    writer_qos.reliability.kind = (
+        dds.ReliabilityKind.RELIABLE if args.reliability == "reliable"
+        else dds.ReliabilityKind.BEST_EFFORT)
     writer = dds.DynamicData.DataWriter(dds.Publisher(participant), topic, writer_qos)
     counter = 0
     while time.monotonic() < deadline:
@@ -76,6 +81,9 @@ def main():
   else:
     reader_qos = dds.DataReaderQos()
     reader_qos.data_representation.value = [int(dds.DataRepresentation.XCDR)]
+    reader_qos.reliability.kind = (
+        dds.ReliabilityKind.RELIABLE if args.reliability == "reliable"
+        else dds.ReliabilityKind.BEST_EFFORT)
     reader = dds.DynamicData.DataReader(dds.Subscriber(participant), topic, reader_qos)
     while time.monotonic() < deadline:
       results["matched"] = max(results["matched"], reader.subscription_matched_status.current_count)
@@ -84,7 +92,8 @@ def main():
 
   participant.close()
   print(json.dumps({"vendor": "connext", "role": args.role,
-                    "extensibility": args.extensibility, "results": results}),
+                    "extensibility": args.extensibility,
+                    "reliability": args.reliability, "results": results}),
         flush=True)
 
 

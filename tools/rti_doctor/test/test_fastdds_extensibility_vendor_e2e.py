@@ -15,7 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VENDORS = os.path.join(HERE, "vendors")
 CONNEXT = os.path.join(VENDORS, "extensibility_connext_endpoint.py")
 FASTDDS_IMAGE = os.environ.get("RTI_DOCTOR_FASTDDS_IMAGE",
-                               "rti-doctor-fastdds-e2e:2.14.6")
+                               "rti-doctor-fastdds-e2e:3.6.2")
 DOMAIN_BASE = 80
 
 

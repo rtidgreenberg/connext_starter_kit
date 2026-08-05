@@ -6,7 +6,7 @@ between "no type yet" and "no type ever", which is why type_state is a state
 machine rather than a snapshot.
 """
 
-from .. import compat, records, typewalk
+from .. import compat, records, typewalk, vendors
 from ..findings import RUNG_TYPE, Finding, Severity
 from ..records import TYPE_PENDING, TYPE_RESOLVED, TYPE_UNAVAILABLE
 
@@ -78,6 +78,17 @@ def check_type_state(context):
         f"version ({request_filter}), so Connext may never have requested the "
         "type - this cause is on our side and should be ruled out first"))
 
+  remedy = (
+      "A TypeIdentifier alone is an identifier, not a schema, so no reader can "
+      "be created from it. Either enable full type propagation on the "
+      "publisher, or supply the IDL locally and use a compile-time type "
+      "instead of DynamicData.")
+  if endpoint.vendor_name == vendors.FASTDDS:
+    remedy += (
+        " For Fast DDS, first upgrade the publisher to Fast DDS 3.6.2 or newer: "
+        "the validated 3.6.2 fixture resolves a Connext DynamicType before "
+        "investigating TypeLookup or TypeObject compatibility further.")
+
   return [Finding(
       id="type.no_type_info",
       rung=RUNG_TYPE,
@@ -91,11 +102,7 @@ def check_type_state(context):
           "the schema comes from a separate request/reply service. Seeing the name "
           "without the schema is the single most common cross-vendor state. "
           "Possible causes: " + "; ".join(causes) + "."),
-      remedy=(
-          "A TypeIdentifier alone is an identifier, not a schema, so no reader can "
-          "be created from it. Either enable full type propagation on the "
-          "publisher, or supply the IDL locally and use a compile-time type "
-          "instead of DynamicData."),
+        remedy=remedy,
       evidence={"topic_name": endpoint.topic_name,
                 "type_name": endpoint.type_name,
                 "request_types_filter": request_filter,

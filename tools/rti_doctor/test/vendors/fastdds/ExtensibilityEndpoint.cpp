@@ -68,6 +68,10 @@ int main(int argc, char** argv)
     std::string role;
     std::string extensibility;
     std::string reliability = "reliable";
+    std::string durability = "volatile";
+    int deadline_seconds = 1;
+    std::string ownership = "shared";
+    std::string representation = "xcdr1";
     std::string type_metadata = "full";
     std::string type_lookup = "disabled";
     std::string wait_for_file;
@@ -79,7 +83,11 @@ int main(int argc, char** argv)
         std::string argument(argv[index]);
         if ((argument == "--domain" || argument == "--topic" || argument == "--role" ||
              argument == "--duration" || argument == "--extensibility" ||
-             argument == "--reliability" || argument == "--type-metadata" ||
+             argument == "--reliability" || argument == "--durability" ||
+             argument == "--deadline-seconds" ||
+             argument == "--ownership" ||
+             argument == "--representation" ||
+             argument == "--type-metadata" ||
              argument == "--type-lookup" || argument == "--wait-for-file" ||
              argument == "--wait-timeout" || argument == "--endpoint-ready-file") && index + 1 < argc)
         {
@@ -90,6 +98,10 @@ int main(int argc, char** argv)
             if (argument == "--duration") duration_seconds = std::stoi(value);
             if (argument == "--extensibility") extensibility = value;
             if (argument == "--reliability") reliability = value;
+            if (argument == "--durability") durability = value;
+            if (argument == "--deadline-seconds") deadline_seconds = std::stoi(value);
+            if (argument == "--ownership") ownership = value;
+            if (argument == "--representation") representation = value;
             if (argument == "--type-metadata") type_metadata = value;
             if (argument == "--type-lookup") type_lookup = value;
             if (argument == "--wait-for-file") wait_for_file = value;
@@ -102,12 +114,20 @@ int main(int argc, char** argv)
             (role != "writer" && role != "reader") ||
             (extensibility != "final" && extensibility != "appendable") ||
             (reliability != "reliable" && reliability != "best-effort") ||
+            (durability != "volatile" && durability != "transient-local") ||
+            deadline_seconds <= 0 ||
+            (ownership != "shared" && ownership != "exclusive") ||
+            (representation != "xcdr1" && representation != "xcdr2") ||
             (type_metadata != "full" && type_metadata != "none") ||
             (type_lookup != "enabled" && type_lookup != "disabled"))
     {
         std::cerr << "required: --domain --topic --role writer|reader --duration positive "
                   << "--extensibility final|appendable "
                   << "[--reliability reliable|best-effort] "
+                  << "[--durability volatile|transient-local] "
+                  << "[--deadline-seconds positive] "
+                  << "[--ownership shared|exclusive] "
+                  << "[--representation xcdr1|xcdr2] "
                   << "[--type-metadata full|none] "
                   << "[--type-lookup enabled|disabled] "
                   << "[--wait-for-file PATH] [--wait-timeout positive] "
@@ -175,9 +195,15 @@ int main(int argc, char** argv)
             return 6;
         }
         DataWriterQos qos = DATAWRITER_QOS_DEFAULT;
-        qos.representation().m_value = {XCDR_DATA_REPRESENTATION};
+        qos.representation().m_value = {representation == "xcdr2"
+            ? XCDR2_DATA_REPRESENTATION : XCDR_DATA_REPRESENTATION};
         qos.reliability().kind = reliability == "reliable"
             ? RELIABLE_RELIABILITY_QOS : BEST_EFFORT_RELIABILITY_QOS;
+        qos.durability().kind = durability == "transient-local"
+            ? TRANSIENT_LOCAL_DURABILITY_QOS : VOLATILE_DURABILITY_QOS;
+        qos.deadline().period = {deadline_seconds, 0u};
+        qos.ownership().kind = ownership == "exclusive"
+            ? EXCLUSIVE_OWNERSHIP_QOS : SHARED_OWNERSHIP_QOS;
         WriterListener listener;
         DataWriter* writer = publisher->create_datawriter(topic, qos, &listener);
         if (writer == nullptr)
@@ -225,9 +251,15 @@ int main(int argc, char** argv)
             return 9;
         }
         DataReaderQos qos = DATAREADER_QOS_DEFAULT;
-        qos.representation().m_value = {XCDR_DATA_REPRESENTATION};
+        qos.representation().m_value = {representation == "xcdr2"
+            ? XCDR2_DATA_REPRESENTATION : XCDR_DATA_REPRESENTATION};
         qos.reliability().kind = reliability == "reliable"
             ? RELIABLE_RELIABILITY_QOS : BEST_EFFORT_RELIABILITY_QOS;
+        qos.durability().kind = durability == "transient-local"
+            ? TRANSIENT_LOCAL_DURABILITY_QOS : VOLATILE_DURABILITY_QOS;
+        qos.deadline().period = {deadline_seconds, 0u};
+        qos.ownership().kind = ownership == "exclusive"
+            ? EXCLUSIVE_OWNERSHIP_QOS : SHARED_OWNERSHIP_QOS;
         ReaderListener listener;
         DataReader* reader = subscriber->create_datareader(topic, qos, &listener);
         if (reader == nullptr)
@@ -259,6 +291,10 @@ int main(int argc, char** argv)
     std::cout << "{\"vendor\":\"fastdds\",\"role\":\"" << role
               << "\",\"extensibility\":\"" << extensibility
               << "\",\"reliability\":\"" << reliability
+              << "\",\"durability\":\"" << durability
+              << "\",\"deadline_seconds\":" << deadline_seconds
+              << ",\"ownership\":\"" << ownership
+              << "\",\"representation\":\"" << representation
               << "\",\"type_metadata\":\"" << type_metadata
               << "\",\"type_lookup\":\"" << type_lookup
               << "\",\"results\":{\"matched\":" << matched

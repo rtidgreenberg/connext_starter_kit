@@ -11,6 +11,7 @@ import rti.connextdds as dds
 
 
 dds.compliance.set_xtypes_mask(dds.compliance.XTypesMask(0x000001A9))
+dds.Logger.instance.verbosity = dds.Verbosity.SILENT
 TYPE_OBJECT_V1_MAX_SERIALIZED_LENGTH = 65536
 
 
@@ -68,6 +69,13 @@ def main():
                       default="keyed-int32")
   parser.add_argument("--reliability", choices=("reliable", "best-effort"),
                       default="reliable")
+  parser.add_argument("--durability", choices=("volatile", "transient-local"),
+                      default="volatile")
+  parser.add_argument("--deadline-seconds", type=int, default=1)
+  parser.add_argument("--ownership", choices=("shared", "exclusive"),
+                      default="shared")
+  parser.add_argument("--representation", choices=("xcdr1", "xcdr2"),
+                      default="xcdr1")
   parser.add_argument("--duration", type=float, default=6.0)
   parser.add_argument("--wait-for-file",
                       help="Wait for PATH after participant creation")
@@ -75,6 +83,8 @@ def main():
   parser.add_argument("--endpoint-ready-file",
                       help="Write PATH after creating the requested endpoint")
   args = parser.parse_args()
+  if args.deadline_seconds <= 0:
+    parser.error("--deadline-seconds must be positive")
 
   participant_qos = dds.DomainParticipantQos()
   configure_type_object_v1_only(participant_qos)
@@ -87,10 +97,19 @@ def main():
 
   if args.role == "writer":
     writer_qos = dds.DataWriterQos()
-    writer_qos.data_representation.value = [int(dds.DataRepresentation.XCDR)]
+    writer_qos.data_representation.value = [int(
+      dds.DataRepresentation.XCDR2 if args.representation == "xcdr2"
+      else dds.DataRepresentation.XCDR)]
     writer_qos.reliability.kind = (
         dds.ReliabilityKind.RELIABLE if args.reliability == "reliable"
         else dds.ReliabilityKind.BEST_EFFORT)
+    writer_qos.durability.kind = (
+      dds.DurabilityKind.TRANSIENT_LOCAL if args.durability == "transient-local"
+      else dds.DurabilityKind.VOLATILE)
+    writer_qos.deadline.period = dds.Duration(args.deadline_seconds)
+    writer_qos.ownership.kind = (
+      dds.OwnershipKind.EXCLUSIVE if args.ownership == "exclusive"
+      else dds.OwnershipKind.SHARED)
     writer = dds.DynamicData.DataWriter(dds.Publisher(participant), topic, writer_qos)
     write_ready_file(args.endpoint_ready_file)
     counter = 0
@@ -108,10 +127,19 @@ def main():
       time.sleep(0.05)
   else:
     reader_qos = dds.DataReaderQos()
-    reader_qos.data_representation.value = [int(dds.DataRepresentation.XCDR)]
+    reader_qos.data_representation.value = [int(
+      dds.DataRepresentation.XCDR2 if args.representation == "xcdr2"
+      else dds.DataRepresentation.XCDR)]
     reader_qos.reliability.kind = (
         dds.ReliabilityKind.RELIABLE if args.reliability == "reliable"
         else dds.ReliabilityKind.BEST_EFFORT)
+    reader_qos.durability.kind = (
+      dds.DurabilityKind.TRANSIENT_LOCAL if args.durability == "transient-local"
+      else dds.DurabilityKind.VOLATILE)
+    reader_qos.deadline.period = dds.Duration(args.deadline_seconds)
+    reader_qos.ownership.kind = (
+      dds.OwnershipKind.EXCLUSIVE if args.ownership == "exclusive"
+      else dds.OwnershipKind.SHARED)
     reader = dds.DynamicData.DataReader(dds.Subscriber(participant), topic, reader_qos)
     write_ready_file(args.endpoint_ready_file)
     while time.monotonic() < deadline:
@@ -122,7 +150,11 @@ def main():
   participant.close()
   print(json.dumps({"vendor": "connext", "role": args.role,
                     "extensibility": args.extensibility,
-                    "reliability": args.reliability, "results": results}),
+                    "reliability": args.reliability, "durability": args.durability,
+                    "deadline_seconds": args.deadline_seconds,
+                    "ownership": args.ownership,
+                    "representation": args.representation,
+                    "results": results}),
         flush=True)
 
 

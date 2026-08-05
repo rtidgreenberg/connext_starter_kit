@@ -10,9 +10,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import doctor_e2e  # noqa: E402
+from rti_doctor import __main__ as doctor_main  # noqa: E402
 
 
 class TestDoctorE2E(unittest.TestCase):
+
+  def test_connext_logging_is_silent_by_default(self):
+    self.assertEqual(doctor_main.parse_args([]).connext_verbosity, "silent")
 
   def test_command_configures_headless_json_environment(self):
     command, environment = doctor_e2e.command(

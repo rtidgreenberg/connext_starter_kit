@@ -50,6 +50,56 @@ All four Fast DDS P0 controls pass, and ten independent Connext BEST_EFFORT
 writer to Fast DDS RELIABLE reader runs discovered the reader and emitted active
 `qos.rxo_mismatch` with RELIABILITY evidence.
 
+## P1 Fast DDS Progress
+
+The Fast DDS endpoint fixture now supports `--durability volatile|transient-local`
+in addition to reliability. The first Fast DDS P1 policy slice is complete:
+
+| Pair | Healthy durability | Durability fault | Status |
+|---|---|---|---|
+| Connext writer -> Fast DDS reader | Both endpoints use VOLATILE durability. | VOLATILE writer and TRANSIENT_LOCAL reader do not match or transfer samples; Doctor emits active `qos.rxo_mismatch` naming DURABILITY. | Passing. |
+| Fast DDS writer -> Connext reader | Both endpoints use VOLATILE durability. | VOLATILE writer and TRANSIENT_LOCAL reader do not match or transfer samples; Doctor emits active `qos.rxo_mismatch` naming DURABILITY. | Passing. |
+
+| Pair | Healthy deadline | Deadline fault | Status |
+|---|---|---|---|
+| Connext writer -> Fast DDS reader | Writer offers a 1-second deadline and reader requests 3 seconds. | Writer offers 3 seconds and reader requests 1 second; endpoints do not match or transfer samples, and Doctor emits active `qos.rxo_mismatch` naming DEADLINE. | Passing. |
+| Fast DDS writer -> Connext reader | Writer offers a 1-second deadline and reader requests 3 seconds. | Writer offers 3 seconds and reader requests 1 second; endpoints do not match or transfer samples, and Doctor emits active `qos.rxo_mismatch` naming DEADLINE. | Passing. |
+
+| Pair | Healthy ownership | Ownership fault | Status |
+|---|---|---|---|
+| Connext writer -> Fast DDS reader | Both endpoints use SHARED ownership. | SHARED writer and EXCLUSIVE reader do not match or transfer samples; Doctor emits active `qos.rxo_mismatch` naming OWNERSHIP. | Passing. |
+| Fast DDS writer -> Connext reader | Both endpoints use SHARED ownership. | SHARED writer and EXCLUSIVE reader do not match or transfer samples; Doctor emits active `qos.rxo_mismatch` naming OWNERSHIP. | Passing. |
+
+Rebuild `rti-doctor-fastdds-e2e:3.6.2` with
+`bash tools/rti_doctor/test/vendors/fastdds/build_image.sh` after changing the
+Fast DDS endpoint fixture; the test runs the image's compiled binary.
+
+The discovery gate allows Doctor 40 seconds to observe both remote participants,
+while each fixture waits up to 45 seconds for its endpoint-release marker. This
+keeps the gated participant visible during transient Docker and discovery delays
+instead of allowing a fixture to exit before Doctor can release the endpoints.
+
+### Fast DDS Data Representation Spike
+
+`test/test_fastdds_extensibility_vendor_e2e.py` now measures explicit XCDR1 and
+XCDR2 selection with the generated FINAL fixture. The results are a
+vendor-direction contract, not a generic same-representation assumption:
+
+| Writer -> reader | Both XCDR1 | Both XCDR2 | Crossed XCDR1/XCDR2 |
+|---|---|---|---|
+| Connext -> Fast DDS | Match and data flow. | Match and data flow. | No match and no samples. |
+| Fast DDS -> Connext | Match and data flow. | Match and data flow. | No match and no samples. |
+
+The matrix uses endpoint-ready gates instead of a fixed startup sleep. Earlier
+ungated observations produced intermittent match and payload results, so they
+are not a valid compatibility claim. The explicit crossed-representation cases
+have different Doctor contracts by direction: Connext writer -> Fast DDS reader
+returns `repr.not_advertised` and `qos.compatible`, so the endpoint-level no-match
+is a documented metadata blind spot. Fast DDS writer -> Connext reader advertises
+XCDR1; Doctor emits active `qos.rxo_mismatch` naming `DATA_REPRESENTATION`.
+The latter report also contains the independent custom FINAL TypeObject
+`type.assignability` error and must not treat it as the representation cause.
+
 ### Fast DDS Type Metadata Spikes
 
 `test/test_fastdds_type_metadata_spike.py` uses Doctor's native Connext logger

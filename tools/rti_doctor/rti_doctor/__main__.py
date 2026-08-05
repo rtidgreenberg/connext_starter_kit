@@ -43,7 +43,7 @@ def configure_logging(debug_log_path=None):
   root_logger.setLevel(logging.INFO)
 
 
-def configure_connext_logging(log_path=None, verbosity="status-all"):
+def configure_connext_logging(log_path=None, verbosity="silent"):
   """Configure Connext's native logger before Doctor creates DDS entities."""
   import rti.connextdds as dds
 
@@ -112,8 +112,8 @@ def parse_args(argv=None):
   parser.add_argument("--connext-log", default=None,
                       help="Write native Connext middleware diagnostics to PATH")
   parser.add_argument("--connext-verbosity", choices=tuple(CONNEXT_VERBOSITIES),
-                      default="status-all", help="Native Connext log verbosity "
-                      "(default: status-all; applies to --connext-log or stderr)")
+                      default="silent", help="Native Connext log verbosity "
+                      "(default: silent; applies to --connext-log or stderr)")
   parser.add_argument("--ready-file", default=None,
                       help="Write PATH after Doctor creates its DDS participant")
   parser.add_argument("--ready-after-participants", type=int, default=0,

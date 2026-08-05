@@ -30,7 +30,8 @@ CONNEXT_EXTENSIBILITY = os.path.join(VENDORS, "extensibility_connext_endpoint.py
 FASTDDS_IMAGE = os.environ.get("RTI_DOCTOR_FASTDDS_IMAGE",
                                "rti-doctor-fastdds-e2e:3.6.2")
 DOMAIN_BASE = 40
-SCENARIO = "reliability"
+RELIABILITY_SCENARIO = "reliability"
+DURABILITY_SCENARIO = "durability"
 OUTPUT_ROOT = os.path.join(TOOL_DIR, "..", "..", "test_output")
 ARTIFACT_ROOT = os.path.join(OUTPUT_ROOT, "rti_doctor_faults")
 
@@ -92,12 +93,12 @@ def _finish_control_dir(case_name, commands, outputs, control_dir, failed):
 class TestConnextCycloneFaultControls(unittest.TestCase):
   """Exercise Doctor against healthy and intentionally incompatible peers."""
 
-  def _endpoint_command(self, script, domain, topic_prefix, role, mode, duration,
-                        ready_file):
+  def _endpoint_command(self, script, domain, topic_prefix, role, mode, scenario,
+                        duration, ready_file):
     command = [
         sys.executable, script, "--domain", str(domain),
         "--topic-prefix", topic_prefix, "--role", role, "--mode", mode,
-        "--scenarios", SCENARIO, "--duration", str(duration),
+        "--scenarios", scenario, "--duration", str(duration),
         "--ready-file", ready_file,
     ]
     if script == CONNEXT:
@@ -109,17 +110,17 @@ class TestConnextCycloneFaultControls(unittest.TestCase):
     return doctor_e2e.run(
         domain, topic, settle=1, type_wait=3, no_probe=True, timeout=20)
 
-  def _run_case(self, writer_script, reader_script, mode):
+  def _run_case(self, writer_script, reader_script, mode, scenario):
     domain = _domain()
     prefix = f"DoctorP0_{uuid.uuid4().hex}"
-    topic = f"{prefix}_{SCENARIO}"
+    topic = f"{prefix}_{scenario}"
     control_dir = tempfile.mkdtemp(prefix="rti_doctor_cyclone_ready_", dir=OUTPUT_ROOT)
     reader_ready_file = os.path.join(control_dir, "reader.ready")
     writer_ready_file = os.path.join(control_dir, "writer.ready")
     reader_command = self._endpoint_command(
-      reader_script, domain, prefix, "reader", mode, 12, reader_ready_file)
+      reader_script, domain, prefix, "reader", mode, scenario, 12, reader_ready_file)
     writer_command = self._endpoint_command(
-      writer_script, domain, prefix, "writer", mode, 10, writer_ready_file)
+      writer_script, domain, prefix, "writer", mode, scenario, 10, writer_ready_file)
     reader = subprocess.Popen(reader_command, text=True, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
     writer = None
@@ -159,32 +160,32 @@ class TestConnextCycloneFaultControls(unittest.TestCase):
     return doctor, report, _last_json(writer_stdout, writer_command), _last_json(
         reader_stdout, reader_command)
 
-  def _assert_healthy(self, writer_script, reader_script):
+  def _assert_healthy(self, writer_script, reader_script, scenario=RELIABILITY_SCENARIO):
     doctor, report, writer, reader = self._run_case(
-        writer_script, reader_script, "compatible")
+        writer_script, reader_script, "compatible", scenario)
     self.assertEqual(doctor.returncode, 0, doctor.stderr)
-    self.assertGreater(writer["results"][SCENARIO]["matched"], 0, writer)
-    self.assertGreater(reader["results"][SCENARIO]["matched"], 0, reader)
-    self.assertGreater(reader["results"][SCENARIO]["samples"], 0, reader)
+    self.assertGreater(writer["results"][scenario]["matched"], 0, writer)
+    self.assertGreater(reader["results"][scenario]["matched"], 0, reader)
+    self.assertGreater(reader["results"][scenario]["samples"], 0, reader)
     findings = report["findings"]
     active_errors = [item["id"] for item in findings
              if not item["suppressed_by"] and item["severity"] == "ERROR"]
     self.assertEqual(active_errors, [], report)
     self.assertNotIn("qos.rxo_mismatch", [item["id"] for item in findings], report)
 
-  def _assert_reliability_fault(self, writer_script, reader_script):
+  def _assert_rxo_fault(self, writer_script, reader_script, scenario):
     doctor, report, writer, reader = self._run_case(
-        writer_script, reader_script, "mismatch")
+        writer_script, reader_script, "mismatch", scenario)
     self.assertEqual(doctor.returncode, 1, doctor.stderr)
-    self.assertGreater(writer["results"][SCENARIO]["samples"], 0, writer)
-    self.assertEqual(writer["results"][SCENARIO]["matched"], 0, writer)
-    self.assertEqual(reader["results"][SCENARIO]["matched"], 0, reader)
-    self.assertEqual(reader["results"][SCENARIO]["samples"], 0, reader)
+    self.assertGreater(writer["results"][scenario]["samples"], 0, writer)
+    self.assertEqual(writer["results"][scenario]["matched"], 0, writer)
+    self.assertEqual(reader["results"][scenario]["matched"], 0, reader)
+    self.assertEqual(reader["results"][scenario]["samples"], 0, reader)
     findings = [item for item in report["findings"] if not item["suppressed_by"]]
     mismatch = [item for item in findings if item["id"] == "qos.rxo_mismatch"]
     self.assertEqual(len(mismatch), 1, report)
     self.assertEqual(mismatch[0]["severity"], "ERROR", mismatch[0])
-    self.assertIn("RELIABILITY", mismatch[0]["title"], mismatch[0])
+    self.assertIn(scenario.upper(), mismatch[0]["title"], mismatch[0])
 
   def test_connext_writer_to_cyclone_reader_healthy(self):
     self._assert_healthy(CONNEXT, CYCLONE)
@@ -193,10 +194,13 @@ class TestConnextCycloneFaultControls(unittest.TestCase):
     self._assert_healthy(CYCLONE, CONNEXT)
 
   def test_connext_writer_to_cyclone_reader_reliability_fault(self):
-    self._assert_reliability_fault(CONNEXT, CYCLONE)
+    self._assert_rxo_fault(CONNEXT, CYCLONE, RELIABILITY_SCENARIO)
 
   def test_cyclone_writer_to_connext_reader_reliability_fault(self):
-    self._assert_reliability_fault(CYCLONE, CONNEXT)
+    self._assert_rxo_fault(CYCLONE, CONNEXT, RELIABILITY_SCENARIO)
+
+  def test_connext_writer_to_cyclone_reader_durability_fault(self):
+    self._assert_rxo_fault(CONNEXT, CYCLONE, DURABILITY_SCENARIO)
 
 
 @unittest.skipUnless(shutil.which("docker"), "docker is not installed")
@@ -213,18 +217,24 @@ class TestConnextFastDdsFaultControls(unittest.TestCase):
           f"Fast DDS image '{FASTDDS_IMAGE}' is unavailable; build it with "
           "test/vendors/fastdds/build_image.sh")
 
-  def _connext_command(self, domain, topic, role, reliability, duration, control_dir,
-                       start_file, endpoint_ready_file):
+  def _connext_command(self, domain, topic, role, reliability, durability,
+                       deadline_seconds, ownership, representation, duration,
+                       control_dir, start_file, endpoint_ready_file):
     return [
         sys.executable, CONNEXT_EXTENSIBILITY, "--domain", str(domain),
         "--topic", topic, "--role", role, "--extensibility", "final",
         "--schema", "fastdds", "--reliability", reliability,
+        "--durability", durability,
+        "--deadline-seconds", str(deadline_seconds),
+        "--ownership", ownership,
+        "--representation", representation,
         "--duration", str(duration), "--wait-for-file", start_file,
-        "--wait-timeout", "20", "--endpoint-ready-file", endpoint_ready_file,
+        "--wait-timeout", "45", "--endpoint-ready-file", endpoint_ready_file,
     ]
 
-  def _fastdds_command(self, domain, topic, role, reliability, duration, control_dir,
-                       start_file, endpoint_ready_file):
+  def _fastdds_command(self, domain, topic, role, reliability, durability,
+                       deadline_seconds, ownership, representation, duration,
+                       control_dir, start_file, endpoint_ready_file):
     command = [
         "docker", "run", "--rm", "--network", "host", "--entrypoint",
         "/doctor-extensibility-build/doctor_fastdds_final",
@@ -232,8 +242,12 @@ class TestConnextFastDdsFaultControls(unittest.TestCase):
         "-e", "FASTDDS_BUILTIN_TRANSPORTS=UDPv4", FASTDDS_IMAGE,
         "--domain", str(domain), "--topic", topic, "--role", role,
         "--extensibility", "final", "--reliability", reliability,
+        "--durability", durability,
+        "--deadline-seconds", str(deadline_seconds),
+        "--ownership", ownership,
+        "--representation", representation,
         "--duration", str(duration), "--wait-for-file",
-        f"/control/{os.path.basename(start_file)}", "--wait-timeout", "15",
+        f"/control/{os.path.basename(start_file)}", "--wait-timeout", "45",
         "--endpoint-ready-file", f"/control/{os.path.basename(endpoint_ready_file)}",
     ]
     return command
@@ -243,15 +257,25 @@ class TestConnextFastDdsFaultControls(unittest.TestCase):
         domain, topic, settle=4, type_wait=3, no_probe=True,
         ready_file=ready_file, connext_log=connext_log,
         connext_verbosity="silent", ready_after_participants=2,
-        ready_timeout=20)
+        ready_timeout=40)
 
   def _doctor_result(self, completed):
     return doctor_e2e.parse_report(completed)
 
-  def _run_case(self, writer_vendor, mode):
+  def _run_case(self, writer_vendor, mode, scenario="reliability"):
     domain = _domain()
     topic = f"DoctorFastDdsP0_{uuid.uuid4().hex}"
-    writer_reliability = "best-effort" if mode == "mismatch" else "reliable"
+    writer_reliability = (
+      "best-effort" if scenario == "reliability" and mode == "mismatch"
+      else "reliable")
+    writer_durability = "volatile"
+    reader_durability = "transient-local" if scenario == "durability" and mode == "mismatch" else "volatile"
+    writer_deadline_seconds = 3 if scenario == "deadline" and mode == "mismatch" else 1
+    reader_deadline_seconds = 1 if scenario == "deadline" and mode == "mismatch" else 3
+    writer_ownership = "shared"
+    reader_ownership = "exclusive" if scenario == "ownership" and mode == "mismatch" else "shared"
+    writer_representation = "xcdr1"
+    reader_representation = "xcdr2" if scenario == "data_representation" and mode == "mismatch" else "xcdr1"
     control_dir = tempfile.mkdtemp(prefix="rti_doctor_fastdds_ready_", dir=OUTPUT_ROOT)
     ready_file = os.path.join(control_dir, "doctor.ready")
     connext_log = os.path.join(control_dir, "doctor_connext.log")
@@ -261,17 +285,25 @@ class TestConnextFastDdsFaultControls(unittest.TestCase):
     writer_ready_file = os.path.join(control_dir, "writer.ready")
     if writer_vendor == "fastdds":
       writer_command = self._fastdds_command(
-          domain, topic, "writer", writer_reliability, 10, control_dir,
+          domain, topic, "writer", writer_reliability, writer_durability,
+          writer_deadline_seconds, writer_ownership, writer_representation, 10,
+          control_dir,
           writer_start_file, writer_ready_file)
       reader_command = self._connext_command(
-          domain, topic, "reader", "reliable", 12, control_dir,
+          domain, topic, "reader", "reliable", reader_durability,
+          reader_deadline_seconds, reader_ownership, reader_representation, 12,
+          control_dir,
           reader_start_file, reader_ready_file)
     else:
       writer_command = self._connext_command(
-          domain, topic, "writer", writer_reliability, 10, control_dir,
+          domain, topic, "writer", writer_reliability, writer_durability,
+          writer_deadline_seconds, writer_ownership, writer_representation, 10,
+          control_dir,
           writer_start_file, writer_ready_file)
       reader_command = self._fastdds_command(
-          domain, topic, "reader", "reliable", 12, control_dir,
+          domain, topic, "reader", "reliable", reader_durability,
+          reader_deadline_seconds, reader_ownership, reader_representation, 12,
+          control_dir,
           reader_start_file, reader_ready_file)
     doctor_command, environment = self._doctor_command(
       domain, topic, ready_file, connext_log)
@@ -344,8 +376,9 @@ class TestConnextFastDdsFaultControls(unittest.TestCase):
     self.assertNotIn("qos.rxo_mismatch",
                      [item["id"] for item in report["findings"]], report)
 
-  def _assert_reliability_fault(self, writer_vendor):
-    doctor, report, writer, reader = self._run_case(writer_vendor, "mismatch")
+  def _assert_rxo_fault(self, writer_vendor, scenario):
+    doctor, report, writer, reader = self._run_case(
+        writer_vendor, "mismatch", scenario)
     self.assertEqual(doctor.returncode, 1, f"{doctor.stderr}\n{report}")
     self.assertGreater(writer["results"]["samples"], 0, writer)
     self.assertEqual(writer["results"]["matched"], 0, writer)
@@ -355,7 +388,19 @@ class TestConnextFastDdsFaultControls(unittest.TestCase):
     mismatch = [item for item in findings if item["id"] == "qos.rxo_mismatch"]
     self.assertEqual(len(mismatch), 1, report)
     self.assertEqual(mismatch[0]["severity"], "ERROR", mismatch[0])
-    self.assertIn("RELIABILITY", mismatch[0]["title"], mismatch[0])
+    self.assertIn(scenario.upper(), mismatch[0]["title"], mismatch[0])
+
+  def _assert_representation_blind_spot(self, writer_vendor):
+    doctor, report, writer, reader = self._run_case(
+        writer_vendor, "mismatch", "data_representation")
+    self.assertEqual(doctor.returncode, 0, f"{doctor.stderr}\n{report}")
+    self.assertGreater(writer["results"]["samples"], 0, writer)
+    self.assertEqual(writer["results"]["matched"], 0, writer)
+    self.assertEqual(reader["results"]["matched"], 0, reader)
+    self.assertEqual(reader["results"]["samples"], 0, reader)
+    findings = [item for item in report["findings"] if not item["suppressed_by"]]
+    self.assertIn("qos.compatible", [item["id"] for item in findings], report)
+    self.assertIn("repr.not_advertised", [item["id"] for item in findings], report)
 
   def test_connext_writer_to_fastdds_reader_healthy(self):
     self._assert_healthy("connext")
@@ -364,10 +409,34 @@ class TestConnextFastDdsFaultControls(unittest.TestCase):
     self._assert_healthy("fastdds")
 
   def test_connext_writer_to_fastdds_reader_reliability_fault(self):
-    self._assert_reliability_fault("connext")
+    self._assert_rxo_fault("connext", "reliability")
 
   def test_fastdds_writer_to_connext_reader_reliability_fault(self):
-    self._assert_reliability_fault("fastdds")
+    self._assert_rxo_fault("fastdds", "reliability")
+
+  def test_connext_writer_to_fastdds_reader_durability_fault(self):
+    self._assert_rxo_fault("connext", "durability")
+
+  def test_fastdds_writer_to_connext_reader_durability_fault(self):
+    self._assert_rxo_fault("fastdds", "durability")
+
+  def test_connext_writer_to_fastdds_reader_deadline_fault(self):
+    self._assert_rxo_fault("connext", "deadline")
+
+  def test_fastdds_writer_to_connext_reader_deadline_fault(self):
+    self._assert_rxo_fault("fastdds", "deadline")
+
+  def test_connext_writer_to_fastdds_reader_ownership_fault(self):
+    self._assert_rxo_fault("connext", "ownership")
+
+  def test_fastdds_writer_to_connext_reader_ownership_fault(self):
+    self._assert_rxo_fault("fastdds", "ownership")
+
+  def test_connext_writer_to_fastdds_reader_data_representation_fault(self):
+    self._assert_representation_blind_spot("connext")
+
+  def test_fastdds_writer_to_connext_reader_data_representation_fault(self):
+    self._assert_rxo_fault("fastdds", "data_representation")
 
 
 if __name__ == "__main__":

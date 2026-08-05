@@ -87,7 +87,7 @@ scan, so "nothing is here" can become "something is alive, but on domain 5".
     --connext-log PATH
           Native Connext middleware diagnostics, including discovery parsing
     --connext-verbosity LEVEL
-          silent | exception | warning | status-local | status-remote | status-all
+          silent (default) | exception | warning | status-local | status-remote | status-all
 ```
 
 Headless examples:

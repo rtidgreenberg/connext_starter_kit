@@ -70,6 +70,7 @@ class ProbeResult:
     # finding may attribute to the selected writer.
     self.correlated = False
     self.matched_other_count = 0
+    self.matched_unreadable_count = 0
     self.samples_other = 0
     # Status snapshots, taken after the probe window.
     self.subscription_matched = None
@@ -265,11 +266,23 @@ def _correlate(reader, endpoint, result):
     else:
       others += 1
 
-  if handles and not target and not others:
-    return None  # nothing resolvable; do not pretend to have correlated
+  # An empty target set is only a conclusion when EVERY publication resolved.
+  # An unreadable key could have been the selected writer, and reporting "never
+  # matched" from that would be the exact false certainty this function exists
+  # to prevent. Covers the all-unreadable case too.
+  if not target and unreadable:
+    return None
 
   result.correlated = True
-  result.matched_other_count = max(result.matched_other_count, others + unreadable)
+  # Current values, deliberately NOT a running max. `attributable` and
+  # `exclusive` are present-tense questions: a writer that matched for one poll
+  # iteration and departed must not permanently downgrade a real ERROR to a
+  # topic-level WARN, nor permanently stop crediting the target's samples.
+  # _snapshot_statuses calls this last, so the final value is the authoritative
+  # post-window reading. matched_count stays a max - a transient match is still
+  # a match.
+  result.matched_other_count = others
+  result.matched_unreadable_count = unreadable
   return target
 
 
@@ -329,7 +342,10 @@ def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1):
           result.matched_count = max(result.matched_count, matched)
       else:
         result.matched_count = max(result.matched_count, len(target_handles))
-      exclusive = result.matched_other_count == 0
+      # "Exclusive" means nothing else this reader matched could have produced
+      # the sample - so an unresolvable publication counts against it too.
+      exclusive = (result.matched_other_count == 0
+                   and result.matched_unreadable_count == 0)
 
       for sample in reader.take():
         if not sample.info.valid:

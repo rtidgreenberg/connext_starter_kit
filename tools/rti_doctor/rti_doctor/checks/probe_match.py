@@ -61,10 +61,16 @@ def _scope_text(probe):
     return ("Scope: topic-wide - the selected writer could not be identified "
             "among the reader's matched publications, so this reading covers "
             "every writer on the topic.")
+  extra = []
   if probe.matched_other_count:
-    return (f"Scope: the selected writer, correlated by publication handle; "
-            f"{probe.matched_other_count} other writer(s) on this topic also "
-            f"matched and are excluded.")
+    extra.append(f"{probe.matched_other_count} other writer(s) on this topic "
+                 f"also matched and are excluded")
+  if probe.matched_unreadable_count:
+    extra.append(f"{probe.matched_unreadable_count} matched publication(s) "
+                 f"could not be resolved to a writer")
+  if extra:
+    return ("Scope: the selected writer, correlated by publication handle; "
+            + "; ".join(extra) + ".")
   return ("Scope: the selected writer, correlated by publication handle; it is "
           "the only writer this reader matched.")
 
@@ -125,7 +131,8 @@ def check_incompatible_qos(context):
   # topic offered a policy the reader would not accept, never which one. It may
   # only be reported as a fact about the selected writer when that writer is the
   # only one this reader could have rejected.
-  attributable = probe.correlated and not probe.matched_other_count
+  attributable = (probe.correlated and not probe.matched_other_count
+                  and not probe.matched_unreadable_count)
 
   root = ("A reader and writer only communicate when every requested-offered "
           "(RxO) policy is compatible. ")

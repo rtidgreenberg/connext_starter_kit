@@ -439,6 +439,7 @@ class FakeProbe:
     # the selected writer and it was the only one the reader matched.
     self.correlated = True
     self.matched_other_count = 0
+    self.matched_unreadable_count = 0
     self.samples_other = 0
     self.__dict__.update(kwargs)
 
@@ -1038,3 +1039,77 @@ class TestParticipantMerge(unittest.TestCase):
     registry.upsert_participant(participant_record(key="p1", name="peer"))
     registry.upsert_participant(participant_record(key="p1", name=None))
     self.assertEqual(registry.participants["p1"].name, "peer")
+
+
+class TestCorrelationDoesNotOverclaim(unittest.TestCase):
+  """Regressions on the writer-correlation fix itself.
+
+  Correlation exists to stop the probe attributing topic-wide evidence to one
+  writer. These guard against it acquiring the same failure mode in new form.
+  """
+
+  def _correlate(self, reader, key="w1"):
+    result = probe.ProbeResult()
+    endpoint = endpoint_record(key=key, kind="Writer")
+    return probe._correlate(reader, endpoint, result), result
+
+  def test_unreadable_publication_blocks_the_never_matched_conclusion(self):
+    """An unreadable key could BE the target; "did not match" is not provable."""
+    reader = FakeMatchedPublicationReader({"h1": None, "h2": "w2"})
+    target, result = self._correlate(reader)
+    self.assertIsNone(target)
+    self.assertFalse(result.correlated)
+
+  def test_unreadable_publication_alongside_a_found_target_is_disclosed(self):
+    reader = FakeMatchedPublicationReader({"h1": "w1", "h2": None})
+    target, result = self._correlate(reader)
+    self.assertEqual(target, {"h1"})
+    self.assertTrue(result.correlated)
+    self.assertEqual(result.matched_unreadable_count, 1)
+
+  def test_other_writer_count_is_current_not_a_running_peak(self):
+    """A departed writer must not permanently downgrade later verdicts."""
+    result = probe.ProbeResult()
+    endpoint = endpoint_record(key="w1", kind="Writer")
+    probe._correlate(FakeMatchedPublicationReader({"h1": "w1", "h2": "w2"}),
+                     endpoint, result)
+    self.assertEqual(result.matched_other_count, 1)
+    probe._correlate(FakeMatchedPublicationReader({"h1": "w1"}), endpoint, result)
+    self.assertEqual(result.matched_other_count, 0)
+
+  def test_transient_neighbour_does_not_downgrade_a_real_incompatibility(self):
+    """The end state is what counts: exit code 1 must survive a transient."""
+    class Status:
+      total_count = 1
+      last_policy = "RELIABILITY"
+      policies = ()
+    probe_result = FakeProbe(requested_incompatible_qos=Status(),
+                             correlated=True, matched_other_count=0)
+    result = probe_match.check_incompatible_qos(CheckContext(probe=probe_result))
+    self.assertEqual(ids(result), ["match.incompatible_qos"])
+    self.assertEqual(result[0].severity, f.Severity.ERROR)
+
+  def test_unresolvable_publication_also_blocks_attribution(self):
+    class Status:
+      total_count = 1
+      last_policy = "RELIABILITY"
+      policies = ()
+    probe_result = FakeProbe(requested_incompatible_qos=Status(),
+                             correlated=True, matched_unreadable_count=1)
+    result = probe_match.check_incompatible_qos(CheckContext(probe=probe_result))
+    self.assertEqual(ids(result), ["match.incompatible_qos_topic"])
+
+  def test_unattributable_sample_is_not_credited_when_a_publication_is_unresolved(self):
+    self.assertFalse(probe._sample_is_target(FakeSample(None), {"h1"}, False))
+
+  def test_silence_names_the_neighbour_instead_of_inventing_a_drop(self):
+    """samples_taken is writer-scoped; received_sample_count is topic-wide."""
+    probe_result = FakeProbe(samples_taken=0, samples_other=100,
+                             protocol={"received_sample_count": 100,
+                                       "received_heartbeat_count": 5,
+                                       "received_gap_count": 0})
+    result = probe_payload.check_silent(CheckContext(probe=probe_result))
+    self.assertEqual(ids(result), ["data.silent"])
+    self.assertIn("OTHER writers", result[0].observed)
+    self.assertIn("none came from the selected writer", result[0].root_cause)
+    self.assertNotIn("dropped between reception", result[0].root_cause)

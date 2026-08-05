@@ -47,13 +47,29 @@ def check_silent(context):
   samples = _c(probe, "received_sample_count")
   gaps = _c(probe, "received_gap_count")
 
+  other = getattr(probe, "samples_other", 0)
   observed = [f"0 valid samples taken in {probe.elapsed:.1f}s",
               f"received_sample_count = {compat.na_text() if samples is None else samples}",
               f"received_heartbeat_count = "
               f"{compat.na_text() if heartbeats is None else heartbeats}",
               f"received_gap_count = {compat.na_text() if gaps is None else gaps}"]
+  if other:
+    observed.append(f"{other} sample(s) arrived from OTHER writers on this topic")
 
-  if heartbeats and not samples:
+  if other:
+    # samples_taken is scoped to the selected writer; received_sample_count is a
+    # topic-wide protocol counter. Without this branch a chatty neighbour on the
+    # same topic sends the reader down the "samples were dropped between
+    # reception and the reader cache" path below, whose remedy points at cache
+    # drop findings that do not exist because nothing was dropped.
+    root = (f"The topic is carrying data - {other} valid sample(s) arrived from "
+            f"other writers during the probe window - but none came from the "
+            f"selected writer. The reader matched it and it published nothing "
+            f"the reader could accept.")
+    remedy = ("Confirm the selected writer is actually writing. Compare it "
+              "against the writers on this topic that are delivering, since "
+              "transport and discovery are demonstrably working for them.")
+  elif heartbeats and not samples:
     root = (
         "Heartbeats are arriving but no data is. The writer is alive and the "
         "reliable protocol path works in at least one direction, so the writer "

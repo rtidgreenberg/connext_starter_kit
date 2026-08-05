@@ -82,6 +82,10 @@ scan, so "nothing is here" can become "something is alive, but on domain 5".
               Capture scoped RTPS UDP packets with tshark while probing one topic
 -i, --interval        UI refresh interval (default: 2.0)
     --debug-log PATH  Discovery/probe log output
+    --connext-log PATH
+          Native Connext middleware diagnostics, including discovery parsing
+    --connext-verbosity LEVEL
+          silent | exception | warning | status-local | status-remote | status-all
 ```
 
 Headless examples:
@@ -98,6 +102,11 @@ Headless examples:
 
 # Capture during one topic probe (writes test_output/rti_doctor_captures/*.pcapng)
 ./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData --capture-interface lo
+
+# Preserve native Connext discovery/TypeLookup diagnostics for later parsing.
+# status-all includes the Fast DDS TypeInformation deserialization failure.
+./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData --no-probe \
+  --connext-log test_output/rti_doctor_connext.log --connext-verbosity status-all
 ```
 
 Exit status is `1` when any ERROR-severity finding survives, `0` otherwise, and

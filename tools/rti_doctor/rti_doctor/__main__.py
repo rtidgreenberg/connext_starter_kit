@@ -13,6 +13,14 @@ DEFAULT_PROBE_TIMEOUT = 10.0
 DEFAULT_TYPE_WAIT = 5.0
 #: How long to let discovery settle before running headless checks.
 DEFAULT_DISCOVERY_SETTLE = 3.0
+CONNEXT_VERBOSITIES = {
+  "silent": "SILENT",
+  "exception": "EXCEPTION",
+  "warning": "WARNING",
+  "status-local": "STATUS_LOCAL",
+  "status-remote": "STATUS_REMOTE",
+  "status-all": "STATUS_ALL",
+}
 
 
 def configure_logging(debug_log_path=None):
@@ -33,6 +41,27 @@ def configure_logging(debug_log_path=None):
   file_handler._rti_doctor_log_path = normalized_path
   root_logger.addHandler(file_handler)
   root_logger.setLevel(logging.INFO)
+
+
+def configure_connext_logging(log_path=None, verbosity="status-all"):
+  """Configure Connext's native logger before Doctor creates DDS entities."""
+  import rti.connextdds as dds
+
+  verbosity_name = CONNEXT_VERBOSITIES[verbosity]
+  logger = dds.Logger.instance
+  logger.verbosity = getattr(dds.Verbosity, verbosity_name)
+  settings = {"connext_verbosity": verbosity}
+  if log_path:
+    path = os.path.abspath(log_path)
+    directory = os.path.dirname(path)
+    if directory:
+      os.makedirs(directory, exist_ok=True)
+    logger.output_file(path)
+    logger.informational("RTI Doctor native Connext logging enabled")
+    settings["connext_log_file"] = path
+  else:
+    settings["connext_log_file"] = "stderr (Connext default)"
+  return settings
 
 
 def parse_args(argv=None):
@@ -77,6 +106,11 @@ def parse_args(argv=None):
                       help="UI refresh interval in seconds (default: 2.0)")
   parser.add_argument("--debug-log", default=os.environ.get("RTI_DOCTOR_DEBUG_LOG"),
                       help="Optional path for discovery/probe log output")
+  parser.add_argument("--connext-log", default=None,
+                      help="Write native Connext middleware diagnostics to PATH")
+  parser.add_argument("--connext-verbosity", choices=tuple(CONNEXT_VERBOSITIES),
+                      default="status-all", help="Native Connext log verbosity "
+                      "(default: status-all; applies to --connext-log or stderr)")
 
   args = parser.parse_args(argv)
   if args.topic and args.all:
@@ -354,6 +388,12 @@ def main(argv=None):
   configure_logging(args.debug_log)
   compat.configure_rti_environment()
 
+  # Native Connext diagnostics include middleware parsing failures that cannot
+  # be observed through Python's logging module. Configure them before the
+  # first DDS entity is created so discovery startup is captured as well.
+  connext_logging = configure_connext_logging(
+      args.connext_log, args.connext_verbosity)
+
   # Before ANY DDS entity exists: Connext's default XTypes compliance mask is not
   # fully OMG-compliant, and RTI's cross-vendor guidance is to use the VENDOR
   # mask. A diagnostic must not fail to decode a peer because of its own encoding
@@ -370,6 +410,7 @@ def main(argv=None):
   session, participant = build_session(
       domain_id, args, active_domains=active_domains, domain_scan_ran=scanned,
       compliance=compliance)
+  session.type_lookup_settings.update(connext_logging)
 
   try:
     if args.topic:

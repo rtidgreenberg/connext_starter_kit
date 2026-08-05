@@ -17,9 +17,12 @@ import time
 import unittest
 import uuid
 
-
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL_DIR = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+
+import doctor_e2e  # noqa: E402
+
 VENDORS = os.path.join(HERE, "vendors")
 CONNEXT = os.path.join(VENDORS, "rxo_connext_matrix.py")
 CYCLONE = os.path.join(VENDORS, "rxo_cyclone_matrix.py")
@@ -28,6 +31,8 @@ FASTDDS_IMAGE = os.environ.get("RTI_DOCTOR_FASTDDS_IMAGE",
                                "rti-doctor-fastdds-e2e:3.6.2")
 DOMAIN_BASE = 40
 SCENARIO = "reliability"
+OUTPUT_ROOT = os.path.join(TOOL_DIR, "..", "..", "test_output")
+ARTIFACT_ROOT = os.path.join(OUTPUT_ROOT, "rti_doctor_faults")
 
 
 def _domain():
@@ -41,17 +46,59 @@ def _last_json(output, command):
   raise AssertionError(f"endpoint emitted no JSON\ncommand={command}\n{output}")
 
 
+def _wait_for_file(path, description, timeout=20.0):
+  deadline = time.monotonic() + timeout
+  while not os.path.exists(path) and time.monotonic() < deadline:
+    time.sleep(0.05)
+  if not os.path.exists(path):
+    raise AssertionError(f"{description} did not create its readiness marker")
+
+
+def _reap(process):
+  if process is None:
+    return "", ""
+  if process.poll() is None:
+    process.kill()
+  return process.communicate()
+
+
+def _preserve_artifacts(case_name, commands, outputs, control_dir):
+  """Persist the evidence needed to reproduce a failed vendor control."""
+  os.makedirs(ARTIFACT_ROOT, exist_ok=True)
+  artifact_dir = tempfile.mkdtemp(prefix=f"{case_name}_", dir=ARTIFACT_ROOT)
+  with open(os.path.join(artifact_dir, "commands.json"), "w", encoding="utf-8") as file:
+    json.dump(commands, file, indent=2)
+    file.write("\n")
+  for name, content in outputs.items():
+    with open(os.path.join(artifact_dir, f"{name}.txt"), "w", encoding="utf-8") as file:
+      file.write(content or "")
+  if control_dir and os.path.isdir(control_dir):
+    shutil.copytree(control_dir, os.path.join(artifact_dir, "control"))
+  return artifact_dir
+
+
+def _finish_control_dir(case_name, commands, outputs, control_dir, failed):
+  keep_artifacts = failed or os.environ.get("RTI_DOCTOR_KEEP_ARTIFACTS")
+  artifact_dir = None
+  if keep_artifacts:
+    artifact_dir = _preserve_artifacts(case_name, commands, outputs, control_dir)
+  shutil.rmtree(control_dir, ignore_errors=True)
+  return artifact_dir
+
+
 @unittest.skipUnless(
     __import__("importlib").util.find_spec("cyclonedds"),
     "Cyclone DDS Python package not available")
 class TestConnextCycloneFaultControls(unittest.TestCase):
   """Exercise Doctor against healthy and intentionally incompatible peers."""
 
-  def _endpoint_command(self, script, domain, topic_prefix, role, mode, duration):
+  def _endpoint_command(self, script, domain, topic_prefix, role, mode, duration,
+                        ready_file):
     command = [
         sys.executable, script, "--domain", str(domain),
         "--topic-prefix", topic_prefix, "--role", role, "--mode", mode,
         "--scenarios", SCENARIO, "--duration", str(duration),
+        "--ready-file", ready_file,
     ]
     if script == CONNEXT:
       # The established vendor matrix uses TypeObject v1 for this pair.
@@ -59,39 +106,31 @@ class TestConnextCycloneFaultControls(unittest.TestCase):
     return command
 
   def _run_doctor(self, domain, topic):
-    environment = dict(os.environ)
-    environment["PYTHONPATH"] = TOOL_DIR + os.pathsep + environment.get("PYTHONPATH", "")
-    command = [
-        sys.executable, "-m", "rti_doctor", "--domain", str(domain),
-        "--topic", topic, "--format", "json", "--no-domain-scan",
-        "--no-probe", "--settle", "1", "--type-wait", "3",
-    ]
-    completed = subprocess.run(command, text=True, capture_output=True, env=environment,
-                               timeout=20, check=False)
-    try:
-      payload = json.loads(completed.stdout)
-    except json.JSONDecodeError as error:
-      self.fail(f"Doctor did not emit JSON: {error}\n{completed.stderr}\n"
-                f"{completed.stdout}")
-    return completed, payload
+    return doctor_e2e.run(
+        domain, topic, settle=1, type_wait=3, no_probe=True, timeout=20)
 
   def _run_case(self, writer_script, reader_script, mode):
     domain = _domain()
     prefix = f"DoctorP0_{uuid.uuid4().hex}"
     topic = f"{prefix}_{SCENARIO}"
+    control_dir = tempfile.mkdtemp(prefix="rti_doctor_cyclone_ready_", dir=OUTPUT_ROOT)
+    reader_ready_file = os.path.join(control_dir, "reader.ready")
+    writer_ready_file = os.path.join(control_dir, "writer.ready")
     reader_command = self._endpoint_command(
-        reader_script, domain, prefix, "reader", mode, 12)
+      reader_script, domain, prefix, "reader", mode, 12, reader_ready_file)
     writer_command = self._endpoint_command(
-        writer_script, domain, prefix, "writer", mode, 10)
+      writer_script, domain, prefix, "writer", mode, 10, writer_ready_file)
     reader = subprocess.Popen(reader_command, text=True, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
     writer = None
+    doctor = None
+    report = None
+    writer_stdout = writer_stderr = reader_stdout = reader_stderr = ""
     try:
-      # The existing RxO suite establishes this ordering for endpoint discovery.
-      time.sleep(3.0)
+      _wait_for_file(reader_ready_file, "reader")
       writer = subprocess.Popen(writer_command, text=True, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE)
-      time.sleep(1.0)
+      _wait_for_file(writer_ready_file, "writer")
       doctor, report = self._run_doctor(domain, topic)
       writer_stdout, writer_stderr = writer.communicate(timeout=15)
       reader_stdout, reader_stderr = reader.communicate(timeout=15)
@@ -100,11 +139,23 @@ class TestConnextCycloneFaultControls(unittest.TestCase):
       self.assertEqual(reader.returncode, 0,
                        f"reader failed: {reader_stderr}\n{reader_stdout}")
     except Exception:
-      for process in (writer, reader):
-        if process is not None and process.poll() is None:
-          process.kill()
-          process.communicate()
+      writer_stdout, writer_stderr = _reap(writer)
+      reader_stdout, reader_stderr = _reap(reader)
+      doctor_stdout = doctor.stdout if doctor is not None else ""
+      doctor_stderr = doctor.stderr if doctor is not None else ""
+      _finish_control_dir(
+          "cyclone", {"reader": reader_command, "writer": writer_command},
+          {"reader_stdout": reader_stdout, "reader_stderr": reader_stderr,
+           "writer_stdout": writer_stdout, "writer_stderr": writer_stderr,
+           "doctor_stdout": doctor_stdout, "doctor_stderr": doctor_stderr},
+          control_dir, failed=True)
       raise
+    _finish_control_dir(
+        "cyclone", {"reader": reader_command, "writer": writer_command},
+        {"reader_stdout": reader_stdout, "reader_stderr": reader_stderr,
+         "writer_stdout": writer_stdout, "writer_stderr": writer_stderr,
+         "doctor_stdout": doctor.stdout, "doctor_stderr": doctor.stderr},
+        control_dir, failed=False)
     return doctor, report, _last_json(writer_stdout, writer_command), _last_json(
         reader_stdout, reader_command)
 
@@ -162,12 +213,14 @@ class TestConnextFastDdsFaultControls(unittest.TestCase):
           f"Fast DDS image '{FASTDDS_IMAGE}' is unavailable; build it with "
           "test/vendors/fastdds/build_image.sh")
 
-  def _connext_command(self, domain, topic, role, reliability, duration):
+  def _connext_command(self, domain, topic, role, reliability, duration, control_dir,
+                       start_file, endpoint_ready_file):
     return [
         sys.executable, CONNEXT_EXTENSIBILITY, "--domain", str(domain),
         "--topic", topic, "--role", role, "--extensibility", "final",
         "--schema", "fastdds", "--reliability", reliability,
-        "--duration", str(duration),
+        "--duration", str(duration), "--wait-for-file", start_file,
+        "--wait-timeout", "20", "--endpoint-ready-file", endpoint_ready_file,
     ]
 
   def _fastdds_command(self, domain, topic, role, reliability, duration, control_dir,
@@ -186,76 +239,61 @@ class TestConnextFastDdsFaultControls(unittest.TestCase):
     return command
 
   def _doctor_command(self, domain, topic, ready_file, connext_log):
-    environment = dict(os.environ)
-    environment["PYTHONPATH"] = TOOL_DIR + os.pathsep + environment.get("PYTHONPATH", "")
-    command = [
-        sys.executable, "-m", "rti_doctor", "--domain", str(domain),
-        "--topic", topic, "--format", "json", "--no-domain-scan",
-        "--no-probe", "--settle", "4", "--type-wait", "3",
-        "--ready-file", ready_file,
-        "--connext-log", connext_log, "--connext-verbosity", "silent",
-    ]
-    return command, environment
+    return doctor_e2e.command(
+        domain, topic, settle=4, type_wait=3, no_probe=True,
+        ready_file=ready_file, connext_log=connext_log,
+        connext_verbosity="silent", ready_after_participants=2,
+        ready_timeout=20)
 
   def _doctor_result(self, completed):
-    try:
-      json_start = completed.stdout.find("{")
-      payload = json.loads(completed.stdout[json_start:])
-    except json.JSONDecodeError as error:
-      self.fail(f"Doctor did not emit JSON: {error}\n{completed.stderr}\n"
-                f"{completed.stdout}")
-    return payload
+    return doctor_e2e.parse_report(completed)
 
   def _run_case(self, writer_vendor, mode):
     domain = _domain()
     topic = f"DoctorFastDdsP0_{uuid.uuid4().hex}"
     writer_reliability = "best-effort" if mode == "mismatch" else "reliable"
-    control_dir = tempfile.mkdtemp(prefix="rti_doctor_fastdds_ready_",
-                     dir=os.path.join(TOOL_DIR, "..", "..", "test_output"))
+    control_dir = tempfile.mkdtemp(prefix="rti_doctor_fastdds_ready_", dir=OUTPUT_ROOT)
     ready_file = os.path.join(control_dir, "doctor.ready")
     connext_log = os.path.join(control_dir, "doctor_connext.log")
     reader_start_file = os.path.join(control_dir, "reader.start")
     reader_ready_file = os.path.join(control_dir, "reader.ready")
     writer_start_file = os.path.join(control_dir, "writer.start")
     writer_ready_file = os.path.join(control_dir, "writer.ready")
-    command_for = (self._fastdds_command if writer_vendor == "fastdds"
-             else self._connext_command)
-    writer_command = command_for(
-      domain, topic, "writer", writer_reliability, 10, control_dir,
-      writer_start_file, writer_ready_file) if writer_vendor == "fastdds" else command_for(
-        domain, topic, "writer", writer_reliability, 10)
-    command_for = (self._connext_command if writer_vendor == "fastdds"
-             else self._fastdds_command)
-    reader_command = command_for(domain, topic, "reader", "reliable", 12) \
-      if writer_vendor == "fastdds" else command_for(
+    if writer_vendor == "fastdds":
+      writer_command = self._fastdds_command(
+          domain, topic, "writer", writer_reliability, 10, control_dir,
+          writer_start_file, writer_ready_file)
+      reader_command = self._connext_command(
+          domain, topic, "reader", "reliable", 12, control_dir,
+          reader_start_file, reader_ready_file)
+    else:
+      writer_command = self._connext_command(
+          domain, topic, "writer", writer_reliability, 10, control_dir,
+          writer_start_file, writer_ready_file)
+      reader_command = self._fastdds_command(
           domain, topic, "reader", "reliable", 12, control_dir,
           reader_start_file, reader_ready_file)
     doctor_command, environment = self._doctor_command(
       domain, topic, ready_file, connext_log)
-    doctor = subprocess.Popen(doctor_command, text=True, stdout=subprocess.PIPE,
-                  stderr=subprocess.PIPE, env=environment)
     reader = None
     writer = None
+    doctor = None
+    writer_stdout = writer_stderr = reader_stdout = reader_stderr = ""
+    doctor_stdout = doctor_stderr = ""
     try:
       reader = subprocess.Popen(reader_command, text=True, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE)
-      deadline = time.monotonic() + 30.0
-      while not os.path.exists(ready_file) and time.monotonic() < deadline:
-        time.sleep(0.05)
-      self.assertTrue(os.path.exists(ready_file), "Doctor did not create its readiness marker")
-      if writer_vendor != "fastdds":
-        with open(reader_start_file, "w", encoding="utf-8"):
-          pass
-        deadline = time.monotonic() + 10.0
-        while not os.path.exists(reader_ready_file) and time.monotonic() < deadline:
-          time.sleep(0.05)
-        self.assertTrue(os.path.exists(reader_ready_file),
-                        "Fast DDS reader did not create its endpoint marker")
       writer = subprocess.Popen(writer_command, text=True, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE)
-      if writer_vendor == "fastdds":
-        with open(writer_start_file, "w", encoding="utf-8"):
-          pass
+      doctor = subprocess.Popen(doctor_command, text=True, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, env=environment)
+      _wait_for_file(ready_file, "Doctor", timeout=30.0)
+      with open(reader_start_file, "w", encoding="utf-8"):
+        pass
+      _wait_for_file(reader_ready_file, "reader")
+      with open(writer_start_file, "w", encoding="utf-8"):
+        pass
+      _wait_for_file(writer_ready_file, "writer")
       writer_stdout, writer_stderr = writer.communicate(timeout=30)
       reader_stdout, reader_stderr = reader.communicate(timeout=30)
       doctor_stdout, doctor_stderr = doctor.communicate(timeout=30)
@@ -267,15 +305,24 @@ class TestConnextFastDdsFaultControls(unittest.TestCase):
       self.assertEqual(reader.returncode, 0,
                        f"reader failed: {reader_stderr}\n{reader_stdout}")
     except Exception:
-      for process in (doctor, writer, reader):
-        if process is None:
-          continue
-        if process.poll() is None:
-          process.kill()
-        process.communicate()
-      shutil.rmtree(control_dir, ignore_errors=True)
+      doctor_stdout, doctor_stderr = _reap(doctor)
+      writer_stdout, writer_stderr = _reap(writer)
+      reader_stdout, reader_stderr = _reap(reader)
+      _finish_control_dir(
+          "fastdds", {"doctor": doctor_command, "reader": reader_command,
+                      "writer": writer_command},
+          {"doctor_stdout": doctor_stdout, "doctor_stderr": doctor_stderr,
+           "reader_stdout": reader_stdout, "reader_stderr": reader_stderr,
+           "writer_stdout": writer_stdout, "writer_stderr": writer_stderr},
+          control_dir, failed=True)
       raise
-    shutil.rmtree(control_dir, ignore_errors=True)
+    _finish_control_dir(
+        "fastdds", {"doctor": doctor_command, "reader": reader_command,
+                    "writer": writer_command},
+        {"doctor_stdout": doctor_stdout, "doctor_stderr": doctor_stderr,
+         "reader_stdout": reader_stdout, "reader_stderr": reader_stderr,
+         "writer_stdout": writer_stdout, "writer_stderr": writer_stderr},
+        control_dir, failed=False)
     return completed, report, _last_json(writer_stdout, writer_command), _last_json(
         reader_stdout, reader_command)
 

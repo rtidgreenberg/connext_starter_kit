@@ -116,12 +116,19 @@ def parse_args(argv=None):
                       "(default: status-all; applies to --connext-log or stderr)")
   parser.add_argument("--ready-file", default=None,
                       help="Write PATH after Doctor creates its DDS participant")
+  parser.add_argument("--ready-after-participants", type=int, default=0,
+                      help="Test hook: wait for this many remote participants before "
+                      "writing --ready-file")
+  parser.add_argument("--ready-timeout", type=float, default=15.0,
+                      help="Seconds to wait for --ready-after-participants (default: 15)")
 
   args = parser.parse_args(argv)
   if args.topic and args.all:
     parser.error("--topic and --all are mutually exclusive")
   if (args.pcap or args.capture_interface) and not args.topic:
     parser.error("--pcap and --capture-interface require --topic")
+  if args.ready_after_participants < 0 or args.ready_timeout <= 0:
+    parser.error("--ready-after-participants must be non-negative and --ready-timeout positive")
   return args
 
 
@@ -281,6 +288,19 @@ def _write_ready_file(path):
     handle.write("ready\n")
 
 
+def _wait_for_remote_participants(session, count, timeout):
+  """Wait for a bounded number of peers before a test fixture creates endpoints."""
+  if count == 0:
+    return True
+  deadline = time.monotonic() + timeout
+  while time.monotonic() < deadline:
+    discovery.refresh_participants(session.participant, session.registry)
+    if len(session.registry.participant_list()) >= count:
+      return True
+    time.sleep(0.05)
+  return False
+
+
 def run_headless_topic(session, args):
   """Diagnose one topic and emit a report. Returns a process exit code."""
   from . import findings as f, topology
@@ -436,6 +456,12 @@ def main(argv=None):
       domain_id, args, active_domains=active_domains, domain_scan_ran=scanned,
       compliance=compliance)
   session.type_lookup_settings.update(connext_logging)
+  if not _wait_for_remote_participants(
+      session, args.ready_after_participants, args.ready_timeout):
+    print("Doctor did not observe the requested remote participant count before "
+          "the readiness timeout.", file=sys.stderr)
+    participant.close()
+    return 3
   _write_ready_file(args.ready_file)
 
   try:

@@ -8,7 +8,6 @@ needs the current Docker image built by vendors/fastdds/build_image.sh.
 import json
 import os
 import random
-import re
 import shutil
 import subprocess
 import sys
@@ -17,6 +16,10 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL_DIR = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+
+import doctor_e2e  # noqa: E402
+
 VENDORS_DIR = os.path.join(HERE, "vendors")
 CYCLONE_FIXTURE = os.path.join(VENDORS_DIR, "cyclone_publisher.py")
 CYCLONE_SUBSCRIBER = os.path.join(VENDORS_DIR, "cyclone_subscriber.py")
@@ -78,38 +81,18 @@ class VendorWireE2E(unittest.TestCase):
     raise NotImplementedError
 
   def run_doctor(self):
-    env = dict(os.environ)
-    env["PYTHONPATH"] = TOOL_DIR + os.pathsep + env.get("PYTHONPATH", "")
-    command = [
-        sys.executable, "-m", "rti_doctor", "--domain", str(self.domain),
-        "--topic", self.topic, "--format", "json", "--no-domain-scan",
-        "--settle", str(DOCTOR_SETTLE), "--type-wait", "5", "--probe-timeout", "4",
-        "--capture-interface", CAPTURE_INTERFACE,
-    ]
+    command, environment = doctor_e2e.command(
+        self.domain, self.topic, settle=DOCTOR_SETTLE, type_wait=5,
+        probe_timeout=4, capture_interface=CAPTURE_INTERFACE)
     for attempt in range(3):
-      completed = subprocess.run(command, text=True, capture_output=True, env=env,
-                                 timeout=40, check=False)
+      completed = subprocess.run(
+          command, text=True, capture_output=True, env=environment,
+          timeout=40, check=False)
       if completed.returncode != 2 or attempt == 2:
         break
       time.sleep(1.0)
     self.assertNotEqual(completed.returncode, 2, completed.stderr)
-    try:
-      decoder = json.JSONDecoder()
-      payload = None
-      output = ""
-      offset = 0
-      for candidate in re.finditer(r"\{(?=\s*\"domain_id\")", completed.stdout):
-        output = completed.stdout[candidate.start():]
-        try:
-          payload, offset = decoder.raw_decode(output)
-          break
-        except json.JSONDecodeError:
-          continue
-      self.assertIsNotNone(payload, "rti_doctor emitted no JSON object")
-    except json.JSONDecodeError as error:
-      self.fail(f"rti_doctor did not emit JSON: {error}\n{completed.stderr}\n"
-                f"{completed.stdout}")
-    return payload
+    return doctor_e2e.parse_report(completed)
 
   def test_discovers_vendor_and_identifies_wire_representation(self):
     payload = self.run_doctor()

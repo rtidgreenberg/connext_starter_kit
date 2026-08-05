@@ -41,12 +41,13 @@ The initial implementation added
 | Connext writer -> Fast DDS reader | Match and reader samples. | No match/samples; Doctor emits active `qos.rxo_mismatch` naming RELIABILITY. | Passing with deterministic readiness. |
 | Fast DDS writer -> Connext reader | Match and reader samples; Fast DDS metadata resolves a Connext `DynamicType`. The custom FINAL TypeObject variant intentionally reports `type.assignability`. | No match/samples; Doctor emits active `qos.rxo_mismatch` naming RELIABILITY. | Passing with the custom TypeObject outcome isolated. |
 
-The Fast DDS P0 class uses a test-only file handshake: Doctor writes a marker
-after creating its participant; the Fast DDS reader waits for that marker and
-then writes its own endpoint-created marker; the writer is released only after
-the reader marker exists. This avoids fixed ordering sleeps and controls the
-one-shot SEDP announcement sequence. Ten independent Connext BEST_EFFORT writer
-to Fast DDS RELIABLE reader runs all discovered the reader and emitted active
+The Fast DDS P0 class uses a test-only discovery-aware file handshake. Both
+fixtures create participants behind endpoint gates. Doctor waits to observe both
+remote participants before writing its marker, after which the test releases
+and confirms the reader endpoint followed by the writer endpoint. This prevents
+fixed ordering sleeps and controls the one-shot SEDP announcement sequence.
+All four Fast DDS P0 controls pass, and ten independent Connext BEST_EFFORT
+writer to Fast DDS RELIABLE reader runs discovered the reader and emitted active
 `qos.rxo_mismatch` with RELIABILITY evidence.
 
 ### Fast DDS Type Metadata Spikes
@@ -104,14 +105,21 @@ captured Fast DDS reader QoS in the forward fault experiment.
 
 ### Common Harness
 
-Create `tools/rti_doctor/test/test_fault_vendor_e2e.py`, with reusable helpers
-for every scenario:
+`tools/rti_doctor/test/doctor_e2e.py` provides shared headless Doctor command
+construction and report extraction for end-to-end tests. It accepts native
+middleware preambles, finds the report JSON by its `domain_id`, and includes the
+command plus stdout/stderr when parsing fails. `test_fault_vendor_e2e.py` and
+the vendor wire suite use it. Keep vendor-specific retry and readiness logic in
+the owning test.
+
+The fault suite has reusable helpers for every scenario:
 
 - Start the reader before the writer, using a unique topic and a safe test
   domain. Retain current vendor setup: local Cyclone Python runtime and the
   current Fast DDS Docker image.
-- Wait for the fixture's JSON readiness result rather than a fixed sleep where
-  the fixture can provide one. Time out with captured stdout/stderr.
+- Use bounded file readiness gates rather than fixed sleeps. For Fast DDS P0,
+  Doctor must observe both fixture participants before either endpoint is
+  created; timeouts retain process streams and control markers.
 - Run the real CLI with `--domain`, `--topic`, `--format json`,
   `--no-domain-scan`, a bounded settle period, a bounded type wait, and a
   bounded probe timeout.
@@ -122,9 +130,10 @@ for every scenario:
   condition is payload-only.
 - Assert Doctor facts second: the required finding ID and severity, a report
   verdict consistent with the failure, and any relevant suppression relation.
-- Save CLI stdout, stderr, fixture JSON, and PCAPNG (when capture is used) in
-  `test_output/rti_doctor_faults/<scenario>-<vendor-pair>-<run-id>/` only on
-  failure, or when `RTI_DOCTOR_KEEP_ARTIFACTS=1`.
+- Save process stdout/stderr, command metadata, and copied readiness-control
+  files in `test_output/rti_doctor_faults/<run-id>/` on failure, or when
+  `RTI_DOCTOR_KEEP_ARTIFACTS=1`; include PCAPNG when the capture path produces
+  one. A retained successful Fast DDS P0 run has verified this complete bundle.
 
 Use deterministic safe domain selection, or calculate candidates with valid,
 non-privileged default RTPS ports. Do not use a random domain range without

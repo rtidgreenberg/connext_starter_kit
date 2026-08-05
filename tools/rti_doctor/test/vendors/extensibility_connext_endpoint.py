@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 import sys
 import time
 
@@ -37,6 +38,26 @@ def build_type(extensibility, schema):
   return sample
 
 
+def wait_for_file(path, timeout):
+  if not path:
+    return
+  deadline = time.monotonic() + timeout
+  while not os.path.exists(path) and time.monotonic() < deadline:
+    time.sleep(0.05)
+  if not os.path.exists(path):
+    raise TimeoutError(f"timed out waiting for start signal: {path}")
+
+
+def write_ready_file(path):
+  if not path:
+    return
+  directory = os.path.dirname(os.path.abspath(path))
+  if directory:
+    os.makedirs(directory, exist_ok=True)
+  with open(path, "w", encoding="utf-8") as ready_file:
+    ready_file.write("ready\n")
+
+
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("--domain", type=int, required=True)
@@ -48,11 +69,17 @@ def main():
   parser.add_argument("--reliability", choices=("reliable", "best-effort"),
                       default="reliable")
   parser.add_argument("--duration", type=float, default=6.0)
+  parser.add_argument("--wait-for-file",
+                      help="Wait for PATH after participant creation")
+  parser.add_argument("--wait-timeout", type=float, default=15.0)
+  parser.add_argument("--endpoint-ready-file",
+                      help="Write PATH after creating the requested endpoint")
   args = parser.parse_args()
 
   participant_qos = dds.DomainParticipantQos()
   configure_type_object_v1_only(participant_qos)
   participant = dds.DomainParticipant(args.domain, qos=participant_qos)
+  wait_for_file(args.wait_for_file, args.wait_timeout)
   sample_type = build_type(args.extensibility, args.schema)
   topic = dds.DynamicData.Topic(participant, args.topic, sample_type)
   results = {"matched": 0, "samples": 0}
@@ -65,6 +92,7 @@ def main():
         dds.ReliabilityKind.RELIABLE if args.reliability == "reliable"
         else dds.ReliabilityKind.BEST_EFFORT)
     writer = dds.DynamicData.DataWriter(dds.Publisher(participant), topic, writer_qos)
+    write_ready_file(args.endpoint_ready_file)
     counter = 0
     while time.monotonic() < deadline:
       counter += 1
@@ -85,6 +113,7 @@ def main():
         dds.ReliabilityKind.RELIABLE if args.reliability == "reliable"
         else dds.ReliabilityKind.BEST_EFFORT)
     reader = dds.DynamicData.DataReader(dds.Subscriber(participant), topic, reader_qos)
+    write_ready_file(args.endpoint_ready_file)
     while time.monotonic() < deadline:
       results["matched"] = max(results["matched"], reader.subscription_matched_status.current_count)
       results["samples"] += sum(1 for sample in reader.take() if sample.info.valid)

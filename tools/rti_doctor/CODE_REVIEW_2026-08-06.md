@@ -108,7 +108,7 @@ The behaviour changes worth knowing about:
 | 08-04 M3 | `-E occurrence=a`, and the parsers split on the aggregator. `rtps.sm.id` used to read `0x09` (INFO_TS) on nearly every frame, so DATA_FRAG could never be counted. |
 | 08-04 M7 | `type.name_conflict` is WARN and points at `type.assignability`. A name difference is not proof: the reader's TypeConsistencyEnforcement is not in discovery. |
 | 08-04 M8 | A truncated walk verdicts as PARTIAL, not FULL, and reports `payload.truncated`. This also exposed a real bug — a bulk-read primitive collection set `truncated` although it read every element — now fixed in `_walk_collection`. |
-| 08-04 M9/N2 | Both `subprocess.run` calls take `timeout=TSHARK_READ_TIMEOUT`. |
+| 08-04 M9/N2 | Both `subprocess.run` calls take `timeout=TSHARK_READ_TIMEOUT`. **Half fixed**: the timeout bounds the hang, not the memory - `-e rtps.issueData` still buffers every payload as hex. See [What remains](#what-remains) item 3. |
 | 08-04 M12 | SPDP2 is resolved from the binding's mask flag and tested as a bit, with the substring only as fallback. `str(mask)` can render as a number, in which case the old check could not fire at all. |
 | 08-04 M13 | `check_no_multicast_locators` dropped from the *system scan* (one Note per writer, saying it does not affect correctness). It still runs in a targeted per-endpoint report. |
 | 08-04 M14 | `check_window` WARNs only on an actual rejection; a bare `uncommitted_sample_count` is INFO, since it is the ordinary in-flight state of a reliable reader read at an arbitrary instant. |
@@ -970,28 +970,43 @@ Re-verified against current source. None of these are re-explained here; see
 
 ---
 
-## Recommended order of work
+## What remains
 
-1. **H1** — one line, and it is a hard crash on a shipped path. Nothing else in
-   this list matters if `--all` cannot finish. Add a test that runs
-   `run_headless_all` against a fake session in the same change.
-2. **H3, H2** — registry integrity. H3 fabricates diagnoses from Doctor's own
-   bookkeeping; H2 silently drops findings under the same concurrency. Both are
-   small, and the system scanner made both routine rather than rare.
-3. **H5, M1** — system-scan correctness. Together these decide whether the
-   Issues screen's counts mean anything. Both are contained in
-   `system_scan.py`'s two check lists.
-4. **H4** — probe correlation. Same class as the `d5d457d` regressions, same
-   fix shape: make the trio (`correlated`, `matched_other_count`,
-   `matched_unreadable_count`) always describe one reading.
-5. **M2, M3, M4** — the TUI. M3 is the first thing an operator sees; M2 is what
-   makes every screen slow; M4 is what makes a slow screen also unsafe.
-6. **M5** — delete the dead screens, but resolve the blind-spot-panel gap first.
-7. **H3 (wire), H6, M2 (wire), M3 (wire), M9** from the carried-over table —
-   the packet path. Until these land, Appendix C should be labelled
-   interface-wide observation rather than evidence about the selected writer.
-8. **M6, M10, M11** — determinism and input validation.
-9. Everything else.
+Every finding in this document is fixed except the four below. The original
+"recommended order of work" is gone because the work in it is done; this is the
+list that replaces it. Items 1-3 are defects with a known cause; item 4 is a
+coverage gap that limits how much any of the above can be trusted.
+
+1. **[I5](#i5) — a background refresh that raises is silent.** Five system
+   screens keep rendering the previous snapshot with no marker, so a scan that
+   has been failing for minutes looks identical to one that found nothing to
+   change. `ReportScreen` already does this correctly. The fix is a shared
+   status convention across the five screens, which is why it was not done
+   half-way inside a fix pass. Its test is still listed as a gap below.
+
+2. **08-04 H7 residual — the probe cannot be cancelled.** Navigating away is
+   handled (the probe is a screen-owned worker), but `probe_endpoint` itself has
+   no cancellation, so quitting during a probe still waits out the current
+   `--probe-timeout` window. Closing this means threading a cancel token or an
+   `Event` through the probe loop.
+
+3. **08-04 M9 residual — `inspect_pcap` memory.** The subprocess timeout is in
+   place and bounds the hang. It does not bound the memory: `-e rtps.issueData`
+   still renders every payload as hex into a buffered stdout, so a large capture
+   is held in RAM in full. Fixing it means either dropping the field and
+   deriving payload size another way, or streaming tshark's output rather than
+   using `capture_output=True`.
+
+4. **CI covers the unit tier only.** Lint and 169 unit tests run on every push.
+   The live suite (195 tests, including the H2 concurrency guard and the scale
+   suite) and the vendor e2e suites need a Connext license, and the vendor tier
+   additionally needs Docker images - so both currently depend on someone
+   remembering to run them locally. Until a licensed self-hosted runner exists,
+   the guards added by this work protect less than they appear to.
+
+Nothing else in this document is outstanding. The remaining product work -
+`DOC-1` through `DOC-4`, `HAR-5`, and the `FDD-2` remainder - lives in
+`IMPROVEMENT_BACKLOG.md` and is feature work rather than review follow-up.
 
 ## Test gaps implied by these findings
 

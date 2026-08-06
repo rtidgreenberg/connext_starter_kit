@@ -8,7 +8,7 @@ machine rather than a snapshot.
 
 from .. import compat, records, typewalk, vendors
 from ..findings import RUNG_TYPE, Finding, Severity
-from ..records import TYPE_PENDING, TYPE_RESOLVED, TYPE_UNAVAILABLE
+from ..records import TYPE_PENDING, TYPE_RESOLVED
 
 DOC_TYPELOOKUP = ("https://community.rti.com/static/documentation/connext-dds/7.7.0/"
                   "doc/manuals/connext_dds_professional/users_manual/users_manual/"
@@ -132,18 +132,28 @@ def check_type_name_conflict(context):
   return [Finding(
       id="type.name_conflict",
       rung=RUNG_TYPE,
-      severity=Severity.ERROR,
+      # WARN, not ERROR. A name difference is not proof of incompatibility: the
+      # reader's TypeConsistencyEnforcement is not published in discovery, and
+      # a reader that ignores the type name matches anyway. Asserting ERROR here
+      # contradicted this tool's own type.assignability finding, which compares
+      # the actual schemas, whenever the two disagreed.
+      severity=Severity.WARN,
       title=f"Topic '{endpoint.topic_name}' is advertised with {len(names)} different type names",
       observed=detail,
       root_cause=(
           "DDS matches a reader to a writer on topic name, and then requires the "
-          "types to be compatible. Two different type names on one topic means at "
-          "least one pairing cannot match. Cross-vendor this is often an IDL "
+          "types to be compatible. Cross-vendor this is often an IDL "
           "module/namespace difference rather than a genuinely different type - "
-          "for example 'Sensor' versus 'sensors::Sensor'."),
+          "for example 'Sensor' versus 'sensors::Sensor' - and a reader "
+          "configured to ignore the type name still matches. Check the "
+          "type.assignability finding, which compares the schemas themselves, "
+          "before treating this as the cause of a match failure."),
       remedy=("Align the type names, or configure type-consistency enforcement to "
               "ignore the name difference if the structures really are compatible."),
-      evidence={"topic_name": endpoint.topic_name, "type_names": sorted(names)},
+      # Topic-scoped: the condition belongs to the topic, not to whichever
+      # endpoint on it the caller happened to be iterating.
+      evidence={"scope": "topic", "topic_name": endpoint.topic_name,
+                "type_names": sorted(names)},
       refs=[DOC_ASSIGNABILITY],
   )]
 

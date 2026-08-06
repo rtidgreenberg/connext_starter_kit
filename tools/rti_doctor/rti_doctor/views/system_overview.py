@@ -12,25 +12,42 @@ from .. import findings as f, report
 from .browse import EndpointListScreen
 from .report_screen import ReportScreen
 
+#: Seconds a snapshot may be reused when a screen is merely being opened. A
+#: scan is expensive and five screens each ask for one, so navigating between
+#: them otherwise pays for a full re-scan per screen. An explicit `r` refresh
+#: always re-scans.
+SCAN_REUSE_SECONDS = 3.0
+
 
 def _issue_counts(snapshot):
   return {severity: sum(issue.severity == severity for issue in snapshot.issues)
           for severity in (f.Severity.ERROR, f.Severity.WARN, f.Severity.INFO)}
 
 
+def _spawn(screen, coroutine):
+  """Run `coroutine` as a worker owned by `screen`.
+
+  Textual's run_worker, not asyncio.create_task: the event loop holds only a
+  weak reference to a bare task, so it can be collected mid-flight, and nothing
+  cancels it when the screen is popped - leaving a scan that finishes seconds
+  later writing into unmounted widgets.
+  """
+  screen.run_worker(coroutine, exit_on_error=False)
+
+
 class SystemOverviewScreen(Screen):
   """The initial routing screen for issue-first and topology-first workflows."""
 
-  BINDINGS = [("1", "issues", "Issues"), ("i", "issues", "Issues"),
-              ("2", "topology", "Topology"), ("t", "topology", "Topology"),
-              ("m", "metrics", "Metrics"), ("s", "save", "Save report"),
-              ("q", "quit_app", "Quit")]
+  BINDINGS = [("r", "refresh", "Refresh"), ("m", "metrics", "Metrics"),
+              ("s", "save", "Save report"), ("q", "quit_app", "Quit")]
 
   def __init__(self, session):
     super().__init__()
     self.session = session
+    self.menu = DataTable()
     self.summary = None
     self.status = None
+    self._snapshot = None
 
   def compose(self):
     yield Header()
@@ -38,19 +55,38 @@ class SystemOverviewScreen(Screen):
       yield Static("[bold cyan]DDS System Overview[/bold cyan]")
       self.summary = Static("Collecting observed topology...", id="system_summary")
       yield self.summary
-      yield Static("[1] Issues\n    Triage errors, warnings, and notes.\n\n"
-                   "[2] DDS Topology & Health\n"
-                   "    Browse participants and their discovered endpoints.")
+      yield Static("Use Up/Down and Enter to choose a view.")
+      yield self.menu
       self.status = Static("", id="system_status")
       yield self.status
     yield Footer()
 
   async def on_mount(self):
     self.title = f"rti_doctor - domain {self.session.domain_id}"
+    self.menu.add_columns("View", "Description")
+    self.menu.add_row("Issues", "Triage errors, warnings, and notes.", key="issues")
+    self.menu.add_row("DDS Topology & Health",
+                      "Browse participants and their discovered endpoints.", key="topology")
+    self.menu.cursor_type = "row"
+    self.menu.focus()
     await self.refresh_summary()
 
-  async def refresh_summary(self):
-    snapshot = await asyncio.to_thread(self.session.system_scan)
+  async def on_screen_resume(self):
+    """Discovery keeps arriving while the operator is in a child screen.
+
+    Without this the landing screen shows the counts it computed at startup for
+    the rest of the session - on a domain that is still settling, which is the
+    common case, that is the first thing the operator sees and the most likely
+    thing to be wrong.
+
+    Textual posts ScreenResume on the initial push too, right after on_mount, so
+    this reuses a very recent scan rather than paying for a duplicate at startup.
+    """
+    if self._snapshot is not None:
+      await self.refresh_summary(max_age=SCAN_REUSE_SECONDS)
+
+  async def refresh_summary(self, max_age=0.0):
+    snapshot = await asyncio.to_thread(self.session.system_scan, None, max_age)
     counts = _issue_counts(snapshot)
     metrics = snapshot.topology
     self.summary.update(
@@ -60,23 +96,101 @@ class SystemOverviewScreen(Screen):
         f"{counts[f.Severity.INFO]} Notes")
     self._snapshot = snapshot
 
-  def action_issues(self):
-    self.app.push_screen(IssueListScreen(self.session))
+  async def on_data_table_row_selected(self, event):
+    if event.row_key is None or self._snapshot is None:
+      return
+    if event.row_key.value == "issues":
+      self.app.push_screen(IssueSeverityScreen(self.session, self._snapshot))
+    elif event.row_key.value == "topology":
+      self.app.push_screen(TopologyHealthScreen(self.session))
 
-  def action_topology(self):
-    self.app.push_screen(TopologyHealthScreen(self.session))
+  def action_refresh(self):
+    _spawn(self, self.refresh_summary())
 
   def action_metrics(self):
     self.app.push_screen(MetricsScreen(self.session))
 
   def action_save(self):
-    snapshot = getattr(self, "_snapshot", None)
+    snapshot = self._snapshot
     if snapshot is None:
       return
     path = os.path.abspath(report.system_filename(self.session.domain_id))
     with open(path, "w", encoding="utf-8") as handle:
       handle.write(report.render_system_text(snapshot, self.session.domain_id))
     self.status.update(f"Saved system report to {path}")
+
+  def action_quit_app(self):
+    self.app.exit()
+
+
+class IssueSeverityScreen(Screen):
+  """Choose which severity of a passive issue snapshot to inspect."""
+
+  BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
+              ("r", "refresh", "Refresh"), ("q", "quit_app", "Quit")]
+
+  def __init__(self, session, snapshot=None):
+    super().__init__()
+    self.session = session
+    self.snapshot = snapshot
+    self.table = DataTable()
+    self.status = None
+
+  def compose(self):
+    yield Header()
+    yield Static("Use Up/Down and Enter to select the issues to display.")
+    with Container(id="issue_severity_menu"):
+      yield self.table
+    self.status = Static("Collecting issue counts...", id="issue_severity_status")
+    yield self.status
+    yield Footer()
+
+  async def on_mount(self):
+    self.title = f"rti_doctor - issue severity domain {self.session.domain_id}"
+    self.table.add_columns("Severity", "Count", "Description")
+    self.table.cursor_type = "row"
+    if self.snapshot is None:
+      await self._refresh(max_age=SCAN_REUSE_SECONDS)
+    else:
+      self._render_menu()
+    self.table.focus()
+
+  async def on_screen_resume(self):
+    """The child list can refresh; without this the counts here disagree with it."""
+    if self.snapshot is not None and self.is_mounted:
+      await self._refresh(max_age=SCAN_REUSE_SECONDS)
+
+  async def _refresh(self, max_age=0.0):
+    self.snapshot = await asyncio.to_thread(self.session.system_scan, None, max_age)
+    self._render_menu()
+
+  def _render_menu(self):
+    self.table.clear()
+    counts = _issue_counts(self.snapshot)
+    choices = (("error", f.Severity.ERROR, "Errors", "Requires attention"),
+               ("warning", f.Severity.WARN, "Warnings", "Potential interoperability risk"),
+               ("info", f.Severity.INFO, "Info", "Advisory observations"))
+    for key, severity, label, description in choices:
+      self.table.add_row(label, str(counts[severity]), description, key=key)
+    self.status.update("Select a severity to show only issues at that level.")
+
+  async def on_data_table_row_selected(self, event):
+    if event.row_key is None:
+      return
+    severity = {
+        "error": f.Severity.ERROR,
+        "warning": f.Severity.WARN,
+        "info": f.Severity.INFO,
+    }.get(event.row_key.value)
+    if severity is not None:
+      self.app.push_screen(IssueListScreen(
+          self.session, snapshot=self.snapshot, severity=severity))
+
+  def action_refresh(self):
+    _spawn(self, self._refresh())
+
+  def action_back(self):
+    self.app.pop_screen()
 
   def action_quit_app(self):
     self.app.exit()
@@ -90,13 +204,14 @@ class IssueListScreen(Screen):
               ("s", "save", "Save report"), ("o", "open_report", "Open report"),
               ("d", "debug", "Debug writer"), ("q", "quit_app", "Quit")]
 
-  def __init__(self, session, snapshot=None, issue_keys=None):
+  def __init__(self, session, snapshot=None, issue_keys=None, severity=None):
     super().__init__()
     self.session = session
     self.table = DataTable()
     self.status = None
     self.snapshot = snapshot
     self.issue_keys = set(issue_keys) if issue_keys is not None else None
+    self.severity = severity
     self.selected_key = None
 
   def compose(self):
@@ -112,22 +227,25 @@ class IssueListScreen(Screen):
     self.table.add_columns("No.", "Severity", "Topic", "Finding", "State")
     self.table.cursor_type = "row"
     if self.snapshot is None:
-      await self._refresh()
+      await self._refresh(max_age=SCAN_REUSE_SECONDS)
     else:
       self._render_snapshot()
     self.table.focus()
 
-  async def _refresh(self):
+  async def _refresh(self, max_age=0.0):
     previous = self.selected_key
-    self.snapshot = await asyncio.to_thread(self.session.system_scan)
+    self.snapshot = await asyncio.to_thread(self.session.system_scan, None, max_age)
     self._render_snapshot(previous)
 
   def _visible_issues(self):
     if self.snapshot is None:
       return ()
-    if self.issue_keys is None:
-      return self.snapshot.issues
-    return tuple(item for item in self.snapshot.issues if item.key in self.issue_keys)
+    issues = self.snapshot.issues
+    if self.issue_keys is not None:
+      issues = tuple(item for item in issues if item.key in self.issue_keys)
+    if self.severity is not None:
+      issues = tuple(item for item in issues if item.severity == self.severity)
+    return issues
 
   def _render_snapshot(self, previous=None):
     self.table.clear()
@@ -138,7 +256,8 @@ class IssueListScreen(Screen):
     counts = {severity: sum(issue.severity == severity for issue in issues)
               for severity in (f.Severity.ERROR, f.Severity.WARN, f.Severity.INFO)}
     stamp = time.strftime("%H:%M:%S", time.localtime(self.snapshot.captured_at))
-    self.status.update(f"Snapshot {stamp}: {counts[f.Severity.ERROR]} Errors | "
+    scope = self.severity.label.title() if self.severity is not None else "All"
+    self.status.update(f"{scope} issues, snapshot {stamp}: {counts[f.Severity.ERROR]} Errors | "
                        f"{counts[f.Severity.WARN]} Warnings | {counts[f.Severity.INFO]} Notes. "
                        "Press r to refresh.")
     if previous and previous in {item.key for item in issues}:
@@ -154,13 +273,13 @@ class IssueListScreen(Screen):
     if issue is not None:
       self.app.push_screen(IssueDetailScreen(self.session, self.snapshot, issue))
 
+  def action_refresh(self):
+    _spawn(self, self._refresh())
+
   def _selected_issue(self):
     if self.snapshot is None or self.selected_key is None:
       return None
     return next((item for item in self._visible_issues() if item.key == self.selected_key), None)
-
-  def action_refresh(self):
-    asyncio.create_task(self._refresh())
 
   def action_metrics(self):
     self.app.push_screen(MetricsScreen(self.session))
@@ -294,11 +413,11 @@ class TopologyHealthScreen(Screen):
   async def on_mount(self):
     self.title = f"rti_doctor - topology domain {self.session.domain_id}"
     self.table.cursor_type = "row"
-    await self._refresh()
+    await self._refresh(max_age=SCAN_REUSE_SECONDS)
     self.table.focus()
 
-  async def _refresh(self):
-    self.snapshot = await asyncio.to_thread(self.session.system_scan)
+  async def _refresh(self, max_age=0.0):
+    self.snapshot = await asyncio.to_thread(self.session.system_scan, None, max_age)
     self._render_table()
 
   def _render_table(self):
@@ -371,7 +490,7 @@ class TopologyHealthScreen(Screen):
     self._render_table()
 
   def action_refresh(self):
-    asyncio.create_task(self._refresh())
+    _spawn(self, self._refresh())
 
   def action_metrics(self):
     self.app.push_screen(MetricsScreen(self.session))
@@ -511,25 +630,28 @@ class MetricsScreen(Screen):
 
   async def on_mount(self):
     self.title = f"rti_doctor - metrics domain {self.session.domain_id}"
-    await self._refresh()
+    await self._refresh(max_age=SCAN_REUSE_SECONDS)
 
-  async def _refresh(self):
-    snapshot = await asyncio.to_thread(self.session.system_scan)
+  async def _refresh(self, max_age=0.0):
+    snapshot = await asyncio.to_thread(self.session.system_scan, None, max_age)
     data = snapshot.topology
-    self.body.update("\n".join([
-        "[bold]Observed Domain Metrics[/bold]", "",
-        f"Domain ID                 {self.session.domain_id}",
-        f"Remote participants       {data['participants']}",
-        f"Remote DataReaders         {data['readers']}",
-        f"Remote DataWriters         {data['writers']}",
-        f"Unique topics              {data['topic_count']}",
-        f"Topic names                {', '.join(data['topics']) or '(none observed)'}",
-        f"Source                     {data['source']}",
-        f"Coverage                   {data['completion_note']}",
-    ]))
+    rows = [
+        ("Domain ID", str(self.session.domain_id)),
+        ("Remote participants", str(data["participants"])),
+        ("Remote DataReaders", str(data["readers"])),
+        ("Remote DataWriters", str(data["writers"])),
+        ("Unique topics", str(data["topic_count"])),
+        ("Topic names", ", ".join(data["topics"]) or "(none observed)"),
+        ("Source", data["source"]),
+        ("Coverage", data["completion_note"]),
+    ]
+    width = max(len(label) for label, _ in rows) + 2
+    self.body.update("\n".join(
+        ["[bold]Observed Domain Metrics[/bold]", ""]
+        + [f"{label.ljust(width)}{value}" for label, value in rows]))
 
   def action_refresh(self):
-    asyncio.create_task(self._refresh())
+    _spawn(self, self._refresh())
 
   def action_back(self):
     self.app.pop_screen()

@@ -13,6 +13,7 @@ The text file is the primary artifact. Its rules:
 
 import json
 import time
+from collections.abc import Mapping
 
 from . import compat, findings as f, probe as probe_mod, records, typewalk
 
@@ -49,6 +50,12 @@ def _wrap(text, indent=15, width=WIDTH):
     lines.append(current)
   pad = " " * indent
   return [pad + line for line in lines]
+
+
+def _fit(text, width):
+  """Truncate to `width`, marking it, so two long names never look identical."""
+  text = str(text)
+  return text if len(text) <= width else text[: width - 1] + "~"
 
 
 def _labelled(label, text, indent=15):
@@ -163,11 +170,13 @@ class ReportData:
       outcome.skip_reason = result.create_error or "reader could not be created"
       outcome.attempted = False
       return outcome
+    outcome.incomplete_reason = result.error
     if result.walk is not None:
       outcome.payload_verdict = result.walk.verdict
       outcome.members_total = result.walk.total
       outcome.members_unreadable = len(result.walk.failed)
       outcome.unreadable_paths = result.walk.failed_paths
+      outcome.truncated = result.walk.truncated
     return outcome
 
   @property
@@ -250,11 +259,17 @@ def render_topology_text(topology):
   lines = _section("OBSERVED TOPOLOGY")
   lines.append(_kv("Source", topology["source"]))
   lines.append(_kv("Scope", topology["scope"]))
-  lines.append(_kv("Domain IDs", ", ".join(str(item) for item in topology["domain_ids"])))
+  lines.append(_kv("Domain", str(topology["selected_domain_id"])))
   lines.append(_kv("Participants", str(topology["participants"])))
   lines.append(_kv("Readers", str(topology["readers"])))
   lines.append(_kv("Writers", str(topology["writers"])))
   lines.append(_kv("Topics", ", ".join(topology["topics"]) or "(none observed)"))
+  # After the counts, and labelled as a different observation: these domains
+  # were heard announcing, and nothing above describes them.
+  others = topology.get("other_domains_announcing") or ()
+  if others:
+    lines.append(_kv("Other domains", ", ".join(str(item) for item in others)
+                     + " (heard announcing; no counts above apply to them)"))
   lines.append(_kv("Coverage", topology["completion_note"]))
   lines.append("")
   return lines
@@ -479,7 +494,10 @@ def render_json(data):
 
 
 def _jsonable(value):
-  if isinstance(value, dict):
+  # Mapping, not dict: system_scan freezes evidence into MappingProxyType,
+  # which is not a dict subclass and would otherwise be stringified as
+  # "mappingproxy({...})".
+  if isinstance(value, Mapping):
     return {str(k): _jsonable(v) for k, v in value.items()}
   if isinstance(value, (list, tuple, set)):
     return [_jsonable(v) for v in value]
@@ -509,8 +527,8 @@ def render_sweep_text(rows, domain_id, environment=None, generated_at=None):
   header = f"{'SEV':6} {'TOPIC':32} {'VENDOR':26} VERDICT"
   lines += [header, "-" * len(header)]
   for row in rows:
-    lines.append(f"{row['severity']:6} {row['topic'][:32]:32} "
-                 f"{row['vendor'][:26]:26} {row['verdict']}")
+    lines.append(f"{row['severity']:6} {_fit(row['topic'], 32):32} "
+                 f"{_fit(row['vendor'], 26):26} {row['verdict']}")
   lines.append("")
 
   lines += _section("DETAIL")

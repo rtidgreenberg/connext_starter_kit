@@ -1,6 +1,6 @@
 """Rung 4 checks: did the reader match, and if not, which policy blocked it?"""
 
-from .. import compat, records
+from .. import compat
 from ..findings import RUNG_MATCH, Finding, Severity
 
 #: RxO rules in plain English, keyed by the substring Connext reports in
@@ -92,6 +92,30 @@ def check_probe_error(context):
           "this is a local failure, not a property of the peer."),
       remedy="Resolve the error above, then re-run the probe.",
       evidence={"error": probe.create_error},
+  )]
+
+
+def check_probe_incomplete(context):
+  """The reader was created, then something failed before the probe finished."""
+  probe = context.probe
+  if probe is None or not probe.created or not getattr(probe, "error", None):
+    return []
+  return [Finding(
+      id="probe.incomplete",
+      rung=RUNG_MATCH,
+      severity=Severity.WARN,
+      title="The probe did not run to completion",
+      observed=probe.error,
+      root_cause=(
+          "The reader was created and whatever this report shows was genuinely "
+          "observed, but the probe raised before finishing - typically while "
+          "reading a status counter. Absent evidence in this report is "
+          "therefore not evidence of absence: a counter that reads as zero may "
+          "simply never have been sampled."),
+      remedy=("Re-run the probe. If it fails the same way, this is an "
+              "rti_doctor bug against this Connext version, not a property of "
+              "the peer - report it with the error above."),
+      evidence={"error": probe.error},
   )]
 
 
@@ -298,6 +322,7 @@ def check_partition_overlap(context):
 
 CHECKS = (
     check_probe_error,
+    check_probe_incomplete,
     check_incompatible_qos,
     check_matched,
     check_inconsistent_topic,

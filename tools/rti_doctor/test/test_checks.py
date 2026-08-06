@@ -1114,3 +1114,108 @@ class TestCorrelationDoesNotOverclaim(unittest.TestCase):
     self.assertIn("OTHER writers", result[0].observed)
     self.assertIn("none came from the selected writer", result[0].root_cause)
     self.assertNotIn("dropped between reception", result[0].root_cause)
+
+
+class TestCorrelationIsNotALatch(unittest.TestCase):
+  """`correlated` and the other/unreadable counts must describe one reading.
+
+  `correlated` used to be set True on success and never cleared, so a later
+  poll that could not resolve a publication left a writer-scoped claim standing
+  over a topic-wide count - and could promote a topic-level WARN into an ERROR
+  that suppresses data.silent.
+  """
+
+  def test_a_later_uncorrelatable_read_clears_every_correlation_field(self):
+    result = probe.ProbeResult()
+    endpoint = endpoint_record(key="w1", kind="Writer")
+
+    good = FakeMatchedPublicationReader({"h1": "w1", "h2": "w2"})
+    self.assertEqual(probe._correlate(good, endpoint, result), {"h1"})
+    self.assertTrue(result.correlated)
+    self.assertEqual(result.matched_other_count, 1)
+
+    # The binding stops reporting matched publications.
+    self.assertIsNone(probe._correlate(FakeUncorrelatableReader(), endpoint, result))
+    self.assertFalse(result.correlated)
+    self.assertEqual(result.matched_other_count, 0)
+    self.assertEqual(result.matched_unreadable_count, 0)
+
+  def test_an_unreadable_publication_clears_it_too(self):
+    result = probe.ProbeResult()
+    endpoint = endpoint_record(key="w1", kind="Writer")
+    probe._correlate(FakeMatchedPublicationReader({"h1": "w1"}), endpoint, result)
+    self.assertTrue(result.correlated)
+
+    # "w1" is gone and one publication will not read: it could have been w1.
+    probe._correlate(FakeMatchedPublicationReader({"h2": None}), endpoint, result)
+    self.assertFalse(result.correlated)
+
+
+class TestProbeIncompleteRun(unittest.TestCase):
+
+  def test_a_failure_after_reader_creation_is_reported(self):
+    probe_result = FakeProbe()
+    probe_result.error = "RuntimeError: status read failed"
+    result = probe_match.check_probe_incomplete(CheckContext(probe=probe_result))
+    self.assertEqual(ids(result), ["probe.incomplete"])
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_a_clean_probe_reports_nothing(self):
+    self.assertEqual(
+        probe_match.check_probe_incomplete(CheckContext(probe=FakeProbe())), [])
+
+
+class TestParticipantDepartureSweep(unittest.TestCase):
+  """One unreadable sample must not evict a live peer and all its endpoints."""
+
+  class FakeParticipant:
+    def __init__(self, readable):
+      self._readable = readable
+    def discovered_participants(self):
+      return ["h1", "h2"]
+    def discovered_participant_data(self, handle):
+      if handle not in self._readable:
+        raise RuntimeError("this vendor's SPDP field will not read")
+      class Key:
+        value = handle
+      class Name:
+        name = handle
+      class Data:
+        key = Key()
+        participant_name = Name()
+      return Data()
+
+  def _registry(self):
+    registry = discovery.DiscoveryRegistry()
+    registry.participants = {"h1": records.ParticipantRecord(key="h1"),
+                             "h2": records.ParticipantRecord(key="h2")}
+    registry.endpoints = {
+        "e1": records.EndpointRecord(key="e1", kind="Writer", participant_key="h2")}
+    return registry
+
+  def test_an_unreadable_participant_does_not_evict_the_peer(self):
+    registry = self._registry()
+    discovery.refresh_participants(self.FakeParticipant({"h1"}), registry)
+    self.assertEqual(set(registry.participants), {"h1", "h2"})
+    self.assertEqual(set(registry.endpoints), {"e1"})
+
+  def test_a_genuinely_departed_participant_is_still_removed(self):
+    registry = self._registry()
+    registry.participants["gone"] = records.ParticipantRecord(key="gone")
+    discovery.refresh_participants(self.FakeParticipant({"h1", "h2"}), registry)
+    self.assertEqual(set(registry.participants), {"h1", "h2"})
+
+
+class TestWriterSelectionIsDeterministic(unittest.TestCase):
+
+  def test_find_writer_does_not_depend_on_discovery_order(self):
+    """Dict order is arrival order; an unsorted pick changed the verdict per run."""
+    keys = ["w-c", "w-a", "w-b"]
+    chosen = set()
+    for order in (keys, list(reversed(keys))):
+      registry = discovery.DiscoveryRegistry()
+      for key in order:
+        registry.endpoints[key] = records.EndpointRecord(
+            key=key, kind="Writer", topic_name="Telemetry")
+      chosen.add(registry.find_writer("Telemetry").key)
+    self.assertEqual(chosen, {"w-a"})

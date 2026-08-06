@@ -13,6 +13,10 @@ import time
 
 from . import compat, records
 
+#: Ceiling on a one-shot tshark read of an existing capture. An unbounded
+#: subprocess.run over an arbitrarily large PCAP hangs the whole report.
+TSHARK_READ_TIMEOUT = 120.0
+
 
 @dataclass
 class WireObservation:
@@ -41,6 +45,12 @@ class DiscoveryObservation:
   reliability_kind: str = ""
 
 
+#: tshark's aggregator when a field occurs more than once in a frame. Every
+#: field below is per-submessage, and RTPS routinely coalesces several
+#: submessages into one frame, so occurrences are requested and split here.
+OCCURRENCE_SEPARATOR = ","
+
+
 def parse_tshark_fields(line):
   """Parse one tab-separated RTPS record from the tshark capture command."""
   fields = line.rstrip("\r\n").split("\t")
@@ -59,11 +69,18 @@ def parse_tshark_fields(line):
   )
 
 
+def _values(field):
+  """Every occurrence of a repeated tshark field, normalized and de-duplicated."""
+  return [item.strip().lower() for item in str(field).split(OCCURRENCE_SEPARATOR)
+          if item.strip()]
+
+
 def _hex_bytes(value):
-  """Length of tshark's colon-separated byte rendering, or zero when absent."""
+  """Total bytes across tshark's colon-separated renderings, or zero if absent."""
   if not value:
     return 0
-  return len("".join(value.split(":"))) // 2
+  digits = value.replace(":", "").replace(OCCURRENCE_SEPARATOR, "")
+  return len(digits) // 2
 
 def parse_discovery_fields(line):
   """Parse RTPS discovery metadata emitted by tshark's fields formatter."""
@@ -79,14 +96,21 @@ def summarize_discovery(observations, source, capture_filter=None):
   """Summarize observed RTPS SPDP/SEDP metadata without decoding user data."""
   participants = {item.guid_prefix for item in observations if item.guid_prefix}
   topics = sorted({item.topic_name for item in observations if item.topic_name})
-  endpoints = {
-      (item.guid_prefix, item.writer_entity_id, item.reader_entity_id)
-      for item in observations
-      if item.writer_entity_id or item.reader_entity_id
-  }
+  # One tuple per (prefix, writer, reader) actually paired in a submessage.
+  # Zipping the occurrence lists positionally rather than crossing them keeps
+  # a coalesced frame from fabricating pairs that were never on the wire.
+  endpoints = set()
+  for item in observations:
+    writers = _values(item.writer_entity_id) or [""]
+    readers = _values(item.reader_entity_id) or [""]
+    for index in range(max(len(writers), len(readers))):
+      writer = writers[index] if index < len(writers) else ""
+      reader = readers[index] if index < len(readers) else ""
+      if writer or reader:
+        endpoints.add((item.guid_prefix, writer, reader))
   return {
-      "source": "tshark RTPS discovery",
-      "pcap_source": source,
+      "kind": "tshark RTPS discovery",
+      "source": source,
       "capture_filter": capture_filter,
       "participants": len(participants),
       "endpoint_observations": len(endpoints),
@@ -106,25 +130,37 @@ def summarize_discovery(observations, source, capture_filter=None):
 
 
 def summarize(observations, writer_entity_id=None, writer_guid_prefix=None):
-  """Stable summary for a report appendix."""
+  """Stable summary for a report appendix.
+
+  Every filter that applies is applied. A GUID prefix identifies the remote
+  PARTICIPANT, not the writer, so on its own it still admits that participant's
+  SPDP/SEDP writers and its writers on other topics - the appendix would then
+  present discovery traffic as the selected writer's user payload. The entity-id
+  and builtin-writer filters therefore narrow it further rather than replacing
+  it.
+
+  Filtering is frame-level: a frame that coalesces the target writer with
+  another writer is counted once, for the target.
+  """
   if writer_guid_prefix is not None:
     observations = [item for item in observations
                     if _same_guid_prefix(item.writer_guid_prefix, writer_guid_prefix)]
-  else:
-    observations = [item for item in observations if not _is_builtin_writer(item)]
-  if writer_entity_id is not None and writer_guid_prefix is None:
+  if writer_entity_id is not None:
     observations = [item for item in observations
                     if _same_entity_id(item.writer_entity_id, writer_entity_id)]
-  encapsulations = sorted({item.encapsulation_id for item in observations
-                           if item.encapsulation_id})
-  writers = sorted({item.writer_entity_id for item in observations
-                    if item.writer_entity_id})
+  else:
+    observations = [item for item in observations if not _is_builtin_writer(item)]
+
+  encapsulations, writers = set(), set()
+  for item in observations:
+    encapsulations.update(_values(item.encapsulation_id))
+    writers.update(_values(item.writer_entity_id))
   return {
       "packets": len(observations),
-      "data_packets": sum(not _has_submessage(item, "0x16") for item in observations),
+      "data_packets": sum(_has_submessage(item, "0x15") for item in observations),
       "data_fragments": sum(_has_submessage(item, "0x16") for item in observations),
-      "encapsulation_ids": encapsulations,
-      "writer_entity_ids": writers,
+      "encapsulation_ids": sorted(encapsulations),
+      "writer_entity_ids": sorted(writers),
       "payload_bytes": sum(item.payload_bytes for item in observations),
       "reassembled_bytes": sum(item.reassembled_bytes for item in observations),
   }
@@ -151,21 +187,23 @@ def endpoint_guid_prefix(endpoint):
 
 
 def _same_entity_id(observed, expected):
-  return observed.lower().removeprefix("0x") == expected.lower().removeprefix("0x")
+  wanted = expected.lower().removeprefix("0x")
+  return any(value.removeprefix("0x") == wanted for value in _values(observed))
 
 
 def _same_guid_prefix(observed, expected):
-  return observed.lower().replace(":", "") == expected.lower().replace(":", "")
+  wanted = expected.lower().replace(":", "")
+  return any(value.replace(":", "") == wanted for value in _values(observed))
 
 
 def _has_submessage(observation, identifier):
-  return identifier in observation.submessage_id.split(",")
+  return identifier.lower() in _values(observation.submessage_id)
 
 
 def _is_builtin_writer(observation):
   """Discovery and participant-message writers end in the RTPS C2/C3 kinds."""
-  entity_id = observation.writer_entity_id.lower()
-  return entity_id.endswith("c2") or entity_id.endswith("c3")
+  return any(value.endswith("c2") or value.endswith("c3")
+             for value in _values(observation.writer_entity_id))
 
 
 def capture_filter(domain_id, endpoint, participant_qos):
@@ -218,7 +256,13 @@ def inspect_pcap(path, tshark_path=None, writer_entity_id=None, writer_guid_pref
       # Generic RTPS DATA also carries discovery parameter lists, so filtering
       # by submessage ID alone would count SEDP as user payload.
       "-Y", "rtps.param.serialize.encap_kind",
-      "-T", "fields", "-E", "occurrence=f",
+      # occurrence=a, not =f. Every field here is per-submessage and RTPS
+      # coalesces submessages into one frame, typically behind an INFO_TS. With
+      # only the first occurrence, rtps.sm.id read 0x09 (INFO_TS) on almost
+      # every frame, so DATA_FRAG could never be counted and DATA was counted
+      # from a submessage that was neither.
+      "-T", "fields", "-E", f"occurrence=a", "-E",
+      f"aggregator={OCCURRENCE_SEPARATOR}",
       "-e", "frame.time_epoch", "-e", "rtps.sm.id",
       "-e", "rtps.sm.wrEntityId", "-e", "rtps.guidPrefix.src",
       "-e", "rtps.sm.seqNumber",
@@ -226,7 +270,11 @@ def inspect_pcap(path, tshark_path=None, writer_entity_id=None, writer_guid_pref
       "-e", "rtps.reassembled.data",
   ]
   try:
-    completed = subprocess.run(command, text=True, capture_output=True, check=False)
+    completed = subprocess.run(command, text=True, capture_output=True,
+                               check=False, timeout=TSHARK_READ_TIMEOUT)
+  except subprocess.TimeoutExpired:
+    return {"error": f"tshark did not finish reading the capture within "
+                     f"{TSHARK_READ_TIMEOUT:.0f}s", "source": path}
   except OSError as error:
     return {"error": f"could not run tshark: {error}", "source": path}
   if completed.returncode:
@@ -252,25 +300,35 @@ def inspect_discovery_pcap(path, tshark_path=None, capture_filter=None):
   """
   tshark_path = tshark_path or shutil.which("tshark")
   if not tshark_path:
-    return {"error": "tshark was not found on PATH", "pcap_source": path}
+    return {"error": "tshark was not found on PATH", "source": path}
   if not os.path.isfile(path):
-    return {"error": f"capture file does not exist: {path}", "pcap_source": path}
+    return {"error": f"capture file does not exist: {path}", "source": path}
 
   command = [
-      tshark_path, "-n", "-r", path, "-Y", "rtps",
-      "-T", "fields", "-E", "occurrence=f",
+      tshark_path, "-n", "-r", path,
+      # Not "-Y rtps": that admits ordinary user DATA/HEARTBEAT/ACKNACK, so
+      # `participants` counted the sender of any RTPS packet and one logical
+      # writer produced several endpoint tuples. Only frames actually carrying
+      # SPDP or SEDP parameters are discovery evidence.
+      "-Y", "rtps.param.builtin_endpoint_set or rtps.param.topicName",
+      "-T", "fields", "-E", "occurrence=a", "-E",
+      f"aggregator={OCCURRENCE_SEPARATOR}",
       "-e", "rtps.guidPrefix.src", "-e", "rtps.sm.wrEntityId",
       "-e", "rtps.sm.rdEntityId", "-e", "rtps.param.builtin_endpoint_set",
       "-e", "rtps.param.topicName", "-e", "rtps.param.typeName",
       "-e", "rtps.reliability_kind",
   ]
   try:
-    completed = subprocess.run(command, text=True, capture_output=True, check=False)
+    completed = subprocess.run(command, text=True, capture_output=True,
+                               check=False, timeout=TSHARK_READ_TIMEOUT)
+  except subprocess.TimeoutExpired:
+    return {"error": f"tshark did not finish reading the capture within "
+                     f"{TSHARK_READ_TIMEOUT:.0f}s", "source": path}
   except OSError as error:
-    return {"error": f"could not run tshark: {error}", "pcap_source": path}
+    return {"error": f"could not run tshark: {error}", "source": path}
   if completed.returncode:
     error = completed.stderr.strip() or f"tshark exited with {completed.returncode}"
-    return {"error": error, "pcap_source": path}
+    return {"error": error, "source": path}
   observations = [parse_discovery_fields(line) for line in completed.stdout.splitlines()
                   if line.strip()]
   return summarize_discovery(observations, path, capture_filter=capture_filter)
@@ -291,6 +349,18 @@ class LiveCapture:
     self.process = None
     self.error = None
     self.started_at = None
+    # tshark writes "Capturing on ..." and a running packet count to stderr for
+    # the whole capture. An undrained PIPE fills at 64KB and blocks the process
+    # mid-capture, so it goes to a file that both start() and finish() read.
+    self.log_path = self.output_path + ".tshark.log"
+    self._log = None
+
+  def _stderr_text(self):
+    try:
+      with open(self.log_path, encoding="utf-8", errors="replace") as handle:
+        return handle.read().strip()
+    except OSError:
+      return ""
 
   def start(self):
     if not self.tshark_path:
@@ -300,35 +370,45 @@ class LiveCapture:
     if directory:
       os.makedirs(directory, exist_ok=True)
     try:
+      self._log = open(self.log_path, "w", encoding="utf-8")
       self.process = subprocess.Popen(
           [self.tshark_path, "-n", "-i", self.interface, "-f", self.capture_filter, "-w",
            self.output_path],
-          stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+          stdout=subprocess.DEVNULL, stderr=self._log, text=True)
       self.started_at = time.monotonic()
       time.sleep(1.0)
       if self.process.poll() is not None:
-        _, stderr = self.process.communicate()
-        self.error = stderr.strip() or "tshark stopped before capture began"
+        self.process.wait()
+        self.error = self._stderr_text() or "tshark stopped before capture began"
     except OSError as error:
       self.error = f"could not start tshark: {error}"
 
   def finish(self):
-    if self.process is not None and self.process.poll() is None:
-      # tshark may still be opening its capture file when diagnosis needs no
-      # probe (for example, when a peer does not serve TypeLookup data).
-      if self.started_at is not None:
-        remaining = 4.0 - (time.monotonic() - self.started_at)
-        if remaining > 0:
-          time.sleep(remaining)
-      self.process.terminate()
-      try:
-        _, stderr = self.process.communicate(timeout=5)
-      except subprocess.TimeoutExpired:
-        self.process.kill()
-        _, stderr = self.process.communicate()
-        self.error = "tshark did not exit after termination and was killed"
+    if self.process is not None:
+      if self.process.poll() is None:
+        # tshark may still be opening its capture file when diagnosis needs no
+        # probe (for example, when a peer does not serve TypeLookup data).
+        if self.started_at is not None:
+          remaining = 4.0 - (time.monotonic() - self.started_at)
+          if remaining > 0:
+            time.sleep(remaining)
+        self.process.terminate()
+        try:
+          self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+          self.process.kill()
+          self.process.wait()
+          self.error = "tshark did not exit after termination and was killed"
+      # Outside the poll() guard on purpose. A tshark that died mid-capture -
+      # interface removed, permissions revoked, disk full - has already exited
+      # by now, and checking its status only when it was still running reported
+      # the resulting empty file as a successful capture of zero packets.
       if self.error is None and self.process.returncode not in (0, -15):
-        self.error = stderr.strip() or f"tshark exited with {self.process.returncode}"
+        self.error = (self._stderr_text()
+                      or f"tshark exited with {self.process.returncode}")
+    if self._log is not None:
+      self._log.close()
+      self._log = None
     if self.error:
       return {"error": self.error, "source": self.output_path,
               "capture_filter": self.capture_filter}

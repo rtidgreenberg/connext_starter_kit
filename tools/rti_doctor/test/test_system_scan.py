@@ -103,6 +103,49 @@ class TestSystemScan(unittest.TestCase):
     self.assertEqual(note.severity, f.Severity.INFO)
     self.assertIn("Connext 7.7", note.recommendation)
 
+  def test_topic_wide_condition_is_one_issue_not_one_per_endpoint(self):
+    """A type-name conflict belongs to the topic, not to each endpoint on it."""
+    registry = registry_with_reliability_fault()
+    registry.endpoints["reader-guid"].type_name = "sensors::TelemetryType"
+    snapshot = system_scan.scan(
+        registry, own_qos=None, type_lookup_settings={"request_types_filter": "*"},
+        domain_id=7, captured_at=123.0)
+
+    conflicts = [item for item in snapshot.issues
+                 if "type.name_conflict" in item.finding_ids]
+    self.assertEqual(len(conflicts), 1)
+    self.assertEqual(conflicts[0].scope, "topic")
+    self.assertEqual(conflicts[0].topic_name, "Telemetry")
+    # Endpoint identity is deliberately absent: it is what would have split one
+    # condition into one issue per endpoint.
+    self.assertEqual(conflicts[0].writer_keys, ())
+    self.assertEqual(conflicts[0].reader_keys, ())
+
+  def test_participant_wide_condition_is_one_issue_not_one_per_endpoint(self):
+    """Neither endpoint advertises locators, so both fall back to the participant."""
+    snapshot = system_scan.scan(
+        registry_with_reliability_fault(), own_qos=None,
+        type_lookup_settings={"request_types_filter": "*"}, domain_id=7,
+        captured_at=123.0)
+    locators = [item for item in snapshot.issues
+                if "locator.unroutable" in item.finding_ids]
+    self.assertEqual(len(locators), 2)  # one per participant, not one per endpoint
+    self.assertEqual({item.scope for item in locators}, {"participant"})
+    self.assertEqual({key for item in locators for key in item.participant_keys},
+                     {"participant-w", "participant-r"})
+
+  def test_no_type_info_error_is_never_raised_against_a_reader(self):
+    """Its title and remedy name a writer; pointed at a reader they mislead."""
+    snapshot = system_scan.scan(
+        registry_with_reliability_fault(), own_qos=None,
+        type_lookup_settings={"request_types_filter": "*"}, domain_id=7,
+        captured_at=123.0)
+    missing = [item for item in snapshot.issues
+               if "type.no_type_info" in item.finding_ids]
+    self.assertEqual(len(missing), 1)
+    self.assertEqual(missing[0].writer_keys, ("writer-guid",))
+    self.assertEqual(missing[0].reader_keys, ())
+
 
 if __name__ == "__main__":
   unittest.main()

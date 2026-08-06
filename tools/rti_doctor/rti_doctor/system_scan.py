@@ -26,7 +26,6 @@ class SystemIssue:
   reader_keys: tuple
   participant_keys: tuple
   evidence: object
-  suppressed_finding_ids: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -37,7 +36,6 @@ class SystemScanSnapshot:
   topology: object
   issues: tuple
   suppressed_findings: tuple = ()
-  wire_evidence: tuple = ()
 
 
 def scan(registry, own_qos, type_lookup_settings, domain_id, active_domains=(),
@@ -73,19 +71,33 @@ def scan(registry, own_qos, type_lookup_settings, domain_id, active_domains=(),
     findings.extend(_annotate(run_checks(context, participant_checks), "participant",
                               participant=participant))
 
+  censused_topics = set()
   for endpoint in sorted(registry.endpoint_list(), key=lambda item: item.key):
     participant = registry.participant_for(endpoint)
     context = CheckContext(**common, endpoint=endpoint,
                            participant_record=participant)
+    # check_no_multicast_locators is deliberately absent: it is a per-writer
+    # INFO whose own text says it "only matters for fan-out efficiency, not
+    # correctness", so across a domain it adds one Note per writer and nothing
+    # else. It still runs in a targeted per-endpoint report, where the operator
+    # asked about that one writer.
     endpoint_checks = [
         static_discovery.check_locators,
-        static_discovery.check_no_multicast_locators,
-        type_compat.check_type_state,
-        type_compat.check_type_name_conflict,
         type_compat.check_extensibility,
         type_compat.check_representation,
     ]
+    # The type-name census reads the whole topic, so it needs one endpoint on
+    # each topic, not every endpoint: running it per endpoint was an
+    # O(endpoints^2) walk that produced one identical finding per endpoint.
+    if endpoint.topic_name not in censused_topics:
+      censused_topics.add(endpoint.topic_name)
+      endpoint_checks.append(type_compat.check_type_name_conflict)
     if endpoint.is_writer:
+      # check_type_state's ERROR is titled and remedied for a writer ("enable
+      # full type propagation on the publisher"). Pointed at a DataReader it
+      # names the wrong entity and sends the operator to the wrong side of the
+      # system, so the system scan asks it about writers only.
+      endpoint_checks.append(type_compat.check_type_state)
       endpoint_checks.append(type_compat.check_assignability)
     findings.extend(_annotate(run_checks(context, tuple(endpoint_checks)), "endpoint",
                               endpoint=endpoint, participant=participant))
@@ -128,12 +140,24 @@ def _version_notes():
 
 
 def _annotate(findings, scope, endpoint=None, participant=None):
-  """Attach stable discovery identity without asking checks to format UI labels."""
+  """Attach stable discovery identity without asking checks to format UI labels.
+
+  A check running in the endpoint loop may widen its own scope to "topic" or
+  "participant" - `check_type_name_conflict` describes a topic, and the
+  no-locators branch of `check_locators` describes a participant. Endpoint
+  identity is then deliberately withheld, because `_issue_key` folds it into the
+  issue key: tagging a topic-wide condition with whichever endpoint happened to
+  trigger it turns one fault into one duplicate issue per endpoint on the topic.
+  """
   annotated = []
   for finding in findings:
     evidence = dict(finding.evidence)
-    evidence.setdefault("scope", scope)
-    if endpoint is not None:
+    declared = evidence.setdefault("scope", scope)
+    if endpoint is not None and declared == "topic":
+      evidence.setdefault("topic_name", endpoint.topic_name)
+    elif endpoint is not None and declared == "participant":
+      evidence.setdefault("participant_key", endpoint.participant_key)
+    elif endpoint is not None:
       evidence.setdefault("endpoint_key", endpoint.key)
       evidence.setdefault("participant_key", endpoint.participant_key)
       evidence.setdefault("topic_name", endpoint.topic_name)

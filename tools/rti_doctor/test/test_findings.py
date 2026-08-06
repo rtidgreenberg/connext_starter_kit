@@ -106,6 +106,30 @@ class TestVerdict(unittest.TestCase):
     self.assertIn("payload PARTIAL", line)
     self.assertIn("2 of 41", line)
 
+  def test_truncated_walk_is_not_reported_as_full(self):
+    """FULL is a completeness claim the walk did not earn."""
+    from rti_doctor import typewalk
+    walk = typewalk.WalkReport()
+    walk.add(typewalk.MemberResult("a", typewalk.MemberResult.READABLE, "int32"))
+    walk.truncated = True
+    self.assertEqual(walk.verdict, f.PAYLOAD_PARTIAL)
+
+    outcome = f.ProbeOutcome(attempted=True, matched=True, samples_received=1,
+                             payload_verdict=f.PAYLOAD_PARTIAL, members_total=1,
+                             members_unreadable=0, truncated=True)
+    line = f.verdict_line([], outcome)
+    self.assertIn("walk truncated", line)
+    self.assertNotIn("unreadable", line)
+
+  def test_incomplete_probe_is_appended_to_the_verdict(self):
+    """A probe that failed part-way must not leave "payload FULL" standing."""
+    outcome = f.ProbeOutcome(attempted=True, matched=True, samples_received=5,
+                             payload_verdict=f.PAYLOAD_FULL,
+                             incomplete_reason="RuntimeError: status read failed")
+    line = f.verdict_line([], outcome)
+    self.assertIn("payload FULL", line)
+    self.assertIn("probe did not complete: RuntimeError", line)
+
 
 if __name__ == "__main__":
   unittest.main()

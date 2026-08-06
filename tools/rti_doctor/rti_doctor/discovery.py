@@ -18,10 +18,13 @@ from .records import EndpointRecord, ParticipantRecord
 class DiscoveryRegistry:
   """Thread-safe-enough store of what we have discovered.
 
-  Builtin listeners fire on Connext receive threads while the UI reads on the
-  asyncio thread. Python dict reads/writes are individually atomic under the
-  GIL, and every consumer takes a snapshot via the list/dict copies below, so no
-  explicit lock is needed for this access pattern.
+  Builtin listeners fire on Connext receive threads, the TUI timer polls
+  participants on the asyncio thread, and system_scan reads from a worker
+  thread. Python dict reads/writes are individually atomic under the GIL, but a
+  Python-level comprehension over `dict.values()` is not: a concurrent insert or
+  delete raises "dictionary changed size during iteration" mid-walk. So every
+  query below materializes `list(...)` first - one atomic C-level copy - and
+  filters the copy.
   """
 
   def __init__(self, type_wait=5.0):
@@ -81,30 +84,36 @@ class DiscoveryRegistry:
     return list(self.endpoints.values())
 
   def writers(self):
-    return [e for e in self.endpoints.values() if e.is_writer]
+    return [e for e in self.endpoint_list() if e.is_writer]
 
   def readers(self):
-    return [e for e in self.endpoints.values() if not e.is_writer]
+    return [e for e in self.endpoint_list() if not e.is_writer]
 
   def endpoints_for(self, participant_key):
-    return [e for e in self.endpoints.values() if e.participant_key == participant_key]
+    return [e for e in self.endpoint_list() if e.participant_key == participant_key]
 
   def endpoints_on_topic(self, topic_name):
-    return [e for e in self.endpoints.values() if e.topic_name == topic_name]
+    return [e for e in self.endpoint_list() if e.topic_name == topic_name]
 
   def participant_for(self, endpoint):
     return self.participants.get(endpoint.participant_key)
 
   def find_writer(self, topic_name):
-    """First writer on a topic, preferring one with a resolved type."""
-    candidates = [e for e in self.writers() if e.topic_name == topic_name]
+    """Lowest-keyed writer on a topic, preferring one with a resolved type.
+
+    Sorted rather than "first discovered": dict order is arrival order, so an
+    unsorted pick made `--topic` select a different writer between runs on a
+    multi-writer topic, and with it a different verdict and exit code.
+    """
+    candidates = sorted((e for e in self.writers() if e.topic_name == topic_name),
+                        key=lambda e: e.key)
     if not candidates:
       return None
     resolved = [e for e in candidates if e.type is not None]
     return (resolved or candidates)[0]
 
   def topic_names(self):
-    return sorted({e.topic_name for e in self.endpoints.values() if e.topic_name})
+    return sorted({e.topic_name for e in self.endpoint_list() if e.topic_name})
 
   def expire_type_waits(self, now=None):
     """Advance PENDING -> UNAVAILABLE for endpoints past the type-wait window."""
@@ -164,8 +173,15 @@ def _merge_endpoint(existing, incoming):
       "representation",
   ):
     value = getattr(incoming, name, None)
-    if value not in (None, ""):
-      setattr(existing, name, value)
+    # Written the same way as _merge_participant, and for the same reason:
+    # `value not in (None, "")` compares by equality, and False == 0 is True in
+    # Python. No field above is numeric or boolean today, so this is not a live
+    # bug - but it is one added field away from being the exact defect that
+    # discarded participant_configuration=False, and the trap is not worth
+    # leaving set.
+    if value is None or value == "":
+      continue
+    setattr(existing, name, value)
   for name in ("unicast_locators", "multicast_locators"):
     value = getattr(incoming, name, None)
     if value:
@@ -416,11 +432,13 @@ def refresh_participants(participant, registry):
     return
 
   live_keys = set()
+  unreadable = 0
   for handle in handles:
     try:
       data = participant.discovered_participant_data(handle)
     except Exception as e:
       logging.debug(f"[refresh_participants] unreadable participant: {e}")
+      unreadable += 1
       continue
 
     key_value = compat.get(compat.get(data, "key", None), "value", None)
@@ -456,6 +474,17 @@ def refresh_participants(participant, registry):
     )
     live_keys.add(record.key)
     registry.upsert_participant(record)
+
+  # Only a complete read proves a participant departed. A handle whose data
+  # would not read is still live - it was returned by discovered_participants()
+  # on this very call - but it contributed no key, so removing everything
+  # outside live_keys would evict that peer AND every one of its endpoints,
+  # and the next scan would report endpoint.none or blind.empty_domain: a
+  # fabricated diagnosis caused by one transient binding error.
+  if unreadable:
+    logging.warning(f"[refresh_participants] {unreadable} participant(s) could not be "
+                    "read; skipping departure sweep for this cycle")
+    return
 
   for key in set(registry.participants) - live_keys:
     registry.remove_participant(key)

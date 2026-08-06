@@ -10,7 +10,7 @@ import time
 
 import rti.connextdds as dds
 
-from . import compat, records, typewalk
+from . import compat, typewalk
 
 #: Protocol counters captured for the report appendix, in report order.
 PROTOCOL_COUNTERS = (
@@ -57,6 +57,11 @@ class ProbeResult:
     self.attempted = False
     self.created = False
     self.create_error = None
+    # A failure AFTER the reader was created - typically a status read that
+    # raised. Kept separate from create_error because `created` stays True and
+    # the samples already walked are still real; what is no longer safe is to
+    # present the run as a complete observation.
+    self.error = None
     self.matched_count = 0
     self.samples_taken = 0
     self.walk = None
@@ -248,13 +253,29 @@ def _correlate(reader, endpoint, result):
   An empty set IS a conclusion: the reader matched, or failed to match, and the
   selected writer was not among the publications it matched.
   """
+  def uncorrelated():
+    """Every field describing correlation, cleared together.
+
+    `correlated` used to be a latch: set True on success and never cleared, so
+    a later poll that could not resolve a publication left `correlated=True`
+    beside a topic-wide matched_count and stale other/unreadable counts. Every
+    consumer then read a writer-scoped answer off topic-wide data - the scope
+    line claimed publication-handle correlation, and check_incompatible_qos
+    could promote a topic-level WARN to an ERROR that suppresses data.silent.
+    The three fields must always describe the same reading.
+    """
+    result.correlated = False
+    result.matched_other_count = 0
+    result.matched_unreadable_count = 0
+    return None
+
   handles = compat.get(reader, "matched_publications", None)
   if handles is None:
-    return None
+    return uncorrelated()
   try:
     handles = list(handles)
   except TypeError:
-    return None
+    return uncorrelated()
 
   target, others, unreadable = set(), 0, 0
   for handle in handles:
@@ -271,7 +292,7 @@ def _correlate(reader, endpoint, result):
   # matched" from that would be the exact false certainty this function exists
   # to prevent. Covers the all-unreadable case too.
   if not target and unreadable:
-    return None
+    return uncorrelated()
 
   result.correlated = True
   # Current values, deliberately NOT a running max. `attributable` and
@@ -367,7 +388,11 @@ def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1):
 
     _snapshot_statuses(reader, topic, endpoint, result)
   except Exception as e:
-    result.create_error = f"{type(e).__name__}: {e}"
+    detail = f"{type(e).__name__}: {e}"
+    if result.created:
+      result.error = detail
+    else:
+      result.create_error = detail
     logging.error(f"[probe] {endpoint.topic_name}: {e}")
   finally:
     result.elapsed = time.monotonic() - start

@@ -24,7 +24,10 @@ class TestDiscoveryParsing(unittest.TestCase):
             "\tCommands\tCommandType\t"),
     ]
     summary = wire.summarize_discovery(observations, "sample.pcapng")
-    self.assertEqual(summary["source"], "tshark RTPS discovery")
+    # `source` is the capture, matching inspect_pcap and what the renderers
+    # read; the label lives in `kind`.
+    self.assertEqual(summary["kind"], "tshark RTPS discovery")
+    self.assertEqual(summary["source"], "sample.pcapng")
     self.assertEqual(summary["participants"], 2)
     self.assertEqual(summary["endpoint_observations"], 2)
     self.assertEqual(summary["topics"], ["Commands", "Status"])

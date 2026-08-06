@@ -39,7 +39,10 @@ class TestTopologySnapshot(unittest.TestCase):
     snapshot = topology.snapshot(
         FakeRegistry(), selected_domain_id=7, active_domain_ids={2, 7},
         domain_scan_ran=True)
-    self.assertEqual(snapshot["domain_ids"], [2, 7])
+    # The selected domain and the domains merely heard announcing stay apart:
+    # every count below is from a single-domain registry.
+    self.assertEqual(snapshot["selected_domain_id"], 7)
+    self.assertEqual(snapshot["other_domains_announcing"], [2])
     self.assertTrue(snapshot["domain_scan_ran"])
     self.assertEqual(snapshot["participants"], 2)
     self.assertEqual(snapshot["writers"], 2)
@@ -52,7 +55,9 @@ class TestTopologySnapshot(unittest.TestCase):
     snapshot = topology.snapshot(FakeRegistry(), selected_domain_id=7)
     data = report.ReportData(
         domain_id=7, scope="domain audit", all_findings=[], topology=snapshot)
-    self.assertIn("OBSERVED TOPOLOGY", report.render_text(data))
+    text = report.render_text(data)
+    self.assertIn("OBSERVED TOPOLOGY", text)
+    self.assertNotIn("Other domains", text)
     payload = json.loads(report.render_json(data))
     self.assertEqual(payload["topology"]["participants"], 2)
     self.assertEqual(payload["topology"]["topics"], ["Commands", "Status"])

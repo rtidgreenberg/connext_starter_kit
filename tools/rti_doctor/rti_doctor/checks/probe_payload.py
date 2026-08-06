@@ -9,8 +9,8 @@ because conflating them is what makes this class of bug expensive:
   * arriving but undecodable -> deserialization / decode failure
 """
 
-from .. import compat
-from ..findings import PAYLOAD_FULL, RUNG_PAYLOAD, Finding, Severity
+from .. import compat, typewalk
+from ..findings import RUNG_PAYLOAD, Finding, Severity
 
 
 def _c(probe, name):
@@ -215,18 +215,42 @@ def check_window(context):
   if not out_of_range and not uncommitted:
     return []
 
+  observed = (f"out_of_range_rejected_sample_count = {out_of_range}, "
+              f"uncommitted_sample_count = {uncommitted}")
+
+  # Only a rejection is a fault. uncommitted_sample_count is a snapshot of
+  # samples waiting on an earlier sequence number, which is the ordinary
+  # in-flight state of a reliable reader - and the probe reads it at an
+  # arbitrary instant. On its own it is context, not evidence.
+  if not out_of_range:
+    return [Finding(
+        id="data.window",
+        rung=RUNG_PAYLOAD,
+        severity=Severity.INFO,
+        title="Samples were waiting on an earlier sequence number when the probe ended",
+        observed=observed,
+        root_cause=(
+            "Samples arrived but could not yet be released to the application, "
+            "normally because an earlier sequence number had not arrived. This "
+            "is the ordinary in-flight state of a reliable reader, and the count "
+            "is a snapshot taken at one instant, so it is reported as context "
+            "rather than as a fault."),
+        remedy=("If this count stays high across repeated runs, investigate the "
+                "missing sequence numbers as loss rather than as a decode problem."),
+        evidence={"out_of_range_rejected_sample_count": out_of_range,
+                  "uncommitted_sample_count": uncommitted},
+    )]
+
   return [Finding(
       id="data.window",
       rung=RUNG_PAYLOAD,
       severity=Severity.WARN,
-      title="Samples rejected or held by the receive window",
-      observed=(f"out_of_range_rejected_sample_count = {out_of_range}, "
-                f"uncommitted_sample_count = {uncommitted}"),
+      title="Samples rejected by the receive window",
+      observed=observed,
       root_cause=(
           "Out-of-range rejections mean the reader's receive window was full and "
-          "samples outside it were discarded. A persistently high uncommitted "
-          "count means samples arrived but cannot be released to the application "
-          "yet, normally because an earlier sequence number is missing."),
+          "samples outside it were discarded. Any uncommitted samples reported "
+          "alongside are waiting on an earlier sequence number."),
       remedy=("Increase the reader's resource limits, or reduce the writer's send "
               "rate. If uncommitted stays high, investigate the missing sequence "
               "numbers as loss rather than as a decode problem."),
@@ -390,6 +414,29 @@ def check_payload_walk(context):
     detail.append("walk truncated by rti_doctor's own element/depth caps, so some "
                   "members were not visited")
 
+  if not failed and walk.truncated:
+    # Every member the walk reached was readable, but it stopped at
+    # rti_doctor's own caps. Reporting that as payload.full would be a
+    # completeness claim about members the tool never visited.
+    return [Finding(
+        id="payload.truncated",
+        rung=RUNG_PAYLOAD,
+        severity=Severity.INFO,
+        title="Every member read, but the walk did not reach the end of the sample",
+        observed="; ".join(detail),
+        root_cause=(
+            f"rti_doctor caps a walk at {typewalk.MAX_DEPTH} levels, "
+            f"{typewalk.MAX_MEMBERS} members and "
+            f"{typewalk.MAX_ELEMENTS_PER_COLLECTION} elements per collection so "
+            f"a corrupt sample cannot hang it. This type is larger than one of "
+            f"those caps, so no verdict can be given for the members beyond it."),
+        remedy=("Nothing to fix in the system under test. Treat this as "
+                "'no decode problem found so far', not as a clean bill of health."),
+        evidence={"members_total": total,
+                  "members_absent": [r.path for r in absent],
+                  "truncated": True},
+    )]
+
   if not failed:
     return [Finding(
         id="payload.full",
@@ -399,7 +446,7 @@ def check_payload_walk(context):
         observed="; ".join(detail),
         evidence={"members_total": total,
                   "members_absent": [r.path for r in absent],
-                  "truncated": walk.truncated},
+                  "truncated": False},
     )]
 
   listed = "; ".join(f"{r.path} ({r.detail})" for r in failed[:20])

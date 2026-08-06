@@ -1,7 +1,5 @@
 """The Textual application shell."""
 
-import asyncio
-
 from textual.app import App
 from textual.containers import Container
 

@@ -6,7 +6,8 @@ import os
 import sys
 import time
 
-from . import compat, discovery, domain_scan, engine, records, report, wire
+from . import (compat, discovery, domain_scan, engine, records, report,
+               topology, wire)
 
 DEFAULT_SCAN_TIMEOUT = 32.0
 DEFAULT_PROBE_TIMEOUT = 10.0
@@ -129,6 +130,21 @@ def parse_args(argv=None):
     parser.error("--pcap and --capture-interface require --topic")
   if args.ready_after_participants < 0 or args.ready_timeout <= 0:
     parser.error("--ready-after-participants must be non-negative and --ready-timeout positive")
+  # argparse's type=int/float accepts negatives, and float() accepts "nan" and
+  # "inf". A negative probe timeout makes the probe window close before it
+  # opens, and a negative domain ID fails deep inside Connext with an error
+  # that says nothing about the argument that caused it.
+  if args.domain is not None and args.domain < 0:
+    parser.error("--domain must be a non-negative integer")
+  for name in ("probe_timeout", "type_wait", "settle", "scan_timeout", "interval"):
+    value = getattr(args, name)
+    flag = "--" + name.replace("_", "-")
+    if value != value or value in (float("inf"), float("-inf")):
+      parser.error(f"{flag} must be a finite number")
+    if value < 0:
+      parser.error(f"{flag} must not be negative")
+  if args.interval <= 0:
+    parser.error("--interval must be greater than zero")
   return args
 
 
@@ -303,7 +319,7 @@ def _wait_for_remote_participants(session, count, timeout):
 
 def run_headless_topic(session, args):
   """Diagnose one topic and emit a report. Returns a process exit code."""
-  from . import findings as f, topology
+  from . import findings as f
 
   _settle(session, args.settle)
 
@@ -346,9 +362,13 @@ def run_headless_topic(session, args):
       wire.capture_filter(session.domain_id, endpoint, session.own_qos),
       writer_entity_id=wire.endpoint_entity_id(endpoint),
       writer_guid_prefix=wire.endpoint_guid_prefix(endpoint))
-    capture.start()
 
+  # start() spawns tshark and blocks a second waiting for it to come up, so it
+  # belongs inside the try: a Ctrl-C in that window would otherwise leave the
+  # capture process running with nothing left to reap it.
   try:
+    if capture is not None:
+      capture.start()
     data = session.diagnose_endpoint(endpoint, probe=not args.no_probe)
   finally:
     wire_evidence = capture.finish() if capture is not None else None

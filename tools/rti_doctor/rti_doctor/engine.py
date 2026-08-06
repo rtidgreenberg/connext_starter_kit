@@ -5,6 +5,7 @@ a report that differs depending on how it was invoked would be worthless.
 """
 
 import logging
+import time
 
 from . import checks, probe as probe_mod, report, system_scan, topology
 from .checks import CheckContext
@@ -25,6 +26,7 @@ class Session:
     self.probe_timeout = probe_timeout
     self.active_domains = active_domains or set()
     self.domain_scan_ran = domain_scan_ran
+    self._last_scan = None
 
   def _context(self, endpoint=None, participant_record=None, probe_result=None):
     return CheckContext(
@@ -51,10 +53,21 @@ class Session:
     context = self._context()
     return checks.run_checks(context, checks.blind_spot_checks())
 
-  def system_scan(self, captured_at=None):
-    """Passive issue/topology snapshot; never creates a diagnostic reader."""
+  def system_scan(self, captured_at=None, max_age=0.0):
+    """Passive issue/topology snapshot; never creates a diagnostic reader.
+
+    A scan is O(endpoints^2) in the topic-census checks, and five TUI screens
+    each ask for one. `max_age` lets a screen that is merely being opened reuse
+    a recent snapshot; an explicit operator refresh leaves it at 0 and always
+    re-scans.
+    """
+    cached = self._last_scan
+    if (max_age > 0 and cached is not None and captured_at is None
+        and 0 <= time.time() - cached.captured_at <= max_age):
+      return cached
+
     self.registry.expire_type_waits()
-    return system_scan.scan(
+    snapshot = system_scan.scan(
         registry=self.registry,
         own_qos=self.own_qos,
         type_lookup_settings=self.type_lookup_settings,
@@ -64,6 +77,8 @@ class Session:
         type_wait=self.type_wait,
         captured_at=captured_at,
     )
+    self._last_scan = snapshot
+    return snapshot
 
   def diagnose_participant(self, participant_record):
     """Rungs 0-3 for a participant. No probing, so a keypress stays cheap."""

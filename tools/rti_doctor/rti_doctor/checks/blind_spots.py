@@ -6,6 +6,8 @@ real cross-vendor blocker; each is a property of *our* configuration or of the
 domain choice, not of a discovered peer.
 """
 
+import rti.connextdds as dds
+
 from .. import compat
 from ..findings import (RUNG_OWN_CONFIG, RUNG_PARTICIPANT, Finding, Severity)
 
@@ -62,6 +64,25 @@ def check_domain_tag(context):
   )]
 
 
+def _spdp2_enabled(plugins):
+  """True when the discovery-plugin mask has the SPDP2 bit set.
+
+  `str(mask)` can render as a decimal or hex number rather than a name list, in
+  which case a substring search for "SPDP2" never matches and this check could
+  not fire at all. So the flag is resolved from the binding and tested as a bit
+  first; the substring is only the fallback for a version whose mask type does
+  not expose it.
+  """
+  flag = compat.get(
+      getattr(dds, "DiscoveryConfigBuiltinPluginKindMask", None), "SPDP2", None)
+  if flag is not None:
+    try:
+      return bool(int(plugins) & int(flag))
+    except (TypeError, ValueError):
+      pass
+  return "SPDP2" in str(plugins).upper()
+
+
 def check_spdp2(context):
   """SPDP2 does not interoperate with standard SPDP."""
   qos = context.own_qos
@@ -73,7 +94,7 @@ def check_spdp2(context):
     # Not present on this version, which also means SPDP2 cannot be enabled.
     return []
   text = str(plugins)
-  if "SPDP2" not in text.upper():
+  if not _spdp2_enabled(plugins):
     return []
   return [Finding(
       id="blind.spdp2",

@@ -157,12 +157,29 @@ class ProbeOutcome:
   members_unreadable: int = 0
   unreadable_paths: list = field(default_factory=list)
   skip_reason: str = None
+  #: The walk stopped at rti_doctor's own element/depth caps, so "every member
+  #: read" is a statement about the members visited, not about the sample.
+  truncated: bool = False
+  #: The probe failed after its reader was created; whatever it did observe is
+  #: real, but the run is not a complete observation.
+  incomplete_reason: str = None
 
 
 def verdict_line(findings, probe=None):
-  """One-line summary opening every report. Derived only from observed state."""
-  probe = probe or ProbeOutcome()
+  """One-line summary opening every report. Derived only from observed state.
 
+  A probe that failed part-way through still has real observations, but it must
+  not present them as a finished measurement - so the incompleteness is appended
+  rather than allowed to leave "payload FULL" standing on its own.
+  """
+  probe = probe or ProbeOutcome()
+  line = _verdict_body(findings, probe)
+  if probe.incomplete_reason:
+    line += f"; probe did not complete: {probe.incomplete_reason}"
+  return line
+
+
+def _verdict_body(findings, probe):
   if not probe.attempted:
     reason = probe.skip_reason or "probe not run"
     worst = max((f.severity for f in active(findings)), default=Severity.OK)
@@ -182,9 +199,18 @@ def verdict_line(findings, probe=None):
     return f"{base}; {tail}" if tail else base
 
   if probe.payload_verdict == PAYLOAD_PARTIAL:
+    if probe.members_unreadable:
+      return (
+          f"matched, samples arriving, payload PARTIAL "
+          f"({probe.members_unreadable} of {probe.members_total} members unreadable)"
+      )
+    # No member failed, but the walk hit rti_doctor's own caps, so the sample
+    # was not read to the end. Calling that FULL would be a completeness claim
+    # about members the tool never visited.
     return (
-        f"matched, samples arriving, payload PARTIAL "
-        f"({probe.members_unreadable} of {probe.members_total} members unreadable)"
+        f"matched, samples arriving, payload PARTIAL (walk truncated at "
+        f"rti_doctor's own caps after {probe.members_total} member(s); no "
+        f"member that was read failed)"
     )
 
   return f"matched, samples arriving, payload {probe.payload_verdict}"

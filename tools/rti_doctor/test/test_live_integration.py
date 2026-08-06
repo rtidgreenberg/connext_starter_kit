@@ -193,7 +193,18 @@ class TestLargeData(LiveFixtureTest):
                      "healthy large data must not be reported as an error")
 
   def test_large_sample_still_deserializes(self):
-    self.assertIn("payload FULL", self.diagnose().verdict)
+    """A 200000-element sequence<octet> is read whole, and says so.
+
+    The walk reads a primitive collection with one bulk read that covers every
+    element however long it is, so exceeding MAX_ELEMENTS_PER_COLLECTION must
+    not mark the walk truncated - only the aggregate-element branch, which
+    genuinely stops at the cap, can do that. Marking it truncated here reported
+    a fully-read healthy large-data topic as payload PARTIAL.
+    """
+    data = self.diagnose()
+    self.assertIn("payload FULL", data.verdict)
+    self.assertFalse(data.probe_result.walk.truncated,
+                     "a bulk-read primitive collection was not actually truncated")
 
 
 class TestPartition(LiveFixtureTest):
@@ -234,6 +245,7 @@ class TestTui(LiveFixtureTest):
     from rti_doctor.app import RTIDoctorApp
     from rti_doctor.views.browse import EndpointListScreen
     from rti_doctor.views.system_overview import (IssueListScreen,
+                IssueSeverityScreen,
                             SystemOverviewScreen,
                             TopologyHealthScreen)
 
@@ -244,13 +256,20 @@ class TestTui(LiveFixtureTest):
       async with app.run_test() as pilot:
         await pilot.pause(0.8)
         seen.append(type(app.screen))
-        await pilot.press("1")
+        await pilot.press("enter")
         await pilot.pause(0.5)
+        seen.append(type(app.screen))
+        await pilot.press("enter")
+        await pilot.pause(0.5)
+        seen.append(type(app.screen))
+        self.selected_issue_severity = app.screen.severity
+        await pilot.press("b")
+        await pilot.pause(0.3)
         seen.append(type(app.screen))
         await pilot.press("b")
         await pilot.pause(0.3)
         seen.append(type(app.screen))
-        await pilot.press("2")
+        await pilot.press("down", "enter")
         await pilot.pause(0.5)
         seen.append(type(app.screen))
         await pilot.press("enter")
@@ -260,9 +279,52 @@ class TestTui(LiveFixtureTest):
     asyncio.run(drive())
     self.assertEqual(
         seen,
-        [SystemOverviewScreen, IssueListScreen, SystemOverviewScreen,
+        [SystemOverviewScreen, IssueSeverityScreen, IssueListScreen,
+         IssueSeverityScreen, SystemOverviewScreen,
          TopologyHealthScreen, EndpointListScreen],
         f"navigation went off course: {[c.__name__ for c in seen]}")
+    self.assertEqual(self.selected_issue_severity, f.Severity.ERROR)
+
+  def test_refresh_and_metrics_survive_navigating_away_mid_scan(self):
+    """The refresh actions used to be bare asyncio.create_task.
+
+    A bare task is only weakly referenced by the loop and nothing cancels it
+    when the screen is popped, so a scan that finished after the operator
+    navigated away wrote into unmounted widgets. Popping immediately after
+    pressing `r` is the case that exposed it.
+    """
+    import asyncio
+
+    from rti_doctor.app import RTIDoctorApp
+    from rti_doctor.views.system_overview import (MetricsScreen,
+                                                  SystemOverviewScreen)
+
+    app = RTIDoctorApp(self.session, interval=1.0)
+    seen = {}
+
+    async def drive():
+      async with app.run_test() as pilot:
+        await pilot.pause(0.8)
+        await pilot.press("m")
+        await pilot.pause(0.5)
+        seen["metrics"] = type(app.screen)
+        seen["body"] = str(app.screen.body.render())
+        # Refresh, then leave before it can finish.
+        await pilot.press("r")
+        await pilot.press("b")
+        await pilot.pause(0.8)
+        seen["after"] = type(app.screen)
+        # The overview must still be usable afterwards.
+        await pilot.press("r")
+        await pilot.pause(0.8)
+        seen["final"] = type(app.screen)
+
+    asyncio.run(drive())
+    self.assertIs(seen["metrics"], MetricsScreen)
+    self.assertIn("Observed Domain Metrics", seen["body"])
+    self.assertIn("Remote DataWriters", seen["body"])
+    self.assertIs(seen["after"], SystemOverviewScreen)
+    self.assertIs(seen["final"], SystemOverviewScreen)
 
 
 if __name__ == "__main__":

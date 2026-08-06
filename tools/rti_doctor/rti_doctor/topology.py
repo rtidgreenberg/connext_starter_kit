@@ -15,13 +15,17 @@ def snapshot(registry, selected_domain_id, active_domain_ids=(),
   readers = registry.readers() if registry is not None else []
   topics = sorted({endpoint.topic_name for endpoint in writers + readers
                    if endpoint.topic_name})
-  domains = {selected_domain_id}
-  domains.update(domain for domain in active_domain_ids or () if domain is not None)
+  # Kept separate from the selected domain on purpose. Every count below comes
+  # from a registry that only ever sees ONE domain; merging the domains the
+  # passive scan heard announcing into a single "domain_ids" list printed those
+  # other domains directly above counts that say nothing about them.
+  other_domains = sorted({domain for domain in active_domain_ids or ()
+                          if domain is not None and domain != selected_domain_id})
   return {
       "source": "builtin discovery",
       "scope": "remote entities observed while RTI Doctor was running",
       "selected_domain_id": selected_domain_id,
-      "domain_ids": sorted(domains),
+      "other_domains_announcing": other_domains,
       "domain_scan_ran": bool(domain_scan_ran),
       "participants": len(participants),
       "writers": len(writers),

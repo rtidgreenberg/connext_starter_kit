@@ -414,16 +414,19 @@ def _render_wire_appendix(data):
     lines.append(_kv("Result", f"unavailable: {error}"))
     lines.append("")
     return lines
-  lines.append(_kv("User-data packets", str(evidence.get("packets", 0))))
-  lines.append(_kv("DATA submessages", str(evidence.get("data_packets", 0))))
-  lines.append(_kv("DATA_FRAG submessages", str(evidence.get("data_fragments", 0))))
+  lines.append(_kv("Frames matching filters", str(evidence.get("packets", 0))))
+  lines.append(_kv("DATA in matching frames", str(evidence.get("data_packets", 0))))
+  lines.append(_kv("DATA_FRAG in matching frames", str(evidence.get("data_fragments", 0))))
   encapsulations = evidence.get("encapsulation_ids", [])
-  lines.append(_kv("Encapsulation IDs", ", ".join(encapsulations) if encapsulations
-                   else "none observed"))
+  lines.append(_kv("Encapsulation IDs in matching frames",
+                   ", ".join(encapsulations) if encapsulations else "none observed"))
   writers = evidence.get("writer_entity_ids", [])
-  lines.append(_kv("Writer entity IDs", ", ".join(writers) if writers else "none observed"))
-  lines.append(_kv("Serialized bytes", str(evidence.get("payload_bytes", 0))))
-  lines.append(_kv("Reassembled bytes", str(evidence.get("reassembled_bytes", 0))))
+  lines.append(_kv("Writer IDs in matching frames",
+                   ", ".join(writers) if writers else "none observed"))
+  lines.append(_kv("Serialized bytes in matching frames",
+                   str(evidence.get("payload_bytes", 0))))
+  lines.append(_kv("Reassembled bytes in matching frames",
+                   str(evidence.get("reassembled_bytes", 0))))
   lines.append("")
   return lines
 

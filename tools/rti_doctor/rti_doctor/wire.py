@@ -140,7 +140,8 @@ def summarize(observations, writer_entity_id=None, writer_guid_prefix=None):
   it.
 
   Filtering is frame-level: a frame that coalesces the target writer with
-  another writer is counted once, for the target.
+  another writer is included once. Its other fields remain frame-level
+  evidence, not evidence attributable to the selected writer alone.
   """
   if writer_guid_prefix is not None:
     observations = [item for item in observations

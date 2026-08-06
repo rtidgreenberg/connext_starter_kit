@@ -16,6 +16,7 @@ def build_tk_placeholder_shell(
         refresh_interval_ms: int = 250,
         record_tab_adapter: Optional[RecordTabAdapter] = None,
         replay_tab_adapter: Optional[ReplayTabAdapter] = None,
+        force_close_handler: Optional[Callable[[float], None]] = None,
 ) -> TkPlaceholderWindow:
     """Build the minimal Record/Replay placeholder window."""
 
@@ -27,6 +28,7 @@ def build_tk_placeholder_shell(
         refresh_interval_ms=refresh_interval_ms,
         record_tab_adapter=record_tab_adapter,
         replay_tab_adapter=replay_tab_adapter,
+        force_close_handler=force_close_handler,
     )
 
 
@@ -55,6 +57,7 @@ def build_tk_session_shell(session, refresh_interval_ms: int = 250) -> TkPlaceho
         refresh_interval_ms=refresh_interval_ms,
         record_tab_adapter=record_tab_adapter,
         replay_tab_adapter=replay_tab_adapter,
+        force_close_handler=session.force_close_gui_launched,
     )
 
 
@@ -89,4 +92,6 @@ def run_tk_session_shell(session, refresh_interval_ms: int = 250) -> int:
     shell = build_tk_session_shell(session, refresh_interval_ms=refresh_interval_ms)
     shell.show()
     shell.root.mainloop()
-    return 0
+    # The window is now always destroyed, even when cleanup fails, so report the
+    # failure through the exit code rather than exiting 0 on a botched shutdown.
+    return 1 if shell.close_failed else 0

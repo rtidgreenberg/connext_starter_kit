@@ -20,8 +20,19 @@ from .view_models import ShellViewModel
 from .workspace import GuiWorkspaceController
 
 
-_EXITED_STATES = {"exited", "start_failed", "stopped", "shutdown", "terminated", "completed", "failed", "cancelled"}
 _ACTIVE_CONVERT_STATES = {"queued", "running", "cancel_requested"}
+
+
+def _is_live_gui_launched(candidate) -> bool:
+    """Return True when this GUI-launched process still needs cleanup on close.
+
+    Liveness comes from `candidate.alive`, not from the observed service state.
+    A Replay Service that has been stopped reports state "stopped" while its
+    process is still running; keying off the state string left that process
+    running after the GUI exited.
+    """
+
+    return bool(candidate.owns_process) and bool(candidate.alive)
 
 
 def _record_process_display_state(state: str) -> str:
@@ -80,6 +91,7 @@ class GuiShellSession:
         )
         self._record_process_states = {}
         self._replay_process_states = {}
+        self._close_failure_published = False
 
     @property
     def runtime(self) -> AppRuntime:
@@ -307,7 +319,25 @@ class GuiShellSession:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            asyncio.run(self.handle_close_request_async(action, item_ids))
+            self._close_failure_published = False
+            try:
+                asyncio.run(self.handle_close_request_async(action, item_ids))
+            except BaseException as exc:
+                # The coroutine publishes gui.close_failed for failures it sees; only
+                # report here for what escapes asyncio.run itself (loop setup, executor
+                # shutdown), so the log shows one cause rather than two.
+                if not self._close_failure_published:
+                    self._publish_close_event(
+                        "gui.close_failed",
+                        f"Close failed: {exc}",
+                        level="error",
+                        action=str(action).strip(),
+                        error=str(exc),
+                        error_type=type(exc).__name__,
+                        stage="asyncio_run",
+                    )
+                dbg_exc("gui", "close request failed outside close coroutine")
+                raise
             return True
         raise RuntimeError("Use handle_close_request_async() when an asyncio event loop is already running")
 
@@ -316,63 +346,173 @@ class GuiShellSession:
 
         normalized_action = str(action).strip()
         selected = tuple(str(item_id) for item_id in item_ids)
-        if normalized_action == "shutdown_gui_launched" and not selected:
-            selected = await self._resolve_gui_launched_item_ids()
-        self._runtime.publish_event(AppEvent(
-            event_type="gui.close_requested",
-            source="gui",
-            payload={
-                "action": normalized_action,
-                "item_ids": list(selected),
-                "level": "info",
-                "message": f"Close requested: {normalized_action}",
-            },
-        ))
-        cleanup_results = ()
-        if normalized_action == "shutdown_gui_launched":
-            print("[INFO] SHUTDOWN_START: Shutting down GUI-spawned local processes", flush=True)
-            if selected:
-                print(f"[INFO] SHUTDOWN_TARGETS: {', '.join(selected)}", flush=True)
-            else:
-                print("[INFO] SHUTDOWN_TARGETS: none", flush=True)
-            cleanup_results = await self._shutdown_gui_launched_items(selected)
-        elif normalized_action != "leave_running":
-            raise ValueError(f"Unsupported close action: {action}")
 
-        self._runtime.publish_event(AppEvent(
-            event_type="gui.close_completed",
-            source="gui",
-            payload={
-                "action": normalized_action,
-                "item_ids": list(selected),
-                "cleanup_results": list(cleanup_results),
-                "level": "info",
-                "message": f"Close completed: {normalized_action}",
-            },
-        ))
-        _print_shutdown_summary(normalized_action, cleanup_results)
-        await self._runtime.shutdown()
+        # Publish the intent before any DDS work. Resolution and cleanup both make
+        # blocking admin calls; if either hangs or raises, this event is the only
+        # record that a close was ever attempted.
+        self._publish_close_event(
+            "gui.close_requested",
+            f"Close requested: {normalized_action}",
+            action=normalized_action,
+            item_ids=list(selected),
+            explicit_targets=bool(selected),
+        )
+        try:
+            if normalized_action == "shutdown_gui_launched" and not selected:
+                self._publish_close_event(
+                    "gui.close_resolving",
+                    "Resolving GUI-launched close targets",
+                    action=normalized_action,
+                )
+                selected = await self._resolve_gui_launched_item_ids()
+                self._publish_close_event(
+                    "gui.close_targets_resolved",
+                    f"Resolved {len(selected)} GUI-launched close target(s)",
+                    action=normalized_action,
+                    item_ids=list(selected),
+                )
+
+            cleanup_results = ()
+            if normalized_action == "shutdown_gui_launched":
+                print("[INFO] SHUTDOWN_START: Shutting down GUI-spawned local processes", flush=True)
+                if selected:
+                    print(f"[INFO] SHUTDOWN_TARGETS: {', '.join(selected)}", flush=True)
+                else:
+                    print("[INFO] SHUTDOWN_TARGETS: none", flush=True)
+                cleanup_results = await self._shutdown_gui_launched_items(selected)
+            elif normalized_action != "leave_running":
+                raise ValueError(f"Unsupported close action: {action}")
+
+            self._publish_close_event(
+                "gui.close_completed",
+                f"Close completed: {normalized_action}",
+                action=normalized_action,
+                item_ids=list(selected),
+                cleanup_results=list(cleanup_results),
+            )
+            _print_shutdown_summary(normalized_action, cleanup_results)
+            self._publish_close_event(
+                "gui.runtime_shutdown_started",
+                "Runtime shutdown started",
+                action=normalized_action,
+            )
+            await self._runtime.shutdown()
+            self._publish_close_event(
+                "gui.close_finished",
+                f"Close finished: {normalized_action}",
+                action=normalized_action,
+                item_ids=list(selected),
+            )
+        except BaseException as exc:
+            self._publish_close_event(
+                "gui.close_failed",
+                f"Close failed: {exc}",
+                level="error",
+                action=normalized_action,
+                item_ids=list(selected),
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+            self._close_failure_published = True
+            dbg_exc("gui", "close request failed")
+            raise
+
+    def force_close_gui_launched(self, deadline_sec: float = 0.0) -> Tuple[str, ...]:
+        """Kill GUI-launched processes from a watchdog thread after a wedged close.
+
+        Called when the close path has blocked past its deadline, which means the
+        thread running it is stuck inside a non-cancellable native call. This does
+        no DDS work: it goes straight to the local process handles so services are
+        not orphaned when the process exits.
+        """
+
+        self._publish_close_event(
+            "gui.close_watchdog_expired",
+            f"Close exceeded {deadline_sec:.1f}s; forcing shutdown of GUI-launched processes",
+            level="error",
+            deadline_sec=deadline_sec,
+        )
+        killed = []
+        for controller in (self._record_controller, self._replay_controller):
+            if controller is None:
+                continue
+            try:
+                selection = controller.last_selection
+                process_manager = controller.process_manager
+            except Exception:
+                dbg_exc("gui", "force close could not read controller selection")
+                continue
+            if process_manager is None:
+                continue
+            for candidate in getattr(selection, "candidates", ()):
+                if not candidate.owns_process or not candidate.alive:
+                    continue
+                try:
+                    outcome = process_manager.request_local_kill(
+                        selection,
+                        candidate.candidate_id,
+                    )
+                except Exception as exc:
+                    dbg_exc("gui", "force close kill failed")
+                    self._publish_close_event(
+                        "gui.close_forced",
+                        f"Force kill failed for {candidate.candidate_id}: {exc}",
+                        level="error",
+                        candidate_id=candidate.candidate_id,
+                        error=str(exc),
+                    )
+                    continue
+                status = getattr(getattr(outcome, "status", None), "value", str(getattr(outcome, "status", "")))
+                # Only count kills that were actually issued; a missing handle or an
+                # already-exited process still gets logged, with its real status.
+                if getattr(outcome, "ok", False):
+                    killed.append(candidate.candidate_id)
+                self._publish_close_event(
+                    "gui.close_forced",
+                    f"Force kill {status} for {candidate.candidate_id}",
+                    level="error",
+                    candidate_id=candidate.candidate_id,
+                    pid=candidate.pid,
+                    status=status,
+                )
+        return tuple(killed)
+
+    def _publish_close_event(
+            self,
+            event_type: str,
+            message: str,
+            level: str = "info",
+            **payload: Any,
+    ) -> None:
+        """Publish one close-path event, never raising into the close path."""
+
+        details = dict(payload)
+        details.update({"level": level, "message": message})
+        try:
+            self._runtime.publish_event(AppEvent(
+                event_type=event_type,
+                source="gui",
+                payload=details,
+            ))
+        except Exception:
+            dbg_exc("gui", f"failed to publish {event_type}")
 
     async def _resolve_gui_launched_item_ids(self) -> Tuple[str, ...]:
         """Collect active GUI-launched items when closeout doesn't provide explicit selections."""
 
         resolved = []
-        record_view = await self._record_controller.refresh_view()
-        for candidate in record_view.candidates:
-            if not candidate.owned:
-                continue
-            if str(candidate.state).strip().lower() in _EXITED_STATES:
+        await self._record_controller.refresh_view()
+        for candidate in self._record_controller.last_selection.candidates:
+            if not _is_live_gui_launched(candidate):
                 continue
             resolved.append(f"record:{candidate.candidate_id}")
 
         if self._replay_controller is not None:
-            replay_view = await self._replay_controller.refresh_view()
-            for target in replay_view.targets:
-                if not target.owned:
+            await self._replay_controller.refresh_view()
+            for candidate in self._replay_controller.last_selection.candidates:
+                if not _is_live_gui_launched(candidate):
                     continue
-                if str(target.state).strip().lower() in _EXITED_STATES:
-                    continue
-                resolved.append(f"replay:{target.target_id}")
+                resolved.append(f"replay:{candidate.candidate_id}")
 
         if self._convert_controller is not None:
             convert_view = await self._convert_controller.refresh_view()

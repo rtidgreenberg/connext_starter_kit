@@ -8,7 +8,6 @@ reader and obscures the mismatch fixture's endpoint counters.
 
 import json
 import os
-import random
 import shutil
 import subprocess
 import sys
@@ -23,13 +22,14 @@ sys.path.insert(0, HERE)
 
 import doctor_e2e  # noqa: E402
 
+import domains  # noqa: E402
+
 VENDORS = os.path.join(HERE, "vendors")
 CONNEXT = os.path.join(VENDORS, "rxo_connext_matrix.py")
 CYCLONE = os.path.join(VENDORS, "rxo_cyclone_matrix.py")
 CONNEXT_EXTENSIBILITY = os.path.join(VENDORS, "extensibility_connext_endpoint.py")
 FASTDDS_IMAGE = os.environ.get("RTI_DOCTOR_FASTDDS_IMAGE",
                                "rti-doctor-fastdds-e2e:3.6.2")
-DOMAIN_BASE = 40
 RELIABILITY_SCENARIO = "reliability"
 DURABILITY_SCENARIO = "durability"
 OUTPUT_ROOT = os.path.join(TOOL_DIR, "..", "..", "test_output")
@@ -37,7 +37,7 @@ ARTIFACT_ROOT = os.path.join(OUTPUT_ROOT, "rti_doctor_faults")
 
 
 def _domain():
-  return DOMAIN_BASE + random.randint(1, 80)
+  return domains.for_suite("test_fault_vendor_e2e")
 
 
 def _last_json(output, command):

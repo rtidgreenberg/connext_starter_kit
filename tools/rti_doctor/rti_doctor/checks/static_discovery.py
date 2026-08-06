@@ -38,7 +38,11 @@ def check_vendor_identify(context):
     detail.append("product version = not reported (RTI extension; "
                   "not meaningful for other vendors)")
 
-  severity = Severity.INFO
+  # OK by default: naming a peer we recognize is the anchor every other finding
+  # hangs off, but it is not itself a condition to triage. As INFO it put one
+  # entry per participant into the system scan's issue list. It still appears in
+  # a targeted report, which renders OK findings.
+  severity = Severity.OK
   root_cause = ""
   remedy = ""
   if not vendors.is_recognized(participant.vendor_id):
@@ -47,6 +51,8 @@ def check_vendor_identify(context):
                   "vendor-specific guidance can be offered.")
     remedy = "Identify the implementation from its vendor id before interpreting other findings."
   elif not participant.is_rti and not vendors.is_validated(participant.vendor_id):
+    # A real caveat, so it stays triageable - but bounded by participants.
+    severity = Severity.INFO
     root_cause = (f"{name} is recognized but is not part of rti_doctor's "
                   f"validation matrix, so vendor notes for it are unverified.")
 

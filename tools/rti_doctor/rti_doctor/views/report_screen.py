@@ -6,6 +6,7 @@ thread and the findings are replaced with the full set. A probe blocks for up to
 seconds.
 """
 
+import asyncio
 import logging
 import os
 

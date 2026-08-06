@@ -258,7 +258,11 @@ def check_extensibility(context):
     return [Finding(
         id="type.extensibility",
         rung=RUNG_TYPE,
-        severity=Severity.INFO,
+        # OK, not INFO: nothing here is wrong, and the system scan lists every
+        # non-OK finding as an issue. One note per endpoint about a type shared
+        # by all of them put 96 identical entries in the issue list of a healthy
+        # 96-endpoint domain. A targeted report still shows OK findings.
+        severity=Severity.OK,
         title="Type extensibility",
         observed="; ".join(f"{n} = {k}" for n, k in sorted(mapping.items())),
         evidence=mapping,
@@ -301,7 +305,10 @@ def check_representation(context):
     return [Finding(
         id="repr.not_advertised",
         rung=RUNG_TYPE,
-        severity=Severity.INFO,
+        # OK: the finding's own text says no incompatibility may be inferred
+        # from it and that it exists only so its absence is not mistaken for an
+        # oversight. That is a statement for a targeted report, not an issue.
+        severity=Severity.OK,
         title="Writer advertises no explicit data representation",
         observed=("PublicationBuiltinTopicData.representation is an empty sequence "
                   "(readable, but carrying no representation ids)."),
@@ -343,7 +350,7 @@ def check_representation(context):
   return [Finding(
       id="repr.offered",
       rung=RUNG_TYPE,
-      severity=Severity.INFO,
+      severity=Severity.OK,  # context for a report, not a domain-wide issue
       title="Writer data representation",
       observed=f"writer offers {text}",
       evidence={"representation": text, "representation_ids": ids},

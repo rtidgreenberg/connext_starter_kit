@@ -58,8 +58,11 @@ not exercised — the condition is stated in the finding.
 Plus 18 findings from 2026-08-04 re-verified as still open — see
 [Carried over](#carried-over-from-2026-08-04). Those are fixed too.
 
-Plus 6 found **while implementing the fixes above**, which the review pass had
-missed — see [Found during implementation](#found-during-implementation).
+Plus 9 found **while implementing the fixes above and building the guards that
+protect them**, none of which this review's reading caught — see
+[Found during implementation](#found-during-implementation). Two of those are
+High, and both were found by running the code at a scale or in a state no test
+had ever put it in.
 
 | # | Sev | Finding | Area |
 |---|---|---|---|
@@ -69,6 +72,9 @@ missed — see [Found during implementation](#found-during-implementation).
 | [I4](#i4) | Low | `_merge_endpoint` still carries the `in (None, "")` predicate `_merge_participant` was fixed for | Discovery |
 | [I5](#i5) | Low | A background refresh that raises is silent; the screen keeps showing stale data | TUI |
 | [I6](#i6) | Low | Five modules carried unused imports | Hygiene |
+| [I7](#i7) | High | A healthy 96-endpoint domain produced 150 issues — one note per endpoint, none of them a condition | System scan |
+| [I8](#i8) | High | A domain with no DDS on it reported an ERROR and exited 1, with nothing wrong anywhere | Blind spots |
+| [I9](#i9) | Med | Deleting the dead screens took `import asyncio` with it while `ReportScreen` still used it; the suite stayed green | TUI |
 
 ---
 
@@ -115,24 +121,46 @@ The behaviour changes worth knowing about:
 | I3 | `_local_networks` → `_local_addresses`, returning a `frozenset` (it is now a shared cached value); the dead `/24` set and the parameter that ignored it are gone. |
 | I4 | `_merge_endpoint` uses the explicit `is None or == ""` form, matching `_merge_participant`, with the reason in a comment. |
 | I5 | **Not fixed** — see [I5](#i5). |
-| I6 | Five unused imports removed. |
+| I6 | Five unused imports removed, and a pyflakes runner added so they cannot accumulate again. |
+| I7 | Findings that say nothing is wrong are `Severity.OK`, so they render in a targeted report and never reach the issue list. 150 issues on a healthy 96-endpoint domain became 0. |
+| I8 | `blind.empty_domain` is OK, and the empty case is stated explicitly everywhere a zero count would otherwise imply a healthy system. |
+| I9 | `import asyncio` restored in `report_screen.py`; a TUI test now opens a report. |
+
+### Infrastructure added alongside the fixes
+
+The pattern across three review rounds was that fixes were reasoned about rather
+than guarded. Four things now guard them:
+
+* **`run_lint.sh`** — pyflakes over `rti_doctor/` and `test/`, honoring `# noqa`
+  and skipping generated IDL. Verified to flag H1's `undefined name 'topology'`,
+  and it found [I9](#i9) on its first run.
+* **`run_tests.sh`** — one place defining the `unit` / `live` / `vendor` tiers,
+  so CI and humans cannot drift. The unit tier needs no Connext install and no
+  license.
+* **`.github/workflows/rti-doctor.yml`** — lint and the unit tier on every push
+  touching the tool. The live and vendor tiers still need a licensed
+  self-hosted runner; that is the next step, and the workflow says so.
+* **`test/domains.py`** — deterministic, port-safe domain assignment replacing
+  seven private `random.randint` bands, one of which reached domain 230. A
+  failure is now reproducible from the test name, and
+  `RTI_DOCTOR_DOMAIN_OFFSET` lets a second machine claim its own band.
+
+Plus the two guards for findings that had none: `TestScanUnderConcurrentDiscovery`
+for [H2](#h2), verified to fail 3/3 runs against the pre-fix code, and
+`test_scale` for behaviour above two endpoints, which found [I7](#i7)
+immediately.
 
 ### Test evidence
 
 ```text
-NDDSHOME=~/rti_connext_dds-7.7.0 PYTHONPATH=tools/rti_doctor \
-  ./connext_dds_env_7.7_py311/bin/python -m unittest \
-  tools.rti_doctor.test.test_cli tools.rti_doctor.test.test_checks \
-  tools.rti_doctor.test.test_wire tools.rti_doctor.test.test_findings \
-  tools.rti_doctor.test.test_system_scan tools.rti_doctor.test.test_topology \
-  tools.rti_doctor.test.test_wire_discovery tools.rti_doctor.test.test_doctor_e2e \
-  tools.rti_doctor.test.test_live_integration
+tools/rti_doctor/run_lint.sh        OK: no undefined names or unused imports.
+tools/rti_doctor/run_tests.sh unit  Ran 166 tests   OK   (no NDDSHOME, no license)
+tools/rti_doctor/run_tests.sh live  Ran 195 tests   OK   (Connext 7.7.0)
 
-Ran 171 tests in 42.006s
-OK
+  scale: 0.080s over 96 endpoints (0.83 ms/endpoint), 0 issue(s)
 ```
 
-125 before, 171 after. Two pre-existing tests were **rewritten** rather than
+125 before, 195 after. Two pre-existing tests were **rewritten** rather than
 extended, because each asserted a defect — see [I2](#i2):
 
 * `test_wire.py::test_summarize_filters_to_selected_writer_guid_prefix` used
@@ -804,6 +832,99 @@ Found by: an AST sweep for imported-but-unreferenced names, run to confirm the
 
 No linter runs over this tool, which is why they accumulated; the sweep is three
 lines of `ast` and would be worth wiring into CI.
+
+### I7
+
+**A healthy 96-endpoint domain produced 150 issues, none of which was a
+condition.**
+
+Found by: `test_scale`, the first thing in this project ever to run a scan
+against more than two endpoints.
+
+The breakdown was exact and entirely structural:
+
+| Count | Severity | Finding |
+|---|---|---|
+| 96 | INFO | `type.extensibility` — one per endpoint, all describing the same shared type |
+| 48 | INFO | `repr.not_advertised` — one per writer, all default QoS |
+| 6 | INFO | `vendor.identify` — one per participant |
+
+Every one is an *observation*, and `system_scan._issues` promotes every non-OK
+finding into the issue list. So the Issues screen on a domain with nothing wrong
+with it was 150 rows deep, which is worse than useless: it is the state in which
+an operator stops reading the list, and the one real ERROR on a bad day is row
+87.
+
+This is the same defect as 08-04 M13, which the review caught for
+`locator.no_multicast` and fixed by dropping that one check from the system
+scan. What the review missed was that M13 was an instance of a class. The
+general rule, applied here: **a finding that explicitly says nothing is wrong
+should be `Severity.OK`.** `_issues` skips OK, while `_render_findings` still
+prints it — so the observation survives in a targeted report, where the operator
+asked about that one endpoint, and disappears from the domain-wide triage list.
+
+Fixed: `type.extensibility` (clean case), `repr.not_advertised`, `repr.offered`
+and `vendor.identify` (recognized vendor) are OK. The non-clean branches are
+untouched — FINAL/mixed extensibility still WARNs, XCDR2-only still WARNs, an
+unrecognized vendor still WARNs, and a recognized-but-unvalidated vendor stays
+INFO because that caveat is real and is bounded by participant count.
+
+After: the same domain reports **0 issues**, and a scan costs 0.83 ms/endpoint.
+
+### I8
+
+**A domain with no DDS on it reported an ERROR and exited 1.**
+
+`check_empty_domain` raised `blind.empty_domain` at `Severity.ERROR` whenever no
+participants were discovered. Pointing Doctor at a quiet domain therefore
+produced an issue list with a red count, and `run_headless_domain` returned exit
+1 — with nothing wrong anywhere, and nothing observed at all.
+
+Finding nothing is the answer to the question the tool was asked, not a fault in
+a system. Worse, it is the one case where "1 Error" is actively misleading:
+there is no system under test to have an error.
+
+Fixed: `blind.empty_domain` is `Severity.OK`. Its guidance is unchanged and
+still renders in a report, and its `root_cause` was reworded — at ERROR it
+asserted "participant discovery (SPDP) is not completing", which is a diagnosis;
+it now leads with the likely truth ("nothing is running on this domain ID") and
+keeps the SPDP causes for the case where peers *were* expected.
+`blind.other_domain_active` is untouched: peers alive on a *different* domain is
+genuinely something to report.
+
+The counterpart matters as much as the fix. "No issues" over a domain where
+nothing was observed reads as a clean bill of health, so the empty case is now
+stated explicitly rather than implied by a zero:
+
+* `render_system_text` — "No DDS participants were discovered on domain N, so
+  there is nothing to report. This is not a clean bill of health: nothing was
+  observed."
+* `SystemOverviewScreen` — replaces the counts line entirely rather than showing
+  "0 Errors | 0 Warnings | 0 Notes".
+* `IssueListScreen` — same, in its snapshot status line.
+
+### I9
+
+**Deleting the dead screens took `import asyncio` with it while `ReportScreen`
+still used it.**
+
+Found by: the pyflakes runner added for P3, on its first run —
+`undefined name 'asyncio'` at three sites in `views/report_screen.py`.
+
+Removing `SweepScreen` (M5) left `ReportScreen` as the module's only class, and
+the unused-import sweep that followed dropped `asyncio` from the header. But
+`ReportScreen._render_static` and `_run_probe` both call `asyncio.to_thread`.
+Opening any report from the TUI would have raised `NameError` on the first
+keypress.
+
+The full 171-test suite stayed green, because the navigation test stopped at
+`EndpointListScreen` and nothing ever pushed `ReportScreen`. This is H1's exact
+failure class — a name used and never imported — reintroduced by the change that
+fixed H1's siblings, and caught only because the linter went in.
+
+Fixed: import restored, and `test_opening_a_report_renders_it` now drills
+Topology → writers → `o` and asserts the report body renders. Verified it fails
+without the import.
 
 ### Considered and deliberately not changed
 

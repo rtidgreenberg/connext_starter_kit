@@ -310,15 +310,25 @@ def check_empty_domain(context):
   return [Finding(
       id="blind.empty_domain",
       rung=RUNG_PARTICIPANT,
-      severity=Severity.ERROR,
+      # An empty domain is a state, not a fault. Doctor looked and found no DDS;
+      # that is the answer to the question, not a condition to triage, and
+      # reporting it as an ERROR meant pointing the tool at a quiet domain
+      # produced an issue list and a nonzero exit code with nothing wrong
+      # anywhere. The guidance below is unchanged and still renders in a report,
+      # which shows OK findings; what it no longer does is manufacture an issue.
+      # blind.other_domain_active stays actionable: peers on ANOTHER domain is
+      # something to report.
+      severity=Severity.OK,
       title=f"No participants discovered on domain {context.domain_id}",
       observed=f"0 remote participants; {scan_note}.",
       root_cause=(
-          "Participant discovery (SPDP) is not completing. In cross-vendor "
-          "systems the usual causes are, in rough order of likelihood: nothing "
-          "is actually running on this domain ID; multicast is blocked and "
-          "initial_peers does not name the peer host; a domain tag is set on the "
-          "Connext side; the peer is an OpenDDS application still using InfoRepo "
+          "No remote participant announced itself during the observation "
+          "window. Most often that simply means nothing is running on this "
+          "domain ID. If peers were expected, participant discovery (SPDP) is "
+          "not completing, and in cross-vendor systems the usual causes are, in "
+          "rough order of likelihood: multicast is blocked and initial_peers "
+          "does not name the peer host; a domain tag is set on the Connext "
+          "side; the peer is an OpenDDS application still using InfoRepo "
           "discovery rather than RTPS; a firewall is dropping UDP discovery "
           "traffic; or one side runs DDS Security and the other does not."),
       remedy=(

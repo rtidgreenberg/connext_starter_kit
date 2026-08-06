@@ -373,11 +373,18 @@ class TestTypeState(unittest.TestCase):
     self.assertEqual(type_compat.check_assignability(context), [])
 
   def test_empty_representation_is_not_reported_as_incompatible(self):
-    """A default-QoS writer advertises an empty sequence; that is not a fault."""
+    """A default-QoS writer advertises an empty sequence; that is not a fault.
+
+    OK rather than INFO: the system scan turns every non-OK finding into an
+    issue, and this fires for every default-QoS writer on the domain. OK keeps
+    it in a targeted report - which renders OK findings - without putting one
+    entry per writer into the issue list.
+    """
     endpoint = endpoint_record(representation=None)
     result = type_compat.check_representation(CheckContext(endpoint=endpoint))
     self.assertEqual(ids(result), ["repr.not_advertised"])
-    self.assertEqual(result[0].severity, f.Severity.INFO)
+    self.assertEqual(result[0].severity, f.Severity.OK)
+    self.assertFalse(result[0].is_problem)
 
 
 class TestDiscoveryLifecycle(unittest.TestCase):

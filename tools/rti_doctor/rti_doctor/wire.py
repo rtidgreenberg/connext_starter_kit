@@ -261,7 +261,7 @@ def inspect_pcap(path, tshark_path=None, writer_entity_id=None, writer_guid_pref
       # only the first occurrence, rtps.sm.id read 0x09 (INFO_TS) on almost
       # every frame, so DATA_FRAG could never be counted and DATA was counted
       # from a submessage that was neither.
-      "-T", "fields", "-E", f"occurrence=a", "-E",
+      "-T", "fields", "-E", "occurrence=a", "-E",
       f"aggregator={OCCURRENCE_SEPARATOR}",
       "-e", "frame.time_epoch", "-e", "rtps.sm.id",
       "-e", "rtps.sm.wrEntityId", "-e", "rtps.guidPrefix.src",

@@ -1,7 +1,6 @@
 """Fast DDS TypeInformation suppression spike observed through Connext logs."""
 
 import os
-import random
 import shutil
 import subprocess
 import sys
@@ -15,9 +14,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL_DIR = os.path.dirname(HERE)
 FASTDDS_IMAGE = os.environ.get("RTI_DOCTOR_FASTDDS_IMAGE",
                                "rti-doctor-fastdds-e2e:3.6.2")
-DOMAIN_BASE = 210
 
 sys.path.insert(0, TOOL_DIR)
+
+import domains  # noqa: E402
 
 try:
   import rti.connextdds  # noqa: F401
@@ -29,7 +29,7 @@ except Exception:  # pragma: no cover - environment dependent
 
 
 def _domain():
-  return DOMAIN_BASE + random.randint(1, 20)
+  return domains.for_suite("test_fastdds_type_metadata_spike")
 
 
 @unittest.skipUnless(CONNEXT_AVAILABLE, "RTI Connext Python API not available")

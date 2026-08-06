@@ -89,11 +89,19 @@ class SystemOverviewScreen(Screen):
     snapshot = await asyncio.to_thread(self.session.system_scan, None, max_age)
     counts = _issue_counts(snapshot)
     metrics = snapshot.topology
-    self.summary.update(
-        f"Observed: {metrics['participants']} participants | {metrics['readers']} readers | "
-        f"{metrics['writers']} writers | {metrics['topic_count']} topics\n"
-        f"Issues: {counts[f.Severity.ERROR]} Errors | {counts[f.Severity.WARN]} Warnings | "
-        f"{counts[f.Severity.INFO]} Notes")
+    if not metrics["participants"]:
+      # Never show "0 Errors" over an empty domain: that reads as a healthy
+      # system, and nothing was observed at all.
+      self.summary.update(
+          f"[yellow]No DDS discovered on domain {self.session.domain_id}.[/yellow]\n"
+          "Nothing was observed, so there is nothing to report - this is not a "
+          "clean bill of health.")
+    else:
+      self.summary.update(
+          f"Observed: {metrics['participants']} participants | {metrics['readers']} readers | "
+          f"{metrics['writers']} writers | {metrics['topic_count']} topics\n"
+          f"Issues: {counts[f.Severity.ERROR]} Errors | {counts[f.Severity.WARN]} Warnings | "
+          f"{counts[f.Severity.INFO]} Notes")
     self._snapshot = snapshot
 
   async def on_data_table_row_selected(self, event):
@@ -257,9 +265,16 @@ class IssueListScreen(Screen):
               for severity in (f.Severity.ERROR, f.Severity.WARN, f.Severity.INFO)}
     stamp = time.strftime("%H:%M:%S", time.localtime(self.snapshot.captured_at))
     scope = self.severity.label.title() if self.severity is not None else "All"
-    self.status.update(f"{scope} issues, snapshot {stamp}: {counts[f.Severity.ERROR]} Errors | "
-                       f"{counts[f.Severity.WARN]} Warnings | {counts[f.Severity.INFO]} Notes. "
-                       "Press r to refresh.")
+    if not self.snapshot.topology["participants"]:
+      # "0 Errors" over an empty domain reads as a healthy system.
+      self.status.update(f"Snapshot {stamp}: no DDS discovered on domain "
+                         f"{self.session.domain_id}, so there is nothing to "
+                         "report. Press r to refresh.")
+    else:
+      self.status.update(
+          f"{scope} issues, snapshot {stamp}: {counts[f.Severity.ERROR]} Errors | "
+          f"{counts[f.Severity.WARN]} Warnings | {counts[f.Severity.INFO]} Notes. "
+          "Press r to refresh.")
     if previous and previous in {item.key for item in issues}:
       self.table.move_cursor(row=next(index for index, item in enumerate(issues)
                                        if item.key == previous))

@@ -2,18 +2,18 @@
 
 import json
 import os
-import random
 import subprocess
 import sys
 import time
 import unittest
+
+import domains  # noqa: E402
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VENDORS = os.path.join(HERE, "vendors")
 CONNEXT = os.path.join(VENDORS, "extensibility_connext_endpoint.py")
 CYCLONE = os.path.join(VENDORS, "extensibility_cyclone_endpoint.py")
-DOMAIN_BASE = 140
 
 
 @unittest.skipUnless(
@@ -37,7 +37,7 @@ class TestExtensibilityVendorDataFlow(unittest.TestCase):
 
   def _run_pair(self, writer_script, writer_extensibility,
                 reader_script, reader_extensibility):
-    domain = DOMAIN_BASE + random.randint(1, 80)
+    domain = domains.for_suite("test_extensibility_vendor_e2e")
     topic = f"DoctorExtensibility{domain}"
     reader_command = self._command(
         reader_script, domain, topic, "reader", reader_extensibility, 6)

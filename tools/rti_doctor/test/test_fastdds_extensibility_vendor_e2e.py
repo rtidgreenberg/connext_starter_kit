@@ -2,7 +2,6 @@
 
 import json
 import os
-import random
 import shutil
 import subprocess
 import sys
@@ -11,13 +10,14 @@ import time
 import unittest
 import uuid
 
+import domains  # noqa: E402
+
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VENDORS = os.path.join(HERE, "vendors")
 CONNEXT = os.path.join(VENDORS, "extensibility_connext_endpoint.py")
 FASTDDS_IMAGE = os.environ.get("RTI_DOCTOR_FASTDDS_IMAGE",
                                "rti-doctor-fastdds-e2e:3.6.2")
-DOMAIN_BASE = 80
 
 
 class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
@@ -84,7 +84,7 @@ class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
   def _run_pair(self, writer_vendor, writer_extensibility,
                 reader_vendor, reader_extensibility, writer_representation="xcdr1",
                 reader_representation="xcdr1"):
-    domain = DOMAIN_BASE + random.randint(1, 70)
+    domain = domains.for_suite("test_fastdds_extensibility_vendor_e2e")
     topic = f"DoctorFastDdsExtensibility_{uuid.uuid4().hex}"
     control_dir = tempfile.mkdtemp(prefix="rti_doctor_fastdds_repr_", dir=HERE)
     reader_start_file = os.path.join(control_dir, "reader.start")

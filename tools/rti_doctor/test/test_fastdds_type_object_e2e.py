@@ -7,7 +7,6 @@ alone are insufficient evidence because SEDP carries them independently.
 """
 
 import os
-import random
 import shutil
 import subprocess
 import sys
@@ -22,9 +21,10 @@ TOOL_DIR = os.path.dirname(HERE)
 VENDORS = os.path.join(HERE, "vendors")
 FASTDDS_IMAGE = os.environ.get("RTI_DOCTOR_FASTDDS_IMAGE",
                                "rti-doctor-fastdds-e2e:3.6.2")
-DOMAIN_BASE = 120
 
 sys.path.insert(0, TOOL_DIR)
+
+import domains  # noqa: E402
 
 try:
   import rti.connextdds  # noqa: F401
@@ -35,7 +35,7 @@ except Exception:  # pragma: no cover - environment dependent
 
 
 def _domain():
-  return DOMAIN_BASE + random.randint(1, 80)
+  return domains.for_suite("test_fastdds_type_object_e2e")
 
 
 @unittest.skipUnless(CONNEXT_AVAILABLE, "RTI Connext Python API not available")

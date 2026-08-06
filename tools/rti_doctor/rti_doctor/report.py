@@ -107,7 +107,14 @@ def render_system_text(snapshot, domain_id, environment=None):
             _kv("Notes", str(counts[f.Severity.INFO])), ""]
   lines += _section("ISSUES")
   if not snapshot.issues:
-    lines += ["No active issues in this snapshot.", ""]
+    # "No issues" over an empty domain would read as a clean bill of health for
+    # a system that was never found. Say which of the two it is.
+    if not topology_data["participants"]:
+      lines += [f"No DDS participants were discovered on domain {domain_id}, so "
+                "there is nothing to report.",
+                "This is not a clean bill of health: nothing was observed.", ""]
+    else:
+      lines += ["No active issues in this snapshot.", ""]
   for number, issue in enumerate(snapshot.issues, 1):
     lines.append(f"[{number}] [{issue.severity.label}] {', '.join(issue.finding_ids)}")
     lines += _labelled("Title", issue.title)

@@ -1,0 +1,58 @@
+name: rti_doctor
+
+# What this covers, and what it does not.
+#
+# Covered: static checks and the 156-test unit suite. Those parse and import
+# rti.connextdds but create no DDS entity, so they run on a stock runner with
+# no Connext install and no license.
+#
+# NOT covered: the live-domain integration suite (needs a license) and the
+# cross-vendor e2e suites (need a license and Docker images). Run those locally
+# with `tools/rti_doctor/run_tests.sh live` and `... vendor` before merging any
+# change to discovery, the probe, or the wire path. Wiring them up needs a
+# self-hosted runner with a license, which is the obvious next step for this
+# workflow rather than a reason to skip it today.
+
+on:
+  push:
+    paths:
+      - 'tools/rti_doctor/**'
+      - '.github/workflows/rti-doctor.yml'
+  pull_request:
+    paths:
+      - 'tools/rti_doctor/**'
+      - '.github/workflows/rti-doctor.yml'
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: static checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pyflakes
+        run: python -m pip install --quiet pyflakes
+      # Catches undefined names and unused imports - the two classes that have
+      # actually shipped bugs here. See run_lint.sh for the cases.
+      - name: Lint
+        run: ./tools/rti_doctor/run_lint.sh
+
+  unit:
+    name: unit suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        # rti.connext imports without a license; only creating entities needs
+        # one, and the unit tier creates none.
+        run: python -m pip install --quiet rti.connext textual
+      - name: Unit tests
+        env:
+          PYTHON: python
+        run: ./tools/rti_doctor/run_tests.sh unit

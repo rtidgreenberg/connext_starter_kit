@@ -2,12 +2,15 @@
 
 import os
 import sys
+import threading
+import time
 import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rti_doctor import discovery, engine, findings as f, records, report, system_scan  # noqa: E402
+from rti_doctor import discovery, engine, findings as f, records  # noqa: E402
+from rti_doctor import report, system_scan, topology  # noqa: E402
 
 
 class Policy:
@@ -145,6 +148,155 @@ class TestSystemScan(unittest.TestCase):
     self.assertEqual(len(missing), 1)
     self.assertEqual(missing[0].writer_keys, ("writer-guid",))
     self.assertEqual(missing[0].reader_keys, ())
+
+
+class TestNothingToReport(unittest.TestCase):
+  """A quiet domain must produce no issues at all.
+
+  Doctor pointed at a domain with no DDS on it used to emit blind.empty_domain
+  at ERROR: an issue list, a red count, and a nonzero exit code, with nothing
+  wrong anywhere. Finding nothing is the answer to the question, not a fault.
+  """
+
+  def _empty_snapshot(self):
+    return system_scan.scan(
+        discovery.DiscoveryRegistry(type_wait=0.0), own_qos=None,
+        type_lookup_settings={"request_types_filter": "*"}, domain_id=7,
+        captured_at=123.0)
+
+  def test_an_empty_domain_produces_no_issues(self):
+    snapshot = self._empty_snapshot()
+    self.assertEqual(
+        [item.finding_ids for item in snapshot.issues], [],
+        "a domain with no DDS on it must not manufacture issues")
+    self.assertEqual(snapshot.topology["participants"], 0)
+
+  def test_the_guidance_is_still_reported(self):
+    """Silenced as an issue, not deleted: a report still explains the emptiness."""
+    text = report.render_system_text(self._empty_snapshot(), 7, environment={
+        "argv": "rti_doctor", "host": "t", "os": "Linux", "machine": "x86_64",
+        "connext": "7.7.0", "nddshome": "/opt/rti", "python": "3.x"})
+    self.assertIn("No DDS participants were discovered on domain 7", text)
+    self.assertNotIn("No active issues in this snapshot", text)
+
+  def test_an_empty_domain_is_not_called_healthy(self):
+    """"No issues" over nothing observed would be a clean bill of health."""
+    text = report.render_system_text(self._empty_snapshot(), 7, environment={
+        "argv": "rti_doctor", "host": "t", "os": "Linux", "machine": "x86_64",
+        "connext": "7.7.0", "nddshome": "/opt/rti", "python": "3.x"})
+    self.assertIn("not a clean bill of health", text)
+
+
+class TestScanUnderConcurrentDiscovery(unittest.TestCase):
+  """The registry is mutated by other threads for the whole of a scan.
+
+  Connext receive threads call upsert_endpoint/remove_endpoint from the builtin
+  listeners, and the TUI's 2s timer calls refresh_participants on the event-loop
+  thread, while system_scan runs in an asyncio.to_thread worker. A registry
+  query that comprehends over a live dict raises "dictionary changed size during
+  iteration" mid-walk.
+
+  The symptom is not a crash. run_checks catches the exception per check and
+  converts it to an internal.check_failed INFO, so the operator sees a scan that
+  silently dropped findings and reported a clean domain. Measured against the
+  pre-fix code, 6 of 122 scans lost at least one check this way.
+
+  The churn deliberately does NOT call remove_participant: that cascades to the
+  participant's endpoints, and an earlier draft of this test emptied the
+  registry within the first fraction of a second, leaving later scans nothing to
+  race over. test_the_churn_keeps_the_registry_populated exists so that cannot
+  happen again unnoticed.
+  """
+
+  PARTICIPANTS = 60
+  DURATION = 1.5
+
+  def setUp(self):
+    # Force frequent thread switches. Without this the race is real but
+    # infrequent, and a regression guard that only usually fires is not one.
+    self._switch_interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    self.addCleanup(sys.setswitchinterval, self._switch_interval)
+
+    self.registry = discovery.DiscoveryRegistry(type_wait=0.0)
+    for index in range(self.PARTICIPANTS):
+      participant = records.ParticipantRecord(key=f"p{index}", name=f"app-{index}")
+      self.registry.participants[participant.key] = participant
+      for kind in ("Writer", "Reader"):
+        endpoint = records.EndpointRecord(
+            key=f"{kind}-{index}", kind=kind, participant_key=participant.key,
+            topic_name=f"Topic{index % 7}", type_name="T",
+            reliability=Policy("RELIABLE"), type_state=records.TYPE_RESOLVED,
+            first_seen=1.0)
+        self.registry.endpoints[endpoint.key] = endpoint
+    self.baseline = len(self.registry.endpoints)
+
+    self._stop = threading.Event()
+    self.churn_error = []
+    self.mutations = 0
+    self._thread = threading.Thread(target=self._churn, daemon=True)
+    self._thread.start()
+    self.addCleanup(self._join)
+
+  def _churn(self):
+    """Stand in for the builtin listeners: endpoints arriving and departing."""
+    index = 0
+    try:
+      while not self._stop.is_set():
+        self.registry.upsert_endpoint(records.EndpointRecord(
+            key=f"Writer-churn-{index}", kind="Writer", participant_key="p0",
+            topic_name=f"Topic{index % 7}", type_name="T",
+            type_state=records.TYPE_RESOLVED, first_seen=1.0))
+        self.registry.remove_endpoint(f"Writer-churn-{max(index - 3, 0)}")
+        index += 1
+        self.mutations = index
+    except Exception as error:  # noqa: BLE001 - reported, never swallowed
+      self.churn_error.append(error)
+
+  def _join(self):
+    self._stop.set()
+    self._thread.join(timeout=5)
+
+  def _run_for(self, work):
+    deadline = time.monotonic() + self.DURATION
+    runs = 0
+    while time.monotonic() < deadline:
+      work()
+      runs += 1
+    self.assertFalse(self.churn_error,
+                     f"the mutating thread itself failed: {self.churn_error}")
+    self.assertGreater(self.mutations, 100, "the mutating thread barely ran")
+    return runs
+
+  def test_the_churn_keeps_the_registry_populated(self):
+    """Guards the guard: a scan over an empty registry cannot race."""
+    self._run_for(lambda: time.sleep(0.05))
+    self.assertGreaterEqual(len(self.registry.endpoints), self.baseline)
+
+  def test_no_check_is_silently_lost_while_endpoints_arrive_and_depart(self):
+    lost = []
+
+    def scan_once():
+      snapshot = system_scan.scan(
+          self.registry, own_qos=None,
+          type_lookup_settings={"request_types_filter": "*"}, domain_id=7)
+      lost.extend(issue for issue in snapshot.issues
+                  if "internal.check_failed" in issue.finding_ids)
+
+    scans = self._run_for(scan_once)
+    self.assertGreater(scans, 1, "the scan never ran often enough to race")
+    if lost:
+      checks = sorted({issue.title for issue in lost})
+      self.fail(
+          f"{len(lost)} check(s) raised during concurrent discovery across "
+          f"{scans} scans, so the scan silently dropped findings and would "
+          f"report a cleaner domain than it saw.\\n  "
+          + "\\n  ".join(checks)
+          + f"\\n  {lost[0].observed}")
+
+  def test_topology_snapshot_survives_the_same_churn(self):
+    """topology.snapshot is outside run_checks, so its failure propagates."""
+    self._run_for(lambda: topology.snapshot(self.registry, 7))
 
 
 if __name__ == "__main__":

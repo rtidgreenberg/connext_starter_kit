@@ -10,7 +10,6 @@ Run:
 """
 
 import os
-import random
 import subprocess
 import sys
 import time
@@ -19,6 +18,8 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL_DIR = os.path.dirname(HERE)
 sys.path.insert(0, TOOL_DIR)
+
+import domains  # noqa: E402
 
 try:
   import rti.connextdds  # noqa: F401
@@ -30,13 +31,11 @@ if CONNEXT_AVAILABLE:
   from rti_doctor import compat, discovery, engine, findings as f, records, report
 
 FIXTURE = os.path.join(HERE, "fixture_publisher.py")
-#: High domain ids, randomised per run, so tests do not collide with each other
-#: or with whatever else is on the machine.
-DOMAIN_BASE = 20
 
 
 def _domain():
-  return DOMAIN_BASE + random.randint(1, 100)
+  """Deterministic per suite and port-safe; see test/domains.py."""
+  return domains.for_suite("test_live_integration")
 
 
 @unittest.skipUnless(CONNEXT_AVAILABLE, "RTI Connext Python API not available")
@@ -284,6 +283,41 @@ class TestTui(LiveFixtureTest):
          TopologyHealthScreen, EndpointListScreen],
         f"navigation went off course: {[c.__name__ for c in seen]}")
     self.assertEqual(self.selected_issue_severity, f.Severity.ERROR)
+
+  def test_opening_a_report_renders_it(self):
+    """Drill all the way to ReportScreen and confirm it renders.
+
+    The navigation test stops at EndpointListScreen, so nothing exercised
+    ReportScreen's own body. Deleting SweepScreen from that module took
+    `import asyncio` with it while ReportScreen still used it for
+    `asyncio.to_thread`, and the whole suite stayed green - the screen would
+    have raised NameError the first time an operator opened a report.
+    """
+    import asyncio
+
+    from rti_doctor.app import RTIDoctorApp
+    from rti_doctor.views.report_screen import ReportScreen
+
+    app = RTIDoctorApp(self.session, interval=1.0)
+    seen = {}
+
+    async def drive():
+      async with app.run_test() as pilot:
+        await pilot.pause(0.8)
+        await pilot.press("down", "enter")     # DDS Topology & Health
+        await pilot.pause(0.6)
+        await pilot.press("3")                 # writers
+        await pilot.pause(0.4)
+        await pilot.press("o")                 # open a passive report
+        await pilot.pause(1.5)
+        seen["screen"] = type(app.screen)
+        seen["body"] = str(app.screen.body.render())
+
+    asyncio.run(drive())
+    self.assertIs(seen["screen"], ReportScreen)
+    self.assertIn("RTI DOCTOR INTEROP REPORT", seen["body"])
+    self.assertIn("VERDICT", seen["body"])
+    self.assertNotIn("Static checks failed", seen["body"])
 
   def test_refresh_and_metrics_survive_navigating_away_mid_scan(self):
     """The refresh actions used to be bare asyncio.create_task.

@@ -5,9 +5,7 @@ third-party runtime and packet-capture permission, and the Fast DDS test also
 needs the current Docker image built by vendors/fastdds/build_image.sh.
 """
 
-import json
 import os
-import random
 import shutil
 import subprocess
 import sys
@@ -20,6 +18,8 @@ sys.path.insert(0, HERE)
 
 import doctor_e2e  # noqa: E402
 
+import domains  # noqa: E402
+
 VENDORS_DIR = os.path.join(HERE, "vendors")
 CYCLONE_FIXTURE = os.path.join(VENDORS_DIR, "cyclone_publisher.py")
 CYCLONE_SUBSCRIBER = os.path.join(VENDORS_DIR, "cyclone_subscriber.py")
@@ -30,11 +30,10 @@ CAPTURE_INTERFACE = os.environ.get("RTI_DOCTOR_TEST_CAPTURE_INTERFACE", "any")
 DOCTOR_SETTLE = 3
 # Cyclone DDS's default RTPS port mapping cannot represent domains above 232.
 # Keep this vendor-only range below that limit while avoiding the usual examples.
-DOMAIN_BASE = 120
 
 
 def _domain():
-  return DOMAIN_BASE + random.randint(1, 100)
+  return domains.for_suite("test_vendor_wire_e2e")
 
 
 def _command_available(command):

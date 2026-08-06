@@ -8,17 +8,17 @@ offered rules against real DDS matching, not only Doctor's static comparison.
 
 import json
 import os
-import random
 import subprocess
 import sys
 import unittest
+
+import domains  # noqa: E402
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VENDORS = os.path.join(HERE, "vendors")
 CONNEXT = os.path.join(VENDORS, "rxo_connext_matrix.py")
 CYCLONE = os.path.join(VENDORS, "rxo_cyclone_matrix.py")
-DOMAIN_BASE = 30
 SCENARIOS = (
     "reliability", "durability", "liveliness_kind", "liveliness_lease",
     "destination_order", "presentation_scope", "presentation_coherent",
@@ -54,7 +54,7 @@ class TestRxOVendorDataFlow(unittest.TestCase):
     self.fail(f"matrix endpoint produced no JSON\ncommand={command}\n{output}")
 
   def _run_pair(self, writer_script, reader_script, mode, scenarios):
-    domain = DOMAIN_BASE + random.randint(1, 100)
+    domain = domains.for_suite("test_rxo_vendor_e2e")
     prefix = f"RxOE2E_{domain}_{mode}"
     reader_command = self._command(
         reader_script, domain, prefix, "reader", mode, scenarios)

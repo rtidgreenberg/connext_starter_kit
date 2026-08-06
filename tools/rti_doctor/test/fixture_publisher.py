@@ -28,7 +28,7 @@ import time
 import rti.connextdds as dds
 
 MODES = ("healthy", "best_effort", "no_type_info", "type_conflict",
-         "large_data", "partition", "bad_pair")
+         "large_data", "partition", "bad_pair", "scale")
 
 
 def configure_rti_environment():
@@ -105,6 +105,68 @@ def populate_rich(sample, counter):
   sample["fixed"] = [1, 2, 3]
 
 
+def run_scale(args):
+  """Many participants and endpoints, so the scan can be measured at scale.
+
+  Every other mode creates one writer and at most one reader, which is why the
+  cost of a system scan and the shape of its issue list were, until this mode
+  existed, only ever reasoned about. The scan walks the endpoint dictionary once
+  per endpoint in the topic-census checks and once per writer in the RxO and
+  assignability checks, so its cost is quadratic in endpoint count and nothing
+  exercised that.
+
+  Deliberately healthy: the point is cost and issue-count shape on a system with
+  nothing wrong with it. A scan that reports N notes about N writers is as much
+  of a problem at scale as a wrong verdict.
+  """
+  dynamic_type = build_rich_type(args.type_name)
+  held = []          # every entity, kept referenced or it is finalized at once
+  participants = []
+
+  for index in range(args.scale_participants):
+    qos = dds.DomainParticipantQos()
+    qos.participant_name.name = f"{args.participant_name}_{index:02d}"
+    participant = dds.DomainParticipant(args.domain, qos=qos)
+    participants.append(participant)
+
+    publisher = dds.Publisher(participant)
+    subscriber = dds.Subscriber(participant)
+    held += [publisher, subscriber]
+
+    # A DomainParticipant may hold only one Topic per name, and with more
+    # endpoints per participant than topics the names necessarily repeat. Real
+    # applications share one Topic between several endpoints for exactly this
+    # reason, so the fixture does too.
+    topics = {}
+    for slot in range(args.scale_endpoints_per_participant):
+      topic_name = f"{args.topic}{(index * 7 + slot) % args.scale_topics:02d}"
+      if topic_name not in topics:
+        topics[topic_name] = dds.DynamicData.Topic(
+            participant, topic_name, dynamic_type)
+        held.append(topics[topic_name])
+      topic = topics[topic_name]
+      if slot % 2 == 0:
+        writer_qos = dds.DataWriterQos()
+        writer_qos.reliability.kind = dds.ReliabilityKind.RELIABLE
+        writer_qos.durability.kind = dds.DurabilityKind.TRANSIENT_LOCAL
+        held.append(dds.DynamicData.DataWriter(publisher, topic, writer_qos))
+      else:
+        reader_qos = dds.DataReaderQos()
+        reader_qos.reliability.kind = dds.ReliabilityKind.RELIABLE
+        reader_qos.durability.kind = dds.DurabilityKind.TRANSIENT_LOCAL
+        held.append(dds.DynamicData.DataReader(subscriber, topic, reader_qos))
+
+  total = args.scale_participants * args.scale_endpoints_per_participant
+  print(f"publishing mode=scale domain={args.domain} "
+        f"participants={args.scale_participants} endpoints={total} "
+        f"topics={args.scale_topics}", flush=True)
+
+  time.sleep(args.duration)
+  for participant in participants:
+    participant.close()
+  return 0
+
+
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("--mode", choices=MODES, default="healthy")
@@ -115,6 +177,12 @@ def main():
   parser.add_argument("--partition", default="secret_partition")
   parser.add_argument("--duration", type=float, default=30.0)
   parser.add_argument("--period", type=float, default=0.25)
+  parser.add_argument("--scale-participants", type=int, default=6,
+                      help="scale mode: how many remote participants to create")
+  parser.add_argument("--scale-topics", type=int, default=12,
+                      help="scale mode: how many distinct topics to spread over")
+  parser.add_argument("--scale-endpoints-per-participant", type=int, default=16,
+                      help="scale mode: readers+writers created per participant")
   args = parser.parse_args()
 
   configure_rti_environment()
@@ -129,6 +197,9 @@ def main():
       participant_qos.resource_limits.type_object_max_serialized_length = 0
     except Exception as e:
       print(f"WARNING: could not disable type propagation: {e}", file=sys.stderr)
+
+  if args.mode == "scale":
+    return run_scale(args)
 
   participant = dds.DomainParticipant(args.domain, qos=participant_qos)
 

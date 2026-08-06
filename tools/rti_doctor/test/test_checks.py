@@ -527,6 +527,7 @@ class TestRxO(unittest.TestCase):
     result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
     self.assertEqual(ids(result), ["qos.rxo_mismatch"])
     self.assertIn("RELIABILITY", result[0].title)
+    self.assertIn(qos_match.DOC_OMG_DDS_RTPS, result[0].refs)
 
   def test_best_effort_reader_vs_reliable_writer_is_fine(self):
     writer, reader, registry = self._pair(

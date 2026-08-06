@@ -25,6 +25,7 @@ DESTINATION_ORDER_ORDER = {"BY_RECEPTION_TIMESTAMP": 0, "BY_SOURCE_TIMESTAMP": 1
 #: every writer. Leaving it unranked makes _ordered_rule decline to evaluate,
 #: which is the correct answer; ranking it above GROUP would fail every writer.
 PRESENTATION_ORDER = {"INSTANCE": 0, "TOPIC": 1, "GROUP": 2}
+DOC_OMG_DDS_RTPS = "https://github.com/omg-dds/dds-rtps"
 
 
 def _enum_name(value):
@@ -281,6 +282,7 @@ def check_rxo_pairs(context):
                       "reader is not counted, since it deliberately mirrors the "
                       "writer and would always match."),
           remedy="",
+          refs=[DOC_OMG_DDS_RTPS],
       )]
     return []
 
@@ -308,6 +310,7 @@ def check_rxo_pairs(context):
               "writer_participant_key": writer.participant_key,
               "reader_participant_key": reader.participant_key,
               "topic_name": writer.topic_name},
+            refs=[DOC_OMG_DDS_RTPS],
       ))
       continue
 
@@ -335,6 +338,7 @@ def check_rxo_pairs(context):
             "reader_participant_key": reader.participant_key,
             "topic_name": writer.topic_name,
                   "mismatches": mismatches},
+          refs=[DOC_OMG_DDS_RTPS],
     ))
   return out
 

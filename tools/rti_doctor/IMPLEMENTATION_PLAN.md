@@ -615,6 +615,26 @@ probed, and given an accurate verdict, and every finding they trigger is real.
 - RTI Monitoring Library / Admin Console-equivalent metrics history.
 - OpenDDS and OpenSplice in the test matrix (recognized and annotated only).
 
+## Post-V1 Interoperability Test Roadmap
+
+Use the [OMG DDS-RTPS interoperability suite](https://github.com/omg-dds/dds-rtps)
+as a reference for expanding the live test matrix. The existing RxO matrix already
+covers matching compatibility; these additions verify data-flow behavior after a
+match. Run each applicable scenario for Connext-to-Connext, Connext-to-Cyclone,
+Cyclone-to-Connext, and Connext-to-Fast DDS when the corresponding fixture is
+available.
+
+| # | Scenario | Expected assertion |
+|---|----------|--------------------|
+| I1 | Content-filtered topics | A reader receives only key and non-key samples selected by its filter. |
+| I2 | History and time-based filtering | KEEP_LAST/KEEP_ALL and TIME_BASED_FILTER preserve the expected per-instance sample sequence and rate. |
+| I3 | Exclusive ownership strength | A reader selects the strongest writer for one instance and receives from both writers for distinct instances. |
+| I4 | Late-joiner durability | VOLATILE and TRANSIENT_LOCAL readers receive the expected historical samples after joining. |
+| I5 | Lifespan expiry | Expired samples are absent while unexpired samples remain readable for reliable and best-effort flows. |
+| I6 | Instance final state | Unregister, dispose, and writer shutdown produce the expected instance-state transitions. |
+| I7 | Ordered access and coherent sets | Multi-topic, multi-instance readers preserve the ordering and coherent-set boundaries required by their presentation QoS. |
+| I8 | Large payload integrity | Fragmented samples arrive and retain a verified payload sentinel, complementing Doctor's current fragmentation counters. |
+
 ## Implementation Status (built and verified)
 
 All phases are implemented. Deviations from the plan above, each driven by

@@ -1,9 +1,11 @@
 """System overview, passive issue list, and observed-topology metrics screens."""
 
 import asyncio
+import logging
 import os
 import time
 
+from rich.markup import escape
 from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static
@@ -31,8 +33,60 @@ def _spawn(screen, coroutine):
   weak reference to a bare task, so it can be collected mid-flight, and nothing
   cancels it when the screen is popped - leaving a scan that finishes seconds
   later writing into unmounted widgets.
+
+  `exit_on_error=False` keeps one failed refresh from tearing down the app, but
+  on its own it also makes the failure invisible: the worker dies, the screen
+  keeps its previous render, and the operator is looking at stale data with no
+  marker. `_report` is the backstop for anything the refresh raises that `_scan`
+  did not already handle.
   """
-  screen.run_worker(coroutine, exit_on_error=False)
+  screen.run_worker(_guarded(screen, coroutine), exit_on_error=False)
+
+
+async def _guarded(screen, coroutine):
+  try:
+    await coroutine
+  except Exception as error:  # noqa: BLE001 - reported on screen, not swallowed
+    _report(screen, error, previous=getattr(screen, "snapshot", None))
+
+
+def _report(screen, error, previous=None, action="Scan"):
+  """Put a refresh failure on the screen's status line and in the log.
+
+  A failed scan must never render like a scan that found nothing to change.
+  These screens hold their snapshot across refreshes, so without this a scan
+  that has been failing for minutes is indistinguishable from a healthy system
+  - which is the one thing a diagnostic tool must not do.
+  """
+  logging.error(f"[{type(screen).__name__}] {action.lower()} failed: {error}")
+  screen.scan_error = error
+  detail = escape(str(error)) or type(error).__name__
+  if previous is None:
+    screen.status.update(f"[red]{action} failed: {detail}[/red] - no data has "
+                         "been collected yet. Press r to retry.")
+    return
+  stamp = time.strftime("%H:%M:%S", time.localtime(previous.captured_at))
+  screen.status.update(f"[red]{action} failed: {detail}[/red] - still showing "
+                       f"the snapshot from {stamp}. Press r to retry.")
+
+
+async def _scan(screen, max_age=0.0, previous=None):
+  """Scan for `screen`, or report why it could not, returning None.
+
+  Callers keep `previous` and skip their render on None, so the last good data
+  stays on screen underneath the failure line rather than being blanked.
+  """
+  try:
+    snapshot = await asyncio.to_thread(screen.session.system_scan, None, max_age)
+  except Exception as error:  # noqa: BLE001 - reported on screen, not swallowed
+    _report(screen, error, previous)
+    return None
+  if screen.scan_error is not None:
+    # Recovered. Clear the marker; the caller's render writes the status line
+    # it would have written had the failure never happened.
+    screen.scan_error = None
+    screen.status.update("")
+  return snapshot
 
 
 class SystemOverviewScreen(Screen):
@@ -47,7 +101,8 @@ class SystemOverviewScreen(Screen):
     self.menu = DataTable()
     self.summary = None
     self.status = None
-    self._snapshot = None
+    self.snapshot = None
+    self.scan_error = None
 
   def compose(self):
     yield Header()
@@ -82,11 +137,13 @@ class SystemOverviewScreen(Screen):
     Textual posts ScreenResume on the initial push too, right after on_mount, so
     this reuses a very recent scan rather than paying for a duplicate at startup.
     """
-    if self._snapshot is not None:
+    if self.snapshot is not None:
       await self.refresh_summary(max_age=SCAN_REUSE_SECONDS)
 
   async def refresh_summary(self, max_age=0.0):
-    snapshot = await asyncio.to_thread(self.session.system_scan, None, max_age)
+    snapshot = await _scan(self, max_age, self.snapshot)
+    if snapshot is None:
+      return
     counts = _issue_counts(snapshot)
     metrics = snapshot.topology
     if not metrics["participants"]:
@@ -102,13 +159,13 @@ class SystemOverviewScreen(Screen):
           f"{metrics['writers']} writers | {metrics['topic_count']} topics\n"
           f"Issues: {counts[f.Severity.ERROR]} Errors | {counts[f.Severity.WARN]} Warnings | "
           f"{counts[f.Severity.INFO]} Notes")
-    self._snapshot = snapshot
+    self.snapshot = snapshot
 
   async def on_data_table_row_selected(self, event):
-    if event.row_key is None or self._snapshot is None:
+    if event.row_key is None or self.snapshot is None:
       return
     if event.row_key.value == "issues":
-      self.app.push_screen(IssueSeverityScreen(self.session, self._snapshot))
+      self.app.push_screen(IssueSeverityScreen(self.session, self.snapshot))
     elif event.row_key.value == "topology":
       self.app.push_screen(TopologyHealthScreen(self.session))
 
@@ -119,7 +176,7 @@ class SystemOverviewScreen(Screen):
     self.app.push_screen(MetricsScreen(self.session))
 
   def action_save(self):
-    snapshot = self._snapshot
+    snapshot = self.snapshot
     if snapshot is None:
       return
     path = os.path.abspath(report.system_filename(self.session.domain_id))
@@ -143,6 +200,7 @@ class IssueSeverityScreen(Screen):
     self.snapshot = snapshot
     self.table = DataTable()
     self.status = None
+    self.scan_error = None
 
   def compose(self):
     yield Header()
@@ -169,7 +227,10 @@ class IssueSeverityScreen(Screen):
       await self._refresh(max_age=SCAN_REUSE_SECONDS)
 
   async def _refresh(self, max_age=0.0):
-    self.snapshot = await asyncio.to_thread(self.session.system_scan, None, max_age)
+    snapshot = await _scan(self, max_age, self.snapshot)
+    if snapshot is None:
+      return
+    self.snapshot = snapshot
     self._render_menu()
 
   def _render_menu(self):
@@ -221,6 +282,7 @@ class IssueListScreen(Screen):
     self.issue_keys = set(issue_keys) if issue_keys is not None else None
     self.severity = severity
     self.selected_key = None
+    self.scan_error = None
 
   def compose(self):
     yield Header()
@@ -242,7 +304,10 @@ class IssueListScreen(Screen):
 
   async def _refresh(self, max_age=0.0):
     previous = self.selected_key
-    self.snapshot = await asyncio.to_thread(self.session.system_scan, None, max_age)
+    snapshot = await _scan(self, max_age, self.snapshot)
+    if snapshot is None:
+      return
+    self.snapshot = snapshot
     self._render_snapshot(previous)
 
   def _visible_issues(self):
@@ -416,6 +481,7 @@ class TopologyHealthScreen(Screen):
     self.mode = "participants"
     self.snapshot = None
     self.selected_key = None
+    self.scan_error = None
 
   def compose(self):
     yield Header()
@@ -432,7 +498,10 @@ class TopologyHealthScreen(Screen):
     self.table.focus()
 
   async def _refresh(self, max_age=0.0):
-    self.snapshot = await asyncio.to_thread(self.session.system_scan, None, max_age)
+    snapshot = await _scan(self, max_age, self.snapshot)
+    if snapshot is None:
+      return
+    self.snapshot = snapshot
     self._render_table()
 
   def _render_table(self):
@@ -635,12 +704,20 @@ class MetricsScreen(Screen):
     super().__init__()
     self.session = session
     self.body = None
+    self.status = None
+    self.snapshot = None
+    self.scan_error = None
 
   def compose(self):
     yield Header()
     with VerticalScroll(id="metrics_body"):
       self.body = Static("Collecting metrics...")
       yield self.body
+    # Counters are the screen's whole content, so a failed refresh here leaves
+    # numbers on screen with nothing marking them as old. This is the line that
+    # says so.
+    self.status = Static("", id="metrics_status")
+    yield self.status
     yield Footer()
 
   async def on_mount(self):
@@ -648,7 +725,10 @@ class MetricsScreen(Screen):
     await self._refresh(max_age=SCAN_REUSE_SECONDS)
 
   async def _refresh(self, max_age=0.0):
-    snapshot = await asyncio.to_thread(self.session.system_scan, None, max_age)
+    snapshot = await _scan(self, max_age, self.snapshot)
+    if snapshot is None:
+      return
+    self.snapshot = snapshot
     data = snapshot.topology
     rows = [
         ("Domain ID", str(self.session.domain_id)),

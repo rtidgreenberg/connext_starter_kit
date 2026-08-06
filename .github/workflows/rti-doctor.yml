@@ -2,7 +2,7 @@ name: rti_doctor
 
 # What this covers, and what it does not.
 #
-# Covered: static checks and the 156-test unit suite. Those parse and import
+# Covered: static checks and the 177-test unit suite. Those parse and import
 # rti.connextdds but create no DDS entity, so they run on a stock runner with
 # no Connext install and no license.
 #

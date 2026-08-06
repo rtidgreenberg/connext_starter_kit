@@ -30,6 +30,7 @@ UNIT=(
     test_wire_discovery
     test_findings
     test_system_scan
+    test_views
     test_topology
     test_domains
     test_doctor_e2e

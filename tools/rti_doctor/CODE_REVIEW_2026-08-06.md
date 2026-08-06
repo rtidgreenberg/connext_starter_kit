@@ -1006,32 +1006,35 @@ Re-verified against current source. None of these are re-explained here; see
 
 ## What remains
 
-Every finding in this document is fixed except the four below. The original
+Every finding in this document is fixed except the three below. The original
 "recommended order of work" is gone because the work in it is done; this is the
-list that replaces it. Items 1-3 are defects with a known cause; item 4 is a
+list that replaces it. Items 1-2 are defects with a known cause; item 3 is a
 coverage gap that limits how much any of the above can be trusted.
 
-1. **[I5](#i5) — a background refresh that raises is silent.** Five system
-   screens keep rendering the previous snapshot with no marker, so a scan that
-   has been failing for minutes looks identical to one that found nothing to
-   change. `ReportScreen` already does this correctly. The fix is a shared
-   status convention across the five screens, which is why it was not done
-   half-way inside a fix pass. Its test is still listed as a gap below.
+**[I5](#i5) is closed as of 2026-08-06.** The five system screens now share one
+convention: `_scan` reports a failed scan on the screen's status line and keeps
+the previous snapshot underneath it ("still showing the snapshot from HH:MM:SS"),
+`_spawn` guards the rest of the refresh coroutine so a rendering failure cannot
+be silent either, and the marker clears on the first scan that succeeds.
+`MetricsScreen` gained the status line it never had. `test/test_views.py` drives
+all five screens headlessly against a stub session whose scan raises - no
+license, no domain, so it runs in the unit tier and therefore in CI. All five of
+its tests were confirmed to fail against the pre-fix source.
 
-2. **08-04 H7 residual — the probe cannot be cancelled.** Navigating away is
+1. **08-04 H7 residual — the probe cannot be cancelled.** Navigating away is
    handled (the probe is a screen-owned worker), but `probe_endpoint` itself has
    no cancellation, so quitting during a probe still waits out the current
    `--probe-timeout` window. Closing this means threading a cancel token or an
    `Event` through the probe loop.
 
-3. **08-04 M9 residual — `inspect_pcap` memory.** The subprocess timeout is in
+2. **08-04 M9 residual — `inspect_pcap` memory.** The subprocess timeout is in
    place and bounds the hang. It does not bound the memory: `-e rtps.issueData`
    still renders every payload as hex into a buffered stdout, so a large capture
    is held in RAM in full. Fixing it means either dropping the field and
    deriving payload size another way, or streaming tshark's output rather than
    using `capture_output=True`.
 
-4. **CI covers the unit tier only.** Lint and 169 unit tests run on every push.
+3. **CI covers the unit tier only.** Lint and 177 unit tests run on every push.
    The live suite (195 tests, including the H2 concurrency guard and the scale
    suite) and the vendor e2e suites need a Connext license, and the vendor tier
    additionally needs Docker images - so both currently depend on someone
@@ -1061,7 +1064,7 @@ None of these tests exist today, and each would have caught a finding above.
 | Two writers on one topic, asserting `find_writer` is stable across registry insertion orders | M6 |
 | `wire.summarize` with both `writer_guid_prefix` and `writer_entity_id`, using a *user* entity id, asserting builtin `…c2`/`…c3` writers are excluded | H3 (08-04) — and `test_wire.py:80-86` must be rewritten, not extended |
 | `WalkReport.verdict` with `truncated=True` and no failures, asserting the verdict is not `FULL` | M8 (08-04) |
-| A screen whose `_refresh` raises, asserting the failure reaches the status line | I5 — still open, and still a gap |
+| A screen whose `_refresh` raises, asserting the failure reaches the status line | I5 — closed 2026-08-06 by `test/test_views.py`, over all five screens |
 | Importing every test module in its own interpreter, so a suite cannot depend on a neighbour having run first | I10 — done manually, not yet automated |
 
 `test_large_sample_still_deserializes` now asserts `walk.truncated is False`

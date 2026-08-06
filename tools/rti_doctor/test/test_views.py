@@ -1,0 +1,240 @@
+"""Unit tests for the system screens' shared refresh-failure convention.
+
+These drive real Textual screens headlessly against a stub session, so they need
+no Connext license and no DDS domain: the behaviour under test is what the
+screen does when `session.system_scan` raises, which is independent of why it
+raised.
+"""
+
+import asyncio
+import logging
+import os
+import sys
+import unittest
+
+from textual.app import App
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from rti_doctor import system_scan  # noqa: E402
+from rti_doctor.views import system_overview  # noqa: E402
+
+TOPOLOGY = {
+    "participants": 2, "readers": 1, "writers": 1, "topic_count": 1,
+    "topics": ["Telemetry"], "source": "discovery registry",
+    "completion_note": "observed passively",
+}
+
+
+def snapshot(captured_at=1000.0):
+  return system_scan.SystemScanSnapshot(
+      captured_at=captured_at, topology=TOPOLOGY, issues=())
+
+
+class StubRegistry:
+  """Only what `TopologyHealthScreen._render_table` reaches for."""
+
+  endpoints = {}
+  participants = {}
+
+  def participant_list(self):
+    return []
+
+  def endpoints_for(self, key):
+    return []
+
+  def readers(self):
+    return []
+
+  def writers(self):
+    return []
+
+  def topic_names(self):
+    return []
+
+  def endpoints_on_topic(self, topic):
+    return []
+
+
+class StubSession:
+  """A session whose scan can be made to fail on demand."""
+
+  def __init__(self):
+    self.domain_id = 7
+    self.registry = StubRegistry()
+    self.fail = None
+    self.calls = 0
+
+  def system_scan(self, scope=None, max_age=0.0):
+    self.calls += 1
+    if self.fail is not None:
+      raise self.fail
+    return snapshot()
+
+
+class Harness(App):
+  """Hosts one screen so it can be driven by key press, as an operator would."""
+
+  def __init__(self, screen):
+    super().__init__()
+    self._target = screen
+
+  def on_mount(self):
+    self.push_screen(self._target)
+
+
+SCREENS = (
+    ("SystemOverviewScreen", system_overview.SystemOverviewScreen),
+    ("IssueSeverityScreen", system_overview.IssueSeverityScreen),
+    ("IssueListScreen", system_overview.IssueListScreen),
+    ("TopologyHealthScreen", system_overview.TopologyHealthScreen),
+    ("MetricsScreen", system_overview.MetricsScreen),
+)
+
+
+def status_text(screen):
+  return str(screen.status.render())
+
+
+class TestRefreshFailureIsVisible(unittest.TestCase):
+
+  def setUp(self):
+    # Every test here provokes the error path on purpose, and the screens log
+    # it. Keep that out of the suite's output; one test below asserts the log
+    # record is still emitted.
+    logging.disable(logging.CRITICAL)
+    self.addCleanup(logging.disable, logging.NOTSET)
+
+  def drive(self, screen_class, steps):
+    """Mount `screen_class`, run `steps(pilot, session, screen)`, return results."""
+    session = StubSession()
+    screen = screen_class(session)
+    app = Harness(screen)
+    collected = {}
+
+    async def run():
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await steps(pilot, session, screen, collected)
+
+    asyncio.run(run())
+    return collected
+
+  async def _press_refresh(self, pilot, app=None):
+    await pilot.press("r")
+    await pilot.app.workers.wait_for_complete()
+    await pilot.pause()
+
+  def test_a_failed_refresh_says_so_on_every_system_screen(self):
+    """Stale data with no marker is the failure mode this closes.
+
+    `_spawn` runs refreshes with `exit_on_error=False` so one failure cannot
+    tear down the app. Without a status convention that also made the failure
+    invisible: the worker died, the screen kept its last render, and a scan that
+    had been failing for minutes looked exactly like one that found nothing to
+    change.
+    """
+    for name, screen_class in SCREENS:
+      with self.subTest(screen=name):
+        async def steps(pilot, session, screen, out):
+          out["before"] = status_text(screen)
+          out["good"] = screen.snapshot
+          session.fail = RuntimeError("participant handle is closed")
+          await self._press_refresh(pilot)
+          out["after"] = status_text(screen)
+          out["kept"] = screen.snapshot
+
+        result = self.drive(screen_class, steps)
+        self.assertNotIn("Scan failed", result["before"])
+        self.assertIn("Scan failed", result["after"])
+        self.assertIn("participant handle is closed", result["after"])
+        # The last good data stays on screen, labelled as old rather than
+        # blanked - and it is still the snapshot from before the failure.
+        self.assertIn("still showing the snapshot from", result["after"])
+        self.assertIsNotNone(result["kept"])
+        self.assertIs(result["kept"], result["good"])
+
+  def test_the_first_scan_failing_does_not_claim_stale_data_it_never_had(self):
+    async def steps(pilot, session, screen, out):
+      out["status"] = status_text(screen)
+      out["snapshot"] = screen.snapshot
+
+    session_failure = RuntimeError("domain 7 is unreachable")
+
+    class FailingSession(StubSession):
+      def __init__(self):
+        super().__init__()
+        self.fail = session_failure
+
+    screen = system_overview.IssueListScreen(FailingSession())
+    app = Harness(screen)
+    collected = {}
+
+    async def run():
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await steps(pilot, screen.session, screen, collected)
+
+    asyncio.run(run())
+    self.assertIn("Scan failed", collected["status"])
+    self.assertIn("domain 7 is unreachable", collected["status"])
+    self.assertIn("no data has been collected yet", collected["status"])
+    self.assertIsNone(collected["snapshot"])
+
+  def test_the_marker_clears_when_the_scan_recovers(self):
+    """A transient failure must not leave a permanent red line."""
+    for name, screen_class in SCREENS:
+      with self.subTest(screen=name):
+        async def steps(pilot, session, screen, out):
+          session.fail = RuntimeError("transient")
+          await self._press_refresh(pilot)
+          out["failed"] = status_text(screen)
+          session.fail = None
+          await self._press_refresh(pilot)
+          out["recovered"] = status_text(screen)
+          out["error"] = screen.scan_error
+          out["snapshot"] = screen.snapshot
+
+        result = self.drive(screen_class, steps)
+        self.assertIn("Scan failed", result["failed"])
+        self.assertNotIn("Scan failed", result["recovered"])
+        self.assertIsNone(result["error"])
+        self.assertIsNotNone(result["snapshot"])
+
+  def test_a_refresh_that_fails_after_the_scan_is_reported_too(self):
+    """The scan is not the only thing a refresh does.
+
+    `_scan` covers the scan itself; `_spawn`'s guard covers everything else the
+    refresh coroutine touches, so a rendering failure cannot be silent either.
+    """
+    async def steps(pilot, session, screen, out):
+      def explode(*args, **kwargs):
+        raise ValueError("row key vanished")
+
+      screen._render_snapshot = explode
+      await self._press_refresh(pilot)
+      out["status"] = status_text(screen)
+
+    result = self.drive(system_overview.IssueListScreen, steps)
+    self.assertIn("Scan failed", result["status"])
+    self.assertIn("row key vanished", result["status"])
+
+  def test_the_failure_is_logged_as_well_as_shown(self):
+    """The status line is for the operator; the log is for the bug report."""
+    logging.disable(logging.NOTSET)
+    self.addCleanup(logging.disable, logging.CRITICAL)
+
+    async def steps(pilot, session, screen, out):
+      session.fail = RuntimeError("scan thread died")
+      await self._press_refresh(pilot)
+
+    with self.assertLogs(level="ERROR") as captured:
+      self.drive(system_overview.MetricsScreen, steps)
+    self.assertTrue(any("MetricsScreen" in line and "scan thread died" in line
+                        for line in captured.output), captured.output)
+
+
+if __name__ == "__main__":
+  unittest.main()

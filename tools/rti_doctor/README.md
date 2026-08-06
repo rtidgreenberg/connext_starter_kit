@@ -22,17 +22,26 @@ From the repository root:
 ./tools/rti_doctor/run_rti_doctor.sh
 ```
 
-You'll be asked for a domain ID exactly as `rti_spy` asks, then get the
-participant list. Keys:
+You'll be asked for a domain ID exactly as `rti_spy` asks, then get a system
+overview. Use `Up`/`Down` and `Enter` to choose Issues or DDS Topology & Health.
+The Issues menu shows Errors, Warnings, and Info with their current counts;
+selecting one shows only that severity. Keys:
 
 | Key | Action |
 |---|---|
-| `Enter` | Drill into a participant's endpoints, then into a report |
-| `d` | Diagnose the highlighted row |
-| `D` | Sweep **every** writer on the domain and rank the results |
-| `s` | Save the current report as a shareable text file |
+| `Up` / `Down` / `Enter` | Select a menu item or drill into the highlighted row |
+| `1` / `2` / `3` / `4` | In Topology: participants, readers, writers, topics |
+| `d` | Run a writer debug probe where available |
+| `o` | Open a passive report for the selected writer where available |
+| `i` | In Topology: the issues linked to the highlighted row |
+| `m` | Observed domain metrics |
+| `r` | Re-scan (every screen shows a snapshot, never a live feed) |
+| `s` | Save the current system or diagnostic report as a shareable text file |
 | `b` / `Esc` | Back |
 | `q` | Quit |
+
+Every screen shows a *snapshot*, not a live view, so a reading never changes
+under you while you read it. `r` takes a new one.
 
 ## The Visibility Ladder
 
@@ -343,6 +352,43 @@ PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
   -m unittest tools.rti_doctor.test.test_extensibility_vendor_e2e \
   tools.rti_doctor.test.test_fastdds_extensibility_vendor_e2e
 ```
+
+### Manual scenarios
+
+Start a long-running fixture in one terminal, then run the printed Doctor
+GUI command from another. The launcher initializes the same Connext Python
+environment as `run_rti_doctor.sh` and stops all fixture processes on Ctrl-C.
+The GUI discovers the fixture; select the printed topic to inspect its report.
+
+```bash
+tools/rti_doctor/test/run_manual_scenario.sh \
+  --scenario healthy --domain 42 --duration 300
+```
+
+Available scenarios are `healthy`, `no-type-info`, `large-data`, `partition`,
+`bad-pair`, `rxo-compatible`, and `rxo-reliability-mismatch`. Cross-vendor
+reliability controls are available in both directions as
+`connext-cyclone-compatible`, `connext-cyclone-reliability-mismatch`,
+`cyclone-connext-compatible`, `cyclone-connext-reliability-mismatch`,
+`connext-fastdds-compatible`, `connext-fastdds-reliability-mismatch`,
+`fastdds-connext-compatible`, `fastdds-connext-reliability-mismatch`, and
+`fastdds-no-type-info`. The latter starts only a Fast DDS writer with
+TypeInformation metadata suppressed; Doctor should discover the endpoint, emit
+`type.no_type_info`, and report a `not probed` verdict.
+
+The `rxo-` and cross-vendor scenarios start separate reader and writer
+endpoints. Their printed command starts the normal Doctor GUI, so you can see
+the same discovery and report flow as an interactive user. Cyclone cases require
+the `cyclonedds` Python package. Fast DDS cases require Docker and the current
+test image, which can be built with:
+
+```bash
+bash tools/rti_doctor/test/vendors/fastdds/build_image.sh
+```
+
+The `fastdds-connext-compatible` fixture deliberately uses the custom Fast DDS
+FINAL TypeObject from the vendor suite: its endpoints exchange data, but Doctor
+may also report `type.assignability`. Run `--help` for all flags.
 
 The fixture publisher can also be run by hand to create a system to point the
 tool at:

@@ -129,6 +129,10 @@ class RecordTabController:
         return self._last_selection
 
     @property
+    def process_manager(self) -> ServiceProcessManager:
+        return self._process_manager
+
+    @property
     def last_monitoring_updates(self) -> Tuple[MonitoringSnapshot, ...]:
         return self._last_monitoring_updates
 
@@ -179,12 +183,14 @@ class RecordTabController:
         dbg("record", f"monitoring_snapshots count={len(monitoring_snapshots)}",
             kinds=[s.kind.value for s in monitoring_snapshots])
         self._latest_monitoring = monitoring_snapshots
-        readiness = await self._readiness(service)
-        self._last_readiness = readiness
-        dbg("record", f"readiness={readiness.status.value if readiness else None}")
+        # Resolve candidates before the readiness check: it needs to know whether
+        # any process is still alive, and neither step depends on readiness.
         selection = self._selection(service, monitoring_snapshots)
         selection = _apply_command_state_override(selection, self._command_history)
         self._last_selection = selection
+        readiness = await self._readiness(service, selection.candidates)
+        self._last_readiness = readiness
+        dbg("record", f"readiness={readiness.status.value if readiness else None}")
         selected = selection.selected_candidate
         if selected and not self._config.selected_candidate_id:
             self._config = replace(self._config, selected_candidate_id=selected.candidate_id)
@@ -498,8 +504,12 @@ class RecordTabController:
             monitoring_domain_id=self._config.launch_monitoring_domain_id,
         )
 
-    async def _readiness(self, service: ServiceInstanceRef) -> Optional[AdminReadiness]:
-        return await readiness_for_service(self._admin_facade, service, self._clock)
+    async def _readiness(
+            self,
+            service: ServiceInstanceRef,
+            candidates: Iterable[ServiceProcessCandidate] = (),
+    ) -> Optional[AdminReadiness]:
+        return await readiness_for_service(self._admin_facade, service, self._clock, candidates)
 
     def _launch_view(self) -> RecordLaunchViewModel:
         return RecordLaunchViewModel(

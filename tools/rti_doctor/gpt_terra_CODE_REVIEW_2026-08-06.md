@@ -30,6 +30,28 @@ byte-to-submessage association. The report now labels all counts, IDs, and byte
 totals as belonging to frames matching the filters, rather than to the selected
 writer. The target writer remains a filter, not an attribution claim.
 
+Completed 2026-08-06 (second pass). The first pass relabelled the text appendix
+only, so `--format json` still emitted bare `data_packets` / `writer_entity_ids`
+/ `payload_bytes` keys that a machine consumer reads as writer-attributed.
+`summarize()` now returns `scope`, `writer_attributed: false` and `scope_note`
+alongside the counts - the same shape `summarize_discovery` already used for
+`complete` / `completion_note` - and both renderers carry them. Two things were
+found while closing it:
+
+* The test gap below is closed by
+  `test_a_coalesced_frame_is_not_presented_as_writer_attributed`, which builds
+  one frame carrying the target writer *and* a second user writer and asserts
+  the summary does not claim writer attribution. It also asserts the second
+  writer's id and encapsulation *are* in the totals, so the aggregation the tool
+  actually performs is recorded rather than implied.
+* The first pass's labels (up to 36 characters) exceeded `_kv`'s default pad of
+  16, so every value in Appendix C rendered flush against its own label
+  (`Frames matching filters1`). The existing test asserted only that the label
+  substrings were present, which cannot see a collision. Fixed with an explicit
+  `WIRE_LABEL_PAD`, guarded by an assertion on the label *and* its value.
+
+All three new tests were confirmed to fail against the pre-fix source.
+
 `inspect_pcap()` requests every occurrence of each tshark field with
 `occurrence=a`, then joins the occurrences into one `WireObservation` for the
 entire UDP frame. `summarize()` accepts that observation when *any* aggregated

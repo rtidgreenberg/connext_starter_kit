@@ -1,5 +1,6 @@
 """Unit tests for tshark RTPS field parsing."""
 
+import json
 import os
 import subprocess
 import sys
@@ -120,6 +121,69 @@ class TestTsharkFields(unittest.TestCase):
     summary = wire.summarize(observations, writer_entity_id="80000002")
     self.assertEqual(summary["data_packets"], 1)
     self.assertEqual(summary["data_fragments"], 1)
+
+  def test_a_coalesced_frame_is_not_presented_as_writer_attributed(self):
+    """One frame carrying the target writer AND another user writer.
+
+    tshark's frame-level fields do not associate bytes with submessages, so the
+    frame is admitted whole: the other writer's entity id and its payload bytes
+    are inside these totals. That is the aggregation the tool has, and the
+    summary must therefore not claim the numbers belong to the target writer.
+    A JSON consumer reads the keys alone, so the disclaimer has to be a value in
+    the mapping and not only a label in the text appendix.
+    """
+    prefix = "011000000000000000000001"
+    observations = [
+        # INFO_TS, the target writer's DATA, and a second user writer's DATA -
+        # one frame, so tshark reports each field as a list of occurrences.
+        wire.parse_tshark_fields(
+            f"1\t0x09,0x15,0x15\t80000002,80000005\t{prefix}\t1,2\t0x0001,0x0007"
+            "\t00:01,00:02:03:04\t"),
+    ]
+    summary = wire.summarize(observations, writer_entity_id="80000002",
+                             writer_guid_prefix=prefix)
+
+    self.assertIs(summary["writer_attributed"], False)
+    self.assertIn("frames", summary["scope"])
+    self.assertIn("filter, not an attribution claim", summary["scope_note"])
+    # The frame is counted once, and the second writer is visibly inside it:
+    # both are consequences of frame-level filtering, and the scope keys above
+    # are what keeps them from reading as the target writer's evidence.
+    self.assertEqual(summary["packets"], 1)
+    self.assertEqual(summary["writer_entity_ids"], ["80000002", "80000005"])
+    self.assertEqual(summary["encapsulation_ids"], ["0x0001", "0x0007"])
+
+  def test_the_scope_marker_survives_into_the_report(self):
+    """Both renderers must carry it: the text reader and the JSON consumer."""
+    observations = [wire.parse_tshark_fields("1\t0x15\t80000002\t\t1\t0x0007\t00:01\t")]
+    data = report.ReportData(
+        domain_id=7, scope="topic 'Sample'", all_findings=[],
+        wire_evidence={"source": "capture.pcapng",
+                       **wire.summarize(observations, writer_entity_id="80000002")})
+
+    # The note is wrapped to the report width, so compare against a single line.
+    rendered = " ".join(report.render_text(data).split())
+    self.assertIn("filter, not an attribution claim", rendered)
+    payload = json.loads(report.render_json(data))["wire_observation"]
+    self.assertIs(payload["writer_attributed"], False)
+    self.assertIn("scope_note", payload)
+
+  def test_wire_appendix_labels_do_not_collide_with_their_values(self):
+    """`_kv` pads to a fixed width, and these labels are longer than the default.
+
+    The frame-scope labels run to 36 characters against a default pad of 16, so
+    every value rendered flush against its own label until the pad was widened.
+    Substring assertions on the labels alone cannot see this.
+    """
+    observations = [wire.parse_tshark_fields("1\t0x15\t80000002\t\t1\t0x0007\t00:01\t")]
+    data = report.ReportData(
+        domain_id=7, scope="topic 'Sample'", all_findings=[],
+        wire_evidence={"source": "capture.pcapng",
+                       **wire.summarize(observations, writer_entity_id="80000002")})
+
+    text = report.render_text(data)
+    self.assertIn("Frames matching filters               1", text)
+    self.assertIn("Encapsulation IDs in matching frames  0x0007", text)
 
   def test_capture_filter_prefers_selected_writer_locator(self):
     endpoint = self.Endpoint([self.Locator("192.0.2.5", 7411)])

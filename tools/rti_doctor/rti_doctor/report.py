@@ -397,36 +397,51 @@ def _render_counter_appendix(data):
   return lines
 
 
+#: Appendix C labels name the frame scope explicitly ("... in matching frames"),
+#: which puts the longest of them at 36 characters. `_kv`'s default pad of 16 is
+#: shorter than that, so it would return the value glued to the label.
+WIRE_LABEL_PAD = 38
+
+
 def _render_wire_appendix(data):
   evidence = data.wire_evidence
   if evidence is None:
     return []
   lines = _section("APPENDIX C - DIRECT RTPS PACKET OBSERVATION")
-  lines.append(_kv("Capture", evidence.get("source", "unknown")))
+  lines.append(_kv("Capture", evidence.get("source", "unknown"), WIRE_LABEL_PAD))
   if evidence.get("capture_filter"):
-    lines.append(_kv("Capture filter", evidence["capture_filter"]))
+    lines.append(_kv("Capture filter", evidence["capture_filter"], WIRE_LABEL_PAD))
   if evidence.get("target_writer_entity_id"):
-    lines.append(_kv("Writer entity filter", evidence["target_writer_entity_id"]))
+    lines.append(_kv("Writer entity filter", evidence["target_writer_entity_id"],
+                     WIRE_LABEL_PAD))
   if evidence.get("target_writer_guid_prefix"):
-    lines.append(_kv("Writer GUID prefix filter", evidence["target_writer_guid_prefix"]))
+    lines.append(_kv("Writer GUID prefix filter", evidence["target_writer_guid_prefix"],
+                     WIRE_LABEL_PAD))
   error = evidence.get("error")
   if error:
-    lines.append(_kv("Result", f"unavailable: {error}"))
+    lines.append(_kv("Result", f"unavailable: {error}", WIRE_LABEL_PAD))
     lines.append("")
     return lines
-  lines.append(_kv("Frames matching filters", str(evidence.get("packets", 0))))
-  lines.append(_kv("DATA in matching frames", str(evidence.get("data_packets", 0))))
-  lines.append(_kv("DATA_FRAG in matching frames", str(evidence.get("data_fragments", 0))))
+  lines.append(_kv("Frames matching filters", str(evidence.get("packets", 0)),
+                   WIRE_LABEL_PAD))
+  lines.append(_kv("DATA in matching frames", str(evidence.get("data_packets", 0)),
+                   WIRE_LABEL_PAD))
+  lines.append(_kv("DATA_FRAG in matching frames", str(evidence.get("data_fragments", 0)),
+                   WIRE_LABEL_PAD))
   encapsulations = evidence.get("encapsulation_ids", [])
   lines.append(_kv("Encapsulation IDs in matching frames",
-                   ", ".join(encapsulations) if encapsulations else "none observed"))
+                   ", ".join(encapsulations) if encapsulations else "none observed",
+                   WIRE_LABEL_PAD))
   writers = evidence.get("writer_entity_ids", [])
   lines.append(_kv("Writer IDs in matching frames",
-                   ", ".join(writers) if writers else "none observed"))
+                   ", ".join(writers) if writers else "none observed", WIRE_LABEL_PAD))
   lines.append(_kv("Serialized bytes in matching frames",
-                   str(evidence.get("payload_bytes", 0))))
+                   str(evidence.get("payload_bytes", 0)), WIRE_LABEL_PAD))
   lines.append(_kv("Reassembled bytes in matching frames",
-                   str(evidence.get("reassembled_bytes", 0))))
+                   str(evidence.get("reassembled_bytes", 0)), WIRE_LABEL_PAD))
+  if evidence.get("scope_note"):
+    lines.append("Scope")
+    lines.extend(_wrap(evidence["scope_note"], indent=2))
   lines.append("")
   return lines
 

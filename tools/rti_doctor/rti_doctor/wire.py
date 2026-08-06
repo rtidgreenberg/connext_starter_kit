@@ -141,7 +141,11 @@ def summarize(observations, writer_entity_id=None, writer_guid_prefix=None):
 
   Filtering is frame-level: a frame that coalesces the target writer with
   another writer is included once. Its other fields remain frame-level
-  evidence, not evidence attributable to the selected writer alone.
+  evidence, not evidence attributable to the selected writer alone. The
+  returned mapping says so in `scope` / `writer_attributed` / `scope_note`,
+  because the text appendix labels every count "in matching frames" but a JSON
+  consumer reads the keys alone and would otherwise attribute them to the
+  selected writer.
   """
   if writer_guid_prefix is not None:
     observations = [item for item in observations
@@ -164,6 +168,16 @@ def summarize(observations, writer_entity_id=None, writer_guid_prefix=None):
       "writer_entity_ids": sorted(writers),
       "payload_bytes": sum(item.payload_bytes for item in observations),
       "reassembled_bytes": sum(item.reassembled_bytes for item in observations),
+      "scope": "frames matching the filters",
+      "writer_attributed": False,
+      "scope_note": (
+          "Every count, ID and byte total here describes whole RTPS frames "
+          "that matched the filters, not one writer within them. A frame can "
+          "coalesce several DATA submessages - including submessages from "
+          "other writers on the same participant - and the frame-level tshark "
+          "fields do not preserve which bytes belonged to which submessage. "
+          "The target writer is therefore a filter, not an attribution claim."
+      ),
   }
 
 

@@ -75,6 +75,7 @@ had ever put it in.
 | [I7](#i7) | High | A healthy 96-endpoint domain produced 150 issues — one note per endpoint, none of them a condition | System scan |
 | [I8](#i8) | High | A domain with no DDS on it reported an ERROR and exited 1, with nothing wrong anywhere | Blind spots |
 | [I9](#i9) | Med | Deleting the dead screens took `import asyncio` with it while `ReportScreen` still used it; the suite stayed green | TUI |
+| [I10](#i10) | Med | Six test modules could import `domains` only if another module had already run, so running one suite alone was broken | Tests |
 
 ---
 
@@ -125,6 +126,7 @@ The behaviour changes worth knowing about:
 | I7 | Findings that say nothing is wrong are `Severity.OK`, so they render in a targeted report and never reach the issue list. 150 issues on a healthy 96-endpoint domain became 0. |
 | I8 | `blind.empty_domain` is OK, and the empty case is stated explicitly everywhere a zero count would otherwise imply a healthy system. |
 | I9 | `import asyncio` restored in `report_screen.py`; a TUI test now opens a report. |
+| I10 | Each of the six suites inserts its own directory before importing `domains`. Verified by importing all ten test modules in separate interpreters. |
 
 ### Infrastructure added alongside the fixes
 
@@ -926,6 +928,38 @@ Fixed: import restored, and `test_opening_a_report_renders_it` now drills
 Topology → writers → `o` and asserts the report body renders. Verified it fails
 without the import.
 
+### I10
+
+**Six test modules could import `domains` only if another module had already
+run.**
+
+Found by: running one vendor suite on its own to test an unrelated hypothesis.
+It failed immediately with `ModuleNotFoundError: No module named 'domains'`.
+
+The HAR-2 migration added `import domains` to eight suites, placing it after the
+last existing import in each. Six of those eight never put the test directory on
+`sys.path` at all — they only add the *tool* directory, because until now they
+imported nothing from beside themselves.
+
+The full vendor run passed that import, and so did the full live run, because
+`unittest` loads modules in a fixed order and two of the eight (`test_fault_vendor_e2e`,
+`test_vendor_wire_e2e`) do `sys.path.insert(0, HERE)`. Once either had been
+imported, the test directory was on `sys.path` for every module loaded after it.
+
+So the migration produced eight suites of which six worked only as a side effect
+of their neighbours, and every tier I ran was a full run, which is exactly the
+shape that hides it. Running one suite alone — the normal way to debug a single
+failing test — was broken for six of eight.
+
+Fixed: each of the six inserts its own directory before importing `domains`,
+with a comment saying why. Verified by importing all ten test modules
+individually in separate interpreters.
+
+Worth noting what did *not* catch this: pyflakes resolves `import domains`
+statically and is satisfied, and the tiered runner always runs modules in
+groups. A "every test module imports on its own" check belongs in CI; it is
+recorded as a gap below.
+
 ### Considered and deliberately not changed
 
 `check_rxo_pairs` emits one `qos.no_counterpart` INFO per writer with no reader,
@@ -1028,6 +1062,7 @@ None of these tests exist today, and each would have caught a finding above.
 | `wire.summarize` with both `writer_guid_prefix` and `writer_entity_id`, using a *user* entity id, asserting builtin `…c2`/`…c3` writers are excluded | H3 (08-04) — and `test_wire.py:80-86` must be rewritten, not extended |
 | `WalkReport.verdict` with `truncated=True` and no failures, asserting the verdict is not `FULL` | M8 (08-04) |
 | A screen whose `_refresh` raises, asserting the failure reaches the status line | I5 — still open, and still a gap |
+| Importing every test module in its own interpreter, so a suite cannot depend on a neighbour having run first | I10 — done manually, not yet automated |
 
 `test_large_sample_still_deserializes` now asserts `walk.truncated is False`
 explicitly rather than only checking the verdict, which makes it the precise

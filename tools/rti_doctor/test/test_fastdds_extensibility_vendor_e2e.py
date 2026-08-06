@@ -10,6 +10,10 @@ import time
 import unittest
 import uuid
 
+# domains lives beside this file. Without this the import resolved only when
+# some OTHER test module had already put the test directory on sys.path,
+# so the suite passed in a full run and failed when run on its own.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: E402
 import domains  # noqa: E402
 
 

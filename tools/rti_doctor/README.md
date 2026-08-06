@@ -123,6 +123,20 @@ Headless examples:
 Exit status is `1` when any ERROR-severity finding survives, `0` otherwise, and
 `2` when the named topic was not found — usable directly in CI.
 
+## Manual Scenarios
+
+Start a fixture in one terminal, then inspect the printed domain and topic from
+another:
+
+```bash
+./tools/rti_doctor/test/run_manual_scenario.sh --scenario healthy
+./tools/rti_doctor/run_rti_doctor.sh --domain 42
+```
+
+The scenarios default to domain `42`; use `--domain ID` to override it. Press
+`Ctrl-C` in the scenario terminal to stop it. Fast DDS scenarios explicitly
+stop and remove their Docker containers during that cleanup.
+
 ## The Shareable Report
 
 `s` in the TUI, or `-o` headlessly, writes a plain-text report: fixed 100-column

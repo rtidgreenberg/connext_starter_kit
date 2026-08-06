@@ -215,9 +215,11 @@ start_connext_fastdds_endpoint() {
 }
 
 start_fastdds_endpoint() {
-    local role="$1"
-    local reliability="$2"
-    docker run --rm --network host --entrypoint /doctor-extensibility-build/doctor_fastdds_final \
+    local container_name="$1"
+    local role="$2"
+    local reliability="$3"
+    docker run --rm --name "$container_name" --network host \
+        --entrypoint /doctor-extensibility-build/doctor_fastdds_final \
         -e FASTDDS_BUILTIN_TRANSPORTS=UDPv4 "$fastdds_image" \
         --domain "$domain" --topic "$topic" --role "$role" \
         --extensibility final --reliability "$reliability" --durability volatile \
@@ -233,6 +235,8 @@ run_fastdds_pair() {
     local writer_reliability="reliable"
     local reader_reliability="reliable"
     local reader_pid writer_pid
+    local reader_container="rti-doctor-manual-$$_$RANDOM-reader"
+    local writer_container="rti-doctor-manual-$$_$RANDOM-writer"
 
     require_fastdds
     if [[ "$writer_vendor" == "connext" ]]; then
@@ -255,26 +259,31 @@ EOF
     if [[ "$reader_vendor" == "connext" ]]; then
         start_connext_fastdds_endpoint reader "$reader_reliability" &
     else
-        start_fastdds_endpoint reader "$reader_reliability" &
+        start_fastdds_endpoint "$reader_container" reader "$reader_reliability" &
     fi
     reader_pid=$!
     sleep 1
     if [[ "$writer_vendor" == "connext" ]]; then
         start_connext_fastdds_endpoint writer "$writer_reliability" &
     else
-        start_fastdds_endpoint writer "$writer_reliability" &
+        start_fastdds_endpoint "$writer_container" writer "$writer_reliability" &
     fi
     writer_pid=$!
 
     cleanup() {
         kill "$reader_pid" "$writer_pid" 2>/dev/null || true
         wait "$reader_pid" "$writer_pid" 2>/dev/null || true
+        docker rm --force "$reader_container" "$writer_container" >/dev/null 2>&1 || true
     }
-    trap cleanup EXIT INT TERM
+    trap cleanup EXIT
+    trap 'exit 130' INT TERM
     wait "$reader_pid" "$writer_pid"
 }
 
 run_fastdds_no_type_info() {
+    local container="rti-doctor-manual-$$_$RANDOM-no-type-info"
+    local docker_pid
+
     require_fastdds
     if [[ "$topic" == "DoctorManual" ]]; then
         topic="DoctorManual_fastdds_no_type_info"
@@ -288,12 +297,23 @@ In the GUI, select topic ${topic}.
 Expected result: type.no_type_info; verdict says not probed. The writer is
 discoverable, but Doctor cannot resolve a DynamicType from suppressed metadata.
 EOF
-    docker run --rm --network host --entrypoint /doctor-extensibility-build/doctor_fastdds_final \
+    docker run --rm --name "$container" --network host \
+        --entrypoint /doctor-extensibility-build/doctor_fastdds_final \
         -e FASTDDS_BUILTIN_TRANSPORTS=UDPv4 "$fastdds_image" \
         --domain "$domain" --topic "$topic" --role writer --extensibility final \
         --reliability reliable --durability volatile --deadline-seconds 1 \
         --ownership shared --representation xcdr1 --type-metadata none \
-        --type-lookup disabled --duration "$duration"
+        --type-lookup disabled --duration "$duration" &
+    docker_pid=$!
+
+    cleanup() {
+        kill "$docker_pid" 2>/dev/null || true
+        wait "$docker_pid" 2>/dev/null || true
+        docker rm --force "$container" >/dev/null 2>&1 || true
+    }
+    trap cleanup EXIT
+    trap 'exit 130' INT TERM
+    wait "$docker_pid"
 }
 
 case "$scenario" in

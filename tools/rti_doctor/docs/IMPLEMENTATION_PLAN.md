@@ -326,7 +326,6 @@ explain an empty table.
 | `vendor.identify` | Which implementation is on the other side | `rtps_vendor_id`, `rtps_protocol_version.major/minor`, `product_version`, `participant_name` |
 | `vendor.known_issues` | Vendor-specific interop caveats | vendor id → curated `vendors.py` notes |
 | `locator.unroutable` | Advertised address we can't reach | endpoint `unicast_locators` else participant `default_unicast_locators`; flag loopback-from-remote-host, Docker/NAT ranges, link-local, IPv6-only, address outside every local subnet |
-| `locator.no_multicast` | No multicast locators advertised → unicast peers required | locator inspection |
 | `transport.class_mismatch` | Shared-memory-only path across hosts; TCP/UDPv6-only peer | `ParticipantBuiltinTopicData.transport_info` (class id, max message size) |
 | `security.mismatch` | Secure remote participant vs our unsecure one | `dds_builtin_endpoints`, `available_builtin_endpoints_ext` secure bits |
 | `discovery.partial` | Discovery data incomplete — don't over-trust other fields | `partial_configuration` |
@@ -594,7 +593,7 @@ Deliverables:
   doesn't reproduce**. Notes ship only once observed, with a source link.
 - `README.md`: quick start, CLI, what each finding id means, how to read the
   verdict, the visibility ladder as a troubleshooting order, explicit limitations.
-- Add `rti_doctor` to [tools/README.md](../README.md) alongside `rti_spy` and
+- Add `rti_doctor` to [tools/README.md](../../README.md) alongside `rti_spy` and
   `rti_view`.
 
 Gate: a real Cyclone writer and a real Fast DDS writer are each discovered,

@@ -985,7 +985,7 @@ Recorded so a future review does not re-litigate these:
 - **`vendors.py`** vendor-id table matches the RTPS assignments; unknown ids render
   rather than guess. Only gap: `01.0A` (Connext Micro) is unmapped, so `is_rti()` is
   `False` for it — looks deliberate.
-- **README flag list** ([README.md:69-84](README.md#L69-L84)) matches `parse_args`
+- **README flag list** ([README.md:69-84](../README.md#L69-L84)) matches `parse_args`
   exactly — no documented-but-missing or implemented-but-undocumented flags.
 - **`--pcap` / `--capture-interface`** are correctly mutually exclusive.
 

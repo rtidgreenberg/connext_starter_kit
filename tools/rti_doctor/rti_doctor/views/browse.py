@@ -1,7 +1,7 @@
 """Endpoint browsing screen.
 
 Same interaction model as rti_spy: a DataTable, Enter to drill down, b to go
-back, q to quit. The only new keys are the diagnostic ones (d, o).
+back, q to quit. The only new diagnostic key is o for the passive report.
 
 Reached from the topology view, which selects the participant. The participant
 list this module used to own went with the Issues-first landing screen; the
@@ -22,7 +22,6 @@ class EndpointListScreen(Screen):
   BINDINGS = [
       ("b", "back", "Back"),
       ("escape", "back", "Back"),
-      ("d", "debug", "Deep diagnose"),
       ("o", "open_report", "Open report"),
       ("q", "quit_app", "Quit"),
   ]
@@ -44,8 +43,7 @@ class EndpointListScreen(Screen):
     yield Static(
         f"[bold]{self.participant.name or '(unnamed)'}[/bold] "
         f"({self.participant.vendor_name})  -  "
-        "[bold green]Enter[/bold green] details  "
-        "[bold green]d[/bold green] deep diagnose  "
+        "[bold green]Enter[/bold green] deep diagnose  "
         "[bold green]o[/bold green] open report  "
         "[bold green]b[/bold green] back",
         id="directions")
@@ -75,7 +73,7 @@ class EndpointListScreen(Screen):
 
   async def on_data_table_row_selected(self, event):
     self.selected_key = event.row_key.value if event.row_key else None
-    self.action_open_report()
+    self.action_debug()
 
   def action_open_report(self):
     if self.selected_key is None:

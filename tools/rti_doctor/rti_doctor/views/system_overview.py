@@ -453,7 +453,7 @@ class TopologyHealthScreen(Screen):
   BINDINGS = [("1", "participants", "Participants"), ("2", "readers", "Readers"),
               ("3", "writers", "Writers"), ("4", "topics", "Topics"),
               ("r", "refresh", "Refresh"), ("i", "issues", "Linked issues"),
-              ("d", "debug", "Deep diagnose"), ("o", "open_report", "Open report"),
+              ("o", "open_report", "Open report"),
               ("m", "metrics", "Metrics"), ("s", "save", "Save report"),
               ("b", "back", "Back"),
               ("escape", "back", "Back"), ("q", "quit_app", "Quit")]
@@ -597,7 +597,7 @@ class TopologyHealthScreen(Screen):
       return
     endpoint = self._selected_endpoint()
     if endpoint is not None:
-      self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=False))
+      self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=True))
 
   def action_debug(self):
     endpoint = self._selected_endpoint()
@@ -623,7 +623,7 @@ class TopicEndpointsScreen(Screen):
   """Readers and writers belonging to one selected topic."""
 
   BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
-              ("o", "open_report", "Open report"), ("d", "debug", "Deep diagnose"),
+              ("o", "open_report", "Open report"),
               ("q", "quit_app", "Quit")]
 
   def __init__(self, session, topic_name):
@@ -657,7 +657,7 @@ class TopicEndpointsScreen(Screen):
 
   async def on_data_table_row_selected(self, event):
     self.selected_key = event.row_key.value if event.row_key else None
-    self.action_open_report()
+    self.action_debug()
 
   def _endpoint(self):
     return self.session.registry.endpoints.get(self.selected_key) if self.selected_key else None

@@ -144,6 +144,13 @@ class TestHealthy(LiveFixtureTest):
                     "APPENDIX A", "APPENDIX B", "APPENDIX C"):
       self.assertIn(heading, text)
 
+  def test_interactive_report_sections_are_split_by_concern(self):
+    sections = report.render_view_sections(self.diagnose())
+    self.assertEqual(set(sections), {"overview", "findings", "type", "probe", "wire", "config"})
+    self.assertIn("VERDICT", sections["overview"])
+    self.assertIn("FINDINGS", sections["findings"])
+    self.assertIn("DISCOVERED TYPE", sections["type"])
+
   def test_report_counters_are_real_not_na(self):
     """Regression: EventCount64 counters rendered as 'not available'."""
     text = report.render_text(self.diagnose())

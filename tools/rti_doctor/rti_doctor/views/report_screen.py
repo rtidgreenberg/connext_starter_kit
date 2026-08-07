@@ -12,7 +12,7 @@ import os
 
 from textual.containers import VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Footer, Header, Static
+from textual.widgets import Footer, Header, Static, TabbedContent, TabPane
 
 from .. import report as report_mod
 
@@ -28,9 +28,11 @@ class ReportScreen(Screen):
   ]
 
   CSS = """
-  #report_body {
+    #report_tabs {
       height: 1fr;
       border: solid $accent;
+    }
+    .report_body {
       padding: 1 2;
   }
   #report_status {
@@ -47,16 +49,22 @@ class ReportScreen(Screen):
     self.participant = participant
     self.probe = probe
     self.data = None
-    self.body = None
+    self.bodies = {}
     self.status = None
 
   def compose(self):
     yield Header()
     self.status = Static("Running static checks...", id="report_status")
     yield self.status
-    with VerticalScroll(id="report_body"):
-      self.body = Static("")
-      yield self.body
+    with TabbedContent(id="report_tabs"):
+      for tab_id, title in (("overview", "Overview"), ("findings", "Findings"),
+                            ("type", "Type"), ("probe", "Probe"),
+                            ("wire", "Wire"), ("config", "Configuration")):
+        with TabPane(title, id=tab_id):
+          with VerticalScroll(classes="report_body"):
+            body = Static("")
+            self.bodies[tab_id] = body
+            yield body
     yield Footer()
 
   async def on_mount(self):
@@ -87,20 +95,24 @@ class ReportScreen(Screen):
       else:
         self.data = await asyncio.to_thread(
             self.session.diagnose_participant, self.participant)
-      self.body.update(report_mod.render_text(self.data))
+      self._update_sections()
     except Exception as e:
       logging.error(f"[ReportScreen] static pass failed: {e}")
-      self.body.update(f"Static checks failed: {e}")
+      self.bodies["overview"].update(f"Static checks failed: {e}")
 
   async def _run_probe(self):
     try:
       self.data = await asyncio.to_thread(
           self.session.diagnose_endpoint, self.endpoint, True, "any")
-      self.body.update(report_mod.render_text(self.data))
+      self._update_sections()
       self.status.update(f"Probe complete. {self.data.verdict}")
     except Exception as e:
       logging.error(f"[ReportScreen] probe failed: {e}")
       self.status.update(f"Probe failed: {e}")
+
+  def _update_sections(self):
+    for tab_id, text in report_mod.render_view_sections(self.data).items():
+      self.bodies[tab_id].update(text)
 
   def action_back(self):
     self.app.pop_screen()

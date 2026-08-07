@@ -29,9 +29,8 @@ selecting one shows only that severity. Keys:
 
 | Key | Action |
 |---|---|
-| `Up` / `Down` / `Enter` | Select a menu item or drill into the highlighted row |
+| `Up` / `Down` / `Enter` | Select a menu item, drill into a participant/topic, or deep-diagnose an endpoint |
 | `1` / `2` / `3` / `4` | In Topology: participants, readers, writers, topics |
-| `d` | Run a writer debug probe where available |
 | `o` | Open a passive report for the selected writer where available |
 | `i` | In Topology: the issues linked to the highlighted row |
 | `m` | Observed domain metrics |

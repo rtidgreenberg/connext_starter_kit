@@ -15,7 +15,7 @@ import json
 import time
 from collections.abc import Mapping
 
-from . import compat, findings as f, probe as probe_mod, records, typewalk
+from . import compat, findings as f, probe as probe_mod, records, typewalk, wire
 
 WIDTH = 100
 RULE = "=" * WIDTH
@@ -196,12 +196,11 @@ class ReportData:
 
 # --- Text renderer -----------------------------------------------------------
 
-def render_text(data):
-  """The shareable report file."""
+def _header_lines(data):
   lines = [RULE, "RTI DOCTOR INTEROP REPORT", RULE]
   env = data.environment
   stamp = time.strftime("%Y-%m-%d %H:%M:%S %z", time.localtime(data.generated_at))
-  lines += [
+  return lines + [
       _kv("Generated", stamp),
       _kv("Tool", "rti_doctor (tools/rti_doctor)"),
       _kv("Command", env.get("argv", "unknown")),
@@ -213,6 +212,28 @@ def render_text(data):
       "",
   ]
 
+
+def render_view_sections(data):
+  """Sections for the interactive report tabs."""
+  overview = _header_lines(data)
+  overview += _section("VERDICT")
+  overview += [data.verdict, ""]
+  overview += _render_peer(data)
+  overview += _render_topology(data)
+  return {
+      "overview": "\n".join(overview),
+      "findings": "\n".join(_render_findings(data)),
+      "type": "\n".join(_render_type_appendix(data)),
+      "probe": "\n".join(_render_counter_appendix(data)),
+      "wire": "\n".join(_render_wire_appendix(data) or [
+          "No direct RTPS packet capture was requested.", ""]),
+      "config": "\n".join(_render_config_appendix(data)),
+  }
+
+
+def render_text(data):
+  """The shareable report file."""
+  lines = _header_lines(data)
   lines += _section("VERDICT")
   lines += [data.verdict, ""]
 
@@ -435,6 +456,9 @@ def _render_wire_appendix(data):
   lines.append(_kv("DATA_FRAG in matching frames", str(evidence.get("data_fragments", 0)),
                    WIRE_LABEL_PAD))
   encapsulations = evidence.get("encapsulation_ids", [])
+  lines.append(_kv("Observed DDS data representation",
+                   wire.encapsulation_text(encapsulations) if encapsulations
+                   else "none observed", WIRE_LABEL_PAD))
   lines.append(_kv("Encapsulation IDs in matching frames",
                    ", ".join(encapsulations) if encapsulations else "none observed",
                    WIRE_LABEL_PAD))

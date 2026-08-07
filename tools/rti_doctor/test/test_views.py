@@ -98,6 +98,12 @@ def status_text(screen):
 
 class TestRefreshFailureIsVisible(unittest.TestCase):
 
+  def test_issue_screens_do_not_offer_deep_diagnosis(self):
+    for screen_class in (system_overview.IssueListScreen,
+                         system_overview.IssueDetailScreen):
+      actions = {binding[1] for binding in screen_class.BINDINGS}
+      self.assertNotIn("debug", actions)
+
   def setUp(self):
     # Every test here provokes the error path on purpose, and the screens log
     # it. Keep that out of the suite's output; one test below asserts the log
@@ -108,11 +114,11 @@ class TestRefreshFailureIsVisible(unittest.TestCase):
   def drive(self, screen_class, steps):
     """Mount `screen_class`, run `steps(pilot, session, screen)`, return results."""
     session = StubSession()
-    screen = screen_class(session)
-    app = Harness(screen)
     collected = {}
 
     async def run():
+      screen = screen_class(session)
+      app = Harness(screen)
       async with app.run_test() as pilot:
         await pilot.pause()
         await app.workers.wait_for_complete()
@@ -156,10 +162,6 @@ class TestRefreshFailureIsVisible(unittest.TestCase):
         self.assertIs(result["kept"], result["good"])
 
   def test_the_first_scan_failing_does_not_claim_stale_data_it_never_had(self):
-    async def steps(pilot, session, screen, out):
-      out["status"] = status_text(screen)
-      out["snapshot"] = screen.snapshot
-
     session_failure = RuntimeError("domain 7 is unreachable")
 
     class FailingSession(StubSession):
@@ -167,15 +169,16 @@ class TestRefreshFailureIsVisible(unittest.TestCase):
         super().__init__()
         self.fail = session_failure
 
-    screen = system_overview.IssueListScreen(FailingSession())
-    app = Harness(screen)
     collected = {}
 
     async def run():
+      screen = system_overview.IssueListScreen(FailingSession())
+      app = Harness(screen)
       async with app.run_test() as pilot:
         await pilot.pause()
         await app.workers.wait_for_complete()
-        await steps(pilot, screen.session, screen, collected)
+        collected["status"] = status_text(screen)
+        collected["snapshot"] = screen.snapshot
 
     asyncio.run(run())
     self.assertIn("Scan failed", collected["status"])

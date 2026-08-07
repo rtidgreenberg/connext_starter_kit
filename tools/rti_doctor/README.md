@@ -209,6 +209,9 @@ Findings have stable, greppable ids. The ones that matter most:
 | 7.3.x | **Verified** — all tests pass; `request_types_filter` is unavailable, which the report records explicitly |
 | 6.1.2 | **Feature-detected but not verified here** — no 6.1.2 install was available to test against |
 
+For Connext 7.3.x, RTI Doctor supports Python 3.9. The launcher selects the
+matching Python 3.9 virtual environment and Connext API wheel automatically.
+
 Every version-sensitive field goes through `rti_doctor/compat.py`, which reports a
 missing field rather than assuming a value. The known differences are documented
 in that module's docstring.

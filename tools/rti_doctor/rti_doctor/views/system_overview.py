@@ -271,7 +271,7 @@ class IssueListScreen(Screen):
   BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
               ("r", "refresh", "Refresh"), ("m", "metrics", "Metrics"),
               ("s", "save", "Save report"), ("o", "open_report", "Open report"),
-              ("d", "debug", "Deep diagnose"), ("q", "quit_app", "Quit")]
+              ("q", "quit_app", "Quit")]
 
   def __init__(self, session, snapshot=None, issue_keys=None, severity=None):
     super().__init__()
@@ -381,16 +381,6 @@ class IssueListScreen(Screen):
     if endpoint is not None:
       self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=False))
 
-  def action_debug(self):
-    issue = self._selected_issue()
-    keys = set() if issue is None else set(issue.writer_keys) | set(issue.reader_keys)
-    if len(keys) != 1:
-      self.status.update("Debug requires an issue with exactly one endpoint.")
-      return
-    endpoint = self.session.registry.endpoints.get(next(iter(keys)))
-    if endpoint is not None:
-      self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=True))
-
   def action_back(self):
     self.app.pop_screen()
 
@@ -402,7 +392,7 @@ class IssueDetailScreen(Screen):
   """Evidence and relationships for one passive system issue."""
 
   BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
-              ("o", "open_report", "Open report"), ("d", "debug", "Deep diagnose"),
+              ("o", "open_report", "Open report"),
               ("s", "save", "Save report"),
               ("q", "quit_app", "Quit")]
 
@@ -443,13 +433,6 @@ class IssueDetailScreen(Screen):
       self.status.update("Open report requires an issue with exactly one writer.")
       return
     self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=False))
-
-  def action_debug(self):
-    endpoint = self._endpoint()
-    if endpoint is None:
-      self.status.update("Debug requires an issue with exactly one endpoint.")
-      return
-    self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=True))
 
   def action_save(self):
     path = os.path.abspath(report.system_filename(self.session.domain_id))

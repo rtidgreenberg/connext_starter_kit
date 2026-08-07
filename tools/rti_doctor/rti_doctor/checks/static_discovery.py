@@ -246,26 +246,6 @@ def _address_problem(ip, local_addresses):
   return None
 
 
-def check_no_multicast_locators(context):
-  """Peer advertises no multicast locator for user traffic."""
-  endpoint = context.endpoint
-  if endpoint is None or not endpoint.is_writer:
-    return []
-  if endpoint.multicast_locators:
-    return []
-  return [Finding(
-      id="locator.no_multicast",
-      rung=RUNG_ENDPOINT,
-      severity=Severity.INFO,
-      title="Writer advertises no multicast locator",
-      observed="endpoint multicast_locators is empty",
-      root_cause=("User data will be delivered over unicast to each matched "
-                  "reader. This is normal and usually intentional; it only "
-                  "matters for fan-out efficiency, not correctness."),
-      remedy="",
-  )]
-
-
 def check_transport(context):
   """Transport class mismatch, e.g. a shared-memory-only peer on another host."""
   participant = _participant(context)
@@ -399,7 +379,6 @@ CHECKS = (
     check_vendor_identify,
     check_vendor_notes,
     check_locators,
-    check_no_multicast_locators,
     check_transport,
     check_security_mismatch,
     check_partial_configuration,

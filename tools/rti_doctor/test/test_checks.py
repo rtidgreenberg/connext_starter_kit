@@ -203,6 +203,12 @@ class TestBlindSpots(unittest.TestCase):
 
 class TestStaticDiscovery(unittest.TestCase):
 
+  def test_healthy_writer_does_not_report_missing_multicast_locator(self):
+    """Writer publication data does not advertise multicast locators."""
+    result = [finding for check in static_discovery.CHECKS
+              for finding in check(CheckContext(endpoint=endpoint_record()))]
+    self.assertNotIn("locator.no_multicast", ids(result))
+
   def test_vendor_identified(self):
     context = CheckContext(participant_record=participant_record())
     result = static_discovery.check_vendor_identify(context)

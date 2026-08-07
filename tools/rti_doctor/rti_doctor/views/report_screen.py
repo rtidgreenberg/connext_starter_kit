@@ -50,6 +50,7 @@ class ReportScreen(Screen):
     self.probe = probe
     self.data = None
     self.bodies = {}
+    self.body = None
     self.status = None
 
   def compose(self):
@@ -64,6 +65,8 @@ class ReportScreen(Screen):
           with VerticalScroll(classes="report_body"):
             body = Static("")
             self.bodies[tab_id] = body
+            if tab_id == "overview":
+              self.body = body
             yield body
     yield Footer()
 

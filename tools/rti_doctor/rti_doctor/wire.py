@@ -18,6 +18,30 @@ from . import compat, records
 TSHARK_READ_TIMEOUT = 120.0
 
 
+#: DDS serialized-payload encapsulation identifiers observable in RTPS DATA.
+#: Each value identifies the encoding actually used on the wire, unlike the
+#: discovery DataRepresentation QoS which only advertises supported encodings.
+ENCAPSULATION_NAMES = {
+  "0x0000": "XCDR1 (big-endian)",
+  "0x0001": "XCDR1 (little-endian)",
+  "0x0002": "XCDR1 parameter list (big-endian)",
+  "0x0003": "XCDR1 parameter list (little-endian)",
+  "0x0006": "XCDR2 (big-endian)",
+  "0x0007": "XCDR2 (little-endian)",
+  "0x0008": "XCDR2 delimited (big-endian)",
+  "0x0009": "XCDR2 delimited (little-endian)",
+  "0x000a": "XCDR2 parameter list (big-endian)",
+  "0x000b": "XCDR2 parameter list (little-endian)",
+}
+
+
+def encapsulation_text(encapsulation_ids):
+  """Render observed DDS serialization encodings with their raw IDs."""
+  return ", ".join(
+    f"{ENCAPSULATION_NAMES.get(str(value).lower(), 'unknown encoding')} [{value}]"
+    for value in encapsulation_ids)
+
+
 @dataclass
 class WireObservation:
   """One RTPS user-data observation emitted by tshark's fields formatter."""

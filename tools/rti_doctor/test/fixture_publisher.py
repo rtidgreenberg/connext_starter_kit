@@ -253,23 +253,26 @@ def main():
 
   deadline = time.monotonic() + args.duration
   counter = 0
-  while time.monotonic() < deadline:
-    sample = dds.DynamicData(dynamic_type)
-    counter += 1
-    if args.mode == "large_data":
-      sample["id"] = counter
-      sample["blob"] = [counter % 256] * 150000
-    elif args.mode == "type_conflict":
-      sample["id"] = f"key-{counter}"
-      sample["totally_different"] = float(counter)
-    else:
-      populate_rich(sample, counter)
-    writer.write(sample)
-    time.sleep(args.period)
-
-  participant.close()
-  if extra_participant is not None:
-    extra_participant.close()
+  try:
+    while time.monotonic() < deadline:
+      sample = dds.DynamicData(dynamic_type)
+      counter += 1
+      if args.mode == "large_data":
+        sample["id"] = counter
+        sample["blob"] = [counter % 256] * 150000
+      elif args.mode == "type_conflict":
+        sample["id"] = f"key-{counter}"
+        sample["totally_different"] = float(counter)
+      else:
+        populate_rich(sample, counter)
+      writer.write(sample)
+      time.sleep(args.period)
+  except KeyboardInterrupt:
+    pass
+  finally:
+    participant.close()
+    if extra_participant is not None:
+      extra_participant.close()
   return 0
 
 

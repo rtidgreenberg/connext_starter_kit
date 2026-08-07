@@ -131,6 +131,18 @@ class TestSystemScan(unittest.TestCase):
     self.assertEqual(note.severity, f.Severity.INFO)
     self.assertIn("Connext 7.7", note.recommendation)
 
+  def test_older_fastdds_version_produces_warning(self):
+    snapshot = system_scan.scan(
+        registry_with_reliability_fault(), own_qos=None,
+        type_lookup_settings={"request_types_filter": "*"}, domain_id=7,
+        captured_at=123.0, fastdds_product_versions=("3.5.4.0", "3.6.2.0"))
+    warning = next(item for item in snapshot.issues
+                   if item.finding_ids ==
+                   ("environment.fastdds_version_older_than_validated",))
+    self.assertEqual(warning.severity, f.Severity.WARN)
+    self.assertIn("3.5.4.0", warning.observed)
+    self.assertNotIn("3.6.2.0", warning.observed)
+
   def test_topic_wide_condition_is_one_issue_not_one_per_endpoint(self):
     """A type-name conflict belongs to the topic, not to each endpoint on it."""
     registry = registry_with_reliability_fault()

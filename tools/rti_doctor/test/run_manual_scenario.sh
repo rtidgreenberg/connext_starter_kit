@@ -10,10 +10,11 @@ source "$REPO_ROOT/scripts/python_env.sh"
 
 usage() {
     cat <<'EOF'
-Usage: run_manual_scenario.sh --scenario NAME [options]
+Usage: run_manual_scenario.sh [--scenario NAME] [options]
 
 Start a fixture in this terminal, then run the printed RTI Doctor command from
 another terminal. Stop the fixture with Ctrl-C when finished.
+Omit --scenario in a terminal to select one with the keyboard.
 
 Scenarios:
   healthy                     Connext writer; expect payload FULL.
@@ -38,7 +39,7 @@ Scenarios:
     fastdds-no-type-info         Fast DDS writer without TypeInformation metadata.
 
 Options:
-  -s, --scenario NAME         Required scenario name.
+    -s, --scenario NAME         Scenario name (interactive selector when omitted).
   -d, --domain ID             DDS domain (default: 42).
   -t, --topic NAME            Topic for single-fixture scenarios (default: DoctorManual).
   -p, --topic-prefix PREFIX   Topic prefix for RxO scenarios (default: ManualRxO).
@@ -53,6 +54,66 @@ topic="DoctorManual"
 topic_prefix="ManualRxO"
 duration=300
 fastdds_image="${RTI_DOCTOR_FASTDDS_IMAGE:-rti-doctor-fastdds-e2e:3.6.2}"
+scenarios=(
+    healthy
+    no-type-info
+    large-data
+    partition
+    bad-pair
+    rxo-compatible
+    rxo-reliability-mismatch
+    connext-cyclone-compatible
+    connext-cyclone-reliability-mismatch
+    cyclone-connext-compatible
+    cyclone-connext-reliability-mismatch
+    connext-fastdds-compatible
+    connext-fastdds-reliability-mismatch
+    fastdds-connext-compatible
+    fastdds-connext-reliability-mismatch
+    fastdds-no-type-info
+)
+
+select_scenario() {
+    local selected=0 key sequence index
+
+    while true; do
+        printf '\033[H\033[J'
+        echo "RTI Doctor manual scenarios"
+        echo
+        for index in "${!scenarios[@]}"; do
+            if ((index == selected)); then
+                printf '  > %s\n' "${scenarios[index]}"
+            else
+                printf '    %s\n' "${scenarios[index]}"
+            fi
+        done
+        echo
+        echo "Up/Down: select  Enter: start  q: quit"
+
+        IFS= read -rsn1 key
+        if [[ "$key" == $'\e' ]]; then
+            sequence=""
+            IFS= read -rsn2 -t 0.1 sequence || true
+            key+="$sequence"
+        fi
+
+        case "$key" in
+            $'\e[A'|k)
+                selected=$(( (selected - 1 + ${#scenarios[@]}) % ${#scenarios[@]} ))
+                ;;
+            $'\e[B'|j)
+                selected=$(( (selected + 1) % ${#scenarios[@]} ))
+                ;;
+            "")
+                scenario="${scenarios[selected]}"
+                return 0
+                ;;
+            q|Q)
+                return 1
+                ;;
+        esac
+    done
+}
 
 while (($#)); do
     case "$1" in
@@ -89,9 +150,13 @@ while (($#)); do
 done
 
 if [[ -z "$scenario" ]]; then
-    echo "--scenario is required." >&2
-    usage >&2
-    exit 2
+    if [[ -t 0 && -t 1 ]]; then
+        select_scenario || exit 0
+    else
+        echo "--scenario is required when stdin or stdout is not a terminal." >&2
+        usage >&2
+        exit 2
+    fi
 fi
 
 if ! [[ "$domain" =~ ^[0-9]+$ ]]; then
@@ -99,19 +164,18 @@ if ! [[ "$domain" =~ ^[0-9]+$ ]]; then
     exit 2
 fi
 
-case "$scenario" in
-    healthy|no-type-info|large-data|partition|bad-pair|rxo-compatible|rxo-reliability-mismatch|\
-    connext-cyclone-compatible|connext-cyclone-reliability-mismatch|\
-    cyclone-connext-compatible|cyclone-connext-reliability-mismatch|\
-    connext-fastdds-compatible|connext-fastdds-reliability-mismatch|\
-    fastdds-connext-compatible|fastdds-connext-reliability-mismatch|fastdds-no-type-info)
-        ;;
-    *)
-        echo "Unknown scenario: $scenario" >&2
-        usage >&2
-        exit 2
-        ;;
-esac
+valid_scenario=false
+for known_scenario in "${scenarios[@]}"; do
+    if [[ "$scenario" == "$known_scenario" ]]; then
+        valid_scenario=true
+        break
+    fi
+done
+if [[ "$valid_scenario" != true ]]; then
+    echo "Unknown scenario: $scenario" >&2
+    usage >&2
+    exit 2
+fi
 
 python_env_init "rti_doctor" "$REPO_ROOT"
 python_env_resolve_nddshome

@@ -7,7 +7,6 @@ a report that differs depending on how it was invoked would be worthless.
 import logging
 import os
 import time
-from dataclasses import replace
 
 from . import checks, probe as probe_mod, report, system_scan, topology, vendors, wire
 from .checks import CheckContext
@@ -78,16 +77,6 @@ class Session:
       return cached
 
     self.registry.expire_type_waits()
-    snapshot = system_scan.scan(
-        registry=self.registry,
-        own_qos=self.own_qos,
-        type_lookup_settings=self.type_lookup_settings,
-        domain_id=self.domain_id,
-        active_domains=self.active_domains,
-        domain_scan_ran=self.domain_scan_ran,
-        type_wait=self.type_wait,
-        captured_at=captured_at,
-    )
     if (self.discovery_capture is not None
         and any(vendors.vendor_name(participant.vendor_id) == vendors.FASTDDS
                 for participant in self.registry.participant_list())):
@@ -98,9 +87,17 @@ class Session:
       if evidence.get("error"):
         logging.warning("[engine] Fast DDS discovery capture unavailable: %s",
                         evidence["error"])
-    if self._fastdds_product_versions:
-      snapshot = replace(snapshot,
-                         fastdds_product_versions=self._fastdds_product_versions)
+    snapshot = system_scan.scan(
+        registry=self.registry,
+        own_qos=self.own_qos,
+        type_lookup_settings=self.type_lookup_settings,
+        domain_id=self.domain_id,
+        active_domains=self.active_domains,
+        domain_scan_ran=self.domain_scan_ran,
+        type_wait=self.type_wait,
+        captured_at=captured_at,
+        fastdds_product_versions=self._fastdds_product_versions,
+    )
     self._last_scan = snapshot
     return snapshot
 
@@ -153,7 +150,7 @@ class Session:
         if capture is not None:
           capture.start()
         probe_result = probe_mod.probe_endpoint(
-            self.participant, endpoint, timeout=self.probe_timeout)
+          self.participant, endpoint, timeout=self.probe_timeout)
       finally:
         wire_evidence = capture.finish() if capture is not None else None
 

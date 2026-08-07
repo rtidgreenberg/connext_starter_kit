@@ -60,6 +60,11 @@ class TestTsharkFields(unittest.TestCase):
     self.assertEqual(summary["payload_bytes"], 5)
     self.assertEqual(summary["reassembled_bytes"], 4)
 
+  def test_decodes_xcdr_encapsulation_ids(self):
+    self.assertEqual(
+        wire.encapsulation_text(["0x0001", "0x0007"]),
+        "XCDR1 (little-endian) [0x0001], XCDR2 (little-endian) [0x0007]")
+
   def test_summarize_filters_to_the_selected_writer_entity(self):
     observations = [
       wire.parse_tshark_fields("1\t0x15\t80000002\t\t1\t0x0001\t00:01\t"),
@@ -184,6 +189,8 @@ class TestTsharkFields(unittest.TestCase):
 
     text = report.render_text(data)
     self.assertIn("Frames matching filters               1", text)
+    self.assertIn("Observed DDS data representation      XCDR2 (little-endian) [0x0007]",
+            text)
     self.assertIn("Encapsulation IDs in matching frames  0x0007", text)
 
   def test_capture_filter_prefers_selected_writer_locator(self):

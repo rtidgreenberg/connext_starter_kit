@@ -40,7 +40,8 @@ class SystemScanSnapshot:
 
 
 def scan(registry, own_qos, type_lookup_settings, domain_id, active_domains=(),
-         domain_scan_ran=False, type_wait=5.0, captured_at=None):
+         domain_scan_ran=False, type_wait=5.0, captured_at=None,
+         fastdds_product_versions=()):
   """Return one passive system snapshot without creating a diagnostic reader."""
   captured_at = time.time() if captured_at is None else captured_at
   common = dict(
@@ -54,7 +55,8 @@ def scan(registry, own_qos, type_lookup_settings, domain_id, active_domains=(),
   )
   findings = []
 
-  findings.extend(_version_notes())
+  if registry.participant_list():
+    findings.extend(_version_notes(fastdds_product_versions))
 
   findings.extend(_annotate(
       run_checks(CheckContext(**common), blind_spots.CHECKS), "domain"))
@@ -77,11 +79,6 @@ def scan(registry, own_qos, type_lookup_settings, domain_id, active_domains=(),
     participant = registry.participant_for(endpoint)
     context = CheckContext(**common, endpoint=endpoint,
                            participant_record=participant)
-    # check_no_multicast_locators is deliberately absent: it is a per-writer
-    # INFO whose own text says it "only matters for fan-out efficiency, not
-    # correctness", so across a domain it adds one Note per writer and nothing
-    # else. It still runs in a targeted per-endpoint report, where the operator
-    # asked about that one writer.
     endpoint_checks = [
         static_discovery.check_locators,
         type_compat.check_extensibility,
@@ -120,24 +117,49 @@ def scan(registry, own_qos, type_lookup_settings, domain_id, active_domains=(),
                                           domain_scan_ran)),
       issues=_issues(active),
       suppressed_findings=suppressed,
+      fastdds_product_versions=tuple(fastdds_product_versions),
   )
 
 
-def _version_notes():
-  """Advise operators running the older supported Connext 7.3 release."""
+def _version_notes(fastdds_product_versions=()):
+  """Advise operators running older tested Connext or Fast DDS versions."""
+  notes = []
   version = compat.version_tuple()
-  if version is None or version[:2] != (7, 3):
-    return []
-  return [f.Finding(
-      id="environment.connext_7_3_upgrade",
-      rung=f.RUNG_OWN_CONFIG,
-      severity=f.Severity.INFO,
-      title="Connext 7.3 is in use",
-      observed=f"Detected Connext {compat.connext_version()}.",
-      root_cause="This scan is running against the older supported Connext 7.3 line.",
-      remedy="Plan an upgrade to Connext 7.7 for current fixes and capabilities.",
-      evidence={"connext_version": compat.connext_version()},
-  )]
+  if version is not None and version[:2] == (7, 3):
+    notes.append(f.Finding(
+        id="environment.connext_7_3_upgrade",
+        rung=f.RUNG_OWN_CONFIG,
+        severity=f.Severity.INFO,
+        title="Connext 7.3 is in use",
+        observed=f"Detected Connext {compat.connext_version()}.",
+        root_cause="This scan is running against the older supported Connext 7.3 line.",
+        remedy="Plan an upgrade to Connext 7.7 for current fixes and capabilities.",
+        evidence={"connext_version": compat.connext_version()},
+    ))
+  for product_version in sorted(set(fastdds_product_versions)):
+    parsed = _parse_version(product_version)
+    if parsed is not None and parsed < (3, 6, 2):
+      notes.append(f.Finding(
+          id="environment.fastdds_version_older_than_validated",
+          rung=f.RUNG_PARTICIPANT,
+          severity=f.Severity.WARN,
+          title="Fast DDS version is older than the validated baseline",
+          observed=(f"RTPS discovery reported Fast DDS {product_version}; "
+                    "the validated baseline is 3.6.2."),
+          root_cause="This Fast DDS version is older than the version covered by the interoperability fixtures.",
+          remedy="Retest with Fast DDS 3.6.2 or newer before relying on the validated interoperability results.",
+          evidence={"fastdds_product_version": product_version,
+                    "validated_baseline": "3.6.2"},
+      ))
+  return notes
+
+
+def _parse_version(value):
+  """Return a numeric release tuple when RTPS discovery reports one."""
+  try:
+    return tuple(int(part) for part in str(value).split("."))
+  except ValueError:
+    return None
 
 
 def _annotate(findings, scope, endpoint=None, participant=None):

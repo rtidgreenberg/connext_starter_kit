@@ -12,18 +12,6 @@ import rti.connextdds as dds
 
 dds.compliance.set_xtypes_mask(dds.compliance.XTypesMask(0x000001A9))
 dds.Logger.instance.verbosity = dds.Verbosity.SILENT
-TYPE_OBJECT_V1_MAX_SERIALIZED_LENGTH = 65536
-
-
-def configure_type_object_v1_only(qos):
-  qos.resource_limits.type_code_max_serialized_length = 0
-  qos.resource_limits.type_object_max_serialized_length = TYPE_OBJECT_V1_MAX_SERIALIZED_LENGTH
-  type_lookup = getattr(dds.DiscoveryConfigBuiltinChannelKindMask,
-                        "TYPE_LOOKUP_SERVICE", None)
-  if type_lookup is not None:
-    channels = qos.discovery_config.enabled_builtin_channels
-    qos.discovery_config.enabled_builtin_channels = (
-        dds.DiscoveryConfigBuiltinChannelKindMask(int(channels) & ~int(type_lookup)))
 
 
 def build_type(extensibility, schema):
@@ -87,7 +75,6 @@ def main():
     parser.error("--deadline-seconds must be positive")
 
   participant_qos = dds.DomainParticipantQos()
-  configure_type_object_v1_only(participant_qos)
   participant = dds.DomainParticipant(args.domain, qos=participant_qos)
   wait_for_file(args.wait_for_file, args.wait_timeout)
   sample_type = build_type(args.extensibility, args.schema)

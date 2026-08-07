@@ -1,4 +1,4 @@
-"""Cross-vendor FINAL/APPENDABLE data-flow matrix for Connext and Fast DDS."""
+"""Cross-vendor FINAL/APPENDABLE compatibility matrix for Connext and Fast DDS."""
 
 import json
 import os
@@ -25,7 +25,7 @@ FASTDDS_IMAGE = os.environ.get("RTI_DOCTOR_FASTDDS_IMAGE",
 
 
 class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
-  """Measure every FINAL/APPENDABLE pair in both Connext/Fast DDS directions."""
+  """Verify matching kinds exchange data and mixed kinds remain incompatible."""
 
   @classmethod
   def setUpClass(cls):
@@ -172,7 +172,11 @@ class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
       with self.subTest(writer=writer_extensibility, reader=reader_extensibility):
         writer, reader = self._run_pair(
             writer_vendor, writer_extensibility, reader_vendor, reader_extensibility)
-        self._assert_data_flows(writer, reader)
+        if writer_extensibility == reader_extensibility:
+          self._assert_data_flows(writer, reader)
+        else:
+          self.assertGreater(writer["results"]["samples"], 0, writer)
+          self.assertEqual(reader["results"]["samples"], 0, reader)
 
   def test_connext_writer_to_fastdds_reader_matrix(self):
     self._run_matrix("connext", "fastdds")

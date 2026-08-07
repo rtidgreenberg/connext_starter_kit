@@ -101,6 +101,9 @@ def render_system_text(snapshot, domain_id, environment=None):
            _kv("Python", environment.get("python")),
            _kv("Domain", str(domain_id)), ""]
   lines += render_topology_text(topology_data)
+  if snapshot.fastdds_product_versions:
+    lines += _section("FAST DDS VERSION EVIDENCE")
+    lines += [_kv("Observed", ", ".join(snapshot.fastdds_product_versions)), ""]
   lines += _section("ISSUE SUMMARY")
   lines += [_kv("Errors", str(counts[f.Severity.ERROR])),
             _kv("Warnings", str(counts[f.Severity.WARN])),
@@ -416,6 +419,9 @@ def _render_wire_appendix(data):
                      WIRE_LABEL_PAD))
   if evidence.get("target_writer_guid_prefix"):
     lines.append(_kv("Writer GUID prefix filter", evidence["target_writer_guid_prefix"],
+                     WIRE_LABEL_PAD))
+  if evidence.get("target_reader_entity_id"):
+    lines.append(_kv("Reader entity filter", evidence["target_reader_entity_id"],
                      WIRE_LABEL_PAD))
   error = evidence.get("error")
   if error:

@@ -236,6 +236,34 @@ def resolve_domain_id(domain_arg, scan_timeout=DEFAULT_SCAN_TIMEOUT, do_scan=Tru
     return domain_id, discovered, scanned
 
 
+def select_discovery_capture_interface():
+  """Offer an optional packet-capture interface during interactive startup."""
+  interfaces, error = wire.capture_interfaces()
+  if error:
+    print(f"Packet capture is unavailable: {error}", file=sys.stderr)
+    return None
+  if not interfaces:
+    print("Packet capture is unavailable: tshark found no interfaces.", file=sys.stderr)
+    return None
+  print("Optional Fast DDS version capture interface (Enter to skip):")
+  for number, description in interfaces:
+    print(f"  {number}: {description}")
+  valid = {number for number, _ in interfaces}
+  while True:
+    try:
+      response = input("Capture interface [skip]: ").strip()
+    except EOFError:
+      return None
+    except KeyboardInterrupt:
+      print()
+      raise
+    if not response:
+      return None
+    if response in valid:
+      return response
+    print("Enter a listed interface number, or press Enter to skip.", file=sys.stderr)
+
+
 def build_session(domain_id, args, active_domains=None, domain_scan_ran=False,
                   compliance=None):
   """Create the diagnostic participant and wrap it in a Session."""
@@ -268,6 +296,21 @@ def build_session(domain_id, args, active_domains=None, domain_scan_ran=False,
       active_domains=active_domains or set(),
       domain_scan_ran=domain_scan_ran,
   ), participant
+
+
+def start_discovery_capture(session, interface):
+  """Start one startup capture; its PCAP is parsed only if Fast DDS is seen."""
+  if not interface:
+    return
+  timestamp = time.strftime("%Y%m%d_%H%M%S")
+  placeholder = type("CaptureEndpoint", (), {"unicast_locators": ()})()
+  capture = wire.LiveCapture(
+      interface,
+      os.path.join("test_output", "rti_doctor_captures",
+                   f"rti_doctor_discovery_domain{session.domain_id}_{timestamp}.pcapng"),
+      wire.capture_filter(session.domain_id, placeholder, session.own_qos))
+  capture.start()
+  session.discovery_capture = capture
 
 
 def _settle(session, seconds):
@@ -471,15 +514,18 @@ def main(argv=None):
       args.domain,
       scan_timeout=args.scan_timeout,
       do_scan=not args.no_domain_scan)
+  capture_interface = select_discovery_capture_interface() if not headless else None
 
   session, participant = build_session(
       domain_id, args, active_domains=active_domains, domain_scan_ran=scanned,
       compliance=compliance)
+  start_discovery_capture(session, capture_interface)
   session.type_lookup_settings.update(connext_logging)
   if not _wait_for_remote_participants(
       session, args.ready_after_participants, args.ready_timeout):
     print("Doctor did not observe the requested remote participant count before "
           "the readiness timeout.", file=sys.stderr)
+    session.close_discovery_capture()
     participant.close()
     return 3
   _write_ready_file(args.ready_file)
@@ -498,6 +544,7 @@ def main(argv=None):
     return 0
   finally:
     try:
+      session.close_discovery_capture()
       participant.close()
     except Exception as e:
       logging.error(f"[main] error closing participant: {e}")

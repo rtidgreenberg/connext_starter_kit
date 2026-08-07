@@ -30,6 +30,7 @@ class WireObservation:
   encapsulation_id: str = ""
   payload_bytes: int = 0
   reassembled_bytes: int = 0
+  reader_entity_id: str = ""
 
 
 @dataclass
@@ -37,6 +38,11 @@ class DiscoveryObservation:
   """One SPDP/SEDP metadata observation decoded by tshark."""
 
   guid_prefix: str = ""
+  vendor_id: str = ""
+  product_version_major: str = ""
+  product_version_minor: str = ""
+  product_version_release: str = ""
+  product_version_revision: str = ""
   writer_entity_id: str = ""
   reader_entity_id: str = ""
   builtin_endpoint_set: str = ""
@@ -54,7 +60,7 @@ OCCURRENCE_SEPARATOR = ","
 def parse_tshark_fields(line):
   """Parse one tab-separated RTPS record from the tshark capture command."""
   fields = line.rstrip("\r\n").split("\t")
-  fields += [""] * (8 - len(fields))
+  fields += [""] * (9 - len(fields))
   payload = _hex_bytes(fields[6])
   reassembled = _hex_bytes(fields[7])
   return WireObservation(
@@ -66,6 +72,7 @@ def parse_tshark_fields(line):
       encapsulation_id=fields[5],
       payload_bytes=payload,
       reassembled_bytes=reassembled,
+      reader_entity_id=fields[8],
   )
 
 
@@ -85,17 +92,32 @@ def _hex_bytes(value):
 def parse_discovery_fields(line):
   """Parse RTPS discovery metadata emitted by tshark's fields formatter."""
   fields = line.rstrip("\r\n").split("\t")
-  fields += [""] * (7 - len(fields))
+  fields += [""] * (12 - len(fields))
   return DiscoveryObservation(
-      guid_prefix=fields[0], writer_entity_id=fields[1],
-      reader_entity_id=fields[2], builtin_endpoint_set=fields[3],
-      topic_name=fields[4], type_name=fields[5], reliability_kind=fields[6])
+      guid_prefix=fields[0], vendor_id=fields[1],
+      product_version_major=fields[2], product_version_minor=fields[3],
+      product_version_release=fields[4], product_version_revision=fields[5],
+      writer_entity_id=fields[6], reader_entity_id=fields[7],
+      builtin_endpoint_set=fields[8], topic_name=fields[9],
+      type_name=fields[10], reliability_kind=fields[11])
+
+
+def _fastdds_product_versions(observation):
+  """Fast DDS versions advertised through its vendor-specific discovery PID."""
+  if not any(value.removeprefix("0x") == "010f" for value in _values(observation.vendor_id)):
+    return []
+  parts = (observation.product_version_major, observation.product_version_minor,
+           observation.product_version_release, observation.product_version_revision)
+  values = [_values(part) for part in parts]
+  return [".".join(version) for version in zip(*values)]
 
 
 def summarize_discovery(observations, source, capture_filter=None):
   """Summarize observed RTPS SPDP/SEDP metadata without decoding user data."""
   participants = {item.guid_prefix for item in observations if item.guid_prefix}
   topics = sorted({item.topic_name for item in observations if item.topic_name})
+  fastdds_versions = sorted({version for item in observations
+                             for version in _fastdds_product_versions(item)})
   # One tuple per (prefix, writer, reader) actually paired in a submessage.
   # Zipping the occurrence lists positionally rather than crossing them keeps
   # a coalesced frame from fabricating pairs that were never on the wire.
@@ -116,6 +138,7 @@ def summarize_discovery(observations, source, capture_filter=None):
       "endpoint_observations": len(endpoints),
       "topics": topics,
       "topic_count": len(topics),
+      "fastdds_product_versions": fastdds_versions,
       "builtin_endpoint_sets": sorted({item.builtin_endpoint_set
                                          for item in observations
                                          if item.builtin_endpoint_set}),
@@ -129,7 +152,8 @@ def summarize_discovery(observations, source, capture_filter=None):
   }
 
 
-def summarize(observations, writer_entity_id=None, writer_guid_prefix=None):
+def summarize(observations, writer_entity_id=None, writer_guid_prefix=None,
+              reader_entity_id=None):
   """Stable summary for a report appendix.
 
   Every filter that applies is applied. A GUID prefix identifies the remote
@@ -153,6 +177,9 @@ def summarize(observations, writer_entity_id=None, writer_guid_prefix=None):
   if writer_entity_id is not None:
     observations = [item for item in observations
                     if _same_entity_id(item.writer_entity_id, writer_entity_id)]
+  elif reader_entity_id is not None:
+    observations = [item for item in observations
+                    if _same_entity_id(item.reader_entity_id, reader_entity_id)]
   else:
     observations = [item for item in observations if not _is_builtin_writer(item)]
 
@@ -257,7 +284,29 @@ def capture_filter(domain_id, endpoint, participant_qos):
   return "udp"
 
 
-def inspect_pcap(path, tshark_path=None, writer_entity_id=None, writer_guid_prefix=None):
+def capture_interfaces(tshark_path=None):
+  """Return tshark capture interfaces as ``(index, description)`` pairs."""
+  tshark_path = tshark_path or shutil.which("tshark")
+  if not tshark_path:
+    return (), "tshark was not found on PATH"
+  try:
+    completed = subprocess.run([tshark_path, "-D"], text=True, capture_output=True,
+                               check=False, timeout=TSHARK_READ_TIMEOUT)
+  except (OSError, subprocess.TimeoutExpired) as error:
+    return (), f"could not list tshark interfaces: {error}"
+  if completed.returncode:
+    return (), (completed.stderr.strip()
+                or f"tshark exited with {completed.returncode}")
+  interfaces = []
+  for line in completed.stdout.splitlines():
+    number, separator, description = line.partition(". ")
+    if separator and number.isdigit() and description:
+      interfaces.append((number, description))
+  return tuple(interfaces), None
+
+
+def inspect_pcap(path, tshark_path=None, writer_entity_id=None, writer_guid_prefix=None,
+                 reader_entity_id=None):
   """Return direct RTPS user-data observations from an existing PCAP/PCAPNG."""
   tshark_path = tshark_path or shutil.which("tshark")
   if not tshark_path:
@@ -282,7 +331,7 @@ def inspect_pcap(path, tshark_path=None, writer_entity_id=None, writer_guid_pref
       "-e", "rtps.sm.wrEntityId", "-e", "rtps.guidPrefix.src",
       "-e", "rtps.sm.seqNumber",
       "-e", "rtps.param.serialize.encap_kind", "-e", "rtps.issueData",
-      "-e", "rtps.reassembled.data",
+      "-e", "rtps.reassembled.data", "-e", "rtps.sm.rdEntityId",
   ]
   try:
     completed = subprocess.run(command, text=True, capture_output=True,
@@ -299,11 +348,13 @@ def inspect_pcap(path, tshark_path=None, writer_entity_id=None, writer_guid_pref
   observations = [parse_tshark_fields(line) for line in completed.stdout.splitlines()
                   if line.strip()]
   result = {"source": path, **summarize(observations, writer_entity_id,
-                                          writer_guid_prefix)}
+                                          writer_guid_prefix, reader_entity_id)}
   if writer_entity_id is not None:
     result["target_writer_entity_id"] = writer_entity_id
   if writer_guid_prefix is not None:
     result["target_writer_guid_prefix"] = writer_guid_prefix
+  if reader_entity_id is not None:
+    result["target_reader_entity_id"] = reader_entity_id
   return result
 
 
@@ -329,9 +380,14 @@ def inspect_discovery_pcap(path, tshark_path=None, capture_filter=None):
       "-T", "fields", "-E", "occurrence=a", "-E",
       f"aggregator={OCCURRENCE_SEPARATOR}",
       "-e", "rtps.guidPrefix.src", "-e", "rtps.sm.wrEntityId",
-      "-e", "rtps.sm.rdEntityId", "-e", "rtps.param.builtin_endpoint_set",
-      "-e", "rtps.param.topicName", "-e", "rtps.param.typeName",
-      "-e", "rtps.reliability_kind",
+      "-e", "rtps.vendorId",
+      "-e", "rtps.param.product_version.major",
+      "-e", "rtps.param.product_version.minor",
+      "-e", "rtps.param.product_version.release",
+      "-e", "rtps.param.product_version.revision",
+      "-e", "rtps.sm.wrEntityId", "-e", "rtps.sm.rdEntityId",
+      "-e", "rtps.param.builtin_endpoint_set", "-e", "rtps.param.topicName",
+      "-e", "rtps.param.typeName", "-e", "rtps.reliability_kind",
   ]
   try:
     completed = subprocess.run(command, text=True, capture_output=True,
@@ -353,13 +409,14 @@ class LiveCapture:
   """An opt-in tshark process that writes a temporary PCAPNG while a probe runs."""
 
   def __init__(self, interface, output_path, capture_filter, writer_entity_id=None,
-               writer_guid_prefix=None,
+               writer_guid_prefix=None, reader_entity_id=None,
                tshark_path=None):
     self.interface = interface
     self.output_path = os.path.abspath(output_path)
     self.capture_filter = capture_filter
     self.writer_entity_id = writer_entity_id
     self.writer_guid_prefix = writer_guid_prefix
+    self.reader_entity_id = reader_entity_id
     self.tshark_path = tshark_path or shutil.which("tshark")
     self.process = None
     self.error = None
@@ -427,8 +484,47 @@ class LiveCapture:
     if self.error:
       return {"error": self.error, "source": self.output_path,
               "capture_filter": self.capture_filter}
+    if not os.path.isfile(self.output_path):
+      return {"error": "tshark exited without creating a capture file; no packets "
+                       "were available for packet evidence",
+              "source": self.output_path, "capture_filter": self.capture_filter}
     result = inspect_pcap(self.output_path, tshark_path=self.tshark_path,
                           writer_entity_id=self.writer_entity_id,
-                          writer_guid_prefix=self.writer_guid_prefix)
+                          writer_guid_prefix=self.writer_guid_prefix,
+                          reader_entity_id=self.reader_entity_id)
+    result["capture_filter"] = self.capture_filter
+    return result
+
+  def finish_discovery(self):
+    """Stop this capture and parse discovery metadata instead of user data."""
+    if self.process is not None:
+      if self.process.poll() is None:
+        if self.started_at is not None:
+          remaining = 4.0 - (time.monotonic() - self.started_at)
+          if remaining > 0:
+            time.sleep(remaining)
+        self.process.terminate()
+        try:
+          self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+          self.process.kill()
+          self.process.wait()
+          self.error = "tshark did not exit after termination and was killed"
+      if self.error is None and self.process.returncode not in (0, -15):
+        self.error = (self._stderr_text()
+                      or f"tshark exited with {self.process.returncode}")
+    if self._log is not None:
+      self._log.close()
+      self._log = None
+    if self.error:
+      return {"error": self.error, "source": self.output_path,
+              "capture_filter": self.capture_filter}
+    if not os.path.isfile(self.output_path):
+      return {"error": "tshark exited without creating a capture file; no packets "
+                       "were available for discovery evidence",
+              "source": self.output_path, "capture_filter": self.capture_filter}
+    result = inspect_discovery_pcap(
+        self.output_path, tshark_path=self.tshark_path,
+        capture_filter=self.capture_filter)
     result["capture_filter"] = self.capture_filter
     return result

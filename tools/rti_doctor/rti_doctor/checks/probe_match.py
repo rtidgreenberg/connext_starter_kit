@@ -225,14 +225,17 @@ def check_matched(context):
   total = compat.get_int(probe.subscription_matched, "total_count")
   scope = _scope_text(probe)
 
+  probe_kind = getattr(probe, "probe_kind", "reader")
+  subject = "Writer matched the reader" if probe_kind == "writer" else "Reader matched the writer"
+  status_name = "publication_matched" if probe_kind == "writer" else "subscription_matched"
   if probe.matched:
     return [Finding(
         id="match.ok",
         rung=RUNG_MATCH,
         severity=Severity.OK,
-        title=("Reader matched the writer" if probe.correlated
+         title=(subject if probe.correlated
                else "Reader matched a writer on this topic"),
-        observed=(f"subscription_matched current_count = {current}, "
+         observed=(f"{status_name} current_count = {current}, "
                   f"total_count = {total} after {probe.elapsed:.1f}s. {scope}"),
         evidence={"current_count": current, "total_count": total,
                   "writer_identified": probe.correlated,
@@ -243,8 +246,9 @@ def check_matched(context):
       id="match.none",
       rung=RUNG_MATCH,
       severity=Severity.ERROR,
-      title="Reader never matched the writer",
-      observed=(f"subscription_matched current_count = {current}, "
+            title=("Writer never matched the reader" if probe_kind == "writer"
+              else "Reader never matched the writer"),
+            observed=(f"{status_name} current_count = {current}, "
                 f"total_count = {total} after {probe.elapsed:.1f}s. {scope}"),
       root_cause=(
           "The reader was created on the same topic with QoS mirroring the writer, "

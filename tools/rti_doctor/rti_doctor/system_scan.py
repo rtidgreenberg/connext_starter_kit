@@ -36,6 +36,7 @@ class SystemScanSnapshot:
   topology: object
   issues: tuple
   suppressed_findings: tuple = ()
+  fastdds_product_versions: tuple = ()
 
 
 def scan(registry, own_qos, type_lookup_settings, domain_id, active_domains=(),

@@ -95,7 +95,7 @@ class ReportScreen(Screen):
   async def _run_probe(self):
     try:
       self.data = await asyncio.to_thread(
-          self.session.diagnose_endpoint, self.endpoint, True)
+          self.session.diagnose_endpoint, self.endpoint, True, "any")
       self.body.update(report_mod.render_text(self.data))
       self.status.update(f"Probe complete. {self.data.verdict}")
     except Exception as e:

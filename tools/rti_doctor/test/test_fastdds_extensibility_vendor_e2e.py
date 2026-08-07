@@ -112,6 +112,7 @@ class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
     reader = subprocess.Popen(reader_command, text=True, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
     writer = None
+    reader_stdout = reader_stderr = writer_stdout = writer_stderr = ""
     try:
       with open(reader_start_file, "w", encoding="utf-8"):
         pass
@@ -130,10 +131,16 @@ class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
     except Exception:
       if writer is not None and writer.poll() is None:
         writer.kill()
-        writer.communicate()
+      if writer is not None:
+        writer_stdout, writer_stderr = writer.communicate()
       if reader.poll() is None:
         reader.kill()
-        reader.communicate()
+      reader_stdout, reader_stderr = reader.communicate()
+      print("Fast DDS fixture failure:\n"
+            f"reader command: {reader_command}\nreader stderr:\n{reader_stderr}\n"
+            f"reader stdout:\n{reader_stdout}\n"
+            f"writer command: {writer_command}\nwriter stderr:\n{writer_stderr}\n"
+            f"writer stdout:\n{writer_stdout}", file=sys.stderr)
       raise
     finally:
       shutil.rmtree(control_dir, ignore_errors=True)

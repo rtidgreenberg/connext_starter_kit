@@ -1,0 +1,7 @@
+module DoctorExtensibility {
+  @final
+  struct Sample {
+    unsigned long index;
+    string message;
+  };
+};

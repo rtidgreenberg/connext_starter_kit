@@ -14,14 +14,14 @@ class TestDiscoveryParsing(unittest.TestCase):
   def test_summary_deduplicates_participants_endpoints_and_topics(self):
     observations = [
         wire.parse_discovery_fields(
-            "010f00000000000000000001\t0x000004c2\t0x000004c7\t"
-            "0x00000c3f\tStatus\tStatusType\t0x00000001"),
+            "010f00000000000000000001\t0x010f\t3\t6\t2\t0\t"
+            "0x000004c2\t0x000004c7\t0x00000c3f\tStatus\tStatusType\t0x00000001"),
         wire.parse_discovery_fields(
-            "010f00000000000000000001\t0x000004c2\t0x000004c7\t"
-            "0x00000c3f\tStatus\tStatusType\t0x00000001"),
+            "010f00000000000000000001\t0x010f\t3\t6\t2\t0\t"
+            "0x000004c2\t0x000004c7\t0x00000c3f\tStatus\tStatusType\t0x00000001"),
         wire.parse_discovery_fields(
-            "010f00000000000000000002\t0x000003c2\t0x00000000\t"
-            "\tCommands\tCommandType\t"),
+            "010f00000000000000000002\t0x0101\t7\t7\t0\t0\t"
+            "0x000003c2\t0x00000000\t\tCommands\tCommandType\t"),
     ]
     summary = wire.summarize_discovery(observations, "sample.pcapng")
     # `source` is the capture, matching inspect_pcap and what the renderers
@@ -32,6 +32,7 @@ class TestDiscoveryParsing(unittest.TestCase):
     self.assertEqual(summary["endpoint_observations"], 2)
     self.assertEqual(summary["topics"], ["Commands", "Status"])
     self.assertEqual(summary["builtin_endpoint_sets"], ["0x00000c3f"])
+    self.assertEqual(summary["fastdds_product_versions"], ["3.6.2.0"])
     self.assertFalse(summary["complete"])
 
 

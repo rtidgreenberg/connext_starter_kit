@@ -271,7 +271,7 @@ class IssueListScreen(Screen):
   BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
               ("r", "refresh", "Refresh"), ("m", "metrics", "Metrics"),
               ("s", "save", "Save report"), ("o", "open_report", "Open report"),
-              ("d", "debug", "Debug writer"), ("q", "quit_app", "Quit")]
+              ("d", "debug", "Deep diagnose"), ("q", "quit_app", "Quit")]
 
   def __init__(self, session, snapshot=None, issue_keys=None, severity=None):
     super().__init__()
@@ -383,10 +383,11 @@ class IssueListScreen(Screen):
 
   def action_debug(self):
     issue = self._selected_issue()
-    if issue is None or len(issue.writer_keys) != 1:
-      self.status.update("Debug requires an issue with exactly one selected writer.")
+    keys = set() if issue is None else set(issue.writer_keys) | set(issue.reader_keys)
+    if len(keys) != 1:
+      self.status.update("Debug requires an issue with exactly one endpoint.")
       return
-    endpoint = self.session.registry.endpoints.get(issue.writer_keys[0])
+    endpoint = self.session.registry.endpoints.get(next(iter(keys)))
     if endpoint is not None:
       self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=True))
 
@@ -401,7 +402,7 @@ class IssueDetailScreen(Screen):
   """Evidence and relationships for one passive system issue."""
 
   BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
-              ("o", "open_report", "Open report"), ("d", "debug", "Debug writer"),
+              ("o", "open_report", "Open report"), ("d", "debug", "Deep diagnose"),
               ("s", "save", "Save report"),
               ("q", "quit_app", "Quit")]
 
@@ -430,22 +431,23 @@ class IssueDetailScreen(Screen):
     yield self.status
     yield Footer()
 
-  def _writer(self):
-    if len(self.issue.writer_keys) != 1:
+  def _endpoint(self):
+    keys = set(self.issue.writer_keys) | set(self.issue.reader_keys)
+    if len(keys) != 1:
       return None
-    return self.session.registry.endpoints.get(self.issue.writer_keys[0])
+    return self.session.registry.endpoints.get(next(iter(keys)))
 
   def action_open_report(self):
-    endpoint = self._writer()
+    endpoint = self._endpoint()
     if endpoint is None:
       self.status.update("Open report requires an issue with exactly one writer.")
       return
     self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=False))
 
   def action_debug(self):
-    endpoint = self._writer()
+    endpoint = self._endpoint()
     if endpoint is None:
-      self.status.update("Debug requires an issue with exactly one writer.")
+      self.status.update("Debug requires an issue with exactly one endpoint.")
       return
     self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=True))
 
@@ -468,7 +470,7 @@ class TopologyHealthScreen(Screen):
   BINDINGS = [("1", "participants", "Participants"), ("2", "readers", "Readers"),
               ("3", "writers", "Writers"), ("4", "topics", "Topics"),
               ("r", "refresh", "Refresh"), ("i", "issues", "Linked issues"),
-              ("d", "debug", "Debug writer"), ("o", "open_report", "Open report"),
+              ("d", "debug", "Deep diagnose"), ("o", "open_report", "Open report"),
               ("m", "metrics", "Metrics"), ("s", "save", "Save report"),
               ("b", "back", "Back"),
               ("escape", "back", "Back"), ("q", "quit_app", "Quit")]
@@ -616,8 +618,8 @@ class TopologyHealthScreen(Screen):
 
   def action_debug(self):
     endpoint = self._selected_endpoint()
-    if endpoint is None or not endpoint.is_writer:
-      self.status.update("Debug is available only when one writer is selected.")
+    if endpoint is None:
+      self.status.update("Debug is available only when one endpoint is selected.")
       return
     self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=True))
 
@@ -638,7 +640,7 @@ class TopicEndpointsScreen(Screen):
   """Readers and writers belonging to one selected topic."""
 
   BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
-              ("o", "open_report", "Open report"), ("d", "debug", "Debug writer"),
+              ("o", "open_report", "Open report"), ("d", "debug", "Deep diagnose"),
               ("q", "quit_app", "Quit")]
 
   def __init__(self, session, topic_name):
@@ -684,7 +686,7 @@ class TopicEndpointsScreen(Screen):
 
   def action_debug(self):
     endpoint = self._endpoint()
-    if endpoint is not None and endpoint.is_writer:
+    if endpoint is not None:
       self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=True))
 
   def action_back(self):

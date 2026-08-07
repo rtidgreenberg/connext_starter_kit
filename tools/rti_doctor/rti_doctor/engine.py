@@ -5,9 +5,11 @@ a report that differs depending on how it was invoked would be worthless.
 """
 
 import logging
+import os
 import time
+from dataclasses import replace
 
-from . import checks, probe as probe_mod, report, system_scan, topology
+from . import checks, probe as probe_mod, report, system_scan, topology, vendors, wire
 from .checks import CheckContext
 
 
@@ -16,7 +18,8 @@ class Session:
 
   def __init__(self, participant, registry, own_qos, type_lookup_settings,
                domain_id, type_wait=5.0, probe_timeout=10.0,
-               active_domains=None, domain_scan_ran=False):
+               active_domains=None, domain_scan_ran=False,
+               discovery_capture=None):
     self.participant = participant
     self.registry = registry
     self.own_qos = own_qos
@@ -26,6 +29,8 @@ class Session:
     self.probe_timeout = probe_timeout
     self.active_domains = active_domains or set()
     self.domain_scan_ran = domain_scan_ran
+    self.discovery_capture = discovery_capture
+    self._fastdds_product_versions = ()
     self._last_scan = None
 
   def _context(self, endpoint=None, participant_record=None, probe_result=None):
@@ -53,6 +58,12 @@ class Session:
     context = self._context()
     return checks.run_checks(context, checks.blind_spot_checks())
 
+  def close_discovery_capture(self):
+    """Stop a startup discovery capture that never observed Fast DDS."""
+    if self.discovery_capture is not None:
+      self.discovery_capture.finish_discovery()
+      self.discovery_capture = None
+
   def system_scan(self, captured_at=None, max_age=0.0):
     """Passive issue/topology snapshot; never creates a diagnostic reader.
 
@@ -77,6 +88,19 @@ class Session:
         type_wait=self.type_wait,
         captured_at=captured_at,
     )
+    if (self.discovery_capture is not None
+        and any(vendors.vendor_name(participant.vendor_id) == vendors.FASTDDS
+                for participant in self.registry.participant_list())):
+      evidence = self.discovery_capture.finish_discovery()
+      self.discovery_capture = None
+      self._fastdds_product_versions = tuple(
+          evidence.get("fastdds_product_versions", ()))
+      if evidence.get("error"):
+        logging.warning("[engine] Fast DDS discovery capture unavailable: %s",
+                        evidence["error"])
+    if self._fastdds_product_versions:
+      snapshot = replace(snapshot,
+                         fastdds_product_versions=self._fastdds_product_versions)
     self._last_scan = snapshot
     return snapshot
 
@@ -102,23 +126,47 @@ class Session:
         topology=self._topology(),
     )
 
-  def diagnose_endpoint(self, endpoint, probe=True):
+  def diagnose_endpoint(self, endpoint, probe=True, capture_interface=None):
     """Full rungs 0-5 for one endpoint, probing unless told not to."""
     self.registry.expire_type_waits()
     participant_record = self.registry.participant_for(endpoint)
 
     probe_result = None
-    if probe and endpoint.is_writer:
+    wire_evidence = None
+    capture = None
+    if probe:
       logging.info(f"[engine] probing topic '{endpoint.topic_name}'")
-      probe_result = probe_mod.probe_endpoint(
-          self.participant, endpoint, timeout=self.probe_timeout)
+      if capture_interface:
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        capture = wire.LiveCapture(
+            capture_interface,
+            os.path.join("test_output", "rti_doctor_captures",
+                         f"rti_doctor_domain{self.domain_id}_{timestamp}.pcapng"),
+            wire.capture_filter(self.domain_id, endpoint, self.own_qos),
+            writer_entity_id=(wire.endpoint_entity_id(endpoint)
+                              if endpoint.is_writer else None),
+            writer_guid_prefix=(wire.endpoint_guid_prefix(endpoint)
+                                if endpoint.is_writer else None),
+            reader_entity_id=(wire.endpoint_entity_id(endpoint)
+                              if not endpoint.is_writer else None))
+      try:
+        if capture is not None:
+          capture.start()
+        probe_result = probe_mod.probe_endpoint(
+            self.participant, endpoint, timeout=self.probe_timeout)
+      finally:
+        wire_evidence = capture.finish() if capture is not None else None
 
     context = self._context(endpoint=endpoint,
                             participant_record=participant_record,
                             probe_result=probe_result)
     selected = checks.static_checks()
     if probe_result is not None:
-      selected = selected + checks.probe_checks()
+      if probe_result.probe_kind == "writer":
+        from .checks import probe_match
+        selected = selected + probe_match.CHECKS
+      else:
+        selected = selected + checks.probe_checks()
     findings = checks.run_checks(context, selected)
 
     return report.ReportData(
@@ -129,7 +177,7 @@ class Session:
         endpoint=endpoint,
         participant=participant_record,
         type_lookup_settings=self.type_lookup_settings,
-        topology=self._topology(),
+        topology=self._topology(), wire_evidence=wire_evidence,
     )
 
   def sweep(self, progress=None, probe=True):

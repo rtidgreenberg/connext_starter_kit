@@ -86,6 +86,7 @@ class ProbeResult:
     self.cache = {}
     self.inconsistent_topic_count = None
     self.applied_reader_qos = {}
+    self.probe_kind = "reader"
     self.elapsed = 0.0
     self.listener_events = []
 
@@ -225,6 +226,55 @@ def build_subscriber(participant, endpoint):
   return subscriber, applied
 
 
+def build_writer_qos(endpoint):
+  """Writer QoS that offers the selected reader's advertised policies."""
+  qos = dds.DataWriterQos()
+  applied = {}
+  for name in ("reliability", "durability", "latency_budget", "deadline",
+               "ownership", "destination_order", "liveliness"):
+    policy = getattr(endpoint, name, None)
+    if policy is None:
+      continue
+    try:
+      if name == "deadline":
+        qos.deadline.period = policy.period
+      elif name == "latency_budget":
+        qos.latency_budget.duration = policy.duration
+      else:
+        getattr(qos, name).kind = policy.kind
+      applied[name] = str(policy)
+    except Exception as error:
+      applied[name] = f"not applied ({error})"
+  return qos, applied
+
+
+def build_publisher(participant, endpoint):
+  """Publisher matching the selected reader's partition and presentation."""
+  qos = dds.PublisherQos()
+  needed = False
+  applied = {}
+  names = compat.get(getattr(endpoint, "partition", None), "name", None)
+  if names:
+    try:
+      qos.partition.name = names
+      applied["partition"] = ", ".join(str(name) for name in names)
+      needed = True
+    except Exception as error:
+      applied["partition"] = f"not applied ({error})"
+  presentation = getattr(endpoint, "presentation", None)
+  if presentation is not None:
+    try:
+      qos.presentation.access_scope = presentation.access_scope
+      qos.presentation.coherent_access = presentation.coherent_access
+      qos.presentation.ordered_access = presentation.ordered_access
+      applied["presentation"] = str(presentation.access_scope)
+      needed = True
+    except Exception as error:
+      applied["presentation"] = f"not applied ({error})"
+  publisher = dds.Publisher(participant, qos) if needed else dds.Publisher(participant)
+  return publisher, applied
+
+
 def _publication_key(reader, handle):
   """Builtin key text of one matched publication, or None when unreadable.
 
@@ -332,8 +382,7 @@ def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1):
   result.attempted = True
 
   if not endpoint.is_writer:
-    result.create_error = "endpoint is a DataReader; only writers can be probed"
-    return result
+    return probe_reader_endpoint(participant, endpoint, timeout, poll)
   if endpoint.type is None:
     result.create_error = "no type information available, cannot create a reader"
     return result
@@ -398,6 +447,48 @@ def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1):
     result.elapsed = time.monotonic() - start
     _close_all(reader, subscriber, topic, endpoint.topic_name)
 
+  return result
+
+
+def probe_reader_endpoint(participant, endpoint, timeout=10.0, poll=0.1):
+  """Create a non-writing DataWriter and observe whether it matches a reader."""
+  result = ProbeResult()
+  result.attempted = True
+  result.probe_kind = "writer"
+  if endpoint.type is None:
+    result.create_error = "no type information available, cannot create a writer"
+    return result
+
+  publisher = topic = writer = None
+  start = time.monotonic()
+  try:
+    topic = dds.DynamicData.Topic(participant, endpoint.topic_name, endpoint.type)
+    publisher, publisher_applied = build_publisher(participant, endpoint)
+    writer_qos, qos_applied = build_writer_qos(endpoint)
+    result.applied_reader_qos = {**publisher_applied, **qos_applied}
+    writer = dds.DynamicData.DataWriter(publisher, topic, writer_qos)
+    result.created = True
+    deadline = start + timeout
+    while time.monotonic() < deadline:
+      status = writer.publication_matched_status
+      matched = compat.get_int(status, "current_count")
+      if matched:
+        result.matched_count = max(result.matched_count, matched)
+        break
+      time.sleep(poll)
+    result.subscription_matched = writer.publication_matched_status
+    result.inconsistent_topic_count = compat.get_int(
+        compat.get(topic, "inconsistent_topic_status", None), "total_count")
+  except Exception as error:
+    detail = f"{type(error).__name__}: {error}"
+    if result.created:
+      result.error = detail
+    else:
+      result.create_error = detail
+    logging.error(f"[probe] {endpoint.topic_name}: {error}")
+  finally:
+    result.elapsed = time.monotonic() - start
+    _close_all(writer, publisher, topic, endpoint.topic_name)
   return result
 
 

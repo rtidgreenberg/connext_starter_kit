@@ -33,7 +33,7 @@ def build_type(extensibility, schema):
       else dds.ExtensibilityKind.EXTENSIBLE)
   if schema == "fastdds":
     sample.add_member(dds.Member("index", dds.Uint32Type(), id=0))
-    sample.add_member(dds.Member("message", dds.StringType(255), id=1))
+    sample.add_member(dds.Member("message", dds.StringType(), id=1))
   else:
     sample.add_member(dds.Member("id", dds.Int32Type(), id=0, is_key=True))
   return sample

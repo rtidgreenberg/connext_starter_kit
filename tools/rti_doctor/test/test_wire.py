@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -237,6 +238,18 @@ class TestTsharkFields(unittest.TestCase):
     evidence = capture.finish()
     self.assertIn("tshark exited with 2", evidence["error"])
     self.assertNotIn("packets", evidence)
+
+  @mock.patch("rti_doctor.wire.os.path.isfile", return_value=False)
+  def test_live_capture_explains_when_tshark_creates_no_file(self, _isfile):
+    class Process:
+      returncode = 0
+      def poll(self):
+        return self.returncode
+
+    capture = wire.LiveCapture("lo", "capture.pcapng", "udp", tshark_path="tshark")
+    capture.process = Process()
+    evidence = capture.finish()
+    self.assertIn("without creating a capture file", evidence["error"])
 
   def test_report_includes_packet_evidence(self):
     data = report.ReportData(

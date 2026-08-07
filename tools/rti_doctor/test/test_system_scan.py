@@ -81,6 +81,31 @@ class TestSystemScan(unittest.TestCase):
     self.assertTrue(snapshot.issues)
     self.assertEqual(snapshot.topology["writers"], 1)
 
+  def test_session_finishes_discovery_capture_only_for_fastdds(self):
+    class Capture:
+      def __init__(self):
+        self.finished = 0
+
+      def finish_discovery(self):
+        self.finished += 1
+        return {"fastdds_product_versions": ["3.6.2.0"]}
+
+    registry = discovery.DiscoveryRegistry(type_wait=0.0)
+    capture = Capture()
+    session = engine.Session(
+        participant=object(), registry=registry, own_qos=None,
+        type_lookup_settings={}, domain_id=7, type_wait=0.0,
+        discovery_capture=capture)
+    session.system_scan(captured_at=123.0)
+    self.assertEqual(capture.finished, 0)
+
+    registry.participants["fastdds"] = records.ParticipantRecord(
+        key="fastdds", vendor_id=type("Vendor", (), {"value": [1, 15]})())
+    snapshot = session.system_scan(captured_at=124.0)
+    self.assertEqual(capture.finished, 1)
+    self.assertIsNone(session.discovery_capture)
+    self.assertEqual(snapshot.fastdds_product_versions, ("3.6.2.0",))
+
   def test_system_report_contains_metrics_and_issue_relationships(self):
     snapshot = system_scan.scan(
         registry_with_reliability_fault(), own_qos=None,

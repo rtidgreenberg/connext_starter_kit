@@ -19,13 +19,12 @@
 #include <fastdds/dds/topic/Topic.hpp>
 #include <fastdds/dds/topic/TypeSupport.hpp>
 
-#include "HelloWorld.hpp"
-#include "HelloWorldPubSubTypes.hpp"
-#include "HelloWorldTypeObjectSupport.hpp"
+#include "Sample.hpp"
+#include "SamplePubSubTypes.hpp"
 
 using namespace eprosima::fastdds::dds;
 
-class NoTypeMetadataHelloWorldPubSubType : public HelloWorldPubSubType {
+class NoTypeMetadataSamplePubSubType : public DoctorExtensibility::SamplePubSubType {
 public:
     void register_type_object_representation() override
     {
@@ -49,7 +48,7 @@ struct ReaderListener : DataReaderListener {
     }
     void on_data_available(DataReader* reader) override
     {
-        HelloWorld sample;
+        DoctorExtensibility::Sample sample;
         SampleInfo info;
         while (reader->take_next_sample(&sample, &info) == RETCODE_OK)
         {
@@ -166,8 +165,8 @@ int main(int argc, char** argv)
     }
 
     TypeSupport type(type_metadata == "none"
-            ? static_cast<TopicDataType*>(new NoTypeMetadataHelloWorldPubSubType())
-            : static_cast<TopicDataType*>(new HelloWorldPubSubType()));
+            ? static_cast<TopicDataType*>(new NoTypeMetadataSamplePubSubType())
+            : static_cast<TopicDataType*>(new DoctorExtensibility::SamplePubSubType()));
     if (type.register_type(participant, "DoctorExtensibility::Sample") !=
             RETCODE_OK)
     {
@@ -220,7 +219,7 @@ int main(int argc, char** argv)
             endpoint_ready_signal << "ready\n";
         }
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(duration_seconds);
-        HelloWorld sample;
+        DoctorExtensibility::Sample sample;
         sample.message("DoctorExtensibility");
         while (std::chrono::steady_clock::now() < deadline)
         {

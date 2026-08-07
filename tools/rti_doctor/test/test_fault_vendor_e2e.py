@@ -7,6 +7,7 @@ reader and obscures the mismatch fixture's endpoint counters.
 """
 
 import json
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -88,7 +89,7 @@ def _finish_control_dir(case_name, commands, outputs, control_dir, failed):
 
 
 @unittest.skipUnless(
-    __import__("importlib").util.find_spec("cyclonedds"),
+  importlib.util.find_spec("cyclonedds"),
     "Cyclone DDS Python package not available")
 class TestConnextCycloneFaultControls(unittest.TestCase):
   """Exercise Doctor against healthy and intentionally incompatible peers."""
@@ -362,15 +363,8 @@ class TestConnextFastDdsFaultControls(unittest.TestCase):
     doctor, report, writer, reader = self._run_case(writer_vendor, "compatible")
     active_errors = [item["id"] for item in report["findings"]
                      if not item["suppressed_by"] and item["severity"] == "ERROR"]
-    if writer_vendor == "fastdds":
-      # The custom FINAL endpoint intentionally exercises a TypeObject variant
-      # that Connext rejects, although its generated Fast DDS metadata resolves.
-      self.assertEqual(doctor.returncode, 1, f"{doctor.stderr}\n{report}")
-      self.assertEqual(active_errors, ["type.assignability"], report)
-      self.assertIn("type.resolved", [item["id"] for item in report["findings"]], report)
-    else:
-      self.assertEqual(doctor.returncode, 0, f"{doctor.stderr}\n{report}")
-      self.assertEqual(active_errors, [], report)
+    self.assertEqual(doctor.returncode, 0, f"{doctor.stderr}\n{report}")
+    self.assertEqual(active_errors, [], report)
     self.assertGreater(reader["results"]["matched"], 0, reader)
     self.assertGreater(reader["results"]["samples"], 0, reader)
     self.assertNotIn("qos.rxo_mismatch",

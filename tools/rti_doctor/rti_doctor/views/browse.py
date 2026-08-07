@@ -22,7 +22,7 @@ class EndpointListScreen(Screen):
   BINDINGS = [
       ("b", "back", "Back"),
       ("escape", "back", "Back"),
-      ("d", "debug", "Debug writer"),
+      ("d", "debug", "Deep diagnose"),
       ("o", "open_report", "Open report"),
       ("q", "quit_app", "Quit"),
   ]
@@ -45,7 +45,7 @@ class EndpointListScreen(Screen):
         f"[bold]{self.participant.name or '(unnamed)'}[/bold] "
         f"({self.participant.vendor_name})  -  "
         "[bold green]Enter[/bold green] details  "
-        "[bold green]d[/bold green] debug writer  "
+        "[bold green]d[/bold green] deep diagnose  "
         "[bold green]o[/bold green] open report  "
         "[bold green]b[/bold green] back",
         id="directions")
@@ -88,7 +88,7 @@ class EndpointListScreen(Screen):
     if self.selected_key is None:
       return
     endpoint = self.session.registry.endpoints.get(self.selected_key)
-    if endpoint is not None and endpoint.is_writer:
+    if endpoint is not None:
       self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=True))
 
   def action_back(self):

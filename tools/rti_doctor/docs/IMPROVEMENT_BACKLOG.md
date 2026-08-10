@@ -3,9 +3,10 @@
 ## Scope
 
 This backlog follows the P0 Connext/Cyclone and Connext/Fast DDS fault-injection
-work and the Fast DDS RTPS capture in `test_output/fastdds_rtps/`. It separates
-test-harness reliability from RTI Doctor product behavior so a passing test
-always means the intended thing.
+work and the Fast DDS RTPS capture in `test_output/fastdds_rtps/`. It is the
+canonical list of deferred and post-current-implementation improvements. It
+separates test-harness reliability from RTI Doctor product behavior so a
+passing test always means the intended thing.
 
 ## Priority 0: Unlock Reliable Fast DDS P0 Coverage
 
@@ -34,8 +35,8 @@ always means the intended thing.
 |---|---|---|---|---|
 | DOC-1 | Distinguish no counterpart from incomplete discovery. | `qos.no_counterpart` is correct for an empty system but indistinguishable from a late observer missing an endpoint announcement. | Include discovery age, participant presence, known remote builtin endpoint mask, and endpoint-announcement activity in the finding evidence. When a peer advertises the relevant SEDP announcer but no endpoint is observed, add an advisory stating that discovery may be incomplete. | A captured Fast DDS late-observer scenario gives an actionable incomplete-discovery advisory instead of implying no reader exists. |
 | DOC-2 | Surface TypeInformation decode failure explicitly. | Connext logs `DISCBuiltin_deserializeTypeInformation: FAILED TO DESERIALIZE`, then Doctor emits generic `type.no_type_info`. | Capture this known discovery/type lookup error through the listener or Doctor debug log and attach it to `type.no_type_info` evidence. Add a distinct, actionable subtype or finding ID if the error can be correlated to the endpoint. | Fast DDS TypeInformation failure states that metadata deserialization failed, identifies the peer, and does not present the condition as merely absent propagation. |
-| DOC-3 | Make headless JSON output machine-safe. | Native Connext diagnostics can precede JSON on stdout. | Direct library diagnostics to stderr where configurable; otherwise document and implement a single stable machine-output channel such as `--output`. Keep human diagnostics separate. | `--format json` produces exactly one JSON document on stdout in the TypeInformation-failure scenario. |
-| DOC-4 | Expose discovered SEDP/QoS details in the report appendix. | TShark proved that the Fast DDS reader advertised RELIABLE, XCDR1, topic, and type even when type metadata was not decoded. | Where discovery bindings expose a field, include raw endpoint key/GUID, vendor ID, QoS policy values, and type-state transition timing in the JSON evidence. Do not infer fields unavailable to Doctor. | A static report for a discovered peer includes enough evidence to explain every `qos.rxo_mismatch` without a PCAP. |
+| DOC-3 | Superseded: make headless JSON output machine-safe. | Decision H1 makes Markdown/text the primary report contract and retires `--format json`; this is current implementation work, not future backlog work. | Remove JSON rendering and its tests according to the implementation plan. Do not build a JSON-only stdout channel. | `--format json` is removed or emits a clear deprecation error, while Markdown/text reports remain readable with native diagnostics present. |
+| DOC-4 | Expose discovered SEDP/QoS details in the report appendix. | TShark proved that the Fast DDS reader advertised RELIABLE, XCDR1, topic, and type even when type metadata was not decoded. | Where discovery bindings expose a field, include raw endpoint key/GUID, vendor ID, QoS policy values, and type-state transition timing in Markdown/text report evidence. Do not infer fields unavailable to Doctor. | A static report for a discovered peer includes enough evidence to explain every `qos.rxo_mismatch` without a PCAP. |
 
 ## Priority 3: Expand Coverage Once P0 Is Stable
 
@@ -47,6 +48,15 @@ always means the intended thing.
 | MAT-4 | Add endpoint-disposal tests. | Stop a discovered fixture endpoint, wait for builtin lifecycle disposal, and sweep again. | Doctor removes the departed endpoint and does not emit a stale probe failure. |
 | MAT-5 | Add large-data cross-vendor tests. | Reuse or add fragmentation fixtures and validate the packet capture appendix separately from error severity. | `data.fragmentation` is informational while payload flow remains healthy. |
 
+## Deferred Diagnostics
+
+| ID | Improvement | Evidence | Implementation | Acceptance check |
+|---|---|---|---|---|
+| S5 | Harden SPDP2 numeric-bitmask support. | Current tests cover only the compatibility substring fallback; customer use is minimal. | Add direct numeric-mask tests for set and unset bits while retaining the fallback-string compatibility test. | The primary numeric path and fallback path produce the expected result for both enabled and disabled masks. |
+| S6 | Re-enable advisory checks only with deterministic coverage. | `blind.security_enabled`, `transport.class_mismatch`, `security.mismatch`, and `discovery.partial` lack direct tests and are disabled from active reporting. | For each advisory, add direct positive and negative tests plus a healthy-path no-findings assertion; then explicitly restore that check to the active set. | Each restored advisory has deterministic coverage that proves it emits only for its intended condition and is absent from a healthy scenario. |
+| S7 | Cover system-scan cache freshness. | `Session.system_scan()` supports recent-snapshot reuse for passive screen navigation and forced re-scan for explicit refresh, but tests currently bypass the cache and the view stub ignores `max_age`. | Add deterministic engine tests with a controllable clock and scan-call count for reuse, expiry, and forced re-scan. Rename the view-stub `scope` argument to `captured_at`; keep it non-caching. | Tests prove a scan is reused only inside `max_age`, expired snapshots rescan, and `max_age=0` or explicit `captured_at` always rescans. |
+| S8 | Restore payload-health diagnosis. | Payload decode, field walking, decode/drop counters, and payload verdicts are outside the current discovery-and-matching product scope. | Define the report contract, add representative DynamicData fixtures and deterministic positive, negative, and healthy-path tests for each restored check before re-enabling `probe_payload.py` and `typewalk.py`. | Each restored payload-health finding is supported by direct deterministic fixtures, and healthy matching/discovery reports do not depend on payload verdicts. |
+
 ## Execution Order
 
 1. Implement FDD-1, because it makes the existing forward Fast DDS P0 test
@@ -54,7 +64,7 @@ always means the intended thing.
 2. Implement FDD-2 with a minimal fixture and preserved PCAP evidence.
 3. Add HAR-1 through HAR-4 while promoting FDD-3; these prevent timing and
    output parsing defects from being misclassified as interoperability results.
-4. Implement DOC-1 through DOC-3 so real diagnostic limitations are visible to
+4. Implement DOC-1, DOC-2, and DOC-4 so real diagnostic limitations are visible to
    users rather than hidden behind generic findings.
 5. Expand the RxO/type/lifecycle matrix only after the P0 controls are reliable.
 

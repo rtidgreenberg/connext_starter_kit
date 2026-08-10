@@ -52,7 +52,6 @@ determines which checks exist and where they surface.
 | 2 | SEDP endpoint discovery — reliable RTPS builtin endpoints | Usually works if rung 1 did; more moving parts | Participant visible, no topics under it |
 | 3 | Type resolution — TypeInformation + TypeLookup Service | **Weakest link** | Topic and type *name* visible, `type` empty |
 | 4 | QoS matching (RxO) | Well-specified, cleanly diagnosable | Reader never matches |
-| 5 | Payload decode — XCDR1/2, extensibility | Cleanly diagnosable via status reasons | Matched, samples lost or rejected |
 
 The dominant cross-vendor case is **rung 2 without rung 3**: you see `topic_name`
 and `type_name` because those are plain SEDP strings, but you can't build a
@@ -121,7 +120,7 @@ tools/rti_doctor/
     records.py               # ParticipantRecord, EndpointRecord, type_state
     vendors.py               # vendor id table + per-vendor advisory notes (data)
     findings.py              # Finding, Severity, rung ordering, verdict rollup
-    typewalk.py              # recursive DynamicType/DynamicData traversal
+    typewalk.py              # deferred payload-health traversal (backlog S8)
     probe.py                 # reader lifecycle + status sampling
     report.py                # text / JSON / Textual rendering
     checks/
@@ -130,7 +129,7 @@ tools/rti_doctor/
       static_discovery.py    # rung 2: vendor, locators, transport, security
       type_compat.py         # rung 3: type state, names, assignability, IDL
       probe_match.py         # rung 4: matching and QoS
-      probe_payload.py       # rung 5: decode + field walk
+      probe_payload.py       # deferred payload-health checks (backlog S8)
     views/
       participants.py        # participant list + blind-spot pane
       endpoints.py           # endpoint list per participant
@@ -193,14 +192,13 @@ Domain 1 — 4 participants   [!] 1 blind-spot warning
 - Endpoint screen adds `Type` (`resolved` / `pending` / `unavailable`) and
   `Health` columns to `Topic Name` / `Kind`.
 - `d` on a participant → rung 0–3 findings plus an endpoint rollup, no probing
-  (keeps a keypress cheap). `d` on an endpoint → full rung 0–5 report including
-  the live probe.
+  (keeps a keypress cheap). `d` on an endpoint → targeted discovery and
+  matching diagnosis through rung 4.
 - `D` → sweep screen: probe every discovered writer, verdict table sorted by
   severity. The "I don't know which topic is broken" entry point.
 - `s` → save the current report as a shareable plain-text file (see below).
-- Report screen streams: static findings render immediately, probe findings fill
-  in as the timeout elapses, with a visible progress line. Opens with one verdict:
-  `VERDICT: matched, samples arriving, payload PARTIAL (2 of 41 members unreadable)`
+- Report screen renders static discovery and matching findings immediately, with
+   a visible progress line only while an explicit matching probe is running.
 
 CLI:
 
@@ -232,9 +230,9 @@ Domain        1
 Scope         topic 'SensorData'      # or 'all writers (7)'
 
 --------------------------------------------------------------------------------
-VERDICT
+DIAGNOSIS
 --------------------------------------------------------------------------------
-matched, samples arriving, payload PARTIAL (2 of 41 members unreadable)
+matched; no active discovery or QoS incompatibility found
 
 --------------------------------------------------------------------------------
 PEER
@@ -249,15 +247,6 @@ Type state    RESOLVED (via TypeLookup, 1.4s after discovery)
 --------------------------------------------------------------------------------
 FINDINGS  (3 ERROR, 1 WARN, 2 INFO)
 --------------------------------------------------------------------------------
-[ERROR] rung 5  payload.partial
-  Observed     2 of 41 members could not be read:
-                 header.timestamp.nanos
-                 readings[3].quality
-  Root cause   Writer offers XCDR2 only; reader negotiated XCDR1 for this
-               APPENDABLE struct, so trailing members fall outside the
-               serialized extent.
-  Remedy       Add XCDR2 to the reader's DataRepresentationQosPolicy, or
-               rebuild the writer's type as FINAL.
   Evidence     writer.representation=[XCDR2]  reader.representation=[XCDR1]
                extensibility=APPENDABLE
   Reference    <doc link>
@@ -397,26 +386,11 @@ SAMPLE_LOST | SAMPLE_REJECTED | SUBSCRIPTION_MATCHED`, plus polling of
 | `match.incompatible_qos` | Exactly which policy blocked it | `requested_incompatible_qos_status.last_policy` + `.policies`, mapped to a plain-English RxO rule |
 | `match.topic_inconsistent` | Local topic definition conflict | `InconsistentTopicStatus.total_count` (Topic-level, not reader-level) |
 
-### Rung 5 — Payload (`checks/probe_payload.py`, `typewalk.py`)
+### Deferred Payload-Health Diagnosis
 
-| id | Detects | Signal |
-|---|---|---|
-| `data.silent` | Matched but nothing arrives | `datareader_protocol_status`: `received_heartbeat_count > 0` with `received_sample_count == 0`; `received_gap_count` |
-| `data.fragmentation` | Large-data / MTU / reassembly failure | `received_fragment_count` rising with flat `reassembled_sample_count`; `dropped_fragment_count`; `sent_nack_fragment_count` |
-| `data.window` | Receive-window / ordering problems | `out_of_range_rejected_sample_count`, `uncommitted_sample_count` |
-| `data.deserialize_failure` | Connext itself could not decode | `sample_lost_status.last_reason & LOST_BY_DESERIALIZATION_FAILURE` / `& LOST_BY_DECODE_FAILURE`; `sample_rejected_status.last_reason & REJECTED_BY_DECODE_FAILURE`; corroborate with `datareader_protocol_status.rejected_sample_count` |
-| `data.cache_drops` | Drops that are policy, not corruption | `datareader_cache_status`: `replaced_dropped_sample_count`, `expired_dropped_sample_count`, `content_filter_dropped_sample_count`, `time_based_filter_dropped_sample_count`, `ownership_dropped_sample_count` |
-| `payload.partial` | A specific member cannot be read | field walk, below |
-
-Where available, statuses are read per matched writer via
-`reader.matched_publication_datareader_protocol_status(handle)`, so one bad peer
-isn't averaged away.
-
-The report keeps four "no data" worlds visibly distinct, because conflating them
-is what makes this class of bug expensive: **not matched** (rung 3/4) vs **matched
-but silent** (writer idle, filtered, or path broken) vs **arriving but dropped**
-(fragmentation, window, resource limits) vs **arriving but undecodable**
-(deserialization/decode failure).
+Payload decode, field walking, decode/drop counters, and payload verdicts are
+not part of the current discovery-and-matching scope. They remain future
+roadmap work in `IMPROVEMENT_BACKLOG.md` item S8.
 
 **The full-deserialization verdict.** "Can the message be fully deserialized" is
 not "did `take()` throw." Walk the resolved `DynamicType`, read every member of a
@@ -529,20 +503,19 @@ specific breaking member.
 ## Phase 6 — Probe Engine
 
 Deliverables: `probe.py` (reader/subscriber lifecycle with guaranteed close,
-diagnostic listener, periodic status snapshots, per-writer protocol status);
-`checks/probe_match.py`; `checks/probe_payload.py`; `typewalk.py`.
+diagnostic listener, periodic status snapshots, per-writer protocol status) and
+`checks/probe_match.py`.
 
 Every status and field access feature-detected so 7.3.x doesn't crash on a
 7.7-only counter; a missing counter yields `INFO` "not available on this Connext
 version" rather than a false negative.
 
-Tests: unit tests for `typewalk` against constructed DynamicData samples (nested,
-sequence, union, optional, enum, string bounds); unit tests for status→finding
-mapping with fake status objects; a leak test asserting readers and subscribers
-close when the report screen is dismissed.
+Tests: unit tests for matching status-to-finding mapping with fake status
+objects; a leak test asserting readers and subscribers close when the report
+screen is dismissed.
 
-Gate: probing a healthy RTI topic yields `VERDICT: ... payload FULL` and leaves no
-open reader behind.
+Gate: a healthy RTI topic reports no active discovery or matching incompatibility
+and leaves no open reader behind.
 
 ## Phase 7 — Sweep Screen And Headless Modes
 

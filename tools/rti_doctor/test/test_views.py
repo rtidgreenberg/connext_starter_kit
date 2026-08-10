@@ -16,7 +16,7 @@ from textual.app import App
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rti_doctor import system_scan  # noqa: E402
+from rti_doctor import findings, system_scan  # noqa: E402
 from rti_doctor.views import system_overview  # noqa: E402
 
 TOPOLOGY = {
@@ -29,6 +29,27 @@ TOPOLOGY = {
 def snapshot(captured_at=1000.0):
   return system_scan.SystemScanSnapshot(
       captured_at=captured_at, topology=TOPOLOGY, issues=())
+
+
+def empty_snapshot_with_error(captured_at=1000.0):
+  issue = system_scan.SystemIssue(
+      key="domain:blind.domain_tag",
+      severity=findings.Severity.ERROR,
+      finding_ids=("blind.domain_tag",),
+  title="Domain tag blocks discovery",
+  observed="The participant has domain tag prod.",
+  root_cause="Tagged and untagged participants do not discover each other.",
+  recommendation="Use the same domain tag on all participants.",
+  topic_name=None,
+  scope="domain",
+  writer_keys=(),
+  reader_keys=(),
+  participant_keys=(),
+  evidence={})
+  topology = dict(TOPOLOGY, participants=0, readers=0, writers=0,
+                  topic_count=0, topics=[])
+  return system_scan.SystemScanSnapshot(
+      captured_at=captured_at, topology=topology, issues=(issue,))
 
 
 class StubRegistry:
@@ -97,6 +118,32 @@ def status_text(screen):
 
 
 class TestRefreshFailureIsVisible(unittest.TestCase):
+
+  def test_empty_domain_with_active_issue_shows_its_error_count(self):
+    """A discovery blind spot is the report, not an empty state."""
+    session = StubSession()
+    active_snapshot = empty_snapshot_with_error()
+    session.system_scan = lambda captured_at=None, max_age=0.0: active_snapshot
+    collected = {}
+
+    async def run():
+      for name, screen in (
+          ("summary", system_overview.SystemOverviewScreen(session)),
+          ("issues", system_overview.IssueListScreen(session, active_snapshot)),
+      ):
+        app = Harness(screen)
+        async with app.run_test() as pilot:
+          await pilot.pause()
+          await app.workers.wait_for_complete()
+          collected[name] = (
+              str(screen.summary.render()) if name == "summary"
+              else status_text(screen))
+
+    asyncio.run(run())
+    self.assertIn("No DDS discovered", collected["summary"])
+    self.assertIn("1 Errors", collected["summary"])
+    self.assertIn("No DDS discovered", collected["issues"])
+    self.assertIn("1 Errors", collected["issues"])
 
   def test_issue_screens_do_not_offer_deep_diagnosis(self):
     for screen_class in (system_overview.IssueListScreen,

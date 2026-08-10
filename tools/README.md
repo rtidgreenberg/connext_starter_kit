@@ -107,7 +107,7 @@ Produces a shareable plain-text report.
 ```bash
 ./tools/rti_doctor/run_rti_doctor.sh                      # interactive TUI
 ./tools/rti_doctor/run_rti_doctor.sh -d 1 -t MyTopic      # headless, one topic
-./tools/rti_doctor/run_rti_doctor.sh -d 1 --all -o out.txt  # sweep the domain
+./tools/rti_doctor/run_rti_doctor.sh -d 1 --system -o out.txt  # assess the system
 ```
 
 See [tools/rti_doctor/README.md](rti_doctor/README.md).

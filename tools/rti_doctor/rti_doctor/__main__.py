@@ -1,4 +1,4 @@
-"""rti_doctor CLI: interactive TUI by default, headless with --topic/--all."""
+"""rti_doctor CLI: interactive TUI by default, headless with --system/--topic."""
 
 import argparse
 import logging
@@ -7,7 +7,7 @@ import sys
 import time
 
 from . import (compat, discovery, domain_scan, engine, paths, records, report,
-               topology, wire)
+               wire)
 
 DEFAULT_SCAN_TIMEOUT = 32.0
 DEFAULT_PROBE_TIMEOUT = 10.0
@@ -75,10 +75,13 @@ def parse_args(argv=None):
                            "non-interactive)")
   parser.add_argument("-t", "--topic", default=None,
                       help="Headless: diagnose one topic and exit")
-  parser.add_argument("--all", action="store_true",
-                      help="Headless: diagnose every discovered writer and exit")
+  parser.add_argument("--system", action="store_true",
+                      help="Headless: assess the DDS system - discovery, topology "
+                           "and local configuration - and exit")
   parser.add_argument("--format", dest="format", choices=("text", "json"),
-                      default="text", help="Headless output format (default: text)")
+                      default="text",
+                      help="Headless output format for --topic (default: text). "
+                           "The system assessment is text only.")
   parser.add_argument("-o", "--output", default=None,
                       help="Write the report to PATH instead of stdout")
   parser.add_argument("--probe-timeout", type=float, default=DEFAULT_PROBE_TIMEOUT,
@@ -124,8 +127,16 @@ def parse_args(argv=None):
                       help="Seconds to wait for --ready-after-participants (default: 15)")
 
   args = parser.parse_args(argv)
-  if args.topic and args.all:
-    parser.error("--topic and --all are mutually exclusive")
+  if args.topic and args.system:
+    parser.error("--topic and --system are mutually exclusive")
+  # The system assessment's renderer is text only, and emitting text to a
+  # consumer that asked for JSON is worse than refusing. Checked against the
+  # dispatch rule rather than --system alone, because a non-tty run with no
+  # --topic reaches the same report - and refusing here beats refusing after a
+  # DomainParticipant has been created.
+  if args.format == "json" and not args.topic and is_headless(args):
+    parser.error("--format json is only available with --topic; the system "
+                 "assessment is a text report")
   if (args.pcap or args.capture_interface) and not args.topic:
     parser.error("--pcap and --capture-interface require --topic")
   if args.ready_after_participants < 0 or args.ready_timeout <= 0:
@@ -146,6 +157,16 @@ def parse_args(argv=None):
   if args.interval <= 0:
     parser.error("--interval must be greater than zero")
   return args
+
+
+def is_headless(args):
+  """Whether this invocation runs a report and exits rather than the TUI.
+
+  `--system` and `--topic` are the two explicit stages; a non-tty stdin means
+  nobody is there to drive the TUI. Without an explicit stage flag a user at a
+  shell has no way to ask for stage one, since a tty would always win.
+  """
+  return bool(args.topic) or bool(args.system) or not sys.stdin.isatty()
 
 
 def resolve_domain_id(domain_arg, scan_timeout=DEFAULT_SCAN_TIMEOUT, do_scan=True):
@@ -391,8 +412,8 @@ def run_headless_topic(session, args):
     if topics:
       print("Discovered topics: " + ", ".join(topics), file=sys.stderr)
     else:
-      print("No topics were discovered at all. Run without --topic to see the "
-            "blind-spot audit.", file=sys.stderr)
+      print("No topics were discovered at all. Run with --system instead of "
+            "--topic for the system assessment.", file=sys.stderr)
     return 2
 
   capture = None
@@ -432,63 +453,34 @@ def run_headless_topic(session, args):
   return 1 if worst >= f.Severity.ERROR else 0
 
 
-def run_headless_all(session, args):
-  """Sweep every writer and emit a summary. Returns a process exit code."""
-  _settle(session, args.settle)
-  time.sleep(max(0.0, args.type_wait))
-  session.registry.expire_type_waits()
+def run_headless_system(session, args):
+  """Stage one: assess the DDS system as a whole and exit.
 
-  rows, _ = session.sweep(probe=not args.no_probe)
-  topology_data = topology.snapshot(
-      session.registry, session.domain_id, session.active_domains,
-      session.domain_scan_ran)
-  if args.format == "json":
-    import json
-    payload = {
-        "unstable_schema": True,
-        "domain_id": session.domain_id,
-        "environment": compat.environment_info(),
-        "topology": topology_data,
-        "writers": [
-            {"topic": row["topic"], "vendor": row["vendor"],
-             "severity": row["severity"], "verdict": row["verdict"],
-             "findings": [{"id": i, "severity": s, "title": t}
-                          for i, s, t in row["findings"]]}
-            for row in rows
-        ],
-    }
-    text = json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n"
-  else:
-    text = report.render_sweep_text(rows, session.domain_id)
-    text += "\n" + "\n".join(report.render_topology_text(topology_data))
+  The rung-0/1 blind-spot audit that leaves no row to click on, plus the
+  system-wide discovery, type and RxO census over everything discovered. It
+  creates no reader and probes nothing, so it stays cheap no matter how large
+  the system is - unlike diagnosing an endpoint, which is the separate,
+  explicitly targeted stage two.
 
-  path = _emit(text, args.output)
-  if path:
-    errors = sum(1 for r in rows if r["severity"] == "ERROR")
-    print(f"Sweep written to {path} ({len(rows)} writer(s), {errors} with ERROR)")
-  return 1 if any(r["severity"] == "ERROR" for r in rows) else 0
-
-
-def run_headless_domain(session, args):
-  """No topic given and not interactive: emit the blind-spot audit."""
+  This is the TUI's scan minus the packet-capture evidence: a capture needs an
+  interface, and choosing one is an interactive prompt.
+  """
   from . import findings as f
 
+  # Type resolution is asynchronous: expire_type_waits only reclassifies a
+  # pending type once --type-wait has elapsed, so scanning before then reports
+  # "still in flight" for a type that never arrives, and exits 0. Both waits go
+  # through _settle rather than time.sleep, because a participant announcing
+  # during the wait is only recorded by polling for it - sleeping through it
+  # produced a report with live endpoints under zero participants.
   _settle(session, args.settle)
-  audit = f.rank(f.suppress(session.diagnose_domain()))
-  data = report.ReportData(
-      domain_id=session.domain_id,
-      scope="domain audit (no topic selected)",
-      all_findings=audit,
-      type_lookup_settings=session.type_lookup_settings,
-      topology=topology.snapshot(session.registry, session.domain_id,
-                 session.active_domains, session.domain_scan_ran),
-  )
-  text = (report.render_json(data) if args.format == "json"
-          else report.render_text(data))
+  _settle(session, args.type_wait)
+  snapshot = session.system_scan()
+  text = report.render_system_text(snapshot, session.domain_id)
   path = _emit(text, args.output)
   if path:
-    print(f"Report written to {path}")
-  worst = max((x.severity for x in f.active(audit)), default=f.Severity.OK)
+    print(f"System report written to {path}")
+  worst = max((issue.severity for issue in snapshot.issues), default=f.Severity.OK)
   return 1 if worst >= f.Severity.ERROR else 0
 
 
@@ -509,7 +501,7 @@ def main(argv=None):
   # defaults. What was actually applied is recorded in every report.
   compliance = compat.set_vendor_xtypes_mask()
 
-  headless = bool(args.topic) or args.all or not sys.stdin.isatty()
+  headless = is_headless(args)
 
   domain_id, active_domains, scanned = resolve_domain_id(
       args.domain,
@@ -534,10 +526,8 @@ def main(argv=None):
   try:
     if args.topic:
       return run_headless_topic(session, args)
-    if args.all:
-      return run_headless_all(session, args)
     if headless:
-      return run_headless_domain(session, args)
+      return run_headless_system(session, args)
 
     from .app import RTIDoctorApp
     _settle(session, min(args.settle, 1.0))

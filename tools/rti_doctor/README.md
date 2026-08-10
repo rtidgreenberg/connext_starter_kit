@@ -75,8 +75,8 @@ scan, so "nothing is here" can become "something is alive, but on domain 5".
 
 ```text
 -d, --domain          DDS domain ID (prompts on startup; 1 when non-interactive)
--t, --topic TOPIC     Headless: diagnose one topic and exit
-    --all             Headless: diagnose every discovered writer and exit
+    --system          Headless: assess the DDS system and exit (stage one)
+-t, --topic TOPIC     Headless: diagnose one topic and exit (stage two)
     --format          text (default) | json
 -o, --output PATH     Write the report to PATH instead of stdout
     --probe-timeout   Seconds to observe a probed reader (default: 10.0)
@@ -98,14 +98,18 @@ scan, so "nothing is here" can become "something is alive, but on domain 5".
           silent (default) | exception | warning | status-local | status-remote | status-all
 ```
 
-Headless examples:
+Headless work is two stages: assess the DDS system, then diagnose one endpoint.
+Stage one is cheap and answers whether the system is visible and healthy at all.
+Stage two is deliberately focused, because a full diagnosis probes, waits for
+type resolution and can start a capture - work that scales linearly with the
+number of writers and should be spent on the one you chose.
 
 ```bash
-# One topic, report to stdout
-./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData
+# Stage one - the system: discovery, topology and our own configuration
+./tools/rti_doctor/run_rti_doctor.sh --domain 1 --system -o system.txt
 
-# Whole domain, saved for a ticket
-./tools/rti_doctor/run_rti_doctor.sh --domain 1 --all -o interop.txt
+# Stage two - one topic, report to stdout
+./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData
 
 # Inspect direct RTPS packet evidence from a saved capture
 ./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData --pcap session.pcapng

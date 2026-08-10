@@ -1,51 +1,75 @@
 """Unit tests for the CLI entry points, with a fake Session.
 
-`run_headless_all` and `run_headless_domain` had no test of any kind, and both
-raised NameError on a module-scope import that was never added - after doing the
-whole sweep. These drive them end to end without a participant.
+The headless paths had no test of any kind, and raised NameError on a
+module-scope import that was never added - after doing all the work. These
+drive them end to end without a participant.
 """
 
 import io
 import os
 import sys
+import time
 import unittest
 from contextlib import redirect_stdout
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rti_doctor import __main__ as cli, findings as f, records  # noqa: E402
-from rti_doctor import discovery  # noqa: E402
+from rti_doctor import __main__ as cli, records  # noqa: E402
+from rti_doctor import discovery, engine  # noqa: E402
 
 
 class FakeSession:
-  """Enough Session surface for the headless paths, with no DDS entities."""
+  """Enough Session surface for the headless paths, with no DDS entities.
 
-  def __init__(self, findings=(), writers=()):
-    self.registry = discovery.DiscoveryRegistry()
-    for writer in writers:
-      self.registry.endpoints[writer.key] = writer
+  `system_scan` is the real `engine.Session.system_scan` running over a real
+  registry, not a canned snapshot: a fake that hardcodes the values the exit
+  code is derived from cannot fail when production stops producing them.
+  """
+
+  def __init__(self, endpoints=(), participants=()):
+    self.registry = discovery.DiscoveryRegistry(type_wait=0.0)
+    for participant in participants:
+      self.registry.participants[participant.key] = participant
+    for endpoint in endpoints:
+      self.registry.endpoints[endpoint.key] = endpoint
     self.domain_id = 7
     self.active_domains = set()
     self.domain_scan_ran = False
-    self.type_lookup_settings = {}
+    self.type_lookup_settings = {"request_types_filter": "*"}
     self.participant = object()
-    self._findings = list(findings)
+    # State engine.Session.system_scan reads. Borrowing the real method keeps
+    # the scan's own ordering - expiring type waits before scanning - under
+    # test instead of re-implementing it here.
+    self.own_qos = None
+    self.type_wait = 0.0
+    self.discovery_capture = None
+    self._last_scan = None
+    self._fastdds_product_versions = ()
 
-  def diagnose_domain(self):
-    return list(self._findings)
+  def system_scan(self, captured_at=None, max_age=0.0):
+    return engine.Session.system_scan(self, captured_at=captured_at,
+                                      max_age=max_age)
 
-  def sweep(self, progress=None, probe=True):
-    from rti_doctor import report
-    rows = []
-    for writer in self.registry.writers():
-      data = report.ReportData(domain_id=self.domain_id,
-                               scope=f"topic '{writer.topic_name}'",
-                               all_findings=list(self._findings), endpoint=writer)
-      rows.append({"topic": writer.topic_name, "vendor": writer.vendor_name,
-                   "severity": "OK", "verdict": data.verdict, "findings": [],
-                   "report": data})
-    return rows, []
+
+class Policy:
+  def __init__(self, kind):
+    self.kind = kind
+
+
+def incompatible_pair():
+  """A live writer/reader pair that can never match: BEST_EFFORT vs RELIABLE."""
+  participants = [records.ParticipantRecord(key="p-w", name="writer-app"),
+                  records.ParticipantRecord(key="p-r", name="reader-app")]
+  endpoints = [
+      records.EndpointRecord(key="w1", kind="Writer", participant_key="p-w",
+                             topic_name="Telemetry", type_name="TelemetryType",
+                             reliability=Policy("BEST_EFFORT"), first_seen=1.0),
+      records.EndpointRecord(key="r1", kind="Reader", participant_key="p-r",
+                             topic_name="Telemetry", type_name="TelemetryType",
+                             reliability=Policy("RELIABLE"), first_seen=1.0),
+  ]
+  return endpoints, participants
 
 
 def _args(**overrides):
@@ -64,38 +88,117 @@ class TestHeadlessPaths(unittest.TestCase):
     self.patch.start()
     self.addCleanup(self.patch.stop)
 
-  def test_sweep_runs_to_completion_and_emits_a_report(self):
-    writer = records.EndpointRecord(key="w1", kind="Writer", topic_name="Telemetry")
-    session = FakeSession(writers=[writer])
+  def test_system_assessment_reports_a_real_incompatibility(self):
+    """A system-wide ERROR must reach the report and the exit code.
+
+    --all used to be what a CI job ran to catch this. Stage one has to catch
+    it too, or removing --all would have removed the gate with it.
+    """
+    endpoints, participants = incompatible_pair()
+    session = FakeSession(endpoints=endpoints, participants=participants)
     buffer = io.StringIO()
     with redirect_stdout(buffer):
-      code = cli.run_headless_all(session, _args(format="text"))
-    self.assertEqual(code, 0)
+      code = cli.run_headless_system(session, _args())
+    self.assertEqual(code, 1)
     output = buffer.getvalue()
-    self.assertIn("RTI DOCTOR INTEROP SWEEP", output)
-    self.assertIn("OBSERVED TOPOLOGY", output)
+    self.assertIn("qos.rxo_mismatch", output)
     self.assertIn("Telemetry", output)
 
-  def test_sweep_json_includes_topology(self):
-    import json
-    session = FakeSession(writers=[
-        records.EndpointRecord(key="w1", kind="Writer", topic_name="Telemetry")])
+  def test_system_assessment_of_a_quiet_system_exits_zero(self):
+    session = FakeSession()
     buffer = io.StringIO()
     with redirect_stdout(buffer):
-      cli.run_headless_all(session, _args(format="json"))
-    payload = json.loads(buffer.getvalue())
-    self.assertEqual(payload["topology"]["selected_domain_id"], 7)
-    self.assertEqual(payload["writers"][0]["topic"], "Telemetry")
+      code = cli.run_headless_system(session, _args())
+    self.assertEqual(code, 0)
+    self.assertIn("RTI DOCTOR SYSTEM REPORT", buffer.getvalue())
 
-  def test_domain_audit_runs_to_completion(self):
-    session = FakeSession(findings=[f.Finding(
-        id="blind.empty_domain", rung=f.RUNG_PARTICIPANT, severity=f.Severity.ERROR,
-        title="No participants discovered")])
-    buffer = io.StringIO()
-    with redirect_stdout(buffer):
-      code = cli.run_headless_domain(session, _args())
-    self.assertEqual(code, 1)  # an ERROR must reach the exit code
-    self.assertIn("blind.empty_domain", buffer.getvalue())
+  def test_system_assessment_waits_out_type_resolution(self):
+    """A type that never resolves must not be reported as still in flight.
+
+    Type resolution is asynchronous, so scanning before --type-wait has
+    elapsed leaves the endpoint PENDING and the run exits 0 on a writer whose
+    schema never arrives. The wait goes through _settle rather than
+    time.sleep, because a participant announcing during it is only recorded by
+    polling for it.
+    """
+    participants = [records.ParticipantRecord(key="p-w")]
+    endpoints = [records.EndpointRecord(
+        key="w1", kind="Writer", participant_key="p-w", topic_name="Telemetry",
+        type_name="TelemetryType", first_seen=time.monotonic())]
+    session = FakeSession(endpoints=endpoints, participants=participants)
+    session.registry.type_wait = session.type_wait = 0.05
+
+    waits = []
+
+    def polling_settle(session, seconds):
+      waits.append(seconds)
+      time.sleep(seconds)
+
+    with mock.patch.object(cli, "_settle", polling_settle):
+      with redirect_stdout(io.StringIO()):
+        cli.run_headless_system(session, cli.parse_args(
+            ["--domain", "7", "--settle", "0", "--type-wait", "0.05"]))
+    self.assertEqual(waits, [0.0, 0.05])
+    self.assertEqual(session.registry.endpoints["w1"].type_state,
+                     records.TYPE_UNAVAILABLE)
+
+  def test_system_assessment_does_not_diagnose_each_endpoint(self):
+    """The point of removing --all: assessment must not scale per endpoint.
+
+    diagnose_endpoint is the expensive path - it probes, waits for types and
+    can start a capture. Stage one must never reach it, however large the
+    system is.
+    """
+    endpoints = [records.EndpointRecord(key=f"w{n}", kind="Writer",
+                                        participant_key="p-w",
+                                        topic_name=f"T{n}", first_seen=1.0)
+                 for n in range(50)]
+    session = FakeSession(endpoints=endpoints,
+                          participants=[records.ParticipantRecord(key="p-w")])
+    session.diagnose_endpoint = lambda *a, **k: self.fail(
+        "system assessment diagnosed an individual endpoint")
+    with redirect_stdout(io.StringIO()):
+      cli.run_headless_system(session, _args())
+
+
+class TestWorkflowFlags(unittest.TestCase):
+  """The two stages must both be reachable from an interactive terminal.
+
+  `--all` was removed, and stage one is otherwise only reachable when stdin is
+  not a tty - so a user at a shell had no way to ask for a system assessment.
+  """
+
+  def test_json_is_refused_for_the_system_assessment(self):
+    # Silently emitting text under --format json is worse than refusing it,
+    # and refusing at parse time beats refusing after a participant exists.
+    for argv in (["-d", "1", "--system", "--format", "json"],
+                 ["-d", "1", "--format", "json"]):  # implicit: non-tty, no topic
+      with self.subTest(argv=argv):
+        with mock.patch.object(sys, "stdin", mock.Mock(isatty=lambda: False)):
+          with self.assertRaises(SystemExit):
+            with redirect_stdout(io.StringIO()), \
+                 mock.patch.object(sys, "stderr", io.StringIO()):
+              cli.parse_args(argv)
+
+  def test_json_is_still_available_for_a_targeted_diagnosis(self):
+    args = cli.parse_args(["-d", "1", "-t", "Telemetry", "--format", "json"])
+    self.assertEqual(args.format, "json")
+
+  def test_the_removed_sweep_flag_is_rejected(self):
+    with self.assertRaises(SystemExit):
+      with redirect_stdout(io.StringIO()), mock.patch.object(sys, "stderr", io.StringIO()):
+        cli.parse_args(["-d", "1", "--all"])
+
+  def test_system_is_headless_even_on_a_terminal(self):
+    with mock.patch.object(sys, "stdin", mock.Mock(isatty=lambda: True)):
+      self.assertTrue(cli.is_headless(cli.parse_args(["-d", "1", "--system"])))
+      self.assertTrue(cli.is_headless(cli.parse_args(["-d", "1", "-t", "T"])))
+      self.assertFalse(cli.is_headless(cli.parse_args(["-d", "1"])))
+
+  def test_system_and_topic_are_mutually_exclusive(self):
+    with self.assertRaises(SystemExit):
+      with redirect_stdout(io.StringIO()), mock.patch.object(sys, "stderr", io.StringIO()):
+        cli.parse_args(["-d", "1", "--system", "-t", "Telemetry"])
 
 
 class TestArgumentValidation(unittest.TestCase):

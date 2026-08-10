@@ -177,45 +177,6 @@ class Session:
         topology=self._topology(), wire_evidence=wire_evidence,
     )
 
-  def sweep(self, progress=None, probe=True):
-    """Diagnose every discovered writer. Returns (rows, reports)."""
-    self.registry.expire_type_waits()
-    writers = sorted(self.registry.writers(), key=lambda e: (e.topic_name, e.key))
-    rows = []
-    reports = []
-
-    for index, writer in enumerate(writers):
-      if progress is not None:
-        try:
-          progress(index, len(writers), writer)
-        except Exception as e:
-          logging.debug(f"[engine] sweep progress callback failed: {e}")
-      data = self.diagnose_endpoint(writer, probe=probe)
-      reports.append(data)
-      rows.append(_sweep_row(data, writer))
-
-    if progress is not None:
-      try:
-        progress(len(writers), len(writers), None)
-      except Exception:
-        pass
-    return rows, reports
-
-
-def _sweep_row(data, writer):
-  from . import findings as f
-  active = f.active(data.findings)
-  worst = max((finding.severity for finding in active), default=f.Severity.OK)
-  return {
-      "topic": writer.topic_name or "(unnamed)",
-      "vendor": writer.vendor_name,
-      "severity": worst.label,
-      "verdict": data.verdict,
-      "findings": [(finding.id, finding.severity.label, finding.title)
-                   for finding in active if finding.is_problem],
-      "report": data,
-  }
-
 
 def health_label(data):
   """Short health string for a table cell."""

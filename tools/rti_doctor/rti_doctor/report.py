@@ -52,12 +52,6 @@ def _wrap(text, indent=15, width=WIDTH):
   return [pad + line for line in lines]
 
 
-def _fit(text, width):
-  """Truncate to `width`, marking it, so two long names never look identical."""
-  text = str(text)
-  return text if len(text) <= width else text[: width - 1] + "~"
-
-
 def _labelled(label, text, indent=15):
   """"  Label   wrapped text..." with the label on the first line."""
   indent = max(indent, len(label) + 3)
@@ -560,37 +554,3 @@ def _jsonable(value):
     return value
   return str(value)
 
-
-# --- Sweep summary -----------------------------------------------------------
-
-def render_sweep_text(rows, domain_id, environment=None, generated_at=None):
-  """One-line-per-writer summary table for --all / the sweep screen."""
-  environment = environment or compat.environment_info()
-  generated_at = generated_at or time.time()
-  stamp = time.strftime("%Y-%m-%d %H:%M:%S %z", time.localtime(generated_at))
-
-  lines = [RULE, "RTI DOCTOR INTEROP SWEEP", RULE,
-           _kv("Generated", stamp),
-           _kv("Command", environment.get("argv", "unknown")),
-           _kv("Host", f"{environment.get('host')}  {environment.get('os')}"),
-           _kv("Connext", f"{environment.get('connext')}"),
-           _kv("Domain", str(domain_id)),
-           _kv("Writers", str(len(rows))),
-           ""]
-
-  lines += _section("SUMMARY")
-  header = f"{'SEV':6} {'TOPIC':32} {'VENDOR':26} VERDICT"
-  lines += [header, "-" * len(header)]
-  for row in rows:
-    lines.append(f"{row['severity']:6} {_fit(row['topic'], 32):32} "
-                 f"{_fit(row['vendor'], 26):26} {row['verdict']}")
-  lines.append("")
-
-  lines += _section("DETAIL")
-  for row in rows:
-    lines.append(f"topic '{row['topic']}' ({row['vendor']})")
-    lines.append(f"  verdict: {row['verdict']}")
-    for finding_id, severity, title in row["findings"]:
-      lines.append(f"  [{severity}] {finding_id}: {title}")
-    lines.append("")
-  return "\n".join(lines) + "\n"

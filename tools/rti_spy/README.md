@@ -138,55 +138,56 @@ skip straight to the domain prompt (still defaults to `1`).
 ## Deploying RTI Spy as a PyInstaller Bundle
 
 The normal launcher remains the easiest way to run `rti_spy` on a development
-machine. The deployment scripts create a compressed PyInstaller folder bundle
-for a compatible Linux target.
+machine. Use these steps to create a compressed PyInstaller folder bundle for a
+compatible Linux target.
 
-For a Connext 7.3 `cp39` RTI Python wheel, install the build prerequisites on
-Debian/Ubuntu:
+1. Install the build prerequisites. For a Connext 7.3 `cp39` RTI Python wheel
+  on Debian/Ubuntu:
 
-```bash
-sudo apt install python3.9 python3.9-venv libpython3.9
-```
+  ```bash
+  sudo apt install python3.9 python3.9-venv libpython3.9
+  ```
 
-Package names vary by distribution. The RTI Python wheels installed with
-Connext are commonly located under
-`$NDDSHOME/resource/python_api/`, for example:
+  Package names vary by distribution.
 
-```text
-$NDDSHOME/resource/python_api/rti_connext_activated-7.3.1-cp39-*.whl
-```
+2. Locate the RTI Python wheel. Wheels installed with Connext are commonly
+  under `$NDDSHOME/resource/python_api/`, for example:
 
-Then prepare the connected build environment. This one-time step needs network
-access to install PyInstaller and the non-RTI Python dependencies:
+  ```text
+  $NDDSHOME/resource/python_api/rti_connext_activated-7.3.1-cp39-*.whl
+  ```
 
-```bash
-./scripts/prepare_rti_spy_bundle_env.sh \
-  --wheel "$NDDSHOME"/resource/python_api/rti_connext_activated-7.3.1-cp39-*.whl
-```
+3. Prepare the connected build environment. This one-time step needs network
+  access to install PyInstaller and non-RTI Python dependencies:
 
-Build the compressed folder bundle without downloading Python packages:
+  ```bash
+  ./scripts/prepare_rti_spy_bundle_env.sh \
+    --wheel "$NDDSHOME"/resource/python_api/rti_connext_activated-7.3.1-cp39-*.whl
+  ```
 
-```bash
-./scripts/build_rti_spy_bundle.sh
-```
+4. Create the deployment package. This reuses the RTI Python wheel recorded
+  during preparation and does not download Python packages:
 
-The build script reuses the RTI Python wheel recorded during preparation. To
-use a different wheel, rerun the preparation step with that wheel.
+  ```bash
+  ./scripts/build_rti_spy_bundle.sh
+  ```
 
-Artifacts are written to `build/rti_spy_bundle/` and include the Connext
-version, Python ABI, and build architecture in their filename.
+  The `.tar.gz` artifact is written to `build/rti_spy_bundle/` and includes
+  the Connext version, Python ABI, and build architecture in its filename. To
+  use a different wheel, rerun the preparation step with that wheel.
 
-Copy the `.tar.gz` to the target, extract it, and run it normally:
+5. Copy the `.tar.gz` to the target, extract it, and run it:
 
-```bash
-tar -xzf rti_spy-*.tar.gz
-./rti_spy/rti_spy --theme textual-light
-```
+  ```bash
+  tar -xzf rti_spy-*.tar.gz
+  ./rti_spy/rti_spy --theme textual-light
+  ```
 
-The target does not need Python, pip, the source repository, or the RTI Python
-wheel. When built from an activated RTI Python wheel, the bundle also does not
-need a separate runtime license installation on the target. It still needs a
-compatible Linux architecture, glibc baseline, and DDS network access.
+  The target does not need Python, pip, the source repository, or the RTI
+  Python wheel. When built from an activated RTI Python wheel, the bundle also
+  does not need a separate runtime license installation on the target. It
+  still needs a compatible Linux architecture, glibc baseline, and DDS network
+  access.
 
 ## Testing
 

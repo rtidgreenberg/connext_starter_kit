@@ -1,7 +1,15 @@
 # RTI Doctor Design Decisions
 
 This log records explicit decisions made while resolving findings from
-`CODE_REVIEW_2026-08-07.md`.
+`CODE_REVIEW_2026-08-07.md`. It records *what was decided and why*, not what has
+been built: implementation status is tracked per finding in
+`CODE_REVIEW_2026-08-07.md`, which carries a Status column and a commit for each
+fix. An entry here staying "Accepted" says nothing about whether it has shipped.
+
+Entries are historical. When a later decision changes an earlier one, the
+earlier entry keeps its original text and gains an **Amendment** line rather
+than being rewritten, so the reasoning that was actually applied at the time
+stays readable.
 
 ## Decision Template
 
@@ -9,6 +17,7 @@ This log records explicit decisions made while resolving findings from
 
 - **Date:** YYYY-MM-DD
 - **Status:** Accepted | Deferred | Superseded
+- **Amendment (date):** (only when a later decision changes this one)
 - **Problem:**
 - **Decision:**
 - **Rationale:**
@@ -43,6 +52,8 @@ This log records explicit decisions made while resolving findings from
 
 - **Date:** 2026-08-10
 - **Status:** Accepted
+- **Extended by:** Q1a, which chooses the shared incomplete-evidence
+	representation this entry's follow-up leaves open.
 - **Problem:** Unreadable PARTITION data collapses into the explicit empty/default
 	partition state and can produce a false `qos.rxo_mismatch` ERROR.
 - **Decision:** Distinguish unreadable partition data from an explicit empty
@@ -63,6 +74,8 @@ This log records explicit decisions made while resolving findings from
 
 - **Date:** 2026-08-10
 - **Status:** Accepted
+- **Extended by:** Q1a, which chooses the shared incomplete-evidence
+	representation this entry's follow-up leaves open.
 - **Problem:** Unreadable PRESENTATION boolean values are treated as explicit
 	`false` offers and can produce a false `qos.rxo_mismatch` ERROR.
 - **Decision:** Compare `coherent_access` and `ordered_access` only when both
@@ -79,10 +92,47 @@ This log records explicit decisions made while resolving findings from
 - **References:** `CODE_REVIEW_2026-08-07.md` Q2; `rti_doctor/checks/qos_match.py`;
 	`test/test_checks.py`.
 
-### C2: `--all` Omits the Domain Audit
+### Q1a: Shared Incomplete-Evidence Representation for QoS
 
 - **Date:** 2026-08-10
 - **Status:** Accepted
+- **Problem:** Q1, Q2 and X4 each defer to "a common incomplete-evidence
+	representation" without choosing one. Every RxO rule that declines on
+	unreadable input returns nothing, so a pair where ten policies were compared
+	and a pair where almost nothing was readable produce identical verdicts.
+- **Decision:** `compare_endpoints` returns `(mismatches, unevaluated)`. Each
+	rule returns either a mismatch dict or an unevaluated record - `{policy,
+	reason}`, distinguished by the `reason` key - and the caller files it. The
+	unevaluated list is carried as `evidence["policies_unevaluated"]` and rendered
+	as a "Not evaluated (...)" sentence on the `observed` line of both
+	`qos.compatible` and `qos.rxo_mismatch`. Every rule participates, not only the
+	policies a finding named.
+- **Rationale:** A channel populated for one policy is worse than none: its
+	absence then certifies that everything else was compared. Reporting on both
+	verdicts matters because a pair can carry a real mismatch and an unread policy
+	at once, and the mismatch must not imply the rest was checked.
+- **Consequences:** A readable value that no ordering applies to is a third
+	outcome, not a gap - a reader requesting PRESENTATION `HIGHEST_OFFERED` matches
+	every writer, so it is recorded as compatible via `reader_accepts_any` rather
+	than as unevaluated. X4's assignability incomplete-evidence result should adopt
+	the same `{policy, reason}` shape when it is done.
+- **Follow-up:** Q4's other half - recording which policies *were* compared, and
+	phrasing the OK line as "N of M policies compared" - is not decided. Q3 and Q5
+	are now disclosed as unevaluated but their verdicts are unchanged and still need
+	decisions.
+- **References:** `CODE_REVIEW_2026-08-07.md` Q1, Q2, Q3, Q4, Q5, X4; Q1, Q2 and
+	X4 decisions; `rti_doctor/checks/qos_match.py`; `test/test_checks.py`.
+
+### C2: `--all` Omits the Domain Audit
+
+- **Date:** 2026-08-10
+- **Status:** Accepted; the deprecation timeline is superseded by S4
+- **Amendment (2026-08-10):** S4 settled the removal timeline this entry left
+	open, in the opposite direction: `--all` is removed outright rather than
+	deprecated and kept for a compatibility release, so no deprecation message is
+	emitted and the Consequences line below no longer applies. Everything else
+	here - the two-stage workflow and the reasoning for it - stands and governs.
+	C2a records the entry point that resulted.
 - **Problem:** `--all` runs a costly full diagnosis for every discovered writer,
 	but omits the system/domain checks that explain discovery failures. This does
 	not scale to systems with hundreds of writers and presents the wrong workflow.
@@ -102,6 +152,41 @@ This log records explicit decisions made while resolving findings from
 	proving that system assessment does not run per-writer diagnostics.
 - **References:** `CODE_REVIEW_2026-08-07.md` C2; `rti_doctor/__main__.py`;
 	`rti_doctor/engine.py`; `test/test_cli.py`.
+
+### C2a: Headless Entry Point for the System Assessment
+
+- **Date:** 2026-08-10
+- **Status:** Accepted
+- **Problem:** C2 left "define the system-level output contract and
+	targeted-selection UX" open, and S4 removed `--all`. The headless system report
+	was selected only by a non-tty stdin, so with `--all` gone a user at a terminal
+	had no way to ask for stage one at all: a tty always won and launched the TUI.
+	The workflow C2 chose was therefore unreachable as documented.
+- **Decision:** Add an explicit `--system` flag for stage one. It runs the same
+	passive scan the TUI shows - the rung-0/1 blind-spot audit plus the system-wide
+	discovery, type and RxO census - creating no reader and probing nothing. Name
+	the dispatch rule `is_headless()` and use it in both `parse_args` and `main`, so
+	the two cannot disagree about which mode an invocation is in. Stage one is a
+	text report; `--format json` applies only to `--topic` and is refused at parse
+	time on the system path.
+- **Rationale:** The two stages must both be nameable, not inferred from whether
+	stdin happens to be a terminal. Stage one must be the full passive census
+	rather than the blind-spot audit alone, because `--all` was what a CI job ran to
+	catch a system-wide RxO or type failure - assessing only rung 0/1 would have
+	removed that gate along with the flag. Refusing JSON beats emitting text to a
+	consumer that asked for JSON.
+- **Consequences:** `rti_doctor -d N --format json` with no `--topic` now exits
+	2 with an explanation instead of producing output. Stage one has no
+	machine-readable form; H1 removes `--format json` entirely, so this is a
+	narrowing of a surface already scheduled for removal. The system report carries
+	the RTI_DOCTOR OWN CONFIGURATION section, so every report still states how the
+	measurement was made.
+- **Follow-up:** If a machine-readable system contract is ever wanted, decide it
+	deliberately rather than reviving `--format json`. Stage one waits `--settle`
+	and then `--type-wait` before scanning, both through the polling helper; revisit
+	if that startup cost becomes a problem in CI.
+- **References:** `CODE_REVIEW_2026-08-07.md` C2, S4; C2 and S4 decisions;
+	`rti_doctor/__main__.py`; `test/test_cli.py`.
 
 ### X1: Local Multicast Defaults Check Is Not a System Diagnostic
 
@@ -130,6 +215,8 @@ This log records explicit decisions made while resolving findings from
 
 - **Date:** 2026-08-10
 - **Status:** Accepted
+- **Extended by:** X2a, which defines the replacement causal-link
+	representation this entry's follow-up leaves open.
 - **Problem:** Suppression matches only on finding ID across the whole system, so
 	one ERROR can remove unrelated symptoms from active findings and counts.
 - **Decision:** Remove automatic suppression. Keep causal relationships as
@@ -146,6 +233,35 @@ This log records explicit decisions made while resolving findings from
 	regression coverage that all findings remain active.
 - **References:** `CODE_REVIEW_2026-08-07.md` X2; `rti_doctor/findings.py`;
 	`rti_doctor/system_scan.py`; `rti_doctor/report.py`; `test/test_findings.py`.
+
+### X2a: Causal Link Representation
+
+- **Date:** 2026-08-10
+- **Status:** Accepted
+- **Problem:** X2 decided to keep causal relationships "as report context or
+	links" without defining what replaces `suppressed_by`.
+- **Decision:** `SUPPRESSION_RULES` becomes `CAUSAL_EXPLAINERS`, and
+	`link_causes()` sets `Finding.explained_by` to the ids present in the same run
+	that would explain that finding. `SystemIssue` carries the same field.
+	Renderers print a "Likely explained by" line that states the link is by finding
+	id alone and should be confirmed before acting on it. Nothing filters on the
+	field.
+- **Rationale:** The reader needs the hypothesis and the fact side by side. The
+	caveat is part of the representation, not decoration: the link is unscoped, so
+	it can point at a condition on another topic, and saying so is what makes an
+	unscoped link safe to publish.
+- **Consequences:** The ERROR-severity gate on explainers is dropped - it
+	existed to justify hiding a finding, and nothing is hidden now, so a WARN cause
+	is worth naming. The `active`/`suppressed` split, both SUPPRESSED report
+	sections and `ReportData.blind_spot_findings` are gone. The JSON report's
+	per-finding `suppressed_by` string becomes `explained_by`, a list.
+- **Follow-up:** `CAUSAL_EXPLAINERS` membership is now an editorial judgement
+	about what to *suggest* rather than what to hide, so entries should be reviewed
+	against that lower bar; an unattributable topic-wide finding still must not be
+	offered as the cause of a pair-scoped symptom.
+- **References:** `CODE_REVIEW_2026-08-07.md` X2, X1; X2 decision;
+	`rti_doctor/findings.py`; `rti_doctor/report.py`; `rti_doctor/system_scan.py`;
+	`test/test_findings.py`.
 
 ### X3: Reader Type Failures Are Reported as Writer Failures
 
@@ -171,6 +287,8 @@ This log records explicit decisions made while resolving findings from
 
 - **Date:** 2026-08-10
 - **Status:** Accepted
+- **Extended by:** Q1a, which chooses the incomplete-evidence shape this
+	entry's follow-up defers. X4 itself is not implemented.
 - **Problem:** Assignability reporting labels only successfully evaluated readers
 	as resolved and returns no finding when all resolved readers are unevaluable.
 	This can present partial structural validation as a complete all-clear.

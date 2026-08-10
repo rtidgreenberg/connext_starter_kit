@@ -81,6 +81,33 @@ class DiscoveryObservation:
 OCCURRENCE_SEPARATOR = ","
 
 
+#: The single ordered discovery-column layout: one (tshark field, observation
+#: attribute) pair per column, in the order tshark emits them. The capture
+#: command's ``-e`` list and the parser's positional mapping are both built
+#: from this, because maintaining them as two independent lists let a field be
+#: added to one and not the other, shifting every column after it.
+#:
+#: Field names must stay unique. tshark emits one column per ``-e`` argument
+#: even when a name repeats - the earlier duplicate column is simply blank and
+#: the value lands in the later one - so a repeated name costs a column that
+#: carries nothing while shifting every real value one slot right of where the
+#: parser expects it. That is the defect this layout exists to prevent.
+DISCOVERY_FIELDS = (
+    ("rtps.guidPrefix.src", "guid_prefix"),
+    ("rtps.vendorId", "vendor_id"),
+    ("rtps.param.product_version.major", "product_version_major"),
+    ("rtps.param.product_version.minor", "product_version_minor"),
+    ("rtps.param.product_version.release", "product_version_release"),
+    ("rtps.param.product_version.revision", "product_version_revision"),
+    ("rtps.sm.wrEntityId", "writer_entity_id"),
+    ("rtps.sm.rdEntityId", "reader_entity_id"),
+    ("rtps.param.builtin_endpoint_set", "builtin_endpoint_set"),
+    ("rtps.param.topicName", "topic_name"),
+    ("rtps.param.typeName", "type_name"),
+    ("rtps.reliability_kind", "reliability_kind"),
+)
+
+
 def parse_tshark_fields(line):
   """Parse one tab-separated RTPS record from the tshark capture command."""
   fields = line.rstrip("\r\n").split("\t")
@@ -114,16 +141,15 @@ def _hex_bytes(value):
   return len(digits) // 2
 
 def parse_discovery_fields(line):
-  """Parse RTPS discovery metadata emitted by tshark's fields formatter."""
+  """Parse RTPS discovery metadata emitted by tshark's fields formatter.
+
+  Columns are assigned by position from ``DISCOVERY_FIELDS``, the same layout
+  that builds the capture command, so the two cannot drift apart.
+  """
   fields = line.rstrip("\r\n").split("\t")
-  fields += [""] * (12 - len(fields))
-  return DiscoveryObservation(
-      guid_prefix=fields[0], vendor_id=fields[1],
-      product_version_major=fields[2], product_version_minor=fields[3],
-      product_version_release=fields[4], product_version_revision=fields[5],
-      writer_entity_id=fields[6], reader_entity_id=fields[7],
-      builtin_endpoint_set=fields[8], topic_name=fields[9],
-      type_name=fields[10], reliability_kind=fields[11])
+  fields += [""] * (len(DISCOVERY_FIELDS) - len(fields))
+  return DiscoveryObservation(**{attribute: fields[index]
+                                 for index, (_, attribute) in enumerate(DISCOVERY_FIELDS)})
 
 
 def _fastdds_product_versions(observation):
@@ -403,16 +429,9 @@ def inspect_discovery_pcap(path, tshark_path=None, capture_filter=None):
       "-Y", "rtps.param.builtin_endpoint_set or rtps.param.topicName",
       "-T", "fields", "-E", "occurrence=a", "-E",
       f"aggregator={OCCURRENCE_SEPARATOR}",
-      "-e", "rtps.guidPrefix.src", "-e", "rtps.sm.wrEntityId",
-      "-e", "rtps.vendorId",
-      "-e", "rtps.param.product_version.major",
-      "-e", "rtps.param.product_version.minor",
-      "-e", "rtps.param.product_version.release",
-      "-e", "rtps.param.product_version.revision",
-      "-e", "rtps.sm.wrEntityId", "-e", "rtps.sm.rdEntityId",
-      "-e", "rtps.param.builtin_endpoint_set", "-e", "rtps.param.topicName",
-      "-e", "rtps.param.typeName", "-e", "rtps.reliability_kind",
   ]
+  for field, _ in DISCOVERY_FIELDS:
+    command += ["-e", field]
   try:
     completed = subprocess.run(command, text=True, capture_output=True,
                                check=False, timeout=TSHARK_READ_TIMEOUT)

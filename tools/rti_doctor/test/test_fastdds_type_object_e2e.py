@@ -23,6 +23,7 @@ FASTDDS_IMAGE = os.environ.get("RTI_DOCTOR_FASTDDS_IMAGE",
                                "rti-doctor-fastdds-e2e:3.6.2")
 
 sys.path.insert(0, TOOL_DIR)
+from rti_doctor import paths  # noqa: E402
 
 # domains lives beside this file. Without this the import resolved only when
 # some OTHER test module had already put the test directory on sys.path,
@@ -63,7 +64,7 @@ class TestFastDdsTypeObjectInterop(unittest.TestCase):
     domain = _domain()
     topic = f"DoctorFastDdsTypeObject_{uuid.uuid4().hex}"
     registry = discovery.DiscoveryRegistry(type_wait=10.0)
-    output_root = os.path.join(TOOL_DIR, "..", "..", "test_output")
+    output_root = paths.TEST_OUTPUT_ROOT
     control_dir = tempfile.mkdtemp(prefix="rti_doctor_fastdds_type_object_",
                                    dir=output_root)
     start_file = os.path.join(control_dir, "start")

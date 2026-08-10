@@ -20,10 +20,12 @@ import uuid
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL_DIR = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
+sys.path.insert(0, TOOL_DIR)
 
 import doctor_e2e  # noqa: E402
 
 import domains  # noqa: E402
+from rti_doctor import paths  # noqa: E402
 
 VENDORS = os.path.join(HERE, "vendors")
 CONNEXT = os.path.join(VENDORS, "rxo_connext_matrix.py")
@@ -33,7 +35,7 @@ FASTDDS_IMAGE = os.environ.get("RTI_DOCTOR_FASTDDS_IMAGE",
                                "rti-doctor-fastdds-e2e:3.6.2")
 RELIABILITY_SCENARIO = "reliability"
 DURABILITY_SCENARIO = "durability"
-OUTPUT_ROOT = os.path.join(TOOL_DIR, "..", "..", "test_output")
+OUTPUT_ROOT = paths.TEST_OUTPUT_ROOT
 ARTIFACT_ROOT = os.path.join(OUTPUT_ROOT, "rti_doctor_faults")
 
 

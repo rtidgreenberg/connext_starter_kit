@@ -5,10 +5,9 @@ a report that differs depending on how it was invoked would be worthless.
 """
 
 import logging
-import os
 import time
 
-from . import checks, probe as probe_mod, report, system_scan, topology, vendors, wire
+from . import checks, paths, probe as probe_mod, report, system_scan, topology, vendors, wire
 from .checks import CheckContext
 
 
@@ -137,8 +136,9 @@ class Session:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         capture = wire.LiveCapture(
             capture_interface,
-            os.path.join("test_output", "rti_doctor_captures",
-                         f"rti_doctor_domain{self.domain_id}_{timestamp}.pcapng"),
+          paths.test_output_path(
+            "rti_doctor_captures",
+            f"rti_doctor_domain{self.domain_id}_{timestamp}.pcapng"),
             wire.capture_filter(self.domain_id, endpoint, self.own_qos),
             writer_entity_id=(wire.endpoint_entity_id(endpoint)
                               if endpoint.is_writer else None),

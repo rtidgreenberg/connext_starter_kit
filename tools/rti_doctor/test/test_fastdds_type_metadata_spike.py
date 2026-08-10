@@ -16,6 +16,7 @@ FASTDDS_IMAGE = os.environ.get("RTI_DOCTOR_FASTDDS_IMAGE",
                                "rti-doctor-fastdds-e2e:3.6.2")
 
 sys.path.insert(0, TOOL_DIR)
+from rti_doctor import paths  # noqa: E402
 
 # domains lives beside this file. Without this the import resolved only when
 # some OTHER test module had already put the test directory on sys.path,
@@ -56,7 +57,7 @@ class TestFastDdsTypeMetadataSpike(unittest.TestCase):
     domain = _domain()
     topic = f"DoctorFastDdsMetadata{type_metadata}_{uuid.uuid4().hex}"
     registry = discovery.DiscoveryRegistry(type_wait=6.0)
-    output_root = os.path.join(TOOL_DIR, "..", "..", "test_output")
+    output_root = paths.TEST_OUTPUT_ROOT
     os.makedirs(output_root, exist_ok=True)
     artifact_dir = tempfile.mkdtemp(prefix="rti_doctor_fastdds_metadata_",
                                     dir=output_root)

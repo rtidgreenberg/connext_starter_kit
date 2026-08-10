@@ -9,8 +9,18 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rti_doctor import wire  # noqa: E402
+from rti_doctor import paths, wire  # noqa: E402
 from rti_doctor import report  # noqa: E402
+
+
+class TestOutputPaths(unittest.TestCase):
+
+  def test_output_root_is_anchored_to_rti_doctor(self):
+    expected = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "test_output"))
+    with mock.patch("os.getcwd", return_value="/unrelated/working/directory"):
+      actual = paths.test_output_path("rti_doctor_captures", "capture.pcapng")
+    self.assertEqual(
+        actual, os.path.join(expected, "rti_doctor_captures", "capture.pcapng"))
 
 
 class TestTsharkFields(unittest.TestCase):

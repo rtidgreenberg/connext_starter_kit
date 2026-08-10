@@ -110,13 +110,14 @@ Headless examples:
 # Inspect direct RTPS packet evidence from a saved capture
 ./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData --pcap session.pcapng
 
-# Capture during one topic probe (writes test_output/rti_doctor_captures/*.pcapng)
+# Capture during one topic probe (writes tools/rti_doctor/test_output/rti_doctor_captures/*.pcapng)
 ./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData --capture-interface lo
 
 # Preserve native Connext discovery/TypeLookup diagnostics for later parsing.
 # status-all includes the Fast DDS TypeInformation deserialization failure.
 ./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData --no-probe \
-  --connext-log test_output/rti_doctor_connext.log --connext-verbosity status-all
+  --connext-log tools/rti_doctor/test_output/rti_doctor_connext.log \
+  --connext-verbosity status-all
 ```
 
 Exit status is `1` when any ERROR-severity finding survives, `0` otherwise, and
@@ -341,7 +342,8 @@ PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
 ```
 
 Set `RTI_DOCTOR_TEST_CAPTURE_INTERFACE` when `any` is not the interface that
-observes your DDS traffic. Test PCAPNG files remain under `test_output/`.
+observes your DDS traffic. All RTI Doctor test artifacts remain under
+`tools/rti_doctor/test_output/`.
 
 RxO data-flow tests construct all diagnosed requested/offered mismatches
 (reliability, durability, liveliness kind and lease, destination order,

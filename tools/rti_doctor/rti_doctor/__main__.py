@@ -6,7 +6,7 @@ import os
 import sys
 import time
 
-from . import (compat, discovery, domain_scan, engine, records, report,
+from . import (compat, discovery, domain_scan, engine, paths, records, report,
                topology, wire)
 
 DEFAULT_SCAN_TIMEOUT = 32.0
@@ -306,8 +306,9 @@ def start_discovery_capture(session, interface):
   placeholder = type("CaptureEndpoint", (), {"unicast_locators": ()})()
   capture = wire.LiveCapture(
       interface,
-      os.path.join("test_output", "rti_doctor_captures",
-                   f"rti_doctor_discovery_domain{session.domain_id}_{timestamp}.pcapng"),
+      paths.test_output_path(
+        "rti_doctor_captures",
+        f"rti_doctor_discovery_domain{session.domain_id}_{timestamp}.pcapng"),
       wire.capture_filter(session.domain_id, placeholder, session.own_qos))
   capture.start()
   session.discovery_capture = capture
@@ -397,8 +398,8 @@ def run_headless_topic(session, args):
   capture = None
   if args.capture_interface:
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    capture_path = os.path.join(
-        "test_output", "rti_doctor_captures",
+    capture_path = paths.test_output_path(
+      "rti_doctor_captures",
         f"rti_doctor_domain{session.domain_id}_{timestamp}.pcapng")
     capture = wire.LiveCapture(
       args.capture_interface, capture_path,

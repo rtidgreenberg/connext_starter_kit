@@ -221,6 +221,10 @@ class ReplayTabController:
         return self._last_selection
 
     @property
+    def process_manager(self):
+        return self._process_manager
+
+    @property
     def last_monitoring_updates(self) -> Tuple[MonitoringSnapshot, ...]:
         return self._last_monitoring_updates
 
@@ -547,10 +551,12 @@ class ReplayTabController:
                 service = discovered
                 self._config = replace(self._config, service=discovered)
         self._latest_monitoring = monitoring_snapshots_for_service(self._latest_monitoring_by_service, service)
-        readiness = await self._readiness(service)
-        self._last_readiness = readiness
+        # Resolve candidates before the readiness check: it needs to know whether
+        # any process is still alive, and neither step depends on readiness.
         runtime_targets = self._runtime_targets(service, self._latest_monitoring)
         targets = self._targets_with_overrides(runtime_targets + self._targets)
+        readiness = await self._readiness(service, self._last_selection.candidates)
+        self._last_readiness = readiness
         view = build_replay_tab_view_model(
             targets=targets,
             selected_target_id=self._config.selected_target_id,
@@ -590,8 +596,12 @@ class ReplayTabController:
             monitoring_domain_id=self._config.launch_monitoring_domain_id,
         )
 
-    async def _readiness(self, service: ServiceInstanceRef) -> Optional[AdminReadiness]:
-        return await readiness_for_service(self._admin_facade, service, self._clock)
+    async def _readiness(
+            self,
+            service: ServiceInstanceRef,
+            candidates: Iterable[ServiceProcessCandidate] = (),
+    ) -> Optional[AdminReadiness]:
+        return await readiness_for_service(self._admin_facade, service, self._clock, candidates)
 
     async def _wait_for_local_shutdown_exit(self, selected: ServiceProcessCandidate) -> bool:
         return await wait_for_local_shutdown_exit(

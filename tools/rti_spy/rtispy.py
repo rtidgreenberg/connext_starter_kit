@@ -1403,7 +1403,14 @@ def main():
   parser.add_argument("--debug-log", default=os.environ.get("RTI_SPY_DEBUG_LOG"), help="Optional path for discovery/subscription log output")
   parser.add_argument("--scan-timeout", type=float, default=32.0, help="Seconds to listen for default domain announcements before prompting for a domain (default: 32.0, just over the 30s default announcement period)")
   parser.add_argument("--no-domain-scan", action="store_true", help="Skip scanning for active domains before prompting")
+  parser.add_argument("--theme", help="Initial Textual theme name (for example: textual-light)")
   args = parser.parse_args()
+  if args.theme:
+    available_themes = RTISPY(None).available_themes
+    if args.theme not in available_themes:
+      parser.error(
+          f"unknown theme '{args.theme}'. Available themes: {', '.join(sorted(available_themes))}"
+      )
   domain_id = resolve_domain_id(args.domain, scan_timeout=args.scan_timeout, do_scan=not args.no_domain_scan)
 
   configure_rti_environment()
@@ -1411,6 +1418,8 @@ def main():
   participant = create_participant(domain_id, name="RTI SPY")
 
   app = RTISPY(participant, interval=args.interval)
+  if args.theme:
+    app.theme = args.theme
   app.run()
 
 if __name__ == "__main__":

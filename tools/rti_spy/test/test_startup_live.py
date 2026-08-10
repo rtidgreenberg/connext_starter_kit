@@ -73,6 +73,39 @@ class TestRtiSpyStartupLive(unittest.TestCase):
         finally:
             sys.argv = original_argv
 
+    def test_main_applies_requested_theme_before_startup(self):
+        original_argv = sys.argv[:]
+
+        class FakeParticipant:
+            def close(self):
+                return None
+
+        def fake_run(app_self, *args, **kwargs):
+            self.assertEqual(app_self.theme, "textual-light")
+            app_self.participant.close()
+
+        try:
+            sys.argv = ["rtispy.py", "--domain", "1", "--theme", "textual-light"]
+            with patch.object(rtispy, "create_participant", return_value=FakeParticipant()), \
+                 patch.object(rtispy, "configure_rti_environment"), \
+                 patch.object(rtispy, "configure_logging"), \
+                 patch.object(rtispy.RTISPY, "run", autospec=True, side_effect=fake_run):
+                rtispy.main()
+        finally:
+            sys.argv = original_argv
+
+    def test_main_rejects_unknown_theme_before_creating_participant(self):
+        original_argv = sys.argv[:]
+        try:
+            sys.argv = ["rtispy.py", "--domain", "1", "--theme", "not-a-theme"]
+            with patch.object(rtispy, "create_participant") as create_participant:
+                with self.assertRaises(SystemExit) as error:
+                    rtispy.main()
+            self.assertEqual(error.exception.code, 2)
+            create_participant.assert_not_called()
+        finally:
+            sys.argv = original_argv
+
     def test_launcher_reaches_running_state_without_domainparticipant_failure(self):
         # See note above: keep domain IDs <= 232 to avoid port wraparound.
         domain_id = random.randint(78, 154)

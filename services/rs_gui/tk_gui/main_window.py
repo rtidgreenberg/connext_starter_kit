@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+import threading
+from dataclasses import dataclass, field
 from typing import Callable, Optional, Tuple, TYPE_CHECKING
+
+from app_core.debug_log import dbg, dbg_exc
 
 from .refresh import TkRefreshBridge
 from .tabs import RecordTabAdapter, ReplayTabAdapter, TkRecordTab, TkReplayTab
@@ -12,6 +16,22 @@ from .theme import DARK_THEME
 if TYPE_CHECKING:
     from app_core import AppCommand
     from gui import ShellViewModel
+
+
+DEFAULT_CLOSE_WATCHDOG_SEC = 15.0
+CLOSE_WATCHDOG_ENV = "RS_GUI_CLOSE_WATCHDOG_SEC"
+
+
+def default_close_watchdog_sec() -> float:
+    """Return the close watchdog deadline, honoring `RS_GUI_CLOSE_WATCHDOG_SEC`."""
+
+    raw = os.environ.get(CLOSE_WATCHDOG_ENV, "").strip()
+    if not raw:
+        return DEFAULT_CLOSE_WATCHDOG_SEC
+    try:
+        return float(raw)
+    except ValueError:
+        return DEFAULT_CLOSE_WATCHDOG_SEC
 
 
 class TkinterUnavailable(RuntimeError):
@@ -108,6 +128,10 @@ class TkPlaceholderWindow:
     refresh_interval_ms: int = 250
     record_tab_adapter: Optional[RecordTabAdapter] = None
     replay_tab_adapter: Optional[ReplayTabAdapter] = None
+    # Last-resort hook invoked from a watchdog thread when `close_handler` wedges
+    # inside a non-cancellable native call. Receives the elapsed deadline.
+    force_close_handler: Optional[Callable[[float], None]] = None
+    close_watchdog_sec: float = field(default_factory=default_close_watchdog_sec)
 
     def __post_init__(self) -> None:
         tk, ttk = _tk_modules()
@@ -163,6 +187,13 @@ class TkPlaceholderWindow:
 
         self.root = root
         self.notebook = notebook
+        self._closing = False
+        self._destroyed = False
+        self._close_handler_done = False
+        self._close_lock = threading.Lock()
+        # Read by run_tk_session_shell so a cleanup failure surfaces in the exit
+        # code instead of only in the event log.
+        self.close_failed = False
         self._refresh_bridge = None
         if self.view_provider is not None:
             self._refresh_bridge = TkRefreshBridge(
@@ -185,14 +216,106 @@ class TkPlaceholderWindow:
             self._refresh_bridge.start()
 
     def close(self) -> None:
-        if self.close_handler is not None:
-            self.close_handler()
-        self.destroy()
+        """Run operator close policy, then destroy the window no matter what."""
+
+        # A second click on the window close button while teardown is in flight
+        # must not start a second cleanup pass.
+        if self._closing:
+            dbg("tk", "close ignored: already closing")
+            return
+        self._closing = True
+        dbg("tk", "close begin", watchdog_sec=self.close_watchdog_sec)
+
+        # Stop the refresh loop before any cleanup runs so a pending `after`
+        # tick cannot re-enter app-core while its services are being torn down.
+        self._stop_refresh()
+        self._show_closing_state()
+
+        watchdog = self._start_close_watchdog()
+        try:
+            if self.close_handler is not None:
+                self.close_handler()
+        except BaseException:
+            # Tk swallows callback exceptions, which historically left the
+            # window alive and unclosable. Record it and keep going.
+            self.close_failed = True
+            dbg_exc("tk", "close handler failed")
+        finally:
+            # Mark done before cancelling: Timer.cancel() is a no-op once the timer
+            # has already fired, so without this a close that lands near the
+            # deadline would hard-exit even though cleanup had succeeded.
+            with self._close_lock:
+                self._close_handler_done = True
+            if watchdog is not None:
+                watchdog.cancel()
+            self.destroy()
+            dbg("tk", "close end")
 
     def destroy(self) -> None:
-        if self._refresh_bridge is not None:
+        if self._destroyed:
+            return
+        self._destroyed = True
+        self._stop_refresh()
+        try:
+            self.root.destroy()
+        except Exception:
+            dbg_exc("tk", "root destroy failed")
+
+    def _stop_refresh(self) -> None:
+        if self._refresh_bridge is None:
+            return
+        try:
             self._refresh_bridge.stop()
-        self.root.destroy()
+        except Exception:
+            dbg_exc("tk", "refresh bridge stop failed")
+
+    def _show_closing_state(self) -> None:
+        """Paint a shutting-down indication before we block the Tk thread."""
+
+        try:
+            self.status_var.set("Status: shutting down services...")
+            self.root.title(f"{self.workspace_name} - shutting down...")
+            self.root.configure(cursor="watch")
+            self.root.update_idletasks()
+        except Exception:
+            dbg_exc("tk", "closing state render failed")
+
+    def _start_close_watchdog(self) -> Optional[threading.Timer]:
+        """Arm the last-resort exit for a close that wedges in a native call.
+
+        `close_handler` ends up inside blocking Connext calls dispatched to an
+        executor. Those are not cancellable, and `asyncio.run` joins its default
+        executor on the way out, so there is no cooperative way to abandon a
+        stuck teardown. When the deadline passes, the process exits rather than
+        leaving an unclosable window and orphaned services behind.
+        """
+
+        deadline = float(self.close_watchdog_sec)
+        if deadline <= 0:
+            return None
+        timer = threading.Timer(deadline, self._on_close_watchdog, args=(deadline,))
+        timer.daemon = True
+        timer.start()
+        return timer
+
+    def _on_close_watchdog(self, deadline: float) -> None:
+        with self._close_lock:
+            if self._close_handler_done:
+                # Cleanup finished in the gap between the timer firing and
+                # cancel(); there is nothing to force.
+                return
+        dbg("tk", "close watchdog expired", deadline_sec=deadline)
+        if self.force_close_handler is not None:
+            try:
+                self.force_close_handler(deadline)
+            except BaseException:
+                dbg_exc("tk", "force close handler failed")
+        self._exit_process(3)
+
+    def _exit_process(self, code: int) -> None:
+        """Hard-exit hook, overridden in tests."""
+
+        os._exit(code)
 
     def refresh_once(self):
         if self._refresh_bridge is None:

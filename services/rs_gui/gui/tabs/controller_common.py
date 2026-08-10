@@ -14,6 +14,18 @@ from app_core.services import (
 )
 
 
+# Process-level exit states. "stopped"/"shutdown"/"paused" are deliberately absent:
+# those describe the *service*, whose process may still be alive and controllable.
+PROCESS_EXITED_STATES = frozenset({
+    "exited",
+    "start_failed",
+    "terminated",
+    "deleted",
+    "not_alive",
+    "dead",
+})
+
+
 def candidate_display_fields(
         candidate: ServiceProcessCandidate,
         now: float,
@@ -95,7 +107,20 @@ def monitoring_services(
     return tuple(unique.values())
 
 
-async def readiness_for_service(admin_facade, service: ServiceInstanceRef, clock) -> Optional[AdminReadiness]:
+async def readiness_for_service(
+        admin_facade,
+        service: ServiceInstanceRef,
+        clock,
+        candidates: Optional[Iterable[ServiceProcessCandidate]] = None,
+) -> Optional[AdminReadiness]:
+    """Return Service Admin readiness, skipping the round trip for dead processes.
+
+    When every known candidate for `service` has exited, its admin endpoints can
+    never match again. Polling anyway costs a DDS discovery check per refresh
+    frame, forever — the 2026-08-05 replay freeze spent 4m51s doing exactly that
+    against a process that had already exited.
+    """
+
     if not service.name:
         return None
     if admin_facade is None:
@@ -105,7 +130,38 @@ async def readiness_for_service(admin_facade, service: ServiceInstanceRef, clock
             message="Service Admin facade is not configured",
             checked_at=clock(),
         )
+    if candidates is not None and candidates_all_exited(candidates):
+        return AdminReadiness(
+            service=service,
+            status=AdminReadinessStatus.UNAVAILABLE,
+            message="Service process has exited",
+            checked_at=clock(),
+        )
     return await admin_facade.readiness(service)
+
+
+def candidates_all_exited(candidates: Iterable[ServiceProcessCandidate]) -> bool:
+    """True when candidates are known and every one reports a dead process.
+
+    Deliberately conservative on two axes:
+
+    - Returns False when nothing is known yet, so a service that is launching or
+      is about to be discovered externally still gets its readiness check.
+    - Requires both `alive is False` and a process-level exit state. A Replay
+      Service that has been *stopped* keeps a live, admin-reachable process, and
+      monitoring reports its state as "stopped", so state alone is not enough.
+    """
+
+    known = tuple(candidates)
+    if not known:
+        return False
+    for candidate in known:
+        if getattr(candidate, "alive", True):
+            return False
+        state = str(getattr(candidate, "observed_state", "")).strip().lower()
+        if state not in PROCESS_EXITED_STATES:
+            return False
+    return True
 
 
 async def wait_for_local_shutdown_exit(

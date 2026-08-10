@@ -171,9 +171,8 @@ class TestConnextCycloneFaultControls(unittest.TestCase):
     self.assertGreater(reader["results"][scenario]["matched"], 0, reader)
     self.assertGreater(reader["results"][scenario]["samples"], 0, reader)
     findings = report["findings"]
-    active_errors = [item["id"] for item in findings
-             if not item["suppressed_by"] and item["severity"] == "ERROR"]
-    self.assertEqual(active_errors, [], report)
+    errors = [item["id"] for item in findings if item["severity"] == "ERROR"]
+    self.assertEqual(errors, [], report)
     self.assertNotIn("qos.rxo_mismatch", [item["id"] for item in findings], report)
 
   def _assert_rxo_fault(self, writer_script, reader_script, scenario):
@@ -184,7 +183,7 @@ class TestConnextCycloneFaultControls(unittest.TestCase):
     self.assertEqual(writer["results"][scenario]["matched"], 0, writer)
     self.assertEqual(reader["results"][scenario]["matched"], 0, reader)
     self.assertEqual(reader["results"][scenario]["samples"], 0, reader)
-    findings = [item for item in report["findings"] if not item["suppressed_by"]]
+    findings = report["findings"]
     mismatch = [item for item in findings if item["id"] == "qos.rxo_mismatch"]
     self.assertEqual(len(mismatch), 1, report)
     self.assertEqual(mismatch[0]["severity"], "ERROR", mismatch[0])
@@ -364,7 +363,7 @@ class TestConnextFastDdsFaultControls(unittest.TestCase):
   def _assert_healthy(self, writer_vendor):
     doctor, report, writer, reader = self._run_case(writer_vendor, "compatible")
     active_errors = [item["id"] for item in report["findings"]
-                     if not item["suppressed_by"] and item["severity"] == "ERROR"]
+                     if item["severity"] == "ERROR"]
     self.assertEqual(doctor.returncode, 0, f"{doctor.stderr}\n{report}")
     self.assertEqual(active_errors, [], report)
     self.assertGreater(reader["results"]["matched"], 0, reader)
@@ -380,7 +379,7 @@ class TestConnextFastDdsFaultControls(unittest.TestCase):
     self.assertEqual(writer["results"]["matched"], 0, writer)
     self.assertEqual(reader["results"]["matched"], 0, reader)
     self.assertEqual(reader["results"]["samples"], 0, reader)
-    findings = [item for item in report["findings"] if not item["suppressed_by"]]
+    findings = report["findings"]
     mismatch = [item for item in findings if item["id"] == "qos.rxo_mismatch"]
     self.assertEqual(len(mismatch), 1, report)
     self.assertEqual(mismatch[0]["severity"], "ERROR", mismatch[0])
@@ -394,7 +393,7 @@ class TestConnextFastDdsFaultControls(unittest.TestCase):
     self.assertEqual(writer["results"]["matched"], 0, writer)
     self.assertEqual(reader["results"]["matched"], 0, reader)
     self.assertEqual(reader["results"]["samples"], 0, reader)
-    findings = [item for item in report["findings"] if not item["suppressed_by"]]
+    findings = report["findings"]
     self.assertIn("qos.compatible", [item["id"] for item in findings], report)
     self.assertIn("repr.not_advertised", [item["id"] for item in findings], report)
 

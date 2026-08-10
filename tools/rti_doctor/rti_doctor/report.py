@@ -7,8 +7,8 @@ The text file is the primary artifact. Its rules:
   * Fixed section order, so two reports diff cleanly against each other.
   * An environment header, so a recipient needs no follow-up questions.
   * A complete raw counter appendix, so a reader who doubts a finding can check.
-  * Suppressed findings listed by id, so causal ordering hides noise without
-    making anything vanish.
+  * Every finding rendered. A finding whose likely cause is also present says
+    so on a "Likely explained by" line; nothing is filtered out by that guess.
 """
 
 import json
@@ -76,7 +76,8 @@ def system_filename(domain_id, timestamp=None):
   return f"rti_doctor_system_{domain_id}_{stamp}.txt"
 
 
-def render_system_text(snapshot, domain_id, environment=None):
+def render_system_text(snapshot, domain_id, environment=None,
+                       type_lookup_settings=None):
   """Render an immutable system-scan snapshot without refreshing it."""
   environment = environment or compat.environment_info()
   stamp = time.strftime("%Y-%m-%d %H:%M:%S %z", time.localtime(snapshot.captured_at))
@@ -126,12 +127,22 @@ def render_system_text(snapshot, domain_id, environment=None):
     lines += _labelled("Observed", issue.observed)
     lines += _labelled("Root cause", issue.root_cause)
     lines += _labelled("Recommendation", issue.recommendation)
+    # Context, not a filter: this issue is listed and counted regardless.
+    if issue.explained_by:
+      lines += _labelled("Likely explained by",
+                         ", ".join(issue.explained_by) +
+                         " - confirm it applies here before acting on it, "
+                         "since the link is by finding id alone.")
     lines.append("")
-  if snapshot.suppressed_findings:
-    lines += _section("SUPPRESSED FINDINGS")
-    for finding in snapshot.suppressed_findings:
-      lines.append(f"{finding.id} (explained by {finding.suppressed_by})")
-    lines.append("")
+  lines += _section("RTI_DOCTOR OWN CONFIGURATION")
+  lines += ["Settings rti_doctor applied to its own participant, so that any",
+            "issue above can be judged against how it was measured.", ""]
+  if type_lookup_settings:
+    for key, value in sorted(type_lookup_settings.items()):
+      lines.append(f"  {str(key).ljust(52)}{value}")
+  else:
+    lines.append("  (no type-lookup settings recorded)")
+  lines.append("")
   lines += _section("SNAPSHOT LIMITATIONS")
   lines += ["This report is an observed passive snapshot, not proof of complete",
             "historical topology or end-to-end data flow. Targeted writer debug",
@@ -144,18 +155,17 @@ class ReportData:
 
   def __init__(self, domain_id, scope, all_findings, probe_result=None,
                endpoint=None, participant=None, type_lookup_settings=None,
-               environment=None, generated_at=None, blind_spot_findings=None,
-               wire_evidence=None, topology=None):
+               environment=None, generated_at=None, wire_evidence=None,
+               topology=None):
     self.domain_id = domain_id
     self.scope = scope
-    self.findings = f.rank(f.suppress(list(all_findings)))
+    self.findings = f.rank(f.link_causes(list(all_findings)))
     self.probe_result = probe_result
     self.endpoint = endpoint
     self.participant = participant
     self.type_lookup_settings = type_lookup_settings or {}
     self.environment = environment or compat.environment_info()
     self.generated_at = generated_at or time.time()
-    self.blind_spot_findings = blind_spot_findings or []
     self.wire_evidence = wire_evidence
     self.topology = topology
 
@@ -301,31 +311,30 @@ def render_topology_text(topology):
 
 
 def _render_findings(data):
-  active = f.active(data.findings)
-  hist = f.counts(data.findings)
+  findings = list(data.findings)
+  hist = f.counts(findings)
   summary = ", ".join(f"{hist[s]} {s.label}" for s in
                       (f.Severity.ERROR, f.Severity.WARN, f.Severity.INFO, f.Severity.OK)
                       if hist.get(s))
   lines = _section(f"FINDINGS  ({summary or 'none'})")
 
-  if not active:
+  if not findings:
     lines += ["No findings.", ""]
-  for finding in active:
+  for finding in findings:
     lines.append(f"[{finding.severity.label}] rung {finding.rung}  {finding.id}")
     lines += _labelled("", finding.title)
     lines += _labelled("Observed", finding.observed)
     lines += _labelled("Root cause", finding.root_cause)
     lines += _labelled("Remedy", finding.remedy)
+    # Context, not a filter: this finding is listed, counted and carried into
+    # the exit code whether or not something here would explain it.
+    if finding.explained_by:
+      lines += _labelled("Likely explained by",
+                         ", ".join(finding.explained_by) +
+                         " - confirm it applies to this endpoint before acting "
+                         "on it, since the link is by finding id alone.")
     for ref in finding.refs:
       lines.append(f"  {'Reference'.ljust(13)}{ref}")
-    lines.append("")
-
-  hidden = f.suppressed(data.findings)
-  if hidden:
-    lines.append(f"SUPPRESSED ({len(hidden)}) - real findings that a lower-rung "
-                 f"failure already explains:")
-    for finding in hidden:
-      lines.append(f"  {finding.id} (explained by {finding.suppressed_by})")
     lines.append("")
   return lines
 
@@ -518,7 +527,7 @@ def render_json(data):
               "remedy": finding.remedy,
               "evidence": _jsonable(finding.evidence),
               "refs": list(finding.refs),
-              "suppressed_by": finding.suppressed_by,
+              "explained_by": list(finding.explained_by),
           }
           for finding in data.findings
       ],

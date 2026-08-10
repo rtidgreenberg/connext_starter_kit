@@ -103,7 +103,7 @@ class LiveFixtureTest(unittest.TestCase):
     return self.session.diagnose_endpoint(writer, probe=probe)
 
   def ids(self, data):
-    return {x.id for x in f.active(data.findings)}
+    return {x.id for x in data.findings}
 
 
 class TestHealthy(LiveFixtureTest):
@@ -120,7 +120,7 @@ class TestHealthy(LiveFixtureTest):
   def test_no_unexpected_errors_on_a_healthy_system(self):
     """The single most important assertion: a healthy system must be quiet."""
     data = self.diagnose()
-    errors = [x.id for x in f.active(data.findings) if x.severity >= f.Severity.ERROR]
+    errors = [x.id for x in data.findings if x.severity >= f.Severity.ERROR]
     self.assertEqual(errors, [], f"healthy system produced errors: {errors}")
 
   def test_every_member_of_the_rich_type_is_readable(self):
@@ -178,14 +178,15 @@ class TestHealthy(LiveFixtureTest):
 class TestNoTypeInfo(LiveFixtureTest):
   MODE = "no_type_info"
 
-  def test_reports_missing_type_and_suppresses_the_consequence(self):
+  def test_reports_missing_type_and_links_the_consequence(self):
     data = self.diagnose()
-    active = self.ids(data)
-    self.assertIn("type.no_type_info", active)
-    suppressed = {x.id: x.suppressed_by for x in f.suppressed(data.findings)}
-    self.assertEqual(suppressed.get("probe.not_created"), "type.no_type_info",
-                     "the unusable-reader finding should be explained by the "
-                     "missing type, not reported as a separate problem")
+    reported = self.ids(data)
+    self.assertIn("type.no_type_info", reported)
+    # Both are reported. The consequence is annotated with its likely cause
+    # rather than removed: hiding it also removed it from the counts.
+    self.assertIn("probe.not_created", reported)
+    links = {x.id: x.explained_by for x in data.findings}
+    self.assertIn("type.no_type_info", links.get("probe.not_created", ()))
 
   def test_verdict_says_not_probed(self):
     self.assertIn("not probed", self.diagnose().verdict)
@@ -196,7 +197,7 @@ class TestLargeData(LiveFixtureTest):
 
   def test_fragmentation_is_reported_without_a_false_error(self):
     data = self.diagnose()
-    fragmentation = [x for x in f.active(data.findings)
+    fragmentation = [x for x in data.findings
                      if x.id == "data.fragmentation"]
     self.assertTrue(fragmentation, "large data did not report fragmentation at all")
     self.assertEqual(fragmentation[0].severity, f.Severity.INFO,
@@ -237,7 +238,7 @@ class TestBadPair(LiveFixtureTest):
 
   def test_names_the_offending_policies(self):
     data = self.diagnose()
-    finding = [x for x in f.active(data.findings) if x.id == "qos.rxo_mismatch"][0]
+    finding = [x for x in data.findings if x.id == "qos.rxo_mismatch"][0]
     self.assertIn("RELIABILITY", finding.title)
     self.assertIn("OWNERSHIP", finding.title)
     self.assertIn("BEST_EFFORT", finding.observed)

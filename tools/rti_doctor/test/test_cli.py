@@ -201,6 +201,34 @@ class TestWorkflowFlags(unittest.TestCase):
         cli.parse_args(["-d", "1", "--system", "-t", "Telemetry"])
 
 
+class TestSessionSurface(unittest.TestCase):
+  """main() is not covered by these tests, so guard what it depends on.
+
+  Removing engine.Session.close_discovery_capture broke every invocation -
+  the AttributeError was swallowed by main()'s cleanup `except`, so the
+  participant was never closed - and nothing failed. pyflakes checks undefined
+  names, not missing attributes.
+  """
+
+  def test_every_session_attribute_main_uses_exists(self):
+    import inspect
+    import re
+    source = inspect.getsource(cli)
+    used = sorted(set(re.findall(r"\bsession\.([A-Za-z_][A-Za-z0-9_]*)", source)))
+    self.assertTrue(used, "expected to find session attribute uses in __main__")
+    missing = [name for name in used
+               if not hasattr(engine.Session, name)
+               and name not in vars(engine.Session).get("__annotations__", {})]
+    # Instance attributes assigned in __init__ are not on the class, so allow
+    # the ones FakeSession models; anything else must be a real class member.
+    instance_attributes = {"registry", "domain_id", "active_domains",
+                           "domain_scan_ran", "type_lookup_settings",
+                           "participant", "own_qos", "type_wait",
+                           "discovery_capture"}
+    self.assertEqual([name for name in missing if name not in instance_attributes],
+                     [])
+
+
 class TestArgumentValidation(unittest.TestCase):
   """argparse accepts negatives, "nan" and "inf" for these; Connext does not."""
 

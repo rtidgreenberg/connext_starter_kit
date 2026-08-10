@@ -192,9 +192,10 @@ def check_incompatible_qos(context):
         evidence=evidence,
     )]
 
-  # Deliberately a DIFFERENT id, at WARN. It is not registered as an explainer
-  # in SUPPRESSION_RULES, so an unattributable rejection cannot suppress
-  # data.silent or match.none and hide a real symptom behind a maybe.
+  # Deliberately a DIFFERENT id, at WARN. It is not registered in
+  # CAUSAL_EXPLAINERS, so an unattributable rejection is never offered as the
+  # explanation for data.silent or match.none - a maybe must not be presented
+  # as the cause of a real symptom.
   return [Finding(
       id="match.incompatible_qos_topic",
       rung=RUNG_MATCH,

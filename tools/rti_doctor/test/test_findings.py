@@ -1,4 +1,4 @@
-"""Unit tests for the findings model: ranking, suppression, verdicts.
+"""Unit tests for the findings model: ranking, causal links, verdicts.
 
 No DDS required - this is pure logic over plain objects.
 """
@@ -31,51 +31,58 @@ class TestRanking(unittest.TestCase):
     self.assertEqual([x.id for x in f.rank(items)], ["a", "z"])
 
 
-class TestSuppression(unittest.TestCase):
+class TestCausalLinks(unittest.TestCase):
+  """Links annotate. They must never remove, reorder or downgrade a finding."""
 
-  def test_lower_rung_error_suppresses_match_failure(self):
+  def test_a_likely_cause_is_recorded_as_context(self):
     items = [make("type.no_type_info", 3, f.Severity.ERROR),
              make("match.none", 4, f.Severity.ERROR)]
-    f.suppress(items)
+    f.link_causes(items)
     by_id = {x.id: x for x in items}
-    self.assertEqual(by_id["match.none"].suppressed_by, "type.no_type_info")
-    self.assertIsNone(by_id["type.no_type_info"].suppressed_by)
+    self.assertEqual(by_id["match.none"].explained_by, ("type.no_type_info",))
+    self.assertEqual(by_id["type.no_type_info"].explained_by, ())
 
-  def test_warning_explainer_does_not_suppress(self):
-    """A WARN is not proof the symptom is accounted for, so it must not hide it."""
-    items = [make("locator.unroutable", 1, f.Severity.WARN),
-             make("match.none", 4, f.Severity.ERROR)]
-    f.suppress(items)
-    self.assertIsNone(items[1].suppressed_by)
+  def test_every_finding_stays_active_and_counted(self):
+    """The regression: one ERROR removed an unrelated symptom from the counts.
 
-  def test_probe_not_created_explained_by_missing_type(self):
-    items = [make("type.no_type_info", 3, f.Severity.ERROR),
-             make("probe.not_created", 4, f.Severity.ERROR)]
-    f.suppress(items)
-    self.assertEqual(items[1].suppressed_by, "type.no_type_info")
-
-  def test_suppressed_findings_are_retained_not_dropped(self):
+    Suppression matched on finding id across the whole run - no topic, no
+    endpoint, no pair - so a type failure on one topic deleted a real, separate
+    match failure on another from the active list, the issue counts and the
+    exit code.
+    """
     items = [make("type.no_type_info", 3, f.Severity.ERROR),
              make("match.none", 4, f.Severity.ERROR)]
-    f.suppress(items)
-    self.assertEqual(len(f.active(items)), 1)
-    self.assertEqual(len(f.suppressed(items)), 1)
-    self.assertEqual(len(items), 2, "suppression must never remove a finding")
+    f.link_causes(items)
+    self.assertEqual(len(items), 2)
+    self.assertEqual(f.counts(items), {f.Severity.ERROR: 2})
 
-  def test_unrelated_error_does_not_suppress(self):
+  def test_a_link_needs_the_cause_to_be_present(self):
     items = [make("vendor.identify", 1, f.Severity.ERROR),
              make("payload.partial", 5, f.Severity.ERROR)]
-    f.suppress(items)
-    self.assertIsNone(items[1].suppressed_by)
+    f.link_causes(items)
+    self.assertEqual(items[1].explained_by, ())
+
+  def test_severity_does_not_gate_a_link(self):
+    """A WARN cause is still worth naming now that naming hides nothing."""
+    items = [make("locator.unroutable", 1, f.Severity.WARN),
+             make("match.none", 4, f.Severity.ERROR)]
+    f.link_causes(items)
+    self.assertEqual(items[1].explained_by, ("locator.unroutable",))
+
+  def test_links_are_recomputed_not_accumulated(self):
+    finding = make("match.none", 4, f.Severity.ERROR)
+    f.link_causes([make("type.no_type_info", 3, f.Severity.ERROR), finding])
+    f.link_causes([finding])
+    self.assertEqual(finding.explained_by, ())
 
 
 class TestCounts(unittest.TestCase):
 
-  def test_counts_exclude_suppressed(self):
+  def test_counts_include_every_finding(self):
     items = [make("type.no_type_info", 3, f.Severity.ERROR),
              make("match.none", 4, f.Severity.ERROR)]
-    f.suppress(items)
-    self.assertEqual(f.counts(items), {f.Severity.ERROR: 1})
+    f.link_causes(items)
+    self.assertEqual(f.counts(items), {f.Severity.ERROR: 2})
 
 
 class TestVerdict(unittest.TestCase):

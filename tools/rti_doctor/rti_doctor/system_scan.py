@@ -26,6 +26,9 @@ class SystemIssue:
   reader_keys: tuple
   participant_keys: tuple
   evidence: object
+  # Finding ids present in this scan that would explain this issue. Context
+  # only: the issue is listed and counted either way.
+  explained_by: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -35,7 +38,6 @@ class SystemScanSnapshot:
   captured_at: float
   topology: object
   issues: tuple
-  suppressed_findings: tuple = ()
   fastdds_product_versions: tuple = ()
 
 
@@ -108,15 +110,12 @@ def scan(registry, own_qos, type_lookup_settings, domain_id, active_domains=(),
                               endpoint=writer,
                               participant=registry.participant_for(writer)))
 
-  ranked = f.rank(f.suppress(findings))
-  active = tuple(item for item in ranked if item.suppressed_by is None)
-  suppressed = tuple(item for item in ranked if item.suppressed_by is not None)
+  ranked = tuple(f.rank(f.link_causes(findings)))
   return SystemScanSnapshot(
       captured_at=captured_at,
       topology=_freeze(topology.snapshot(registry, domain_id, active_domains,
                                           domain_scan_ran)),
-      issues=_issues(active),
-      suppressed_findings=suppressed,
+      issues=_issues(ranked),
       fastdds_product_versions=tuple(fastdds_product_versions),
   )
 
@@ -198,7 +197,11 @@ def _annotate(findings, scope, endpoint=None, participant=None):
 
 
 def _issues(findings):
-  """Aggregate active non-OK findings by deterministic issue identity."""
+  """Aggregate non-OK findings by deterministic issue identity.
+
+  Every non-OK finding produces an issue. Nothing is filtered by a causal
+  guess - a likely cause travels with the issue as `explained_by` instead.
+  """
   grouped = {}
   for finding in findings:
     if finding.severity == f.Severity.OK:
@@ -227,6 +230,8 @@ def _issues(findings):
                                           _tuple(evidence.get("writer_participant_key")) +
                                           _tuple(evidence.get("reader_participant_key"))))),
         evidence=_freeze(evidence),
+        explained_by=tuple(sorted({cause for item in grouped_findings
+                                   for cause in item.explained_by})),
     ))
   return tuple(sorted(issues, key=lambda item: (-int(item.severity), item.topic_name,
                                                   item.finding_ids, item.key)))

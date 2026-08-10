@@ -186,7 +186,9 @@ class SystemOverviewScreen(Screen):
       return
     path = os.path.abspath(report.system_filename(self.session.domain_id))
     with open(path, "w", encoding="utf-8") as handle:
-      handle.write(report.render_system_text(snapshot, self.session.domain_id))
+      handle.write(report.render_system_text(
+          snapshot, self.session.domain_id,
+          type_lookup_settings=self.session.type_lookup_settings))
     self.status.update(f"Saved system report to {path}")
 
   def action_quit_app(self):
@@ -376,7 +378,9 @@ class IssueListScreen(Screen):
       return
     path = os.path.abspath(report.system_filename(self.session.domain_id))
     with open(path, "w", encoding="utf-8") as handle:
-      handle.write(report.render_system_text(self.snapshot, self.session.domain_id))
+      handle.write(report.render_system_text(
+          self.snapshot, self.session.domain_id,
+          type_lookup_settings=self.session.type_lookup_settings))
     self.status.update(f"Saved system report to {path}")
 
   def action_open_report(self):
@@ -444,7 +448,9 @@ class IssueDetailScreen(Screen):
   def action_save(self):
     path = os.path.abspath(report.system_filename(self.session.domain_id))
     with open(path, "w", encoding="utf-8") as handle:
-      handle.write(report.render_system_text(self.snapshot, self.session.domain_id))
+      handle.write(report.render_system_text(
+          self.snapshot, self.session.domain_id,
+          type_lookup_settings=self.session.type_lookup_settings))
     self.status.update(f"Saved system report to {path}")
 
   def action_back(self):
@@ -616,7 +622,9 @@ class TopologyHealthScreen(Screen):
   def action_save(self):
     path = os.path.abspath(report.system_filename(self.session.domain_id))
     with open(path, "w", encoding="utf-8") as handle:
-      handle.write(report.render_system_text(self.snapshot, self.session.domain_id))
+      handle.write(report.render_system_text(
+          self.snapshot, self.session.domain_id,
+          type_lookup_settings=self.session.type_lookup_settings))
     self.status.update(f"Saved system report to {path}")
 
   def action_back(self):

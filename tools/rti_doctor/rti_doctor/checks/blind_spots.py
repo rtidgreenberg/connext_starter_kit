@@ -142,62 +142,6 @@ def check_security_enabled(context):
   )]
 
 
-def check_multicast_and_peers(context):
-  """Multicast unusable with no usable initial_peers means nothing is reachable."""
-  qos = context.own_qos
-  if qos is None:
-    return []
-  discovery = compat.get(qos, "discovery", None)
-  if discovery is None:
-    return []
-
-  peers = compat.get(discovery, "initial_peers", None)
-  peer_list = []
-  try:
-    peer_list = [str(p) for p in (peers or ())]
-  except TypeError:
-    peer_list = [str(peers)] if peers else []
-
-  has_multicast_peer = any(_looks_multicast(p) for p in peer_list)
-  receive_addresses = compat.get(discovery, "multicast_receive_addresses", None)
-  receive_list = []
-  try:
-    receive_list = [str(a) for a in (receive_addresses or ())]
-  except TypeError:
-    receive_list = [str(receive_addresses)] if receive_addresses else []
-
-  if receive_list and (has_multicast_peer or len(peer_list) > 1):
-    return []
-  if not receive_list:
-    return [Finding(
-        id="blind.no_multicast_no_peers",
-        rung=RUNG_OWN_CONFIG,
-        severity=Severity.WARN,
-        title="No multicast receive addresses configured",
-        observed=(f"discovery.multicast_receive_addresses is empty; "
-                  f"initial_peers = {peer_list or '[]'}"),
-        root_cause=(
-            "With no multicast receive address, this participant only discovers "
-            "peers it can reach through initial_peers unicast. Any peer not in "
-            "that list is invisible even when it is running correctly."),
-        remedy=("Restore the default multicast receive address, or add every "
-                "peer host to initial_peers (NDDS_DISCOVERY_PEERS)."),
-        evidence={"initial_peers": peer_list, "multicast_receive_addresses": receive_list},
-        refs=[DOC_DISCOVERY],
-    )]
-  return []
-
-
-def _looks_multicast(peer):
-  """True for a peer string in the IPv4 multicast range 224-239."""
-  text = peer.split("@")[-1].split(":")[0]
-  first = text.split(".")[0]
-  try:
-    return 224 <= int(first) <= 239
-  except ValueError:
-    return False
-
-
 def check_accept_unknown_peers(context):
   """accept_unknown_peers=False silently drops otherwise-valid peers."""
   qos = context.own_qos
@@ -344,7 +288,6 @@ CHECKS = (
     check_domain_tag,
     check_spdp2,
     check_security_enabled,
-    check_multicast_and_peers,
     check_accept_unknown_peers,
     check_nonstandard_ports,
     check_other_domain_active,

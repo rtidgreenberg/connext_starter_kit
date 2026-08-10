@@ -311,7 +311,7 @@ def _correlate(reader, endpoint, result):
     beside a topic-wide matched_count and stale other/unreadable counts. Every
     consumer then read a writer-scoped answer off topic-wide data - the scope
     line claimed publication-handle correlation, and check_incompatible_qos
-    could promote a topic-level WARN to an ERROR that suppresses data.silent.
+    could promote a topic-level WARN into a writer-scoped ERROR.
     The three fields must always describe the same reading.
     """
     result.correlated = False

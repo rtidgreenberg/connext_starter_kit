@@ -49,18 +49,13 @@ class Session:
     return topology.snapshot(
         self.registry, self.domain_id, self.active_domains, self.domain_scan_ran)
 
-  # --- Diagnoses -------------------------------------------------------------
-
-  def diagnose_domain(self):
-    """Blind-spot audit only: what might we not be seeing at all?"""
-    context = self._context()
-    return checks.run_checks(context, checks.blind_spot_checks())
-
   def close_discovery_capture(self):
     """Stop a startup discovery capture that never observed Fast DDS."""
     if self.discovery_capture is not None:
       self.discovery_capture.finish_discovery()
       self.discovery_capture = None
+
+  # --- Diagnoses -------------------------------------------------------------
 
   def system_scan(self, captured_at=None, max_age=0.0):
     """Passive issue/topology snapshot; never creates a diagnostic reader.
@@ -181,7 +176,7 @@ class Session:
 def health_label(data):
   """Short health string for a table cell."""
   from . import findings as f
-  active = f.active(data.findings)
+  active = data.findings
   errors = [x for x in active if x.severity >= f.Severity.ERROR]
   if errors:
     return f"x {errors[0].id.split('.')[-1]}"

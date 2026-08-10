@@ -45,8 +45,9 @@ under you while you read it. `r` takes a new one.
 ## The Visibility Ladder
 
 Cross-vendor failures come in rungs, and each one fails differently. The report
-is ordered by this, and a lower-rung failure suppresses the higher-rung symptoms
-it explains.
+is ordered by this, and a higher-rung finding is annotated with the lower-rung
+findings that would explain it. Nothing is hidden: the link is context, and
+every finding stays in the list, the counts and the exit code.
 
 | Rung | Mechanism | How a failure looks |
 |---|---|---|
@@ -66,10 +67,15 @@ the peer may not implement.
 audit shown above the participant table. It covers the conditions that make an
 RTI participant and a third-party participant mutually invisible *on the same
 domain ID*: a domain tag set on our side, SPDP2 configured (which does not
-interoperate with standard SPDP at all), a secure-vs-unsecure mismatch, multicast
-unavailable with no usable `initial_peers`, `accept_unknown_peers = false`, and
-nonstandard RTPS port mappings. It also reuses the passive domain-0 announcement
-scan, so "nothing is here" can become "something is alive, but on domain 5".
+interoperate with standard SPDP at all), a secure-vs-unsecure mismatch,
+`accept_unknown_peers = false`, and nonstandard RTPS port mappings. It also
+reuses the passive domain-0 announcement scan, so "nothing is here" can become
+"something is alive, but on domain 5".
+
+It does **not** diagnose multicast reachability. Whether multicast works between
+two hosts is not observable from either side's participant QoS, and a finding
+derived from rti_doctor's own defaults would describe the diagnostic, not the
+system it was pointed at.
 
 ## CLI
 
@@ -77,7 +83,7 @@ scan, so "nothing is here" can become "something is alive, but on domain 5".
 -d, --domain          DDS domain ID (prompts on startup; 1 when non-interactive)
     --system          Headless: assess the DDS system and exit (stage one)
 -t, --topic TOPIC     Headless: diagnose one topic and exit (stage two)
-    --format          text (default) | json
+    --format          text (default) | json; json requires --topic
 -o, --output PATH     Write the report to PATH instead of stdout
     --probe-timeout   Seconds to observe a probed reader (default: 10.0)
     --type-wait       Seconds to wait for remote type resolution (default: 5.0)
@@ -124,8 +130,10 @@ number of writers and should be spent on the one you chose.
   --connext-verbosity status-all
 ```
 
-Exit status is `1` when any ERROR-severity finding survives, `0` otherwise, and
-`2` when the named topic was not found — usable directly in CI.
+Exit status is `1` when any ERROR-severity finding is reported, `0` otherwise,
+and `2` when the named topic was not found or the arguments were rejected —
+usable directly in CI. No finding is excluded from that decision by a causal
+guess about another finding.
 
 ## Manual Scenarios
 
@@ -156,8 +164,10 @@ Three rules the writer follows:
   `n/a (not available on Connext X.Y.Z)` — never `0`, never omitted.
 - **The raw appendix is complete, not filtered**, so anyone who doubts a finding
   can check the evidence themselves.
-- **Suppressed findings are still listed by id** under `SUPPRESSED (explained
-  by ...)`, so causal ordering hides noise without hiding facts.
+- **Nothing is filtered out by a guess.** A finding whose likely cause is also
+  present says so on a `Likely explained by` line, but stays fully reported and
+  counted. The link matches on finding id alone, so it can point at a condition
+  on another topic — confirm it applies before acting on it.
 
 ## Reading a Verdict
 

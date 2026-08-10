@@ -449,7 +449,7 @@ def run_headless_topic(session, args):
     print(f"Report written to {path}")
     print(f"VERDICT: {data.verdict}")
 
-  worst = max((x.severity for x in f.active(data.findings)), default=f.Severity.OK)
+  worst = max((x.severity for x in data.findings), default=f.Severity.OK)
   return 1 if worst >= f.Severity.ERROR else 0
 
 
@@ -476,7 +476,9 @@ def run_headless_system(session, args):
   _settle(session, args.settle)
   _settle(session, args.type_wait)
   snapshot = session.system_scan()
-  text = report.render_system_text(snapshot, session.domain_id)
+  text = report.render_system_text(
+      snapshot, session.domain_id,
+      type_lookup_settings=session.type_lookup_settings)
   path = _emit(text, args.output)
   if path:
     print(f"System report written to {path}")

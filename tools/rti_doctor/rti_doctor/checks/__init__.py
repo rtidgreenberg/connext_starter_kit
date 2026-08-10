@@ -62,12 +62,6 @@ def run_checks(context, checks):
   return out
 
 
-def blind_spot_checks():
-  """Rung 0-1 only: the checks that can explain an empty table."""
-  from . import blind_spots
-  return blind_spots.CHECKS
-
-
 def type_state_checks():
   """Just the type-resolution state check, for per-participant rollups."""
   from . import type_compat

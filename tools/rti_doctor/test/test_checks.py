@@ -168,10 +168,19 @@ class TestBlindSpots(unittest.TestCase):
     result = blind_spots.check_nonstandard_ports(CheckContext(own_qos=FakeQos()))
     self.assertEqual(result, [])
 
-  def test_no_multicast_receive_addresses_fires(self):
+  def test_local_multicast_defaults_are_not_diagnosed(self):
+    """Our own multicast config says nothing about the deployed system.
+
+    rti_doctor runs with multicast-enabled defaults, so a finding derived from
+    its own participant QoS reported the tool's configuration as evidence
+    about the peers it is there to diagnose. Remote reachability is not
+    observable from local QoS at all.
+    """
     qos = FakeQos(discovery=FakeDiscovery(multicast_receive_addresses=()))
-    result = blind_spots.check_multicast_and_peers(CheckContext(own_qos=qos))
-    self.assertEqual(ids(result), ["blind.no_multicast_no_peers"])
+    context = CheckContext(own_qos=qos, registry=FakeRegistry([participant_record()]),
+                           domain_id=1)
+    result = [x for check in blind_spots.CHECKS for x in check(context)]
+    self.assertNotIn("blind.no_multicast_no_peers", ids(result))
 
   def test_empty_domain_fires_with_no_participants(self):
     context = CheckContext(registry=FakeRegistry([]), domain_id=7)
@@ -1047,12 +1056,17 @@ class TestProbeMatchScoping(unittest.TestCase):
     result = probe_match.check_incompatible_qos(CheckContext(probe=probe_result))
     self.assertEqual(ids(result), ["match.incompatible_qos_topic"])
 
-  def test_topic_scoped_rejection_cannot_suppress_data_silence(self):
-    """A maybe must never hide a real symptom. Regression on SUPPRESSION_RULES."""
+  def test_topic_scoped_rejection_is_not_offered_as_a_cause(self):
+    """A maybe must not be presented as the explanation for a real symptom.
+
+    This no longer hides anything - causal links only annotate - but naming an
+    unattributable topic-wide rejection as the cause of this pair's silence
+    would still send the operator after the wrong writer.
+    """
     self.assertNotIn("match.incompatible_qos_topic",
-                     f.SUPPRESSION_RULES.get("data.silent", ()))
+                     f.CAUSAL_EXPLAINERS.get("data.silent", ()))
     self.assertNotIn("match.incompatible_qos_topic",
-                     f.SUPPRESSION_RULES.get("match.none", ()))
+                     f.CAUSAL_EXPLAINERS.get("match.none", ()))
 
   def test_match_ok_says_so_when_the_writer_was_not_identified(self):
     correlated = probe_match.check_matched(
@@ -1275,8 +1289,8 @@ class TestCorrelationIsNotALatch(unittest.TestCase):
 
   `correlated` used to be set True on success and never cleared, so a later
   poll that could not resolve a publication left a writer-scoped claim standing
-  over a topic-wide count - and could promote a topic-level WARN into an ERROR
-  that suppresses data.silent.
+  over a topic-wide count - and could promote a topic-level WARN into a
+  writer-scoped ERROR.
   """
 
   def test_a_later_uncorrelatable_read_clears_every_correlation_field(self):

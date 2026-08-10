@@ -1,10 +1,16 @@
-"""Finding model, severity ordering, causal suppression, and verdict rollup.
+"""Finding model, severity ordering, causal links, and verdict rollup.
 
 A Finding is the single output currency of rti_doctor: every check returns a list
 of them, and every renderer consumes them. Findings carry a `rung` from the
-visibility ladder (see IMPLEMENTATION_PLAN.md), which drives both ordering and
-suppression: a rung-2 locator problem causally explains a rung-4 match failure,
-so reporting them as peers would be noise.
+visibility ladder (see IMPLEMENTATION_PLAN.md), which drives ordering: a rung-2
+locator problem is usually what explains a rung-4 match failure.
+
+That causal relationship is reported as context and never as a filter. Findings
+used to be suppressed by any ERROR anywhere in the run that carried a matching
+id - no topic, endpoint or pair scope - so an unresolved type on one topic
+removed a genuinely independent match failure on another from the active list
+and from the counts the operator reads. A likely cause is a hypothesis; an
+observed symptom is a fact, and the fact is not deleted by the hypothesis.
 """
 
 from dataclasses import dataclass, field
@@ -60,23 +66,24 @@ class Finding:
   remedy: str = ""
   evidence: dict = field(default_factory=dict)
   refs: list = field(default_factory=list)
-  # Set by suppress(): the id of the lower-rung finding that explains this one.
-  suppressed_by: str = None
+  # Set by link_causes(): ids of lower-rung findings in this same run that
+  # would explain this one. Context for the reader, never a filter - this
+  # finding stays in every list, count and exit-code calculation regardless.
+  explained_by: tuple = ()
 
   @property
   def is_problem(self):
     return self.severity >= Severity.WARN
 
 
-# A finding id maps to the set of ids that, if present, causally explain it.
-# Only ERROR-severity explainers suppress, because a warning is not proof that
-# the higher-rung symptom has been accounted for.
-SUPPRESSION_RULES = {
+# A finding id maps to the ids that, if also present, are the likely cause of
+# it. This annotates; it does not hide. Ordering within each tuple is the order
+# the links are reported in.
+CAUSAL_EXPLAINERS = {
     "match.none": (
         "blind.domain_tag",
         "blind.spdp2",
         "blind.security_enabled",
-        "blind.no_multicast_no_peers",
         "blind.unknown_peers_rejected",
         "locator.unroutable",
         "transport.class_mismatch",
@@ -85,8 +92,8 @@ SUPPRESSION_RULES = {
         "match.incompatible_qos",
         "repr.no_common",
     ),
-    # A reader that could not be created is explained entirely by the missing
-    # type; reporting both as peers would imply two independent problems.
+    # A reader that could not be created is usually explained entirely by the
+    # missing type.
     "probe.not_created": ("type.no_type_info",),
     "data.silent": ("match.none", "match.incompatible_qos"),
     "data.window": ("data.fragmentation",),
@@ -100,18 +107,18 @@ SUPPRESSION_RULES = {
 }
 
 
-def suppress(findings):
-  """Mark findings that a lower-rung ERROR finding causally explains.
+def link_causes(findings):
+  """Annotate each finding with the ids present that would explain it.
 
-  Suppressed findings are never dropped - renderers list them by id under a
-  SUPPRESSED heading so nothing vanishes without a trace.
+  Nothing is removed, reordered or downgraded. The links are unscoped - they
+  match on finding id across the whole run - which is why they are presented
+  as "likely explained by" rather than used to decide what the operator sees.
   """
-  fatal_ids = {f.id for f in findings if f.severity >= Severity.ERROR}
+  present = {item.id for item in findings}
   for finding in findings:
-    for explainer in SUPPRESSION_RULES.get(finding.id, ()):  # deterministic order
-      if explainer in fatal_ids and explainer != finding.id:
-        finding.suppressed_by = explainer
-        break
+    finding.explained_by = tuple(
+        explainer for explainer in CAUSAL_EXPLAINERS.get(finding.id, ())
+        if explainer in present and explainer != finding.id)
   return findings
 
 
@@ -120,18 +127,13 @@ def rank(findings):
   return sorted(findings, key=lambda f: (-int(f.severity), f.rung, f.id))
 
 
-def active(findings):
-  return [f for f in findings if f.suppressed_by is None]
-
-
-def suppressed(findings):
-  return [f for f in findings if f.suppressed_by is not None]
-
-
 def counts(findings):
-  """Severity histogram over active findings, worst first."""
+  """Severity histogram over every finding, worst first.
+
+  There is no active/suppressed split: a finding that was produced is counted.
+  """
   out = {}
-  for finding in active(findings):
+  for finding in findings:
     out[finding.severity] = out.get(finding.severity, 0) + 1
   return out
 
@@ -182,7 +184,7 @@ def verdict_line(findings, probe=None):
 def _verdict_body(findings, probe):
   if not probe.attempted:
     reason = probe.skip_reason or "probe not run"
-    worst = max((f.severity for f in active(findings)), default=Severity.OK)
+    worst = max((f.severity for f in findings), default=Severity.OK)
     if worst >= Severity.ERROR:
       return f"not probed ({reason}); {_problem_summary(findings)}"
     return f"not probed ({reason})"

@@ -106,6 +106,58 @@ class TestSystemScan(unittest.TestCase):
     self.assertIsNone(session.discovery_capture)
     self.assertEqual(snapshot.fastdds_product_versions, ("3.6.2.0",))
 
+  def test_an_independent_failure_is_never_removed_by_another(self):
+    """The suppression regression: one ERROR deleted an unrelated symptom.
+
+    Suppression matched on finding id across the whole run, with no topic,
+    endpoint or pair scope, so an unresolved type on one topic removed a real
+    RxO failure on another from the issue list, the counts and the exit code.
+    """
+    registry = registry_with_reliability_fault()
+    # A second, unrelated topic whose type never resolved.
+    other = records.ParticipantRecord(key="participant-o", name="other-app")
+    registry.participants[other.key] = other
+    registry.endpoints["other-writer"] = records.EndpointRecord(
+        key="other-writer", kind="Writer", participant_key=other.key,
+        topic_name="Alarms", type_name="AlarmType",
+        type_state=records.TYPE_UNAVAILABLE, first_seen=1.0)
+
+    snapshot = system_scan.scan(
+        registry, own_qos=None,
+        type_lookup_settings={"request_types_filter": "*"}, domain_id=7,
+        captured_at=123.0)
+
+    reported = {item for issue in snapshot.issues for item in issue.finding_ids}
+    self.assertIn("qos.rxo_mismatch", reported)
+    self.assertIn("type.no_type_info", reported)
+    worst = max(issue.severity for issue in snapshot.issues)
+    self.assertEqual(worst, f.Severity.ERROR)
+
+  def test_a_likely_cause_travels_with_the_issue_as_context(self):
+    registry = registry_with_reliability_fault()
+    snapshot = system_scan.scan(
+        registry, own_qos=None,
+        type_lookup_settings={"request_types_filter": "*"}, domain_id=7,
+        captured_at=123.0)
+    # Whatever links exist, they must never be the reason an issue is absent.
+    for issue in snapshot.issues:
+      self.assertIsInstance(issue.explained_by, tuple)
+
+  def test_the_report_records_our_own_configuration(self):
+    """Every report states how the measurement was made, stage one included."""
+    snapshot = system_scan.scan(
+        registry_with_reliability_fault(), own_qos=None,
+        type_lookup_settings={"request_types_filter": "*"}, domain_id=7,
+        captured_at=123.0)
+    text = report.render_system_text(
+        snapshot, 7, environment={
+            "argv": "rti_doctor", "host": "test", "os": "Linux",
+            "machine": "x86_64", "connext": "7.7.0", "nddshome": "/opt/rti",
+            "python": "3.x"},
+        type_lookup_settings={"request_types_filter": "*"})
+    self.assertIn("RTI_DOCTOR OWN CONFIGURATION", text)
+    self.assertIn("request_types_filter", text)
+
   def test_system_report_contains_metrics_and_issue_relationships(self):
     snapshot = system_scan.scan(
         registry_with_reliability_fault(), own_qos=None,

@@ -141,16 +141,27 @@ The normal launcher remains the easiest way to run `rti_spy` on a development
 machine. The deployment scripts create a compressed PyInstaller folder bundle
 for a compatible Linux target.
 
-The build host needs the Python version and shared library required by the RTI
-Python wheel (for example, on Debian/Ubuntu, `python3.9`, `python3.9-venv`, and
-`libpython3.9` for a Connext 7.3 `cp39` wheel), plus network access for the
-one-time dependency preparation. Package names vary by distribution.
+For a Connext 7.3 `cp39` RTI Python wheel, install the build prerequisites on
+Debian/Ubuntu:
 
-Prepare the connected build environment:
+```bash
+sudo apt install python3.9 python3.9-venv libpython3.9
+```
+
+Package names vary by distribution. The RTI Python wheels installed with
+Connext are commonly located under
+`$NDDSHOME/resource/python_api/`, for example:
+
+```text
+$NDDSHOME/resource/python_api/rti_connext_activated-7.3.1-cp39-*.whl
+```
+
+Then prepare the connected build environment. This one-time step needs network
+access to install PyInstaller and the non-RTI Python dependencies:
 
 ```bash
 ./scripts/prepare_rti_spy_bundle_env.sh \
-  --wheel /path/to/rti_connext_activated-7.3.1-cp39-*.whl
+  --wheel "$NDDSHOME"/resource/python_api/rti_connext_activated-7.3.1-cp39-*.whl
 ```
 
 Build the compressed folder bundle without downloading Python packages:
@@ -173,8 +184,9 @@ tar -xzf rti_spy-*.tar.gz
 ```
 
 The target does not need Python, pip, the source repository, or the RTI Python
-wheel. It still needs a compatible Linux architecture, glibc baseline, and DDS
-network access.
+wheel. When built from an activated RTI Python wheel, the bundle also does not
+need a separate runtime license installation on the target. It still needs a
+compatible Linux architecture, glibc baseline, and DDS network access.
 
 ## Testing
 

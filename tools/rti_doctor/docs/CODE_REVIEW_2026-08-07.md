@@ -39,6 +39,14 @@ folded in below as [C1a](#c1a), [C1b](#c1b), [C1c](#c1c) and [S12](#s12).
 sub-findings under [C1](#c1)). 43 are marked Confirmed or Re-verified; the rest
 are Plausible and should be reproduced before being scheduled.
 
+**Status as of 2026-08-10: 7 Fixed, 2 Partial, 3 Live, 59 Open.** Fixed:
+[C1](#c1), [C2](#c2), [Q1](#q1), [Q2](#q2), [X1](#x1), [X2](#x2), [S4](#s4) -
+five of the six Criticals ([C3](#c3) is the exception), and two of the three
+false-ERROR findings called out below ([X3](#x3) is the exception).
+Partial: [Q3](#q3), [Q4](#q4). Live: [C1a](#c1a), [C1b](#c1b), [C1c](#c1c),
+which the [C1](#c1) fix unblocked and which now need decisions of their own.
+Every status is recorded per finding; see the legend under [Index](#index).
+
 The single most important result is that **the tool's failure modes are
 concentrated at the reporting boundary, not in its DDS logic.** The RxO comparison
 and the XTypes assignability delegation were audited policy by policy and are
@@ -54,6 +62,8 @@ Second: the Fast DDS version-evidence feature added in the most recent commit
 cannot fire at all, because the discovery capture's tshark field list and its
 parser disagree on column count ([C1](#c1)). That one-line defect also makes three
 of the four findings from the diff review of that commit latent rather than live.
+**Both halves of that have since happened:** [C1](#c1) is fixed, and the three
+latent sub-findings are live and unaddressed.
 
 ## Verification conventions
 
@@ -90,82 +100,104 @@ stays invisible. Annotating those nine fields `Optional[...]` would make
 
 ## Index
 
-| ID | Severity | One line |
-|---|---|---|
-| [C1](#c1) | **Critical** | The discovery-capture tshark command has 13 `-e` fields and the parser maps 12; every field but the GUID prefix is off by one, and the Fast DDS version feature is dead |
-| [C2](#c2) | **Critical** | `--all` never runs the blind-spot audit, so an unreachable domain reports a clean sweep and exit 0 |
-| [C3](#c3) | **Critical** | On an empty domain the TUI prints "nothing to report" while three screens simultaneously disagree about the error count |
-| [X1](#x1) | **Critical** | The multicast blind-spot check's `initial_peers` half is dead code, so multicast-off-with-defaults produces no finding at all |
-| [X2](#x2) | **Critical** | Suppression matches on finding `id` alone, globally, so an explainer on one topic hides a real independent failure on another |
-| [Q1](#q1) | **Critical** | An unreadable PARTITION policy is converted into a positive claim of the default partition, producing a false ERROR and exit 1 |
-| [H1](#h1) | High | `--format json` is not valid JSON through the documented entry point, and prompts/progress go to stdout |
-| [Q2](#q2) | High | An absent writer-side PRESENTATION boolean is treated as `false`, producing a false ERROR |
-| [Q3](#q3) | High | DATA_REPRESENTATION is silently skipped for default-QoS writers — the most common configuration — and the result is reported as OK |
-| [X3](#x3) | High | `check_type_state` emits a writer-phrased ERROR for a DataReader on two of its three call paths |
-| [X4](#x4) | High | The assignability OK finding reports the evaluated reader count under a "resolved" label, so an all-clear can cover 1 of 3 readers |
-| [H2](#h2) | High | `type.extensibility` still emits one WARN per endpoint — 96 identical warnings for one type |
-| [H3](#h3) | High | `o` on the issue-detail screen can never work for `qos.rxo_mismatch`, the flagship ERROR |
-| [H4](#h4) | High | Topic-scoped dedup withholds participant identity, so `type.name_conflict` shows every involved participant as "OK" |
-| [H5](#h5) | High | `TopologyHealthScreen` raises `AttributeError` from four key handlers when the first scan failed |
-| [H6](#h6) | High | Every `cleanup` EXIT trap in `run_manual_scenario.sh` reads function-locals, so it aborts before `docker rm` and fails a successful run |
-| [H7](#h7) | High | The participant and startup tshark are created outside the `try/finally` that closes them |
-| [H8](#h8) | High | Every TUI report probe spawns a `tshark -i any` capture, undisclosed and unconditional |
-| [H9](#h9) | High | The startup discovery capture is unbounded on disk, and its full re-parse at exit is computed and discarded |
-| [H10](#h10) | High | `refresh_participants` guards only the data fetch, so one unreadable field aborts the whole poll cycle |
-| [S1](#s1) | High | The scale suite skips itself when the regression it exists to catch occurs |
-| [S2](#s2) | High | The discovery field-name mapping is asserted by nothing, and `compat.get` turns a wrong name into a silent default |
-| [S3](#s3) | High | `unittest.main()` sits mid-file in `test_checks.py`; 13 of 20 classes are unreachable when run directly |
-| [S4](#s4) | High | `FakeSession.sweep` hardcodes the two values `--all` is judged by |
-| [Q4](#q4) | Medium | The `qos.compatible` OK finding records nothing about which policies were actually evaluated |
-| [Q5](#q5) | Medium | The AUTO-sentinel guard tests membership anywhere in the list, so a determinate writer skips the comparison |
-| [Q7](#q7) | Medium | A focused *reader* with no writers on its topic yields no finding at all |
-| [X5](#x5) | Medium | The SPDP2 bit-test fix degrades silently to the substring path it replaced |
-| [X6](#x6) | Medium | The SPDP2 finding never tests whether standard SPDP is *also* enabled, so a false ERROR can suppress domain-wide |
-| [X7](#x7) | Medium | Secure-vs-unsecure detection keys on the substring `secur` in a user-chosen plugin alias |
-| [X8](#x8) | Medium | A wrong guess about `PropertyQosPolicy`'s shape silently disables two rung-0 checks |
-| [M1](#m1) | Medium | `typewalk`'s type-graph recursion has no visited set and runs once per endpoint per scan |
-| [M2](#m2) | Medium | `_fastdds_product_versions` zips four occurrence lists with no length check |
-| [M3](#m3) | Medium | `_walk_union` conflates "unparseable labels" with "this is the default member" |
-| [M4](#m4) | Medium | `Session.system_scan` is not re-entrant and nothing serialises scans |
-| [M5](#m5) | Medium | The scan copies the whole endpoint dict `P + T + 2W` times, re-paid every 3 s of navigation |
-| [M6](#m6) | Medium | The discovery poll runs synchronously on the Textual event-loop thread |
-| [M7](#m7) | Medium | The type-resolution state machine is mutated from two threads and can latch UNAVAILABLE on a resolved type |
-| [M8](#m8) | Medium | Topology rows come from the live registry while the Health column comes from a stale snapshot |
-| [M9](#m9) | Medium | `IssueListScreen`'s key filter is frozen at push time and mislabels itself "All" |
-| [M10](#m10) | Medium | The verdict line drops the problem summary on every non-FULL payload |
-| [M11](#m11) | Medium | Both cleanups share one `try`, so a capture-teardown failure skips `participant.close()` |
-| [M12](#m12) | Medium | `--format json` produces no JSON at all on the two non-zero non-error exits |
-| [M13](#m13) | Medium | A startup failure and "found ERROR findings" are both exit 1 |
-| [M14](#m14) | Medium | `--ready-timeout` is the one numeric flag omitted from the finiteness check; `inf` hangs forever |
-| [M15](#m15) | Medium | `run_tests.sh` truncates failure output to 40 lines, and `all` does not run all suites |
-| [M16](#m16) | Medium | `rich` is imported but undeclared, `textual` is unpinned, and a dev-only package ships to users |
-| [M17](#m17) | Medium | The `no_type_info` fault fixture degrades to a healthy fixture on a warning |
-| [S5](#s5) | Medium | The SPDP2 bitmask path is never executed by its own tests |
-| [S6](#s6) | Medium | Four `static_discovery` checks and one `blind_spots` check have zero tests |
-| [S7](#s7) | Medium | The scan cache's freshness contract is untested; the stub ignores `max_age` |
-| [S8](#s8) | Medium | `typewalk.py` is 584 lines with one test, and the stated reason it cannot be unit-tested is false |
-| [S9](#s9) | Medium | Five probe checks are invoked by no test, and `FakeProbe`'s defaults make two unfireable |
-| [S10](#s10) | Medium | Two RxO guard clauses — the AUTO sentinel and partition wildcards — have no test |
-| [S11](#s11) | Medium | `run_headless_topic`, the primary headless entry point, has no test outside the licensed tiers |
-| [Q6](#q6) | Low | Partition wildcard-vs-wildcard matching is more permissive than DDS partition-expression matching |
-| [X10](#x10) | Low | XCDR2-only detection uses exact list equality, so `[2, 1]` is missed |
-| [L1](#l1) | Low | `records.locator_ip` ignores the locator kind and reports a fabricated IPv4 for an IPv6/SHMEM peer |
-| [L2](#l2) | Low | `listener_events` grows without bound and is rendered in full |
-| [L3](#l3) | Low | `selected_key` survives a re-render that resets the cursor |
-| [L4](#l4) | Low | `check_extensibility` passes the raw type map as `evidence`, sharing a namespace with `_annotate` |
-| [L5](#l5) | Low | `s` on a severity-filtered issue list saves an unfiltered report with different numbering |
-| [L6](#l6) | Low | Exit code 2 means both "bad command line" and "topic not found" |
-| [L7](#l7) | Low | The cleanup trap is installed after the background children are started |
-| [L8](#l8) | Low | `fixture_publisher` scale mode has no cleanup path and divides by an unvalidated argument |
-| [S12](#s12) | Low | `read -rsn1` EOF matches the Enter branch, so Ctrl-D launches a fixture instead of cancelling |
-| [S13](#s13) | Low | `test_fastdds_type_metadata_spike.py` is in no `run_tests.sh` tier |
-| [S14](#s14) | Low | Assorted test hazards: a collision guard that omits a suite, wall-clock assertions in the unit tier |
+Status was added on 2026-08-10 as findings were worked, and records only what
+changed in the source since this review was written. It is not a re-review: a
+row still marked Open has not been re-verified either.
+
+* **Fixed** — the defect this finding describes is gone, with the commit that
+  did it. The decision behind it is recorded in `DESIGN_DECISIONS.md`.
+* **Partial** — part of the finding is closed and part is not. The finding's own
+  section says which half.
+* **Live** — was latent behind another finding, is now reachable. Sub-findings
+  [C1a](#c1a), [C1b](#c1b) and [C1c](#c1c) are all in this state: fixing
+  [C1](#c1) is what made them fire.
+* **Open** — untouched.
+
+| ID | Status | Severity | One line |
+|---|---|---|---|
+| [C1](#c1) | **Fixed** `b771412` | **Critical** | The discovery-capture tshark command has 13 `-e` fields and the parser maps 12; every field but the GUID prefix is off by one, and the Fast DDS version feature is dead |
+| [C2](#c2) | **Fixed** `e9f5da1` | **Critical** | `--all` never runs the blind-spot audit, so an unreachable domain reports a clean sweep and exit 0 |
+| [C3](#c3) | Open | **Critical** | On an empty domain the TUI prints "nothing to report" while three screens simultaneously disagree about the error count |
+| [X1](#x1) | **Fixed** `cfecce6` | **Critical** | The multicast blind-spot check's `initial_peers` half is dead code, so multicast-off-with-defaults produces no finding at all |
+| [X2](#x2) | **Fixed** `cfecce6` | **Critical** | Suppression matches on finding `id` alone, globally, so an explainer on one topic hides a real independent failure on another |
+| [Q1](#q1) | **Fixed** `4fadb43` | **Critical** | An unreadable PARTITION policy is converted into a positive claim of the default partition, producing a false ERROR and exit 1 |
+| [H1](#h1) | Open | High | `--format json` is not valid JSON through the documented entry point, and prompts/progress go to stdout |
+| [Q2](#q2) | **Fixed** `4fadb43` | High | An absent writer-side PRESENTATION boolean is treated as `false`, producing a false ERROR |
+| [Q3](#q3) | Partial | High | DATA_REPRESENTATION is silently skipped for default-QoS writers — the most common configuration — and the result is reported as OK |
+| [X3](#x3) | Open | High | `check_type_state` emits a writer-phrased ERROR for a DataReader on two of its three call paths |
+| [X4](#x4) | Open | High | The assignability OK finding reports the evaluated reader count under a "resolved" label, so an all-clear can cover 1 of 3 readers |
+| [H2](#h2) | Open | High | `type.extensibility` still emits one WARN per endpoint — 96 identical warnings for one type |
+| [H3](#h3) | Open | High | `o` on the issue-detail screen can never work for `qos.rxo_mismatch`, the flagship ERROR |
+| [H4](#h4) | Open | High | Topic-scoped dedup withholds participant identity, so `type.name_conflict` shows every involved participant as "OK" |
+| [H5](#h5) | Open | High | `TopologyHealthScreen` raises `AttributeError` from four key handlers when the first scan failed |
+| [H6](#h6) | Open | High | Every `cleanup` EXIT trap in `run_manual_scenario.sh` reads function-locals, so it aborts before `docker rm` and fails a successful run |
+| [H7](#h7) | Open | High | The participant and startup tshark are created outside the `try/finally` that closes them |
+| [H8](#h8) | Open | High | Every TUI report probe spawns a `tshark -i any` capture, undisclosed and unconditional |
+| [H9](#h9) | Open | High | The startup discovery capture is unbounded on disk, and its full re-parse at exit is computed and discarded |
+| [H10](#h10) | Open | High | `refresh_participants` guards only the data fetch, so one unreadable field aborts the whole poll cycle |
+| [S1](#s1) | Open | High | The scale suite skips itself when the regression it exists to catch occurs |
+| [S2](#s2) | Open | High | The discovery field-name mapping is asserted by nothing, and `compat.get` turns a wrong name into a silent default |
+| [S3](#s3) | Open | High | `unittest.main()` sits mid-file in `test_checks.py`; 13 of 20 classes are unreachable when run directly |
+| [S4](#s4) | **Fixed** `e9f5da1` | High | `FakeSession.sweep` hardcodes the two values `--all` is judged by |
+| [Q4](#q4) | Partial | Medium | The `qos.compatible` OK finding records nothing about which policies were actually evaluated |
+| [Q5](#q5) | Open | Medium | The AUTO-sentinel guard tests membership anywhere in the list, so a determinate writer skips the comparison |
+| [Q7](#q7) | Open | Medium | A focused *reader* with no writers on its topic yields no finding at all |
+| [X5](#x5) | Open | Medium | The SPDP2 bit-test fix degrades silently to the substring path it replaced |
+| [X6](#x6) | Open | Medium | The SPDP2 finding never tests whether standard SPDP is *also* enabled, so a false ERROR can suppress domain-wide |
+| [X7](#x7) | Open | Medium | Secure-vs-unsecure detection keys on the substring `secur` in a user-chosen plugin alias |
+| [X8](#x8) | Open | Medium | A wrong guess about `PropertyQosPolicy`'s shape silently disables two rung-0 checks |
+| [M1](#m1) | Open | Medium | `typewalk`'s type-graph recursion has no visited set and runs once per endpoint per scan |
+| [M2](#m2) | Open | Medium | `_fastdds_product_versions` zips four occurrence lists with no length check |
+| [M3](#m3) | Open | Medium | `_walk_union` conflates "unparseable labels" with "this is the default member" |
+| [M4](#m4) | Open | Medium | `Session.system_scan` is not re-entrant and nothing serialises scans |
+| [M5](#m5) | Open | Medium | The scan copies the whole endpoint dict `P + T + 2W` times, re-paid every 3 s of navigation |
+| [M6](#m6) | Open | Medium | The discovery poll runs synchronously on the Textual event-loop thread |
+| [M7](#m7) | Open | Medium | The type-resolution state machine is mutated from two threads and can latch UNAVAILABLE on a resolved type |
+| [M8](#m8) | Open | Medium | Topology rows come from the live registry while the Health column comes from a stale snapshot |
+| [M9](#m9) | Open | Medium | `IssueListScreen`'s key filter is frozen at push time and mislabels itself "All" |
+| [M10](#m10) | Open | Medium | The verdict line drops the problem summary on every non-FULL payload |
+| [M11](#m11) | Open | Medium | Both cleanups share one `try`, so a capture-teardown failure skips `participant.close()` |
+| [M12](#m12) | Open | Medium | `--format json` produces no JSON at all on the two non-zero non-error exits |
+| [M13](#m13) | Open | Medium | A startup failure and "found ERROR findings" are both exit 1 |
+| [M14](#m14) | Open | Medium | `--ready-timeout` is the one numeric flag omitted from the finiteness check; `inf` hangs forever |
+| [M15](#m15) | Open | Medium | `run_tests.sh` truncates failure output to 40 lines, and `all` does not run all suites |
+| [M16](#m16) | Open | Medium | `rich` is imported but undeclared, `textual` is unpinned, and a dev-only package ships to users |
+| [M17](#m17) | Open | Medium | The `no_type_info` fault fixture degrades to a healthy fixture on a warning |
+| [S5](#s5) | Open | Medium | The SPDP2 bitmask path is never executed by its own tests |
+| [S6](#s6) | Open | Medium | Four `static_discovery` checks and one `blind_spots` check have zero tests |
+| [S7](#s7) | Open | Medium | The scan cache's freshness contract is untested; the stub ignores `max_age` |
+| [S8](#s8) | Open | Medium | `typewalk.py` is 584 lines with one test, and the stated reason it cannot be unit-tested is false |
+| [S9](#s9) | Open | Medium | Five probe checks are invoked by no test, and `FakeProbe`'s defaults make two unfireable |
+| [S10](#s10) | Open | Medium | Two RxO guard clauses — the AUTO sentinel and partition wildcards — have no test |
+| [S11](#s11) | Open | Medium | `run_headless_topic`, the primary headless entry point, has no test outside the licensed tiers |
+| [Q6](#q6) | Open | Low | Partition wildcard-vs-wildcard matching is more permissive than DDS partition-expression matching |
+| [X10](#x10) | Open | Low | XCDR2-only detection uses exact list equality, so `[2, 1]` is missed |
+| [L1](#l1) | Open | Low | `records.locator_ip` ignores the locator kind and reports a fabricated IPv4 for an IPv6/SHMEM peer |
+| [L2](#l2) | Open | Low | `listener_events` grows without bound and is rendered in full |
+| [L3](#l3) | Open | Low | `selected_key` survives a re-render that resets the cursor |
+| [L4](#l4) | Open | Low | `check_extensibility` passes the raw type map as `evidence`, sharing a namespace with `_annotate` |
+| [L5](#l5) | Open | Low | `s` on a severity-filtered issue list saves an unfiltered report with different numbering |
+| [L6](#l6) | Open | Low | Exit code 2 means both "bad command line" and "topic not found" |
+| [L7](#l7) | Open | Low | The cleanup trap is installed after the background children are started |
+| [L8](#l8) | Open | Low | `fixture_publisher` scale mode has no cleanup path and divides by an unvalidated argument |
+| [S12](#s12) | Open | Low | `read -rsn1` EOF matches the Enter branch, so Ctrl-D launches a fixture instead of cancelling |
+| [S13](#s13) | Open | Low | `test_fastdds_type_metadata_spike.py` is in no `run_tests.sh` tier |
+| [S14](#s14) | Open | Low | Assorted test hazards: a collision guard that omits a suite, wall-clock assertions in the unit tier |
 
 ---
 
 ## Critical
 
 ### C1
+
+**Status: Fixed** in `b771412`. `wire.DISCOVERY_FIELDS` is now the one
+ordered layout that builds both the tshark `-e` list and the parser's
+positional mapping, so the two cannot drift again. Note the mechanism
+described above is slightly off: tshark emits one column per `-e` argument
+even when a name repeats - the *earlier* duplicate is blank and the value
+lands in the later one - so the row had 13 columns against a 12-slot parser.
+The consequences as traced are correct. Verified empirically against tshark
+4.4.9. See C1 in `DESIGN_DECISIONS.md`.
 
 **The discovery-capture tshark command requests 13 fields and the parser maps 12, so every discovery field except the GUID prefix is off by one — and the entire Fast DDS version feature added in `290707c` can never fire.**
 `../rti_doctor/wire.py#L406` and `#L412` both pass `-e rtps.sm.wrEntityId`.
@@ -230,6 +262,11 @@ count from the command instead of hard-coding 12.
 
 #### C1a
 
+**Status: Live.** Unblocked by the C1 fix and reproduced since: three distinct
+out-of-baseline versions still collapse into one issue keyed
+`environment.fastdds_version_older_than_validated:::::`, naming one version.
+No decision recorded yet.
+
 **All `environment.fastdds_version_older_than_validated` findings share one
 `_issue_key`, so N distinct out-of-baseline versions collapse into one issue
 naming one version.** `../rti_doctor/system_scan.py#L139` + `#L235-L247`.
@@ -243,6 +280,10 @@ column mapping is fixed, and it will start mattering the moment it is.
 
 #### C1b
 
+**Status: Live.** Unblocked by the C1 fix. `_version_notes` still bypasses
+`_annotate`, so the finding carries no `participant_key`. No decision recorded
+yet.
+
 **The same finding declares `RUNG_PARTICIPANT` but bypasses `_annotate()`, so it
 carries no `participant_key`.** `../rti_doctor/system_scan.py#L142`.
 `system_overview._health()` and `_linked_issue_keys()` never link it, leaving the
@@ -254,12 +295,24 @@ different producer.
 
 #### C1c
 
+**Status: Live.** Unblocked by the C1 fix. The version list is still latched
+and `discovery_capture` nulled on the same pass, so the WARN keeps firing
+after that participant departs. No decision recorded yet.
+
 **`_fastdds_product_versions` is latched on the first Fast DDS-bearing scan and
 `discovery_capture` is nulled, so the WARN keeps firing on every later refresh
 after that participant departs, as long as any participant remains.**
 `../rti_doctor/engine.py#L85`. **Re-verified. Latent behind [C1](#c1).**
 
 ### C2
+
+**Status: Fixed** in `e9f5da1`, by removal rather than by adding the audit:
+[S4](#s4) superseded C2's deprecation plan. `--all`, `run_headless_all`,
+`Session.sweep`, `_sweep_row` and `render_sweep_text` are gone. Headless work
+is now two stages - `--system` for the passive system scan, `--topic` for a
+targeted diagnosis - and `--system` reports the system-wide issue census, so
+an unreachable domain cannot exit 0 clean. See C2, C2a and S4 in
+`DESIGN_DECISIONS.md`.
 
 **`--all` never runs the blind-spot audit, so an unreachable or empty domain
 reports a clean sweep and exits 0.**
@@ -275,6 +328,11 @@ it. A domain tag mismatch, `accept_unknown_peers = false`, or SPDP2 on our side
 all present as a passing build. **Confirmed.**
 
 ### C3
+
+**Status: Open.** One detail below has gone stale:
+`blind.no_multicast_no_peers` no longer exists ([X1](#x1)), so it is not among
+the rung-0 findings an empty domain can produce. The disagreement between the
+three screens is untouched.
 
 **On an empty domain the TUI prints "there is nothing to report" while three
 screens simultaneously disagree about the error count, and the saved text report
@@ -296,6 +354,15 @@ snapshot.issues` *first* — so the saved report and the TUI diverge on the sing
 scenario the tool exists for. **Confirmed.**
 
 ### X1
+
+**Status: Fixed** in `cfecce6` by removing `check_multicast_and_peers` and
+`_looks_multicast` outright, per the accepted decision: a check that reads
+rti_doctor's own participant QoS describes the diagnostic, not the system it
+was pointed at, and multicast reachability between two hosts is not observable
+from either side's QoS. The README no longer promises it. The second half of
+this finding - the unreachable `SUPPRESSION_RULES` entries for
+`blind.no_multicast_no_peers` and `repr.no_common` - is moot: [X2](#x2)
+removed suppression entirely. See X1 in `DESIGN_DECISIONS.md`.
 
 **The multicast blind-spot check's entire `initial_peers` half is dead code, so
 the most common real multicast blind spot produces no finding at all — and the
@@ -330,6 +397,14 @@ never explain anything. `"repr.no_common"` (`findings.py:86`) is dead for the
 same reason: `type_compat.py:335` always emits it as WARN.
 
 ### X2
+
+**Status: Fixed** in `cfecce6`. Suppression is gone rather than scoped:
+`SUPPRESSION_RULES` is now `CAUSAL_EXPLAINERS` and `link_causes()` annotates a
+finding with `explained_by` without removing it from any list, count or exit
+code. The severity gate went with it, since naming a likely cause no longer
+hides anything, and the rendered line states that the link is by finding id
+alone and should be confirmed. The `active`/`suppressed` split and both
+SUPPRESSED report sections are removed. See X2 and X2a in `DESIGN_DECISIONS.md`.
 
 **Suppression matches on finding `id` alone, globally, across every endpoint,
 topic and pair — so a rung-0 or rung-3 explainer in one scope silently hides a
@@ -369,6 +444,15 @@ they leave the active issue list and the counts the operator reads.
 **Confirmed.**
 
 ### Q1
+
+**Status: Fixed** in `4fadb43`. `_partition_names` returns `(names, readable)`,
+so an explicit empty list is still the default partition while an unreadable
+policy declines. Every rule in the file now reports what it could not compare
+through `evidence["policies_unevaluated"]` and a "Not evaluated" line, because
+an incomplete-evidence channel populated for PARTITION alone would have made
+its absence certify that everything else was compared. A bare-string partition
+name, which iterated per character, is guarded too. See Q1 and Q1a in
+`DESIGN_DECISIONS.md`.
 
 **An unreadable PARTITION policy is silently converted into a positive claim of
 the default partition, producing a false ERROR — and PARTITION is the one rule in
@@ -424,6 +508,10 @@ Two independent causes, both on the path a CI job would use:
 
 ### Q2
 
+**Status: Fixed** in `4fadb43`, through the same channel as [Q1](#q1). An
+unreadable `coherent_access`/`ordered_access` is recorded as unevaluated; an
+explicit `False` still compares. See Q2 and Q1a in `DESIGN_DECISIONS.md`.
+
 **An absent writer-side PRESENTATION boolean is treated as `false`, producing a
 false ERROR — while the sibling rule on the same policy object correctly
 declines.**
@@ -440,6 +528,15 @@ Scenario: the reader's Subscriber has
 correctly declines to evaluate for exactly that input. **Confirmed.**
 
 ### Q3
+
+**Status: Partial.** The reporting half is closed by the [Q1](#q1) work in
+`4fadb43`: an empty advertised sequence now produces an explicit
+DATA_REPRESENTATION unevaluated record and a "Not evaluated" line, so the OK
+finding no longer reads as a clean bill of health on this policy. The verdict
+half stands - the pair is still reported `qos.compatible` / Severity.OK rather
+than the ERROR the concrete scenario argues for, and `repr.not_advertised` is
+still not cross-referenced. Not decided; `DESIGN_DECISIONS.md` Q1a records
+that this verdict still needs one.
 
 **DATA_REPRESENTATION — the only XTypes RxO rule in the tool — is silently
 skipped for the most common writer configuration, and the result is reported as a
@@ -776,6 +873,15 @@ test. Fix: move the `if __name__` block to the end of the file.
 
 ### S4
 
+**Status: Fixed** in `e9f5da1`. `--all` and its exit-code and
+finding-serialization paths are removed, so there is nothing left for the
+hardcoded double to mask. `FakeSession` now borrows the real
+`engine.Session.system_scan` over a real registry instead of returning canned
+rows, and `test_cli` additionally cross-checks the `session.` attributes
+`main()` uses against `engine.Session` - a guard added after deleting
+`close_discovery_capture` broke every invocation with the whole suite green.
+See S4 in `DESIGN_DECISIONS.md`.
+
 **`FakeSession.sweep` hardcodes the two values `--all` is judged by, so both are
 dead in the tests.**
 `../test/test_cli.py#L38-L48`. It returns `"severity": "OK"` and
@@ -798,6 +904,12 @@ surviving the fix credited with closing it. **Confirmed.**
 
 ### Q4
 
+**Status: Partial.** `evidence["policies_unevaluated"]` and the "Not evaluated
+(...)" sentence landed in `4fadb43` for every rule, so "compatible" and
+"almost nothing was readable" are no longer byte-identical. The
+`policies_compared` half and the "8 of 10 policies compared" phrasing were not
+done, and `DESIGN_DECISIONS.md` Q1a records that half as still undecided.
+
 **The `qos.compatible` OK finding records nothing about which policies were
 actually evaluated, so "compatible" is indistinguishable from "almost nothing was
 readable".**
@@ -815,6 +927,14 @@ the `observed` line say "8 of 10 policies compared" rather than an unqualified
 "No observable QoS mismatch". **Confirmed.**
 
 ### Q5
+
+**Status: Open**, but no longer silent. As of `4fadb43` an AUTO sentinel on
+either side produces a DATA_REPRESENTATION unevaluated record rather than a
+quiet skip, so the operator can see the comparison did not happen. The guard
+itself is unchanged - still membership anywhere in the list rather than
+position 0 - so the scenario above is still reported as no mismatch. Note
+[S10](#s10): the AUTO test still needs writing before narrowing it, and
+`DESIGN_DECISIONS.md` Q1a records this verdict as undecided.
 
 **The AUTO-sentinel guard tests membership anywhere in the list rather than at
 position 0, so a writer with a determinate effective representation skips the
@@ -1774,6 +1894,24 @@ correct; the defects are [Q1](#q1)–[Q7](#q7) and nothing else.
 # Recommended order of work
 
 Ordered by consequence per unit of effort, not by severity label.
+
+Items 1-4 and the [S4](#s4) part of item 9 are done - worked in the decision
+log's order (C1, Q1, Q2, C2/S4, X1, X2), not this one - and each was
+implemented against a recorded decision rather than the fix sketched here
+(see `DESIGN_DECISIONS.md`); where the two differ, the decision won. Three
+departures worth noting:
+
+* [C1](#c1)'s fix is a shared field layout, not the one-line deletion, so the
+  command and the parser cannot drift again.
+* [C2](#c2) was resolved by deleting `--all` ([S4](#s4)'s decision) rather than
+  by adding the missing `diagnose_domain()` call to it.
+* [X2](#x2)'s suppression was removed outright rather than scoped by topic and
+  pair, so no finding can hide another at all.
+
+[C1a](#c1a)/[C1b](#c1b)/[C1c](#c1c) were **not** fixed alongside [C1](#c1) as
+item 2 advises, so the feature did land broken a second time. They are the
+first thing to pick up. Item 6 ([X3](#x3) + [X4](#x4)) is next in the decision
+log's order.
 
 1. **[Q1](#q1)** + **[Q2](#q2)** — the two false ERRORs. These are the worst
    findings in the review in operational terms: the tool asserts, at ERROR

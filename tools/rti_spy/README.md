@@ -92,6 +92,13 @@ The app entrypoint accepts:
 --debug-log           Optional log file for discovery/subscription events
 --scan-timeout        Seconds to scan for active domains before prompting (default: 32.0)
 --no-domain-scan      Skip scanning for active domains before prompting
+--theme               Initial Textual theme name (for example: textual-light)
+```
+
+To start in a light palette:
+
+```bash
+./tools/rti_spy/run_rtispy.sh --domain 1 --theme textual-light
 ```
 
 Direct invocation:
@@ -127,6 +134,47 @@ This is best-effort:
 
 Use `--scan-timeout` to shorten/lengthen the wait, or `--no-domain-scan` to
 skip straight to the domain prompt (still defaults to `1`).
+
+## Deploying RTI Spy as a PyInstaller Bundle
+
+The normal launcher remains the easiest way to run `rti_spy` on a development
+machine. The deployment scripts create a compressed PyInstaller folder bundle
+for a compatible Linux target.
+
+The build host needs the Python version and shared library required by the RTI
+Python wheel (for example, on Debian/Ubuntu, `python3.9`, `python3.9-venv`, and
+`libpython3.9` for a Connext 7.3 `cp39` wheel), plus network access for the
+one-time dependency preparation. Package names vary by distribution.
+
+Prepare the connected build environment:
+
+```bash
+./scripts/prepare_rti_spy_bundle_env.sh \
+  --wheel /path/to/rti_connext_activated-7.3.1-cp39-*.whl
+```
+
+Build the compressed folder bundle without downloading Python packages:
+
+```bash
+./scripts/build_rti_spy_bundle.sh
+```
+
+The build script reuses the RTI Python wheel recorded during preparation. To
+use a different wheel, rerun the preparation step with that wheel.
+
+Artifacts are written to `build/rti_spy_bundle/` and include the Connext
+version, Python ABI, and build architecture in their filename.
+
+Copy the `.tar.gz` to the target, extract it, and run it normally:
+
+```bash
+tar -xzf rti_spy-*.tar.gz
+./rti_spy/rti_spy --theme textual-light
+```
+
+The target does not need Python, pip, the source repository, or the RTI Python
+wheel. It still needs a compatible Linux architecture, glibc baseline, and DDS
+network access.
 
 ## Testing
 

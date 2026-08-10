@@ -75,13 +75,53 @@ def _seconds(duration):
   return float(sec) + (float(nanosec or 0) / 1e9)
 
 
+def _unevaluated(label, reason):
+  """A record that one policy was not compared, and why.
+
+  Distinguished from a mismatch dict by the `reason` key. Every rule that
+  declines returns one of these rather than None, so that the absence of an
+  incompatibility never has to stand in for two different answers.
+  """
+  return {"policy": label, "reason": reason}
+
+
+def _sort_unevaluated(result, mismatches, unevaluated):
+  """File a rule's outcome under the mismatch or the incomplete-evidence list."""
+  if result is None:
+    return
+  if "reason" in result:
+    unevaluated.append(result)
+  else:
+    mismatches.append(result)
+
+
 def _ordered_rule(label, writer_policy, reader_policy, order, explanation,
-                  attributes=("kind",)):
-  """Compare an ordered policy. Returns a mismatch dict or None."""
+                  attributes=("kind",), reader_accepts_any=()):
+  """Compare an ordered policy. Returns a mismatch, an unevaluated record, or None.
+
+  ``reader_accepts_any`` names reader kinds that are compatible with every
+  writer, so there is nothing to compare and nothing missing either - unlike
+  a kind that is simply absent from ``order``.
+  """
   offered, offered_name = _rank(writer_policy, order, attributes)
   requested, requested_name = _rank(reader_policy, order, attributes)
+  unreadable = [side for side, name in (("writer", offered_name),
+                                        ("reader", requested_name))
+                if name is None]
+  if unreadable:
+    return _unevaluated(label, f"The {label} kind was not readable in the "
+                               f"discovery data of the {' and '.join(unreadable)}.")
+  if requested_name in reader_accepts_any:
+    return None
   if offered is None or requested is None:
-    return None  # cannot evaluate; say nothing rather than guess
+    # Readable, but outside the ordered kinds - PRESENTATION HIGHEST_OFFERED is
+    # the intended case. Not a gap in the data, but still not a comparison.
+    unranked = " and ".join(
+        f"{side} {name}" for side, name, rank in
+        (("writer", offered_name, offered), ("reader", requested_name, requested))
+        if rank is None)
+    return _unevaluated(label, f"No requested/offered ordering applies to "
+                               f"{unranked}, so this policy was not compared.")
   if offered >= requested:
     return None
   return {
@@ -96,8 +136,11 @@ def _duration_rule(label, writer_duration, reader_duration, explanation):
   """Writer's period/duration must be <= the reader's (writer at least as strict)."""
   offered = _seconds(writer_duration)
   requested = _seconds(reader_duration)
-  if offered is None or requested is None:
-    return None
+  unreadable = [side for side, value in (("writer", offered), ("reader", requested))
+                if value is None]
+  if unreadable:
+    return _unevaluated(label, f"The {label} value was not readable in the "
+                               f"discovery data of the {' and '.join(unreadable)}.")
   if offered <= requested:
     return None
   return {
@@ -108,20 +151,47 @@ def _duration_rule(label, writer_duration, reader_duration, explanation):
   }
 
 
+#: Distinguishes "the binding returned None" from "the attribute was absent or
+#: raised". Both are unreadable here, but the sentinel keeps that a deliberate
+#: decision rather than an accident of compat.get's default.
+_UNREADABLE = object()
+
+
 def _partition_names(policy):
-  names = compat.get(policy, "name", None)
+  """``(names, readable)`` for a PARTITION policy.
+
+  ``([], True)`` is the explicit default partition - the endpoint really did
+  assert the single empty-string partition. ``([], False)`` means the policy
+  could not be read at all, which is not a partition claim and must never be
+  compared: the endpoint may well be in "telemetry".
+  """
+  if policy is None:
+    return [], False
+  names = compat.get(policy, "name", _UNREADABLE)
+  if names is _UNREADABLE or names is None:
+    return [], False
+  # A bare string is one partition name, not a sequence of one-character names.
+  # Iterating it produced "t, e, l, e, m, ..." and a false PARTITION mismatch.
+  if isinstance(names, str):
+    return [names], True
   try:
-    return [str(n) for n in (names or ())]
+    return [str(name) for name in names], True
   except TypeError:
-    return []
+    return [], False
 
 
 def _partitions_overlap(writer_endpoint, reader_endpoint):
-  """DDS partition matching, including the empty-default and wildcard cases."""
+  """DDS partition matching, including the empty-default and wildcard cases.
+
+  The overlap is ``None`` when either side's policy was unreadable, so callers
+  can decline to evaluate rather than convert missing data into a mismatch.
+  """
   import fnmatch
 
-  writer_names = _partition_names(writer_endpoint.partition)
-  reader_names = _partition_names(reader_endpoint.partition)
+  writer_names, writer_readable = _partition_names(writer_endpoint.partition)
+  reader_names, reader_readable = _partition_names(reader_endpoint.partition)
+  if not (writer_readable and reader_readable):
+    return None, writer_names, reader_names
 
   # An empty partition list means the single default (empty-string) partition.
   writer_effective = writer_names or [""]
@@ -140,65 +210,69 @@ def _partitions_overlap(writer_endpoint, reader_endpoint):
 def compare_endpoints(writer, reader):
   """Every RxO incompatibility between a discovered writer and reader.
 
-  Returns a list of mismatch dicts. Empty means "no incompatibility observable
-  from discovery data" - not a guarantee of matching, since type assignability
-  and security are checked elsewhere.
+  Returns ``(mismatches, unevaluated)``. A mismatch dict is an observed
+  incompatibility; an unevaluated dict names a policy whose discovery data was
+  not readable on one or both sides. Discovery data that could not be read is
+  never converted into an incompatibility claim - but it is not silently
+  dropped either, because "no mismatch" and "nothing to compare" are different
+  answers and the operator ships on the first one.
+
+  An empty ``mismatches`` means "no incompatibility observable from discovery
+  data" - not a guarantee of matching, since type assignability and security
+  are checked elsewhere.
   """
   mismatches = []
+  unevaluated = []
 
   rule = _ordered_rule(
       "RELIABILITY", writer.reliability, reader.reliability, RELIABILITY_ORDER,
       "A RELIABLE reader cannot match a BEST_EFFORT writer. The reader may "
       "request BEST_EFFORT from a RELIABLE writer, but not the reverse.")
-  if rule:
-    mismatches.append(rule)
+  _sort_unevaluated(rule, mismatches, unevaluated)
 
   rule = _ordered_rule(
       "DURABILITY", writer.durability, reader.durability, DURABILITY_ORDER,
       "The writer must offer durability at least as strong as the reader "
       "requests: VOLATILE < TRANSIENT_LOCAL < TRANSIENT < PERSISTENT.")
-  if rule:
-    mismatches.append(rule)
+  _sort_unevaluated(rule, mismatches, unevaluated)
 
   rule = _ordered_rule(
       "LIVELINESS", writer.liveliness, reader.liveliness, LIVELINESS_ORDER,
       "The writer's liveliness kind must be at least as strong as the reader's: "
       "AUTOMATIC < MANUAL_BY_PARTICIPANT < MANUAL_BY_TOPIC.")
-  if rule:
-    mismatches.append(rule)
+  _sort_unevaluated(rule, mismatches, unevaluated)
 
   rule = _ordered_rule(
       "DESTINATION_ORDER", writer.destination_order, reader.destination_order,
       DESTINATION_ORDER_ORDER,
       "The writer's destination order must be at least as strong as the "
       "reader's: BY_RECEPTION_TIMESTAMP < BY_SOURCE_TIMESTAMP.")
-  if rule:
-    mismatches.append(rule)
+  _sort_unevaluated(rule, mismatches, unevaluated)
 
   rule = _ordered_rule(
       "PRESENTATION access_scope", writer.presentation, reader.presentation,
       PRESENTATION_ORDER,
       "The writer's presentation access scope must be at least as broad as the "
       "reader's: INSTANCE < TOPIC < GROUP.",
-      attributes=("access_scope", "kind"))
-  if rule:
-    mismatches.append(rule)
+      attributes=("access_scope", "kind"),
+      # HIGHEST_OFFERED means "use whatever each remote Publisher offers", so
+      # it matches every writer. That is an answer, not a gap in the evidence.
+      reader_accepts_any=("HIGHEST_OFFERED",))
+  _sort_unevaluated(rule, mismatches, unevaluated)
 
   rule = _duration_rule(
       "DEADLINE", compat.get(writer.deadline, "period", None),
       compat.get(reader.deadline, "period", None),
       "The writer's deadline period must be less than or equal to the reader's, "
       "so the writer promises updates at least as often as the reader requires.")
-  if rule:
-    mismatches.append(rule)
+  _sort_unevaluated(rule, mismatches, unevaluated)
 
   rule = _duration_rule(
       "LATENCY_BUDGET", compat.get(writer.latency_budget, "duration", None),
       compat.get(reader.latency_budget, "duration", None),
       "The writer's latency budget duration must be less than or equal to the "
       "reader's.")
-  if rule:
-    mismatches.append(rule)
+  _sort_unevaluated(rule, mismatches, unevaluated)
 
   rule = _duration_rule(
       "LIVELINESS lease_duration",
@@ -206,15 +280,27 @@ def compare_endpoints(writer, reader):
       compat.get(reader.liveliness, "lease_duration", None),
       "The writer's liveliness lease duration must be less than or equal to the "
       "reader's.")
-  if rule:
-    mismatches.append(rule)
+  _sort_unevaluated(rule, mismatches, unevaluated)
 
   for name in ("coherent_access", "ordered_access"):
-    writer_value = compat.get(writer.presentation, name, None)
-    reader_value = compat.get(reader.presentation, name, None)
-    if reader_value and not writer_value:
+    label = f"PRESENTATION {name}"
+    writer_value = compat.get(writer.presentation, name, _UNREADABLE)
+    reader_value = compat.get(reader.presentation, name, _UNREADABLE)
+    # An unreadable flag is not an offer of false. Reading it as one made a
+    # writer whose PRESENTATION never survived discovery fail against every
+    # reader that requests coherent or ordered access - the same false ERROR
+    # the sibling access_scope rule already declines to make.
+    unreadable = [side for side, value in (("writer", writer_value),
+                                           ("reader", reader_value))
+                  if value is _UNREADABLE or value is None]
+    if unreadable:
+      unevaluated.append(_unevaluated(
+          label, f"The {name} flag was not readable in the discovery data of "
+                 f"the {' and '.join(unreadable)}, so it is neither an offer "
+                 f"nor a request."))
+    elif reader_value and not writer_value:
       mismatches.append({
-          "policy": f"PRESENTATION {name}",
+          "policy": label,
           "offered": str(bool(writer_value)),
           "requested": str(bool(reader_value)),
           "rule": f"A writer must offer {name}=true when the reader requests it.",
@@ -223,7 +309,13 @@ def compare_endpoints(writer, reader):
   # OWNERSHIP is not ordered - the kinds must be identical.
   writer_ownership = _kind_name(writer.ownership)
   reader_ownership = _kind_name(reader.ownership)
-  if writer_ownership and reader_ownership and writer_ownership != reader_ownership:
+  unreadable = [side for side, name in (("writer", writer_ownership),
+                                        ("reader", reader_ownership)) if not name]
+  if unreadable:
+    unevaluated.append(_unevaluated(
+        "OWNERSHIP", f"The OWNERSHIP kind was not readable in the discovery "
+                     f"data of the {' and '.join(unreadable)}."))
+  elif writer_ownership != reader_ownership:
     mismatches.append({
         "policy": "OWNERSHIP",
         "offered": writer_ownership,
@@ -237,19 +329,41 @@ def compare_endpoints(writer, reader):
   # [XCDR2] intersects, but the writer serializes XCDR1 and the reader rejects it.
   writer_ids = records.representation_ids(writer.representation)
   reader_ids = records.representation_ids(reader.representation)
-  if writer_ids and reader_ids and -1 not in writer_ids and -1 not in reader_ids:
-    if writer_ids[0] not in set(reader_ids):
-      mismatches.append({
-          "policy": "DATA_REPRESENTATION",
-          "offered": records.representation_text(writer.representation),
-          "requested": records.representation_text(reader.representation),
-          "rule": "The reader must accept the writer's effective data "
-                  "representation, which is the first entry in the writer's list "
-                  "(XCDR1/XCDR2).",
-      })
+  # An empty list is "could not read" (records.representation_ids says so), and
+  # AUTO leaves the effective representation undetermined from discovery alone.
+  if not (writer_ids and reader_ids):
+    empty = [side for side, ids_ in (("writer", writer_ids), ("reader", reader_ids))
+             if not ids_]
+    unevaluated.append(_unevaluated(
+        "DATA_REPRESENTATION",
+        f"The {' and '.join(empty)} advertised no data representation in "
+        f"discovery, so the writer's effective representation could not be "
+        f"compared against what the reader accepts."))
+  elif -1 in writer_ids or -1 in reader_ids:
+    auto = [side for side, ids_ in (("writer", writer_ids), ("reader", reader_ids))
+            if -1 in ids_]
+    unevaluated.append(_unevaluated(
+        "DATA_REPRESENTATION",
+        f"The {' and '.join(auto)} advertised AUTO, whose effective "
+        f"representation is not determinable from discovery data."))
+  elif writer_ids[0] not in set(reader_ids):
+    mismatches.append({
+        "policy": "DATA_REPRESENTATION",
+        "offered": records.representation_text(writer.representation),
+        "requested": records.representation_text(reader.representation),
+        "rule": "The reader must accept the writer's effective data "
+                "representation, which is the first entry in the writer's list "
+                "(XCDR1/XCDR2).",
+    })
 
   overlap, writer_partitions, reader_partitions = _partitions_overlap(writer, reader)
-  if not overlap:
+  if overlap is None:
+    unevaluated.append(_unevaluated(
+        "PARTITION",
+        "The PARTITION policy was not readable in the discovery data of one or "
+        "both endpoints, so no partition claim can be made for either side. An "
+        "unreadable policy is not the default partition."))
+  elif not overlap:
     mismatches.append({
         "policy": "PARTITION",
         "offered": ", ".join(writer_partitions) or "(default)",
@@ -258,7 +372,21 @@ def compare_endpoints(writer, reader):
                 "Partitions are matched as strings, with wildcards allowed.",
     })
 
-  return mismatches
+  return mismatches, unevaluated
+
+
+def _unevaluated_text(unevaluated):
+  """Sentence naming the policies that were not compared, or an empty string.
+
+  Appended to the `observed` line of both QoS verdicts: an operator reading
+  "no observable QoS mismatch" needs to know when a policy was skipped for
+  want of data rather than found compatible.
+  """
+  if not unevaluated:
+    return ""
+  policies = ", ".join(item["policy"] for item in unevaluated)
+  return (f" Not evaluated ({policies}): this pair was neither confirmed "
+          f"compatible nor found incompatible on these policies.")
 
 
 def check_rxo_pairs(context):
@@ -290,12 +418,19 @@ def check_rxo_pairs(context):
   for peer in peers:
     writer = endpoint if endpoint.is_writer else peer
     reader = peer if endpoint.is_writer else endpoint
-    mismatches = compare_endpoints(writer, reader)
+    mismatches, unevaluated = compare_endpoints(writer, reader)
 
     writer_participant = context.registry.participant_for(writer)
     reader_participant = context.registry.participant_for(reader)
     writer_label = _label(writer, writer_participant)
     reader_label = _label(reader, reader_participant)
+    evidence = {"writer": writer_label, "reader": reader_label,
+                "writer_key": writer.key, "reader_key": reader.key,
+                "writer_participant_key": writer.participant_key,
+                "reader_participant_key": reader.participant_key,
+                "topic_name": writer.topic_name}
+    if unevaluated:
+      evidence["policies_unevaluated"] = unevaluated
 
     if not mismatches:
       out.append(Finding(
@@ -304,12 +439,9 @@ def check_rxo_pairs(context):
           severity=Severity.OK,
           title=f"No observable QoS mismatch: {writer_label} -> {reader_label}",
           observed=("No requested/offered incompatibility was observed in the "
-                    "discovery QoS available for this pair."),
-          evidence={"writer": writer_label, "reader": reader_label,
-              "writer_key": writer.key, "reader_key": reader.key,
-              "writer_participant_key": writer.participant_key,
-              "reader_participant_key": reader.participant_key,
-              "topic_name": writer.topic_name},
+                    "discovery QoS available for this pair." +
+                    _unevaluated_text(unevaluated)),
+          evidence=evidence,
             refs=[DOC_OMG_DDS_RTPS],
       ))
       continue
@@ -320,24 +452,20 @@ def check_rxo_pairs(context):
     rules = " ".join(m["rule"] for m in mismatches)
     policies = ", ".join(m["policy"] for m in mismatches)
 
+    evidence["mismatches"] = mismatches
     out.append(Finding(
         id="qos.rxo_mismatch",
         rung=RUNG_MATCH,
         severity=Severity.ERROR,
         title=f"QoS incompatible ({policies}): {writer_label} -> {reader_label}",
-        observed=detail,
+        observed=detail + "." + _unevaluated_text(unevaluated),
         root_cause=(
             "These two endpoints are both live in the system and will never "
             "communicate: DDS only matches a reader to a writer when every "
             "requested/offered policy is compatible. " + rules),
         remedy=(f"Change {policies} on one side. The reader is the constrained "
                 f"side - it must request no more than the writer offers."),
-        evidence={"writer": writer_label, "reader": reader_label,
-            "writer_key": writer.key, "reader_key": reader.key,
-            "writer_participant_key": writer.participant_key,
-            "reader_participant_key": reader.participant_key,
-            "topic_name": writer.topic_name,
-                  "mismatches": mismatches},
+        evidence=evidence,
           refs=[DOC_OMG_DDS_RTPS],
     ))
   return out

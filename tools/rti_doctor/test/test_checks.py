@@ -592,6 +592,10 @@ class TestRxO(unittest.TestCase):
         result = qos_match.check_rxo_pairs(
             CheckContext(endpoint=writer, registry=registry))
         self.assertEqual(ids(result), ["qos.compatible"])
+        # Compatible, not unevaluable: nothing about this pair is missing.
+        unevaluated = [item["policy"]
+                       for item in result[0].evidence["policies_unevaluated"]]
+        self.assertNotIn("PRESENTATION access_scope", unevaluated)
 
   def test_reader_must_accept_the_writers_first_representation(self):
     """Regression: set intersection called [XCDR1, XCDR2] -> [XCDR2] compatible."""
@@ -640,6 +644,55 @@ class TestRxO(unittest.TestCase):
         {"presentation": Presentation(False)}, {"presentation": Presentation(True)})
     result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
     self.assertIn("PRESENTATION coherent_access", result[0].title)
+
+  def test_unreadable_presentation_boolean_is_not_an_offer_of_false(self):
+    """An absent PRESENTATION is no claim; false is a claim. Do not confuse them.
+
+    The writer's Publisher may well have coherent_access=true - its policy
+    simply did not survive discovery - so calling it false produced an ERROR,
+    and exit 1, for a pair that matches.
+    """
+    class Presentation:
+      def __init__(self, coherent_access=False, ordered_access=False):
+        self.coherent_access = coherent_access
+        self.ordered_access = ordered_access
+
+    class Unreadable:
+      @property
+      def coherent_access(self):
+        raise RuntimeError("policy not available on this Connext version")
+      ordered_access = False
+
+    for label, writer_kwargs, reader_kwargs in (
+        ("writer policy absent", {}, {"presentation": Presentation(coherent_access=True)}),
+        ("writer flag unreadable", {"presentation": Unreadable()},
+         {"presentation": Presentation(coherent_access=True)}),
+        ("reader flag unreadable", {"presentation": Presentation()},
+         {"presentation": Unreadable()}),
+    ):
+      with self.subTest(case=label):
+        writer, reader, registry = self._pair(writer_kwargs, reader_kwargs)
+        result = qos_match.check_rxo_pairs(
+            CheckContext(endpoint=writer, registry=registry))
+        self.assertEqual(ids(result), ["qos.compatible"])
+        unevaluated = [item["policy"]
+                       for item in result[0].evidence["policies_unevaluated"]]
+        self.assertIn("PRESENTATION coherent_access", unevaluated)
+
+  def test_explicit_presentation_false_is_still_compared(self):
+    """The fix must not silence the real offer of false."""
+    class Presentation:
+      def __init__(self, coherent_access, ordered_access=False):
+        self.coherent_access = coherent_access
+        self.ordered_access = ordered_access
+
+    writer, reader, registry = self._pair(
+        {"presentation": Presentation(False)}, {"presentation": Presentation(True)})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.rxo_mismatch"])
+    unevaluated = [item["policy"]
+                   for item in result[0].evidence["policies_unevaluated"]]
+    self.assertNotIn("PRESENTATION coherent_access", unevaluated)
 
   def test_every_runtime_matrix_condition_has_a_named_diagnostic(self):
     class Duration:
@@ -733,6 +786,94 @@ class TestRxO(unittest.TestCase):
     writer, reader, registry = self._pair()
     result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
     self.assertEqual(ids(result), ["qos.compatible"])
+
+  @staticmethod
+  def _partition(names):
+    # `names` is stored as given: a real PartitionQosPolicy carries a sequence,
+    # but a single string has to stay a single string here.
+    class Partition:
+      name = names
+    return Partition()
+
+  def test_a_single_string_partition_is_one_name(self):
+    """A str is iterable, and iterating it made 'telemetry' nine partitions."""
+    writer, reader, registry = self._pair(
+        {"partition": self._partition("telemetry")},
+        {"partition": self._partition(["telemetry"])})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.compatible"])
+
+  def test_readable_partitions_are_reported_as_evaluated(self):
+    """A policy that was compared must not appear in the incomplete list."""
+    writer, reader, registry = self._pair(
+        {"partition": self._partition(["telemetry"])},
+        {"partition": self._partition(["telemetry"])})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    unevaluated = [item["policy"]
+                   for item in result[0].evidence["policies_unevaluated"]]
+    self.assertNotIn("PARTITION", unevaluated)
+
+  def test_named_partitions_still_match_and_mismatch(self):
+    for writer_names, reader_names, expected in (
+        (["telemetry"], ["telemetry"], "qos.compatible"),
+        (["telemetry"], ["control"], "qos.rxo_mismatch"),
+        (["telem*"], ["telemetry"], "qos.compatible"),
+        ([], [], "qos.compatible"),          # both explicitly default
+        ([], ["telemetry"], "qos.rxo_mismatch"),
+    ):
+      with self.subTest(writer=writer_names, reader=reader_names):
+        writer, reader, registry = self._pair(
+            {"partition": self._partition(writer_names)},
+            {"partition": self._partition(reader_names)})
+        result = qos_match.check_rxo_pairs(
+            CheckContext(endpoint=writer, registry=registry))
+        self.assertEqual(ids(result), [expected])
+
+  def test_unreadable_partition_is_not_a_mismatch(self):
+    """An unreadable PARTITION is not a claim of the default partition.
+
+    The writer really is in "telemetry"; its policy simply did not survive
+    discovery. Treating that as the default partition produced an ERROR - and
+    exit 1 - for a pair that is matched and communicating.
+    """
+    class Unreadable:
+      @property
+      def name(self):
+        raise RuntimeError("policy not available on this Connext version")
+
+    for label, writer_kwargs, reader_kwargs in (
+        ("writer unreadable", {"partition": Unreadable()},
+         {"partition": self._partition(["telemetry"])}),
+        ("reader unreadable", {"partition": self._partition(["telemetry"])},
+         {"partition": Unreadable()}),
+        ("writer absent", {}, {"partition": self._partition(["telemetry"])}),
+        ("reader absent", {"partition": self._partition(["telemetry"])}, {}),
+    ):
+      with self.subTest(case=label):
+        writer, reader, registry = self._pair(writer_kwargs, reader_kwargs)
+        result = qos_match.check_rxo_pairs(
+            CheckContext(endpoint=writer, registry=registry))
+        self.assertEqual(ids(result), ["qos.compatible"])
+        # Not evaluated is not the same answer as compatible, and the report
+        # has to say which one this was.
+        unevaluated = [item["policy"]
+                       for item in result[0].evidence["policies_unevaluated"]]
+        self.assertIn("PARTITION", unevaluated)
+        self.assertIn("PARTITION", result[0].observed)
+
+  def test_incomplete_evidence_is_recorded_alongside_a_real_mismatch(self):
+    writer, reader, registry = self._pair(
+        {"reliability": self._policy("BEST_EFFORT")},
+        {"reliability": self._policy("RELIABLE")})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.rxo_mismatch"])
+    self.assertEqual([m["policy"] for m in result[0].evidence["mismatches"]],
+                     ["RELIABILITY"])
+    unevaluated = [item["policy"]
+                   for item in result[0].evidence["policies_unevaluated"]]
+    self.assertIn("PARTITION", unevaluated)
+    self.assertNotIn("RELIABILITY", unevaluated)
+    self.assertIn("Not evaluated", result[0].observed)
 
   def test_no_counterpart_is_reported_as_info(self):
     writer = endpoint_record(key="w", kind="Writer")

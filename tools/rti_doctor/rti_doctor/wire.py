@@ -359,27 +359,6 @@ def capture_filter(domain_id, endpoint, participant_qos):
   return "udp"
 
 
-def capture_interfaces(tshark_path=None):
-  """Return tshark capture interfaces as ``(index, description)`` pairs."""
-  tshark_path = tshark_path or shutil.which("tshark")
-  if not tshark_path:
-    return (), "tshark was not found on PATH"
-  try:
-    completed = subprocess.run([tshark_path, "-D"], text=True, capture_output=True,
-                               check=False, timeout=TSHARK_READ_TIMEOUT)
-  except (OSError, subprocess.TimeoutExpired) as error:
-    return (), f"could not list tshark interfaces: {error}"
-  if completed.returncode:
-    return (), (completed.stderr.strip()
-                or f"tshark exited with {completed.returncode}")
-  interfaces = []
-  for line in completed.stdout.splitlines():
-    number, separator, description = line.partition(". ")
-    if separator and number.isdigit() and description:
-      interfaces.append((number, description))
-  return tuple(interfaces), None
-
-
 def inspect_pcap(path, tshark_path=None, writer_entity_id=None, writer_guid_prefix=None,
                  reader_entity_id=None):
   """Return direct RTPS user-data observations from an existing PCAP/PCAPNG."""
@@ -474,11 +453,18 @@ def inspect_discovery_pcap(path, tshark_path=None, capture_filter=None):
 
 
 class LiveCapture:
-  """An opt-in tshark process that writes a temporary PCAPNG while a probe runs."""
+  """An opt-in tshark process that writes a temporary PCAPNG while a probe runs.
+
+  Every capture is bounded. `duration` becomes tshark's own ``-a duration:``
+  stop condition, so a capture whose owner never reaches `finish()` - an
+  abandoned worker, a screen popped mid-capture, an interpreter killed
+  outright - still ends by itself instead of writing until the disk fills.
+  `finish()` remains the normal end; the ceiling is the backstop.
+  """
 
   def __init__(self, interface, output_path, capture_filter, writer_entity_id=None,
                writer_guid_prefix=None, reader_entity_id=None,
-               tshark_path=None):
+               tshark_path=None, duration=None):
     self.interface = interface
     self.output_path = os.path.abspath(output_path)
     self.capture_filter = capture_filter
@@ -486,6 +472,7 @@ class LiveCapture:
     self.writer_guid_prefix = writer_guid_prefix
     self.reader_entity_id = reader_entity_id
     self.tshark_path = tshark_path or shutil.which("tshark")
+    self.duration = duration
     self.process = None
     self.error = None
     self.started_at = None
@@ -509,12 +496,16 @@ class LiveCapture:
     directory = os.path.dirname(self.output_path)
     if directory:
       os.makedirs(directory, exist_ok=True)
+    command = [self.tshark_path, "-n", "-i", self.interface, "-f", self.capture_filter,
+               "-w", self.output_path]
+    if self.duration:
+      # tshark takes whole seconds and treats 0 as "no limit", so a sub-second
+      # window still has to round up to one.
+      command += ["-a", f"duration:{max(1, int(round(self.duration)))}"]
     try:
       self._log = open(self.log_path, "w", encoding="utf-8")
       self.process = subprocess.Popen(
-          [self.tshark_path, "-n", "-i", self.interface, "-f", self.capture_filter, "-w",
-           self.output_path],
-          stdout=subprocess.DEVNULL, stderr=self._log, text=True)
+          command, stdout=subprocess.DEVNULL, stderr=self._log, text=True)
       self.started_at = time.monotonic()
       time.sleep(1.0)
       if self.process.poll() is not None:
@@ -523,39 +514,58 @@ class LiveCapture:
     except OSError as error:
       self.error = f"could not start tshark: {error}"
 
-  def finish(self):
-    if self.process is not None:
-      if self.process.poll() is None:
-        # tshark may still be opening its capture file when diagnosis needs no
-        # probe (for example, when a peer does not serve TypeLookup data).
-        if self.started_at is not None:
-          remaining = 4.0 - (time.monotonic() - self.started_at)
-          if remaining > 0:
-            time.sleep(remaining)
-        self.process.terminate()
-        try:
-          self.process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-          self.process.kill()
-          self.process.wait()
-          self.error = "tshark did not exit after termination and was killed"
-      # Outside the poll() guard on purpose. A tshark that died mid-capture -
-      # interface removed, permissions revoked, disk full - has already exited
-      # by now, and checking its status only when it was still running reported
-      # the resulting empty file as a successful capture of zero packets.
-      if self.error is None and self.process.returncode not in (0, -15):
-        self.error = (self._stderr_text()
-                      or f"tshark exited with {self.process.returncode}")
+  def stop(self):
+    """Terminate the capture and record how it ended. Safe to call twice.
+
+    One capture file answers two different questions - what user data crossed
+    the wire, and what discovery metadata did - and a report that asks both
+    reads the same file twice. Stopping is therefore separate from parsing:
+    `finish()` and `finish_discovery()` may be called in either order on one
+    capture, and only the first of them stops anything.
+    """
+    if self.process is None:
+      return
+    if self.process.poll() is None:
+      # tshark may still be opening its capture file when diagnosis needs no
+      # probe (for example, when a peer does not serve TypeLookup data).
+      if self.started_at is not None:
+        remaining = 4.0 - (time.monotonic() - self.started_at)
+        if remaining > 0:
+          time.sleep(remaining)
+      self.process.terminate()
+      try:
+        self.process.wait(timeout=5)
+      except subprocess.TimeoutExpired:
+        self.process.kill()
+        self.process.wait()
+        self.error = "tshark did not exit after termination and was killed"
+    # Outside the poll() guard on purpose. A tshark that died mid-capture -
+    # interface removed, permissions revoked, disk full - has already exited
+    # by now, and checking its status only when it was still running reported
+    # the resulting empty file as a successful capture of zero packets.
+    if self.error is None and self.process.returncode not in (0, -15):
+      self.error = (self._stderr_text()
+                    or f"tshark exited with {self.process.returncode}")
     if self._log is not None:
       self._log.close()
       self._log = None
+
+  def _unusable(self, evidence_kind):
+    """The capture's own failure, or nothing to read, as an evidence mapping."""
     if self.error:
       return {"error": self.error, "source": self.output_path,
               "capture_filter": self.capture_filter}
     if not os.path.isfile(self.output_path):
       return {"error": "tshark exited without creating a capture file; no packets "
-                       "were available for packet evidence",
+                       f"were available for {evidence_kind} evidence",
               "source": self.output_path, "capture_filter": self.capture_filter}
+    return None
+
+  def finish(self):
+    self.stop()
+    unusable = self._unusable("packet")
+    if unusable is not None:
+      return unusable
     result = inspect_pcap(self.output_path, tshark_path=self.tshark_path,
                           writer_entity_id=self.writer_entity_id,
                           writer_guid_prefix=self.writer_guid_prefix,
@@ -565,32 +575,10 @@ class LiveCapture:
 
   def finish_discovery(self):
     """Stop this capture and parse discovery metadata instead of user data."""
-    if self.process is not None:
-      if self.process.poll() is None:
-        if self.started_at is not None:
-          remaining = 4.0 - (time.monotonic() - self.started_at)
-          if remaining > 0:
-            time.sleep(remaining)
-        self.process.terminate()
-        try:
-          self.process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-          self.process.kill()
-          self.process.wait()
-          self.error = "tshark did not exit after termination and was killed"
-      if self.error is None and self.process.returncode not in (0, -15):
-        self.error = (self._stderr_text()
-                      or f"tshark exited with {self.process.returncode}")
-    if self._log is not None:
-      self._log.close()
-      self._log = None
-    if self.error:
-      return {"error": self.error, "source": self.output_path,
-              "capture_filter": self.capture_filter}
-    if not os.path.isfile(self.output_path):
-      return {"error": "tshark exited without creating a capture file; no packets "
-                       "were available for discovery evidence",
-              "source": self.output_path, "capture_filter": self.capture_filter}
+    self.stop()
+    unusable = self._unusable("discovery")
+    if unusable is not None:
+      return unusable
     result = inspect_discovery_pcap(
         self.output_path, tshark_path=self.tshark_path,
         capture_filter=self.capture_filter)

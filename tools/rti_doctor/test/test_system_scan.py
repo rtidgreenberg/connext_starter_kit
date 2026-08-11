@@ -99,30 +99,51 @@ class TestSystemScan(unittest.TestCase):
     self.assertTrue(snapshot.issues)
     self.assertEqual(snapshot.topology["writers"], 1)
 
-  def test_session_finishes_discovery_capture_only_for_fastdds(self):
-    class Capture:
-      def __init__(self):
-        self.finished = 0
-
-      def finish_discovery(self):
-        self.finished += 1
-        return {"fastdds_product_versions": ["3.6.2.0"]}
-
+  def test_a_scan_never_starts_or_reads_a_packet_capture(self):
+    """H9: the scan is DDS-level and passive. It used to stop and re-parse one."""
     registry = discovery.DiscoveryRegistry(type_wait=0.0)
-    capture = Capture()
-    session = engine.Session(
-        participant=object(), registry=registry, own_qos=None,
-        type_lookup_settings={}, domain_id=7, type_wait=0.0,
-        discovery_capture=capture)
-    session.system_scan(captured_at=123.0)
-    self.assertEqual(capture.finished, 0)
-
     registry.participants["fastdds"] = records.ParticipantRecord(
         key="fastdds", vendor_id=type("Vendor", (), {"value": [1, 15]})())
-    snapshot = session.system_scan(captured_at=124.0)
-    self.assertEqual(capture.finished, 1)
-    self.assertIsNone(session.discovery_capture)
-    self.assertEqual(snapshot.fastdds_product_versions, ("3.6.2.0",))
+    session = engine.Session(
+        participant=object(), registry=registry, own_qos=None,
+        type_lookup_settings={}, domain_id=7, type_wait=0.0)
+
+    def fail(*args, **kwargs):
+      self.fail("the system scan ran tshark")
+
+    with mock.patch.object(engine.wire, "LiveCapture", fail), \
+         mock.patch.object(engine.wire, "inspect_discovery_pcap", fail):
+      snapshot = session.system_scan(captured_at=123.0)
+    self.assertEqual(snapshot.fastdds_product_versions, ())
+
+  def test_capture_evidence_reaches_the_next_scan(self):
+    """The version evidence an explicit capture collected is what the scan reports."""
+    registry, peers = registry_with_fastdds_peers()
+    session = engine.Session(
+        participant=object(), registry=registry, own_qos=None,
+        type_lookup_settings={}, domain_id=7, type_wait=0.0)
+    first = session.system_scan(captured_at=123.0)
+    self.assertEqual(first.fastdds_product_versions, ())
+
+    session.record_wire_discovery({
+        "fastdds_product_versions": ["3.5.4.0"],
+        "fastdds_participant_versions": [[peers["old"], "3.5.4.0"]]})
+    # A stale cached scan must not keep reporting the versions as unknown.
+    second = session.system_scan(captured_at=124.0, max_age=3600.0)
+    self.assertEqual(second.fastdds_product_versions, ("3.5.4.0",))
+    self.assertTrue(any("environment.fastdds_version_older_than_validated"
+                        in issue.finding_ids for issue in second.issues))
+
+  def test_a_failed_capture_records_nothing(self):
+    """An unreadable capture is not evidence that no old version is present."""
+    session = engine.Session(
+        participant=object(), registry=discovery.DiscoveryRegistry(type_wait=0.0),
+        own_qos=None, type_lookup_settings={}, domain_id=7, type_wait=0.0)
+    session.record_wire_discovery(
+        {"error": "tshark was not found on PATH",
+         "fastdds_product_versions": ["3.5.4.0"]})
+    self.assertEqual(session.system_scan(captured_at=123.0)
+                     .fastdds_product_versions, ())
 
   def test_an_independent_failure_is_never_removed_by_another(self):
     """The suppression regression: one ERROR deleted an unrelated symptom.
@@ -200,6 +221,36 @@ class TestSystemScan(unittest.TestCase):
                 if item.finding_ids == ("environment.connext_7_3_upgrade",))
     self.assertEqual(note.severity, f.Severity.INFO)
     self.assertIn("Connext 7.7", note.recommendation)
+
+  def test_the_system_report_says_a_version_needs_a_capture(self):
+    """H8/H9: "nobody looked" must not render the same as "nothing is there".
+
+    Fast DDS advertises its product version only in RTPS discovery packets, and
+    nothing captures packets now unless an operator asks. Dropping the section
+    when no capture had run left the report silently certifying a question it
+    had never put.
+    """
+    snapshot = system_scan.scan(
+        registry_with_fastdds_peers()[0], own_qos=None,
+        type_lookup_settings={}, domain_id=7, captured_at=123.0)
+    text = report.render_system_text(snapshot, 7, environment={
+        "argv": "rti_doctor", "host": "test", "os": "Linux", "machine": "x86_64",
+        "connext": "7.7.0", "nddshome": "/opt/rti", "python": "3.x"})
+    self.assertIn("FAST DDS VERSION EVIDENCE", text)
+    self.assertIn(report.CAPTURE_PLACEHOLDER, text)
+    self.assertIn("press c", text)
+
+  def test_an_observed_version_replaces_the_placeholder(self):
+    registry, peers = registry_with_fastdds_peers()
+    snapshot = system_scan.scan(
+        registry, own_qos=None, type_lookup_settings={}, domain_id=7,
+        captured_at=123.0, fastdds_product_versions=("3.5.4.0",),
+        fastdds_participant_versions=((peers["old"], "3.5.4.0"),))
+    text = report.render_system_text(snapshot, 7, environment={
+        "argv": "rti_doctor", "host": "test", "os": "Linux", "machine": "x86_64",
+        "connext": "7.7.0", "nddshome": "/opt/rti", "python": "3.x"})
+    self.assertIn("3.5.4.0", text)
+    self.assertNotIn(report.CAPTURE_PLACEHOLDER, text)
 
   def test_older_fastdds_version_produces_warning(self):
     registry, peers = registry_with_fastdds_peers()

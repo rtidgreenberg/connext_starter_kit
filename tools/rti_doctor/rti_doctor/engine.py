@@ -7,8 +7,20 @@ a report that differs depending on how it was invoked would be worthless.
 import logging
 import time
 
-from . import checks, paths, probe as probe_mod, report, system_scan, topology, vendors, wire
+from . import checks, paths, probe as probe_mod, report, system_scan, topology, wire
 from .checks import CheckContext
+
+#: How long a capture runs when no probe is bounding it - a reader report, or a
+#: writer diagnosed with probing off. Short enough that an operator waits for it
+#: rather than wondering whether the screen has hung.
+DEFAULT_CAPTURE_SECONDS = 8.0
+
+#: Slack between the window a capture is asked to cover and the hard
+#: ``-a duration:`` ceiling tshark applies to itself: the one-second startup
+#: settle, the four-second settle in `LiveCapture.finish()`, and room for a probe
+#: that overruns its timeout. The ceiling is there to end an abandoned capture,
+#: not a normal one, so it is deliberately well clear of the expected window.
+CAPTURE_DURATION_MARGIN = 15.0
 
 
 class Session:
@@ -17,7 +29,7 @@ class Session:
   def __init__(self, participant, registry, own_qos, type_lookup_settings,
                domain_id, type_wait=5.0, probe_timeout=10.0,
                active_domains=None, domain_scan_ran=False,
-               discovery_capture=None):
+               capture_interface=None):
     self.participant = participant
     self.registry = registry
     self.own_qos = own_qos
@@ -27,7 +39,9 @@ class Session:
     self.probe_timeout = probe_timeout
     self.active_domains = active_domains or set()
     self.domain_scan_ran = domain_scan_ran
-    self.discovery_capture = discovery_capture
+    # The interface an explicitly requested capture uses. Nothing starts a
+    # capture because this is set; it only says where one would listen.
+    self.capture_interface = capture_interface
     self._fastdds_product_versions = ()
     self._fastdds_participant_versions = ()
     self._last_scan = None
@@ -50,18 +64,32 @@ class Session:
     return topology.snapshot(
         self.registry, self.domain_id, self.active_domains, self.domain_scan_ran)
 
-  def close_discovery_capture(self):
-    """Stop a startup discovery capture that never observed Fast DDS.
+  def record_wire_discovery(self, evidence):
+    """Take packet-only discovery facts from one operator-requested capture.
 
-    Detached before it is finished, not after: `finish_discovery()` can raise,
-    and clearing the attribute afterwards left a raised teardown with the
-    capture still attached - so a retry re-terminated an already-dead process
-    and raised again.
+    Packet evidence used to arrive from a capture started at startup and run
+    for the whole session. It now arrives only from a capture the operator
+    asked for on one endpoint report, so this is where a bounded capture hands
+    its findings to the system scan. Versions accumulate across captures: a
+    second capture on another endpoint adds to what the first observed rather
+    than replacing it, and `system_scan._fastdds_version_notes` already drops a
+    version whose participant has since left, so nothing outlives its peer.
     """
-    capture = self.discovery_capture
-    if capture is not None:
-      self.discovery_capture = None
-      capture.finish_discovery()
+    if not evidence or evidence.get("error"):
+      return
+    pairs = set(self._fastdds_participant_versions)
+    pairs.update(tuple(pair) for pair in evidence.get("fastdds_participant_versions", ())
+                 if isinstance(pair, (list, tuple)) and len(pair) == 2)
+    versions = set(self._fastdds_product_versions)
+    versions.update(evidence.get("fastdds_product_versions", ()))
+    if (pairs == set(self._fastdds_participant_versions)
+        and versions == set(self._fastdds_product_versions)):
+      return
+    self._fastdds_participant_versions = tuple(sorted(pairs))
+    self._fastdds_product_versions = tuple(sorted(versions))
+    # A cached scan predates this evidence and would render the version
+    # findings as still unavailable for as long as it stays fresh.
+    self._last_scan = None
 
   # --- Diagnoses -------------------------------------------------------------
 
@@ -79,23 +107,6 @@ class Session:
       return cached
 
     self.registry.expire_type_waits()
-    if (self.discovery_capture is not None
-        and any(vendors.vendor_name(participant.vendor_id) == vendors.FASTDDS
-                for participant in self.registry.participant_list())):
-      evidence = self.discovery_capture.finish_discovery()
-      self.discovery_capture = None
-      self._fastdds_product_versions = tuple(
-          evidence.get("fastdds_product_versions", ()))
-      # Kept alongside the flat version list, which the report renders as
-      # "observed during this session". The paired form is what the version
-      # findings key on, so a version outlives the capture but not the
-      # participant that advertised it.
-      self._fastdds_participant_versions = tuple(
-          tuple(pair) for pair in evidence.get("fastdds_participant_versions", ())
-          if isinstance(pair, (list, tuple)) and len(pair) == 2)
-      if evidence.get("error"):
-        logging.warning("[engine] Fast DDS discovery capture unavailable: %s",
-                        evidence["error"])
     snapshot = system_scan.scan(
         registry=self.registry,
         own_qos=self.own_qos,
@@ -133,37 +144,69 @@ class Session:
         topology=self._topology(),
     )
 
-  def diagnose_endpoint(self, endpoint, probe=True, capture_interface=None):
-    """Full rungs 0-5 for one endpoint, probing unless told not to."""
+  def capture_path(self, timestamp=None):
+    """Where a capture requested now would write its PCAPNG."""
+    stamp = timestamp or time.strftime("%Y%m%d_%H%M%S")
+    return paths.test_output_path(
+        "rti_doctor_captures",
+        f"rti_doctor_domain{self.domain_id}_{stamp}.pcapng")
+
+  def diagnose_endpoint(self, endpoint, probe=True, capture_interface=None,
+                        capture_seconds=None, capture_path=None):
+    """Full rungs 0-5 for one endpoint, probing unless told not to.
+
+    Capturing packets is a separate request from probing, not a consequence of
+    it. A reader report has nothing to probe and is still a legitimate target
+    for wire evidence, and a probe must be able to run without spawning a
+    privileged capture the operator never asked for - which is what navigating
+    to any writer report used to do. `capture_interface` is therefore the only
+    thing that starts tshark, and it is only ever passed when someone asked.
+    """
     self.registry.expire_type_waits()
     participant_record = self.registry.participant_for(endpoint)
 
     probe_result = None
     wire_evidence = None
+    discovery_evidence = None
     capture = None
-    if probe:
-      logging.info(f"[engine] probing topic '{endpoint.topic_name}'")
-      if capture_interface:
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        capture = wire.LiveCapture(
-            capture_interface,
-          paths.test_output_path(
-            "rti_doctor_captures",
-            f"rti_doctor_domain{self.domain_id}_{timestamp}.pcapng"),
-            wire.capture_filter(self.domain_id, endpoint, self.own_qos),
-            writer_entity_id=(wire.endpoint_entity_id(endpoint)
+    if capture_seconds is None:
+      capture_seconds = self.probe_timeout if probe else DEFAULT_CAPTURE_SECONDS
+    if capture_interface:
+      capture = wire.LiveCapture(
+          capture_interface,
+          # A caller that told the operator where the capture would land passes
+          # that path in, so the file named on screen is the file written.
+          capture_path or self.capture_path(),
+          wire.capture_filter(self.domain_id, endpoint, self.own_qos),
+          writer_entity_id=(wire.endpoint_entity_id(endpoint)
+                            if endpoint.is_writer else None),
+          writer_guid_prefix=(wire.endpoint_guid_prefix(endpoint)
                               if endpoint.is_writer else None),
-            writer_guid_prefix=(wire.endpoint_guid_prefix(endpoint)
-                                if endpoint.is_writer else None),
-            reader_entity_id=(wire.endpoint_entity_id(endpoint)
-                              if not endpoint.is_writer else None))
+          reader_entity_id=(wire.endpoint_entity_id(endpoint)
+                            if not endpoint.is_writer else None),
+          duration=capture_seconds + CAPTURE_DURATION_MARGIN)
+    if probe or capture is not None:
       try:
         if capture is not None:
           capture.start()
-        probe_result = probe_mod.probe_endpoint(
-          self.participant, endpoint, timeout=self.probe_timeout)
+        if probe:
+          logging.info(f"[engine] probing topic '{endpoint.topic_name}'")
+          probe_result = probe_mod.probe_endpoint(
+            self.participant, endpoint, timeout=self.probe_timeout)
+        elif capture is not None:
+          # Nothing else is holding this capture open, so it needs its own
+          # window; finishing immediately would report an empty capture as the
+          # endpoint's wire evidence.
+          time.sleep(capture_seconds)
       finally:
-        wire_evidence = capture.finish() if capture is not None else None
+        if capture is not None:
+          wire_evidence = capture.finish()
+          # The same file, read for discovery metadata: Fast DDS advertises its
+          # product version in SPDP and nothing else can observe it. One
+          # capture answers both questions, so asking for wire evidence is not
+          # also a reason to run a second tshark.
+          discovery_evidence = capture.finish_discovery()
+          self.record_wire_discovery(discovery_evidence)
 
     context = self._context(endpoint=endpoint,
                             participant_record=participant_record,
@@ -186,6 +229,8 @@ class Session:
         participant=participant_record,
         type_lookup_settings=self.type_lookup_settings,
         topology=self._topology(), wire_evidence=wire_evidence,
+        discovery_evidence=discovery_evidence,
+        capture_interface=capture_interface,
     )
 
 

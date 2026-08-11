@@ -35,12 +35,28 @@ selecting one shows only that severity. Keys:
 | `i` | In Topology: the issues linked to the highlighted row |
 | `m` | Observed domain metrics |
 | `r` | Re-scan (every screen shows a snapshot, never a live feed) |
+| `c` | On an endpoint report: capture RTPS packets for that endpoint |
 | `s` | Save the current system or diagnostic report as a shareable text file |
 | `b` / `Esc` | Back |
 | `q` | Quit |
 
 Every screen shows a *snapshot*, not a live view, so a reading never changes
 under you while you read it. `r` takes a new one.
+
+## Packet Capture Is Something You Ask For
+
+Nothing runs `tshark` unless you press `c` on a reader or writer report. Before
+it starts, the screen states the interface, the file it will write (under
+`tools/rti_doctor/test_output/rti_doctor_captures/`, with a `.tshark.log` beside
+it) and how long it will run; the capture is bounded by tshark's own
+`-a duration:`, so one that is abandoned still stops. `--capture-interface`
+chooses the interface; without it, `c` uses `any`.
+
+A few facts are observable **only** in RTPS packets — a Fast DDS peer's product
+version above all — and reports render those as `Run capture to ascertain`
+rather than as absent, because "nobody looked" and "there is nothing there" are
+different answers. One capture answers both questions: the user data that
+crossed the wire, and the discovery metadata around it.
 
 ## The Visibility Ladder
 
@@ -92,9 +108,10 @@ system it was pointed at.
     --no-probe        Static checks only; never create a reader
     --type-object-v1-only
           Advertise TypeObject v1 and disable TypeLookup v2 for an experiment
-    --pcap PATH       Analyze RTPS user-data packets in an existing capture
+    --pcap PATH       Analyze RTPS user-data packets in an existing capture (with --topic)
     --capture-interface IFACE
-              Capture scoped RTPS UDP packets with tshark while probing one topic
+              Interface for packet capture: captured while probing with --topic,
+              or used by the TUI's 'c' capture action (default: any)
 -i, --interval        UI refresh interval (default: 2.0)
     --debug-log PATH  Discovery/probe log output
     --connext-log PATH
@@ -129,10 +146,28 @@ number of writers and should be spent on the one you chose.
   --connext-verbosity status-all
 ```
 
-Exit status is `1` when any ERROR-severity finding is reported, `0` otherwise,
-and `2` when the named topic was not found or the arguments were rejected —
-usable directly in CI. No finding is excluded from that decision by a causal
+### Exit status
+
+Usable directly in CI. No finding is excluded from that decision by a causal
 guess about another finding.
+
+| Code | Meaning |
+|---|---|
+| `0` | A diagnosis ran and reported no ERROR-severity finding |
+| `1` | A diagnosis ran and reported at least one ERROR-severity finding |
+| `2` | The named topic was not found — or the arguments were rejected |
+| `3` | `--ready-after-participants` was not met before `--ready-timeout` |
+| `4` | Doctor could not run: no license, an unusable domain, a failed startup |
+| `130` | Interrupted (`Ctrl-C`) |
+
+`1` means one thing only: **a diagnosis completed and found an error**. A
+startup failure used to reach the shell as `1` too, by way of an uncaught
+traceback, so a CI job could not tell "your system has an error" from "Doctor
+never ran". A `4` prints one line on stderr saying what failed; the traceback
+goes to `--debug-log`.
+
+`2` is still overloaded — argparse rejects a bad command line with it as well —
+so a wrapper that retries on "topic absent" should check stderr before looping.
 
 ## Manual Scenarios
 
@@ -293,6 +328,15 @@ the payload representation. Cyclone resolves an unspecified policy from the
 type's defaults, which can select XCDR2. Use the optional PCAP evidence to report
 the representation actually selected by that writer and type.
 
+**This is the same emptiness a Connext writer advertises, and it does not mean
+the same thing.** Measured against live Connext 7.7.0
+(`test/test_data_representation_spike.py`), an empty advertisement from a
+Connext writer means XCDR1: a writer configured explicitly `[XCDR1]` advertises
+an empty sequence too, and both are refused by an XCDR2-only reader. Cyclone's
+empty advertisement can mean XCDR2. So "advertised nothing" is a per-vendor
+question, not a single fact — which is why the tool still declines to judge it
+rather than guessing. See Q3 in `docs/DESIGN_DECISIONS.md`.
+
 The controlled manual `FINAL`/XCDR1 fixture additionally uses explicit sequential
 member IDs and a matching XCDR1-only writer/reader configuration. Cyclone still
 reported zero writer matches while Connext reported one reader match and received
@@ -313,9 +357,11 @@ data-representation selector or a missing dynamic member ID.
   self-inflicted blindness but cannot see the peer's configuration.
 - **The domain scan is best-effort**: it relies on RTI's default domain
   announcements, so an empty result is not proof that no other domain is active.
-- **Wire observation is opt-in and bounded.** `--pcap` and
-  `--capture-interface` use `tshark` to count RTPS DATA/DATA_FRAG submessages and
-  report the encapsulation IDs Wireshark actually decodes. A live capture applies
+- **Wire observation is opt-in and bounded.** `--pcap`, `--capture-interface`
+  and the TUI's `c` action use `tshark` to count RTPS DATA/DATA_FRAG submessages
+  and report the encapsulation IDs Wireshark actually decodes. Nothing else
+  captures: no capture starts at startup, on navigation, or on a report you
+  merely opened. A live capture applies
   a BPF filter for the selected domain's configured RTPS port range before packets
   are written; discovered writer ports outside that range are added explicitly.
   The resulting observations are then limited to the selected endpoint's RTPS

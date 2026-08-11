@@ -6,14 +6,26 @@ import os
 import sys
 import time
 
-from . import (compat, discovery, domain_scan, engine, paths, records, report,
-               wire)
+from . import compat, discovery, domain_scan, engine, records, report, wire
 
 DEFAULT_SCAN_TIMEOUT = 32.0
 DEFAULT_PROBE_TIMEOUT = 10.0
 DEFAULT_TYPE_WAIT = 5.0
 #: How long to let discovery settle before running headless checks.
 DEFAULT_DISCOVERY_SETTLE = 3.0
+
+#: The process exit contract. `1` means one thing only - a diagnosis ran to
+#: completion and reported an ERROR-severity finding - because a CI job reading
+#: `1` acts on the findings. A startup failure used to reach the shell as `1`
+#: too, by way of an uncaught traceback, so "Doctor could not run" and "your
+#: system has an error" were indistinguishable to the one consumer that cannot
+#: read the message.
+EXIT_OK = 0
+EXIT_ERROR_FINDINGS = 1
+EXIT_TARGET_ABSENT = 2
+EXIT_READINESS_TIMEOUT = 3
+EXIT_CANNOT_START = 4
+EXIT_INTERRUPTED = 130
 CONNEXT_VERBOSITIES = {
   "silent": "SILENT",
   "exception": "EXCEPTION",
@@ -104,7 +116,9 @@ def parse_args(argv=None):
   packet_group.add_argument("--pcap", default=None,
                             help="Analyze RTPS user-data packets in an existing PCAP/PCAPNG")
   packet_group.add_argument("--capture-interface", default=None,
-                            help="Capture UDP packets with tshark while probing one topic")
+                            help="Interface for packet capture: captured while probing "
+                                 "with --topic, or used by the TUI 'c' capture action "
+                                 "(default: any)")
   parser.add_argument("-i", "--interval", type=float, default=2.0,
                       help="UI refresh interval in seconds (default: 2.0)")
   parser.add_argument("--debug-log", default=os.environ.get("RTI_DOCTOR_DEBUG_LOG"),
@@ -125,8 +139,15 @@ def parse_args(argv=None):
   args = parser.parse_args(argv)
   if args.topic and args.system:
     parser.error("--topic and --system are mutually exclusive")
-  if (args.pcap or args.capture_interface) and not args.topic:
-    parser.error("--pcap and --capture-interface require --topic")
+  if args.pcap and not args.topic:
+    parser.error("--pcap requires --topic")
+  # --capture-interface no longer implies --topic: it is also how the TUI's
+  # explicit capture action is pointed at an interface other than "any". It
+  # still has no meaning for the passive system assessment, which creates no
+  # DDS entities and captures nothing.
+  if args.capture_interface and args.system:
+    parser.error("--capture-interface is not used by --system; capture during "
+                 "a --topic diagnosis, or from an endpoint report in the TUI")
   if args.ready_after_participants < 0 or args.ready_timeout <= 0:
     parser.error("--ready-after-participants must be non-negative and --ready-timeout positive")
   # argparse's type=int/float accepts negatives, and float() accepts "nan" and
@@ -245,34 +266,6 @@ def resolve_domain_id(domain_arg, scan_timeout=DEFAULT_SCAN_TIMEOUT, do_scan=Tru
     return domain_id, discovered, scanned
 
 
-def select_discovery_capture_interface():
-  """Offer an optional packet-capture interface during interactive startup."""
-  interfaces, error = wire.capture_interfaces()
-  if error:
-    print(f"Packet capture is unavailable: {error}", file=sys.stderr)
-    return None
-  if not interfaces:
-    print("Packet capture is unavailable: tshark found no interfaces.", file=sys.stderr)
-    return None
-  print("Optional Fast DDS version capture interface (Enter to skip):")
-  for number, description in interfaces:
-    print(f"  {number}: {description}")
-  valid = {number for number, _ in interfaces}
-  while True:
-    try:
-      response = input("Capture interface [skip]: ").strip()
-    except EOFError:
-      return None
-    except KeyboardInterrupt:
-      print()
-      raise
-    if not response:
-      return None
-    if response in valid:
-      return response
-    print("Enter a listed interface number, or press Enter to skip.", file=sys.stderr)
-
-
 def build_session(domain_id, args, active_domains=None, domain_scan_ran=False,
                   compliance=None):
   """Create the diagnostic participant and wrap it in a Session."""
@@ -304,23 +297,8 @@ def build_session(domain_id, args, active_domains=None, domain_scan_ran=False,
       probe_timeout=args.probe_timeout,
       active_domains=active_domains or set(),
       domain_scan_ran=domain_scan_ran,
+      capture_interface=args.capture_interface,
   ), participant
-
-
-def start_discovery_capture(session, interface):
-  """Start one startup capture; its PCAP is parsed only if Fast DDS is seen."""
-  if not interface:
-    return
-  timestamp = time.strftime("%Y%m%d_%H%M%S")
-  placeholder = type("CaptureEndpoint", (), {"unicast_locators": ()})()
-  capture = wire.LiveCapture(
-      interface,
-      paths.test_output_path(
-        "rti_doctor_captures",
-        f"rti_doctor_discovery_domain{session.domain_id}_{timestamp}.pcapng"),
-      wire.capture_filter(session.domain_id, placeholder, session.own_qos))
-  capture.start()
-  session.discovery_capture = capture
 
 
 def _settle(session, seconds):
@@ -402,41 +380,27 @@ def run_headless_topic(session, args):
     else:
       print("No topics were discovered at all. Run with --system instead of "
             "--topic for the system assessment.", file=sys.stderr)
-    return 2
+    return EXIT_TARGET_ABSENT
 
-  capture = None
+  # The capture is the engine's, not a second one built here: one code path
+  # decides where a capture writes, how long it may run and how its file is
+  # read, so the CLI and the TUI cannot drift into capturing differently.
   if args.capture_interface:
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    capture_path = paths.test_output_path(
-      "rti_doctor_captures",
-        f"rti_doctor_domain{session.domain_id}_{timestamp}.pcapng")
-    capture = wire.LiveCapture(
-      args.capture_interface, capture_path,
-      wire.capture_filter(session.domain_id, endpoint, session.own_qos),
-      writer_entity_id=wire.endpoint_entity_id(endpoint),
-      writer_guid_prefix=wire.endpoint_guid_prefix(endpoint))
-
-  # start() spawns tshark and blocks a second waiting for it to come up, so it
-  # belongs inside the try: a Ctrl-C in that window would otherwise leave the
-  # capture process running with nothing left to reap it.
-  try:
-    if capture is not None:
-      capture.start()
-    data = session.diagnose_endpoint(endpoint, probe=not args.no_probe)
-  finally:
-    wire_evidence = capture.finish() if capture is not None else None
+    print(f"Capturing RTPS packets on interface '{args.capture_interface}' while "
+          f"diagnosing '{args.topic}'.", file=sys.stderr)
+  data = session.diagnose_endpoint(endpoint, probe=not args.no_probe,
+                                   capture_interface=args.capture_interface)
   if args.pcap:
-    wire_evidence = wire.inspect_pcap(
+    data.wire_evidence = wire.inspect_pcap(
         args.pcap, writer_entity_id=wire.endpoint_entity_id(endpoint),
         writer_guid_prefix=wire.endpoint_guid_prefix(endpoint))
-  data.wire_evidence = wire_evidence
   path = _emit(report.render_text(data), args.output)
   if path:
     print(f"Report written to {path}")
     print(f"VERDICT: {data.verdict}")
 
   worst = max((x.severity for x in data.findings), default=f.Severity.OK)
-  return 1 if worst >= f.Severity.ERROR else 0
+  return EXIT_ERROR_FINDINGS if worst >= f.Severity.ERROR else EXIT_OK
 
 
 def run_headless_system(session, args):
@@ -469,54 +433,71 @@ def run_headless_system(session, args):
   if path:
     print(f"System report written to {path}")
   worst = max((issue.severity for issue in snapshot.issues), default=f.Severity.OK)
-  return 1 if worst >= f.Severity.ERROR else 0
+  return EXIT_ERROR_FINDINGS if worst >= f.Severity.ERROR else EXIT_OK
+
+
+def _cannot_start(stage, error):
+  """Report an operational failure on one line and return its exit code.
+
+  A traceback is the wrong output for "no license", "domain 500 is out of
+  range" or "the participant could not be created": it buries the one sentence
+  that matters and, because CPython exits 1 on an uncaught exception, it makes
+  a Doctor that never ran indistinguishable from a system Doctor found errors
+  in. The traceback still reaches --debug-log, which is where an unexpected
+  failure is actually diagnosed.
+  """
+  logging.exception("[main] %s failed", stage)
+  print(f"rti_doctor could not {stage}: {error.__class__.__name__}: {error}",
+        file=sys.stderr)
+  print("Run with --debug-log PATH for the full traceback.", file=sys.stderr)
+  return EXIT_CANNOT_START
 
 
 def main(argv=None):
   args = parse_args(argv)
   configure_logging(args.debug_log)
-  compat.configure_rti_environment()
-
-  # Native Connext diagnostics include middleware parsing failures that cannot
-  # be observed through Python's logging module. Configure them before the
-  # first DDS entity is created so discovery startup is captured as well.
-  connext_logging = configure_connext_logging(
-      args.connext_log, args.connext_verbosity)
-
-  # Before ANY DDS entity exists: Connext's default XTypes compliance mask is not
-  # fully OMG-compliant, and RTI's cross-vendor guidance is to use the VENDOR
-  # mask. A diagnostic must not fail to decode a peer because of its own encoding
-  # defaults. What was actually applied is recorded in every report.
-  compliance = compat.set_vendor_xtypes_mask()
 
   headless = is_headless(args)
-
-  domain_id, active_domains, scanned = resolve_domain_id(
-      args.domain,
-      scan_timeout=args.scan_timeout,
-      do_scan=not args.no_domain_scan)
-  capture_interface = select_discovery_capture_interface() if not headless else None
-
-  session, participant = build_session(
-      domain_id, args, active_domains=active_domains, domain_scan_ran=scanned,
-      compliance=compliance)
-
-  # Everything from here on is inside the ownership boundary. Capture startup,
-  # readiness waiting and the ready file all used to run before the `try`, so
-  # anything raising in them left the participant open and the tshark process
-  # orphaned - and the widest window was the one nobody sees: Ctrl-C during
-  # `LiveCapture.start()`'s one-second settle, or during the up-to-
-  # --ready-timeout wait, unwound straight past this block. The duplicated
-  # cleanup that used to sit on the readiness return path is gone with it,
-  # because that path now leaves through the same `finally` as every other.
   try:
-    start_discovery_capture(session, capture_interface)
+    compat.configure_rti_environment()
+
+    # Native Connext diagnostics include middleware parsing failures that cannot
+    # be observed through Python's logging module. Configure them before the
+    # first DDS entity is created so discovery startup is captured as well.
+    connext_logging = configure_connext_logging(
+        args.connext_log, args.connext_verbosity)
+
+    # Before ANY DDS entity exists: Connext's default XTypes compliance mask is not
+    # fully OMG-compliant, and RTI's cross-vendor guidance is to use the VENDOR
+    # mask. A diagnostic must not fail to decode a peer because of its own encoding
+    # defaults. What was actually applied is recorded in every report.
+    compliance = compat.set_vendor_xtypes_mask()
+
+    domain_id, active_domains, scanned = resolve_domain_id(
+        args.domain,
+        scan_timeout=args.scan_timeout,
+        do_scan=not args.no_domain_scan)
+
+    session, participant = build_session(
+        domain_id, args, active_domains=active_domains, domain_scan_ran=scanned,
+        compliance=compliance)
+  except Exception as error:  # noqa: BLE001 - reported, not swallowed
+    return _cannot_start("start", error)
+
+  # Everything from here on is inside the ownership boundary. The readiness wait
+  # and the ready file used to run before the `try`, so anything raising in them
+  # left the participant open - and the widest window was the one nobody sees:
+  # a Ctrl-C during the wait for `--ready-timeout` unwound straight past this
+  # block. The duplicated cleanup that used to sit on the readiness return path
+  # is gone with it, because that path now leaves through the same `finally` as
+  # every other.
+  try:
     session.type_lookup_settings.update(connext_logging)
     if not _wait_for_remote_participants(
         session, args.ready_after_participants, args.ready_timeout):
       print("Doctor did not observe the requested remote participant count before "
             "the readiness timeout.", file=sys.stderr)
-      return 3
+      return EXIT_READINESS_TIMEOUT
     _write_ready_file(args.ready_file)
 
     if args.topic:
@@ -527,25 +508,24 @@ def main(argv=None):
     from .app import RTIDoctorApp
     _settle(session, min(args.settle, 1.0))
     RTIDoctorApp(session, interval=args.interval).run()
-    return 0
+    return EXIT_OK
+  except Exception as error:  # noqa: BLE001 - reported, not swallowed
+    # An assessment that died is not an assessment that found errors, so this
+    # cannot be allowed to reach the shell as the finding-error exit code.
+    return _cannot_start("complete this run", error)
   finally:
-    _close_session(session, participant)
+    _close_participant(participant)
 
 
-def _close_session(session, participant):
-  """Release both owned resources, independently.
+def _close_participant(participant):
+  """Release the one resource main() owns.
 
-  One `try` around both meant a raising capture teardown skipped
-  `participant.close()` entirely and left the participant open at interpreter
-  exit - the capture is the more likely of the two to fail (`self._log.close()`
-  can raise `OSError`, and the `kill()`/`wait()` after a `TimeoutExpired` is
-  unguarded), so the ordering put the failure-prone cleanup in front of the one
-  that matters more.
+  It used to own two: the participant and a startup packet capture that ran for
+  the whole session. The capture is gone (nothing captures without being asked
+  now), so the ordering that put the failure-prone cleanup first has nothing
+  left to order - but the guard stays, because a close that raises must not
+  escape a `finally` and replace the run's real exit code.
   """
-  try:
-    session.close_discovery_capture()
-  except Exception as e:
-    logging.error(f"[main] error closing discovery capture: {e}")
   try:
     participant.close()
   except Exception as e:
@@ -557,4 +537,4 @@ if __name__ == "__main__":
     sys.exit(main())
   except KeyboardInterrupt:
     print("Aborted.")
-    sys.exit(130)
+    sys.exit(EXIT_INTERRUPTED)

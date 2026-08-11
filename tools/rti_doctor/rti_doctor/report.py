@@ -26,6 +26,17 @@ WIDTH = 100
 RULE = "=" * WIDTH
 THIN = "-" * WIDTH
 
+#: What a field observable only in RTPS packets says when no capture has been
+#: run. Rendering the field as absent, or omitting its section, made "nobody
+#: looked" indistinguishable from "there is nothing there" - and since captures
+#: are now only ever started when an operator asks, "nobody looked" is the
+#: normal state rather than an unusual one.
+CAPTURE_PLACEHOLDER = "Run capture to ascertain"
+
+#: How to ascertain it, stated wherever the placeholder appears.
+CAPTURE_HINT = ("Open an endpoint report and press c to capture RTPS packets for "
+                "that endpoint.")
+
 
 def _section(title):
   return [THIN, title, THIN]
@@ -101,9 +112,15 @@ def render_system_text(snapshot, domain_id, environment=None,
            _kv("Python", environment.get("python")),
            _kv("Domain", str(domain_id)), ""]
   lines += render_topology_text(topology_data)
+  # Always rendered, including when nothing was captured. A Fast DDS peer
+  # advertises its product version only in RTPS discovery packets, so no
+  # passive DDS-level scan can supply this; omitting the section when no
+  # capture had been run made an unasked question look like a settled one.
+  lines += _section("FAST DDS VERSION EVIDENCE")
   if snapshot.fastdds_product_versions:
-    lines += _section("FAST DDS VERSION EVIDENCE")
     lines += [_kv("Observed", ", ".join(snapshot.fastdds_product_versions)), ""]
+  else:
+    lines += [_kv("Observed", CAPTURE_PLACEHOLDER), CAPTURE_HINT, ""]
   lines += _section("ISSUE SUMMARY")
   lines += [_kv("Errors", str(counts[f.Severity.ERROR])),
             _kv("Warnings", str(counts[f.Severity.WARN])),
@@ -161,7 +178,7 @@ class ReportData:
   def __init__(self, domain_id, scope, all_findings, probe_result=None,
                endpoint=None, participant=None, type_lookup_settings=None,
                environment=None, generated_at=None, wire_evidence=None,
-               topology=None):
+               topology=None, discovery_evidence=None, capture_interface=None):
     self.domain_id = domain_id
     self.scope = scope
     self.findings = f.rank(f.link_causes(list(all_findings)))
@@ -172,6 +189,11 @@ class ReportData:
     self.environment = environment or compat.environment_info()
     self.generated_at = generated_at or time.time()
     self.wire_evidence = wire_evidence
+    # Discovery metadata read from the same capture as `wire_evidence`. It
+    # carries the packet-only facts - Fast DDS product versions above all -
+    # that no DDS-level observation can supply.
+    self.discovery_evidence = discovery_evidence
+    self.capture_interface = capture_interface
     self.topology = topology
 
   @property
@@ -235,7 +257,11 @@ def render_view_sections(data):
       "type": "\n".join(_render_type_appendix(data)),
       "probe": "\n".join(_render_counter_appendix(data)),
       "wire": "\n".join(_render_wire_appendix(data) or [
-          "No direct RTPS packet capture was requested.", ""]),
+          "No direct RTPS packet capture was requested.",
+          "",
+          f"Fast DDS version: {CAPTURE_PLACEHOLDER}.",
+          "Press c to capture RTPS packets for this endpoint. Nothing is "
+          "captured until you do.", ""]),
       "config": "\n".join(_render_config_appendix(data)),
   }
 
@@ -440,6 +466,8 @@ def _render_wire_appendix(data):
   if evidence is None:
     return []
   lines = _section("APPENDIX C - DIRECT RTPS PACKET OBSERVATION")
+  if data.capture_interface:
+    lines.append(_kv("Capture interface", data.capture_interface, WIRE_LABEL_PAD))
   lines.append(_kv("Capture", evidence.get("source", "unknown"), WIRE_LABEL_PAD))
   if evidence.get("capture_filter"):
     lines.append(_kv("Capture filter", evidence["capture_filter"], WIRE_LABEL_PAD))
@@ -456,6 +484,7 @@ def _render_wire_appendix(data):
   if error:
     lines.append(_kv("Result", f"unavailable: {error}", WIRE_LABEL_PAD))
     lines.append("")
+    lines += _render_discovery_evidence(data)
     return lines
   lines.append(_kv("Frames matching filters", str(evidence.get("packets", 0)),
                    WIRE_LABEL_PAD))
@@ -480,6 +509,38 @@ def _render_wire_appendix(data):
   if evidence.get("scope_note"):
     lines.append("Scope")
     lines.extend(_wrap(evidence["scope_note"], indent=2))
+  lines.append("")
+  lines += _render_discovery_evidence(data)
+  return lines
+
+
+def _render_discovery_evidence(data):
+  """The packet-only discovery facts read from the same capture.
+
+  Separate from the user-data block above it because it answers a different
+  question - who announced themselves, and as what - and because the Fast DDS
+  product version is the one fact in this tool that no DDS-level observation
+  can produce at all.
+  """
+  evidence = data.discovery_evidence
+  if evidence is None:
+    return []
+  lines = ["RTPS discovery observed in the same capture"]
+  error = evidence.get("error")
+  if error:
+    lines.append(_kv("  Result", f"unavailable: {error}", WIRE_LABEL_PAD))
+    lines.append("")
+    return lines
+  versions = evidence.get("fastdds_product_versions") or []
+  lines.append(_kv("  Fast DDS versions advertised",
+                   ", ".join(versions) if versions
+                   else "none observed in this capture", WIRE_LABEL_PAD))
+  lines.append(_kv("  Participants announcing",
+                   str(evidence.get("participants", 0)), WIRE_LABEL_PAD))
+  topics = evidence.get("topics") or []
+  lines.append(_kv("  Topics announced",
+                   ", ".join(topics) if topics else "none observed",
+                   WIRE_LABEL_PAD))
   lines.append("")
   return lines
 

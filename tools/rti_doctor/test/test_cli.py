@@ -44,7 +44,8 @@ class FakeSession:
     # test instead of re-implementing it here.
     self.own_qos = None
     self.type_wait = 0.0
-    self.discovery_capture = None
+    self.probe_timeout = 0.0
+    self.capture_interface = None
     self._last_scan = None
     self._fastdds_product_versions = ()
     self._fastdds_participant_versions = ()
@@ -209,10 +210,10 @@ class TestWorkflowFlags(unittest.TestCase):
 class TestSessionSurface(unittest.TestCase):
   """main() is not covered by these tests, so guard what it depends on.
 
-  Removing engine.Session.close_discovery_capture broke every invocation -
-  the AttributeError was swallowed by main()'s cleanup `except`, so the
-  participant was never closed - and nothing failed. pyflakes checks undefined
-  names, not missing attributes.
+  A `Session` method that `main()` calls in a cleanup `except` once went
+  missing and broke every invocation without failing anything: the
+  AttributeError was swallowed there, so the participant was never closed.
+  pyflakes checks undefined names, not missing attributes.
   """
 
   def test_every_session_attribute_main_uses_exists(self):
@@ -229,21 +230,13 @@ class TestSessionSurface(unittest.TestCase):
     instance_attributes = {"registry", "domain_id", "active_domains",
                            "domain_scan_ran", "type_lookup_settings",
                            "participant", "own_qos", "type_wait",
-                           "discovery_capture"}
+                           "capture_interface"}
     self.assertEqual([name for name in missing if name not in instance_attributes],
                      [])
 
 
-class TestMainReleasesWhatItOwns(unittest.TestCase):
-  """H7/M11: the participant and the capture must survive every exit path.
-
-  `main()` used to create both and then run capture startup, the readiness wait
-  and the ready-file write *before* entering its cleanup `try`. Anything raising
-  in that stretch - and the widest window is Ctrl-C during
-  `LiveCapture.start()`'s one-second settle, or during the up-to-15-second
-  readiness wait - unwound straight past the `finally`, leaving a DomainParticipant
-  open and a `tshark` writing into `test_output/` with nothing left to reap it.
-  """
+class MainHarness(unittest.TestCase):
+  """Drives `main()` with a fake session, participant and headless run."""
 
   class FakeParticipant:
     def __init__(self):
@@ -253,110 +246,223 @@ class TestMainReleasesWhatItOwns(unittest.TestCase):
       self.closed += 1
 
   def _run(self, argv=("--domain", "7", "--system", "--no-domain-scan"),
-           closes_raise=False, **patches):
-    session = FakeSession()
-    session.closed_capture = 0
+           session=None, **patches):
+    session = session or FakeSession()
     participant = self.FakeParticipant()
-
-    def close_discovery_capture():
-      session.closed_capture += 1
-      if closes_raise:
-        raise OSError("tshark log file is already closed")
-
-    session.close_discovery_capture = close_discovery_capture
     defaults = {
         "build_session": lambda *a, **k: (session, participant),
-        "start_discovery_capture": lambda *a, **k: None,
         "_wait_for_remote_participants": lambda *a, **k: True,
         "_write_ready_file": lambda *a, **k: None,
         "run_headless_system": lambda *a, **k: 0,
     }
     defaults.update(patches)
+    errors = io.StringIO()
     with contextlib.ExitStack() as stack:
       for name, value in defaults.items():
         stack.enter_context(mock.patch.object(cli, name, value))
       stack.enter_context(redirect_stdout(io.StringIO()))
-      stack.enter_context(mock.patch.object(sys, "stderr", io.StringIO()))
+      stack.enter_context(mock.patch.object(sys, "stderr", errors))
       try:
         code = cli.main(list(argv))
       except BaseException as error:  # noqa: BLE001 - the point of the test
         code = error
+    self.stderr = errors.getvalue()
     return session, participant, code
 
-  def test_a_clean_run_closes_both_exactly_once(self):
-    session, participant, code = self._run()
+
+class TestMainReleasesWhatItOwns(MainHarness):
+  """H7: the participant must be released on every exit path.
+
+  `main()` used to create it and then run capture startup, the readiness wait
+  and the ready-file write *before* entering its cleanup `try`. Anything raising
+  in that stretch - the widest window being Ctrl-C during the up-to-15-second
+  readiness wait - unwound straight past the `finally`, leaving a
+  DomainParticipant open. H9 removed the second owned resource, the startup
+  packet capture, so the participant is now the whole ownership boundary.
+  """
+
+  def test_a_clean_run_closes_the_participant_exactly_once(self):
+    _session, participant, code = self._run()
     self.assertEqual(code, 0)
     self.assertEqual(participant.closed, 1)
-    self.assertEqual(session.closed_capture, 1)
 
-  def test_an_interrupt_during_capture_startup_still_closes_both(self):
+  def test_an_interrupt_during_the_readiness_wait_still_closes_it(self):
     def interrupt(*args, **kwargs):
       raise KeyboardInterrupt()
 
-    session, participant, code = self._run(start_discovery_capture=interrupt)
+    _session, participant, code = self._run(_wait_for_remote_participants=interrupt)
     self.assertIsInstance(code, KeyboardInterrupt)
     self.assertEqual(participant.closed, 1)
-    self.assertEqual(session.closed_capture, 1)
 
-  def test_an_interrupt_during_the_readiness_wait_still_closes_both(self):
-    def interrupt(*args, **kwargs):
-      raise KeyboardInterrupt()
-
-    session, participant, code = self._run(_wait_for_remote_participants=interrupt)
-    self.assertIsInstance(code, KeyboardInterrupt)
-    self.assertEqual(participant.closed, 1)
-    self.assertEqual(session.closed_capture, 1)
-
-  def test_an_unwritable_ready_file_still_closes_both(self):
+  def test_an_unwritable_ready_file_still_closes_it(self):
     def unwritable(*args, **kwargs):
       raise OSError("read-only file system")
 
-    session, participant, code = self._run(_write_ready_file=unwritable)
-    self.assertIsInstance(code, OSError)
-    self.assertEqual(participant.closed, 1)
-    self.assertEqual(session.closed_capture, 1)
-
-  def test_the_readiness_timeout_closes_both_exactly_once(self):
-    """It used to close them itself as well as returning; now it just returns."""
-    session, participant, code = self._run(
-        _wait_for_remote_participants=lambda *a, **k: False)
-    self.assertEqual(code, 3)
-    self.assertEqual(participant.closed, 1)
-    self.assertEqual(session.closed_capture, 1)
-
-  def test_a_raising_capture_teardown_still_closes_the_participant(self):
-    """M11: one `try` around both put the likelier failure in front."""
     with self.assertLogs(level="ERROR"):
-      session, participant, code = self._run(closes_raise=True)
-    self.assertEqual(code, 0)
-    self.assertEqual(session.closed_capture, 1)
+      _session, participant, code = self._run(_write_ready_file=unwritable)
+    # M13: an operational failure is exit 4, not the finding-error exit code.
+    self.assertEqual(code, cli.EXIT_CANNOT_START)
     self.assertEqual(participant.closed, 1)
 
+  def test_the_readiness_timeout_closes_it_exactly_once(self):
+    """It used to close it itself as well as returning; now it just returns."""
+    _session, participant, code = self._run(
+        _wait_for_remote_participants=lambda *a, **k: False)
+    self.assertEqual(code, cli.EXIT_READINESS_TIMEOUT)
+    self.assertEqual(participant.closed, 1)
 
-class TestCaptureDetachesBeforeItFinishes(unittest.TestCase):
-  """M11: a raising teardown left the capture attached for a doomed retry."""
+  def test_a_raising_close_does_not_replace_the_run_result(self):
+    class RefusingParticipant:
+      closed = 0
 
-  class ExplodingCapture:
-    def __init__(self):
-      self.finishes = 0
+      def close(self):
+        raise OSError("participant handle is already closed")
 
-    def finish_discovery(self):
-      self.finishes += 1
-      raise OSError("tshark log file is already closed")
+    participant = RefusingParticipant()
+    with self.assertLogs(level="ERROR"):
+      with contextlib.ExitStack() as stack:
+        for name, value in (
+            ("build_session", lambda *a, **k: (FakeSession(), participant)),
+            ("_wait_for_remote_participants", lambda *a, **k: True),
+            ("_write_ready_file", lambda *a, **k: None),
+            ("run_headless_system", lambda *a, **k: 1)):
+          stack.enter_context(mock.patch.object(cli, name, value))
+        stack.enter_context(redirect_stdout(io.StringIO()))
+        stack.enter_context(mock.patch.object(sys, "stderr", io.StringIO()))
+        code = cli.main(["--domain", "7", "--system", "--no-domain-scan"])
+    self.assertEqual(code, 1)
 
-  def test_a_failed_close_does_not_leave_the_capture_attached(self):
-    capture = self.ExplodingCapture()
-    session = engine.Session(
-        participant=object(), registry=discovery.DiscoveryRegistry(type_wait=0.0),
-        own_qos=None, type_lookup_settings={}, domain_id=7,
-        discovery_capture=capture)
 
-    with self.assertRaises(OSError):
-      session.close_discovery_capture()
-    self.assertIsNone(session.discovery_capture)
-    # A second close is a no-op rather than terminating a dead process again.
-    session.close_discovery_capture()
-    self.assertEqual(capture.finishes, 1)
+class TestNothingIsCapturedWithoutBeingAsked(MainHarness):
+  """H8/H9: startup must not capture packets, and must not offer to.
+
+  Startup used to prompt for a capture interface and then run `tshark` over the
+  domain's whole RTPS port range - all user traffic, not just discovery - for
+  the entire session, with nothing bounding the file on disk and a full re-parse
+  at exit whose result was discarded.
+  """
+
+  def test_starting_up_creates_no_capture(self):
+    captures = []
+
+    class Recorded:
+      def __init__(self, *args, **kwargs):
+        captures.append((args, kwargs))
+
+    with mock.patch.object(cli.wire, "LiveCapture", Recorded):
+      _session, _participant, code = self._run()
+    self.assertEqual(code, 0)
+    self.assertEqual(captures, [])
+
+  def test_the_interactive_startup_neither_prompts_nor_captures(self):
+    """The TUI path is the one that used to do both.
+
+    Startup listed tshark's interfaces, prompted for one, and then captured the
+    domain's whole RTPS port range for as long as the session lasted. Nothing
+    on this path may run tshark or ask about it now: capture is a `c` away, on
+    an endpoint report, or not at all.
+    """
+    captures = []
+    output = io.StringIO()
+
+    class Recorded:
+      def __init__(self, *args, **kwargs):
+        captures.append((args, kwargs))
+
+    class FakeApp:
+      def __init__(self, session, interval=2.0):
+        self.session = session
+
+      def run(self):
+        return None
+
+    with contextlib.ExitStack() as stack:
+      for name, value in (
+          ("build_session",
+           lambda *a, **k: (FakeSession(), self.FakeParticipant())),
+          ("_wait_for_remote_participants", lambda *a, **k: True),
+          ("_write_ready_file", lambda *a, **k: None),
+          ("_settle", lambda session, seconds: None)):
+        stack.enter_context(mock.patch.object(cli, name, value))
+      stack.enter_context(mock.patch.object(cli.wire, "LiveCapture", Recorded))
+      stack.enter_context(mock.patch("rti_doctor.app.RTIDoctorApp", FakeApp))
+      stack.enter_context(mock.patch.object(
+          sys, "stdin", mock.Mock(isatty=lambda: True)))
+      stack.enter_context(redirect_stdout(output))
+      stack.enter_context(mock.patch.object(sys, "stderr", io.StringIO()))
+      code = cli.main(["--domain", "7", "--no-domain-scan"])
+
+    self.assertEqual(code, 0)
+    self.assertEqual(captures, [])
+    self.assertNotIn("Capture interface", output.getvalue())
+    self.assertNotIn("capture", output.getvalue().lower())
+
+  def test_the_startup_capture_entry_points_are_gone(self):
+    for name in ("start_discovery_capture", "select_discovery_capture_interface"):
+      self.assertFalse(hasattr(cli, name), f"{name} still exists")
+
+  def test_a_capture_interface_is_accepted_without_a_topic(self):
+    """It selects the TUI's capture interface; it does not start a capture."""
+    args = cli.parse_args(["-d", "1", "--capture-interface", "lo"])
+    self.assertEqual(args.capture_interface, "lo")
+
+  def test_a_capture_interface_is_rejected_for_the_system_assessment(self):
+    with self.assertRaises(SystemExit):
+      with redirect_stdout(io.StringIO()), mock.patch.object(sys, "stderr", io.StringIO()):
+        cli.parse_args(["-d", "1", "--system", "--capture-interface", "lo"])
+
+  def test_the_session_carries_the_requested_interface(self):
+    session, _participant, _code = self._run()
+    self.assertIsNone(session.capture_interface)
+
+
+class TestExitContract(MainHarness):
+  """M13: `1` must mean "a diagnosis ran and found an ERROR", and only that."""
+
+  def test_a_startup_failure_is_four_and_not_one(self):
+    def no_license(*args, **kwargs):
+      raise RuntimeError("DDS_DomainParticipantFactory_create_participant: license")
+
+    with self.assertLogs(level="ERROR"):
+      _session, participant, code = self._run(build_session=no_license)
+    self.assertEqual(code, cli.EXIT_CANNOT_START)
+    self.assertIn("could not start", self.stderr)
+    self.assertIn("license", self.stderr)
+    # No traceback on stderr; --debug-log is where it goes instead.
+    self.assertNotIn("Traceback", self.stderr)
+    self.assertIn("--debug-log", self.stderr)
+    # Nothing was created, so nothing is closed - and no NameError for it.
+    self.assertEqual(participant.closed, 0)
+
+  def test_a_run_that_dies_mid_diagnosis_is_four_and_not_one(self):
+    def explode(*args, **kwargs):
+      raise RuntimeError("participant handle is closed")
+
+    with self.assertLogs(level="ERROR"):
+      _session, participant, code = self._run(run_headless_system=explode)
+    self.assertEqual(code, cli.EXIT_CANNOT_START)
+    self.assertIn("could not complete this run", self.stderr)
+    self.assertEqual(participant.closed, 1)
+
+  def test_a_completed_assessment_with_errors_is_one(self):
+    _session, _participant, code = self._run(
+        run_headless_system=lambda *a, **k: cli.EXIT_ERROR_FINDINGS)
+    self.assertEqual(code, 1)
+
+  def test_an_interrupt_is_not_reported_as_an_operational_failure(self):
+    """Ctrl-C is 130, so it must pass straight through the exit-4 guard."""
+    def interrupt(*args, **kwargs):
+      raise KeyboardInterrupt()
+
+    _session, _participant, code = self._run(run_headless_system=interrupt)
+    self.assertIsInstance(code, KeyboardInterrupt)
+
+  def test_every_documented_exit_code_is_distinct(self):
+    codes = (cli.EXIT_OK, cli.EXIT_ERROR_FINDINGS, cli.EXIT_TARGET_ABSENT,
+             cli.EXIT_READINESS_TIMEOUT, cli.EXIT_CANNOT_START,
+             cli.EXIT_INTERRUPTED)
+    self.assertEqual(len(set(codes)), len(codes))
+    self.assertEqual(codes, (0, 1, 2, 3, 4, 130))
 
 
 class TestArgumentValidation(unittest.TestCase):

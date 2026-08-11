@@ -37,6 +37,10 @@ _FIELD_LINE = re.compile(
 #: Appendix C labels, longest first so "Capture filter" is not read as
 #: "Capture". `int`/`list` say how to read the value back off the line.
 _WIRE_FIELDS = (
+    # Before "Capture filter" and "Capture" for the same reason they are
+    # ordered against each other: a shorter label is a prefix of a longer one.
+    ("  Fast DDS versions advertised", "fastdds_product_versions", list),
+    ("Capture interface", "capture_interface", str),
     ("Reassembled bytes in matching frames", "reassembled_bytes", int),
     ("Serialized bytes in matching frames", "payload_bytes", int),
     ("Encapsulation IDs in matching frames", "encapsulation_ids", list),

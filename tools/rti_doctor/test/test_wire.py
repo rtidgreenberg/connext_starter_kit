@@ -7,9 +7,11 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(__file__))
 
 from rti_doctor import paths, wire  # noqa: E402
 from rti_doctor import report  # noqa: E402
+import doctor_e2e  # noqa: E402
 
 
 class TestOutputPaths(unittest.TestCase):
@@ -270,6 +272,83 @@ class TestTsharkFields(unittest.TestCase):
     evidence = capture.finish()
     self.assertIn("without creating a capture file", evidence["error"])
 
+  def test_a_capture_bounds_itself_with_a_duration(self):
+    """H9: nothing may run tshark without a stop condition of its own.
+
+    `finish()` is the normal end, but an owner that never reaches it - a popped
+    screen, a killed interpreter - used to leave tshark writing until something
+    else stopped it. The ceiling is tshark's own, so it survives losing us.
+    """
+    commands = []
+
+    class Process:
+      def poll(self):
+        return None
+
+    def record(command, **kwargs):
+      commands.append(command)
+      return Process()
+
+    capture = wire.LiveCapture("lo", "capture.pcapng", "udp", tshark_path="tshark",
+                               duration=23.4)
+    with mock.patch("rti_doctor.wire.subprocess.Popen", record), \
+         mock.patch("rti_doctor.wire.time.sleep", lambda seconds: None), \
+         mock.patch("rti_doctor.wire.os.makedirs"), \
+         mock.patch("builtins.open", mock.mock_open()):
+      capture.start()
+    self.assertIsNone(capture.error)
+    self.assertIn("-a", commands[0])
+    self.assertEqual(commands[0][commands[0].index("-a") + 1], "duration:23")
+
+  def test_a_capture_without_a_duration_asks_for_none(self):
+    """`-a duration:0` means "no limit" to tshark, so 0 must not be emitted."""
+    commands = []
+
+    class Process:
+      def poll(self):
+        return None
+
+    capture = wire.LiveCapture("lo", "capture.pcapng", "udp", tshark_path="tshark")
+    with mock.patch("rti_doctor.wire.subprocess.Popen",
+                    lambda command, **kwargs: commands.append(command) or Process()), \
+         mock.patch("rti_doctor.wire.time.sleep", lambda seconds: None), \
+         mock.patch("rti_doctor.wire.os.makedirs"), \
+         mock.patch("builtins.open", mock.mock_open()):
+      capture.start()
+    self.assertNotIn("-a", commands[0])
+
+  def test_one_capture_can_be_read_as_user_data_and_as_discovery(self):
+    """The two questions share one file, so only the first read stops tshark."""
+    class Process:
+      def __init__(self):
+        self.returncode = None
+        self.terminates = 0
+
+      def poll(self):
+        return self.returncode
+
+      def terminate(self):
+        self.terminates += 1
+        self.returncode = -15
+
+      def wait(self, timeout=None):
+        return self.returncode
+
+    capture = wire.LiveCapture("lo", "capture.pcapng", "udp", tshark_path="tshark")
+    capture.process = Process()
+    with mock.patch("rti_doctor.wire.os.path.isfile", return_value=True), \
+         mock.patch("rti_doctor.wire.inspect_pcap",
+                    return_value={"packets": 3}) as user_data, \
+         mock.patch("rti_doctor.wire.inspect_discovery_pcap",
+                    return_value={"fastdds_product_versions": ["3.5.4.0"]}) as meta:
+      packets = capture.finish()
+      discovery_evidence = capture.finish_discovery()
+    self.assertEqual(capture.process.terminates, 1)
+    self.assertEqual(user_data.call_count, 1)
+    self.assertEqual(meta.call_count, 1)
+    self.assertEqual(packets["packets"], 3)
+    self.assertEqual(discovery_evidence["fastdds_product_versions"], ["3.5.4.0"])
+
   def test_report_includes_packet_evidence(self):
     data = report.ReportData(
         domain_id=7,
@@ -296,6 +375,45 @@ class TestTsharkFields(unittest.TestCase):
     # second time alongside it.
     self.assertEqual(text.count("DIRECT RTPS PACKET OBSERVATION"), 1)
     self.assertEqual(text.count("Frames matching filters"), 1)
+
+  def test_report_carries_the_discovery_evidence_from_the_same_capture(self):
+    """One capture, two questions: what crossed the wire, and who announced.
+
+    The Fast DDS product version is the one fact in this tool that no DDS-level
+    observation can produce, so a report that captured packets has to render it
+    - and a machine reading the report back has to be able to find it.
+    """
+    data = report.ReportData(
+        domain_id=7, scope="topic 'Sample'", all_findings=[],
+        capture_interface="eth0",
+        wire_evidence={"source": "capture.pcapng", "packets": 1,
+                       "data_packets": 1, "data_fragments": 0,
+                       "encapsulation_ids": ["0x0007"],
+                       "writer_entity_ids": ["000001c2"],
+                       "payload_bytes": 12, "reassembled_bytes": 0},
+        discovery_evidence={"fastdds_product_versions": ["3.5.4.0"],
+                            "participants": 2, "topics": ["Sample"]})
+    text = report.render_text(data)
+    self.assertIn("Capture interface", text)
+    self.assertIn("eth0", text)
+    self.assertIn("RTPS discovery observed in the same capture", text)
+    self.assertIn("3.5.4.0", text)
+
+    completed = subprocess.CompletedProcess(args=["rti_doctor"], returncode=0,
+                                            stdout=text, stderr="")
+    parsed = doctor_e2e.parse_report(completed)["wire_observation"]
+    self.assertEqual(parsed["source"], "capture.pcapng")
+    self.assertEqual(parsed["capture_interface"], "eth0")
+    self.assertEqual(parsed["fastdds_product_versions"], ["3.5.4.0"])
+
+  def test_a_failed_capture_still_reports_what_discovery_it_read(self):
+    data = report.ReportData(
+        domain_id=7, scope="topic 'Sample'", all_findings=[],
+        wire_evidence={"source": "capture.pcapng", "error": "no permission"},
+        discovery_evidence={"error": "no permission"})
+    text = report.render_text(data)
+    self.assertIn("unavailable: no permission", text)
+    self.assertIn("RTPS discovery observed in the same capture", text)
 
 
 if __name__ == "__main__":

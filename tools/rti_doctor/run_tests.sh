@@ -35,7 +35,7 @@ UNIT=(
     test_domains
     test_doctor_e2e
 )
-LIVE=(test_live_integration test_scale)
+LIVE=(test_live_integration test_scale test_data_representation_spike)
 VENDOR=(
     test_fault_vendor_e2e
     test_rxo_vendor_e2e

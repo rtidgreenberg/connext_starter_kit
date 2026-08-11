@@ -206,9 +206,19 @@ def representation_text(representation):
 
   An empty sequence is reported as "not advertised" rather than "unknown":
   verified against a live 7.7.0 writer, a writer using the default policy
-  advertises an EMPTY sequence in discovery, which is readable but says nothing
-  about what it supports. Calling that "unknown" invites the reader to infer an
-  incompatibility that has not been observed.
+  advertises an EMPTY sequence in discovery.
+
+  What that emptiness *means* was measured on 2026-08-11 by
+  `test/test_data_representation_spike.py`, and the answer is narrower than this
+  docstring used to claim. For a Connext writer an empty advertisement is not
+  "says nothing about what it supports": a writer configured explicitly
+  `[XCDR1]` advertises an empty sequence too, and both configurations match an
+  XCDR1 reader while being refused by an XCDR2-only reader with
+  `requested_incompatible_qos` naming DATA_REPRESENTATION. Empty means XCDR1.
+  The label stays "not advertised" because that is what was *observed* on the
+  wire, and because the same emptiness from a non-Connext writer has not been
+  measured - see Q3 in `docs/DESIGN_DECISIONS.md` before treating it as a claim
+  about any vendor.
   """
   if representation is None:
     return "unreadable"

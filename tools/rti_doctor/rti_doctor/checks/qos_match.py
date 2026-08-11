@@ -327,6 +327,20 @@ def compare_endpoints(writer, reader):
   # exactly one effective representation - the first in its list - while the
   # reader's list is the set it will accept. Writer [XCDR1, XCDR2] against reader
   # [XCDR2] intersects, but the writer serializes XCDR1 and the reader rejects it.
+  #
+  # Measured 2026-08-11 (`test/test_data_representation_spike.py`): a *Connext*
+  # writer cannot produce a multi-value list at all - the QoS is rejected locally
+  # with "Writer can't have more than one" - so the list reasoning above only
+  # ever applies to a foreign vendor. The branch below is still correct; it is
+  # narrower in reach than it looks.
+  #
+  # The empty-list branch is the open half of Q3. A Connext writer that
+  # advertises nothing is effectively XCDR1 and really is refused by an
+  # XCDR2-only reader, so declining here reports a genuinely incompatible pair
+  # as `qos.compatible` at exit 0. It is left declining on purpose until the
+  # same emptiness is measured for a non-Connext writer: see Q3 in
+  # `docs/DESIGN_DECISIONS.md`, and the expectedFailure in the spike suite that
+  # runs this exact disagreement on every live test run.
   writer_ids = records.representation_ids(writer.representation)
   reader_ids = records.representation_ids(reader.representation)
   # An empty list is "could not read" (records.representation_ids says so), and

@@ -81,9 +81,13 @@ def scan(registry, own_qos, type_lookup_settings, domain_id, active_domains=(),
     participant = registry.participant_for(endpoint)
     context = CheckContext(**common, endpoint=endpoint,
                            participant_record=participant)
+    # check_extensibility is deliberately absent. It describes how a type is
+    # declared, which is the same answer for every endpoint sharing that type -
+    # 96 byte-identical entries in the issue list of a 96-endpoint domain - and
+    # it describes the IDL rather than anything observed on this system. It
+    # runs in targeted diagnosis, where the type map is the point.
     endpoint_checks = [
         static_discovery.check_locators,
-        type_compat.check_extensibility,
         type_compat.check_representation,
     ]
     # The type-name census reads the whole topic, so it needs one endpoint on

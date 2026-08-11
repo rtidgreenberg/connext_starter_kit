@@ -8,10 +8,11 @@ a healthy system - the failure mode that makes a diagnostic tool useless.
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rti_doctor import discovery, findings as f, probe, records  # noqa: E402
+from rti_doctor import discovery, findings as f, probe, records, typewalk  # noqa: E402
 from rti_doctor.checks import CheckContext, blind_spots, static_discovery  # noqa: E402
 from rti_doctor.checks import probe_match, probe_payload  # noqa: E402
 from rti_doctor.checks import qos_match, type_compat  # noqa: E402
@@ -499,6 +500,35 @@ class TestTypeState(unittest.TestCase):
     self.assertIn("2 resolved on the topic", finding.observed)
     self.assertIn("Not evaluated (1 reader(s): Foreign)", finding.observed)
     self.assertEqual(finding.evidence["unevaluable_reader_count"], 1)
+
+  def test_a_final_type_is_described_not_warned_about(self):
+    """FINAL is a property of the IDL, not an observed failure.
+
+    A WARN made is_problem True, so a type-design note entered the issue list
+    and the nonzero exit path of a system whose every pair the tool had just
+    confirmed assignable. The note itself is worth keeping in a targeted
+    report; the severity was the overstatement.
+    """
+    endpoint = endpoint_record(key="w1", kind="Writer",
+                               type=FakeDynamicType("Sensor"))
+    context = CheckContext(endpoint=endpoint)
+    with mock.patch.object(typewalk, "extensibility_map",
+                           return_value={"Sensor": "FINAL"}):
+      finding = type_compat.check_extensibility(context)[0]
+    self.assertEqual(finding.id, "type.extensibility")
+    self.assertEqual(finding.severity, f.Severity.INFO)
+    self.assertFalse(finding.is_problem)
+    self.assertIn("type.assignability", finding.root_cause)
+    self.assertIn("not anything observed", finding.root_cause)
+
+  def test_a_uniformly_extensible_type_stays_ok(self):
+    endpoint = endpoint_record(key="w1", kind="Writer",
+                               type=FakeDynamicType("Sensor"))
+    context = CheckContext(endpoint=endpoint)
+    with mock.patch.object(typewalk, "extensibility_map",
+                           return_value={"Sensor": "APPENDABLE"}):
+      finding = type_compat.check_extensibility(context)[0]
+    self.assertEqual(finding.severity, f.Severity.OK)
 
   def test_reader_endpoint_does_not_duplicate_writer_monitoring(self):
     writer = endpoint_record(key="writer", kind="Writer",

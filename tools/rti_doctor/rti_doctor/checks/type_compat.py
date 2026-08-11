@@ -335,7 +335,15 @@ def _unevaluable_text(unevaluable):
 
 
 def check_extensibility(context):
-  """Report extensibility kinds, and flag FINAL types as evolution hazards."""
+  """Describe the type's declared extensibility. Targeted diagnosis only.
+
+  This reads the IDL declaration, not the system: it says how the type is
+  allowed to evolve, never that anything has gone wrong. `type.assignability`
+  is the check that compares real schemas against real readers, and it is what
+  an operator should act on. Deliberately not in the system census - one
+  descriptive note about a type shared by 96 endpoints put 96 byte-identical
+  entries in the issue list.
+  """
   endpoint = context.endpoint
   if endpoint is None or endpoint.type is None:
     return []
@@ -346,22 +354,18 @@ def check_extensibility(context):
 
   finals = [name for name, kind in mapping.items() if "FINAL" in str(kind).upper()]
   mixed = len({str(k).upper().split(".")[-1] for k in mapping.values()}) > 1
+  observed = "; ".join(f"{n} = {k}" for n, k in sorted(mapping.items()))
 
   if not finals and not mixed:
     return [Finding(
         id="type.extensibility",
         rung=RUNG_TYPE,
-        # OK, not INFO: nothing here is wrong, and the system scan lists every
-        # non-OK finding as an issue. One note per endpoint about a type shared
-        # by all of them put 96 identical entries in the issue list of a healthy
-        # 96-endpoint domain. A targeted report still shows OK findings.
         severity=Severity.OK,
         title="Type extensibility",
-        observed="; ".join(f"{n} = {k}" for n, k in sorted(mapping.items())),
+        observed=observed,
         evidence=mapping,
     )]
 
-  severity = Severity.WARN if finals else Severity.INFO
   root = []
   if finals:
     root.append(
@@ -372,13 +376,21 @@ def check_extensibility(context):
     root.append(
         "Nested types use more than one extensibility kind, so a change that is "
         "safe in one part of the type can be fatal in another.")
+  root.append(
+      "This describes how the type is declared, not anything observed on this "
+      "system: no reader has been found to reject this writer here. Read it "
+      "alongside type.assignability, which compares the actual schemas.")
 
   return [Finding(
       id="type.extensibility",
       rung=RUNG_TYPE,
-      severity=severity,
-      title="Type extensibility may limit interoperability",
-      observed="; ".join(f"{n} = {k}" for n, k in sorted(mapping.items())),
+      # INFO, not WARN. A declared extensibility kind is a property of the IDL
+      # and a risk to future changes; calling it a warning put a type-design
+      # note into the issue list and the nonzero exit path of a system whose
+      # every pair the tool had just confirmed assignable.
+      severity=Severity.INFO,
+      title="Type extensibility limits how this type can evolve",
+      observed=observed,
       root_cause=" ".join(root),
       remedy=("If the two sides are built from separate IDL copies, prefer "
               "APPENDABLE or MUTABLE over FINAL."),

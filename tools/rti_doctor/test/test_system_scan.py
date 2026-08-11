@@ -195,6 +195,38 @@ class TestSystemScan(unittest.TestCase):
     self.assertIn("3.5.4.0", warning.observed)
     self.assertNotIn("3.6.2.0", warning.observed)
 
+  def test_the_census_does_not_describe_type_extensibility(self):
+    """One shared type must not put one note per endpoint in the issue list.
+
+    check_extensibility describes how a type is declared - the same answer for
+    every endpoint using it - so 96 endpoints sharing one FINAL type produced
+    96 byte-identical entries. It belongs to targeted diagnosis, where the
+    type map is the point, and it is asserted absent here so it cannot drift
+    back in.
+    """
+    registry = discovery.DiscoveryRegistry(type_wait=0.0)
+    participant = records.ParticipantRecord(key="p")
+    registry.participants = {participant.key: participant}
+    # A resolved type on every endpoint: check_extensibility returns early on
+    # `type is None`, so a fixture without one passes whether or not the check
+    # still runs in the census.
+    registry.endpoints = {
+        f"w{n}": records.EndpointRecord(
+            key=f"w{n}", kind="Writer", participant_key="p",
+            topic_name="Telemetry", type_name="TelemetryType",
+            type=object(), type_state=records.TYPE_RESOLVED, first_seen=1.0)
+        for n in range(8)}
+
+    with mock.patch("rti_doctor.typewalk.extensibility_map",
+                    return_value={"TelemetryType": "FINAL"}):
+      snapshot = system_scan.scan(
+          registry, own_qos=None,
+          type_lookup_settings={"request_types_filter": "*"}, domain_id=7,
+          captured_at=123.0)
+
+    self.assertEqual([item for item in snapshot.issues
+                      if "type.extensibility" in item.finding_ids], [])
+
   def test_topic_wide_condition_is_one_issue_not_one_per_endpoint(self):
     """A type-name conflict belongs to the topic, not to each endpoint on it."""
     registry = registry_with_reliability_fault()

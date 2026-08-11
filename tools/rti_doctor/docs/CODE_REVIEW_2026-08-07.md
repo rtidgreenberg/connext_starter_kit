@@ -39,9 +39,10 @@ folded in below as [C1a](#c1a), [C1b](#c1b), [C1c](#c1c) and [S12](#s12).
 sub-findings under [C1](#c1)). 43 are marked Confirmed or Re-verified; the rest
 are Plausible and should be reproduced before being scheduled.
 
-**Status as of 2026-08-10: 12 Fixed, 2 Partial, 3 Live, 54 Open.** Fixed:
+**Status as of 2026-08-10: 15 Fixed, 2 Partial, 3 Live, 51 Open.** Fixed:
 [C1](#c1), [C2](#c2), [C3](#c3), [Q1](#q1), [Q2](#q2), [X1](#x1), [X2](#x2),
-[X3](#x3), [X4](#x4), [H1](#h1), [S4](#s4), [M12](#m12) - **all six
+[X3](#x3), [X4](#x4), [H1](#h1), [H2](#h2), [H3](#h3), [H4](#h4),
+[S4](#s4), [M12](#m12) - **all six
 Criticals**, and all three of the false-ERROR findings called out below.
 Partial: [Q3](#q3), [Q4](#q4). Live: [C1a](#c1a), [C1b](#c1b), [C1c](#c1c),
 which the [C1](#c1) fix unblocked. Every status is recorded per finding; see
@@ -131,9 +132,9 @@ row still marked Open has not been re-verified either.
 | [Q3](#q3) | Partial | High | DATA_REPRESENTATION is silently skipped for default-QoS writers — the most common configuration — and the result is reported as OK |
 | [X3](#x3) | **Fixed** `43e5cab` | High | `check_type_state` emits a writer-phrased ERROR for a DataReader on two of its three call paths |
 | [X4](#x4) | **Fixed** `acfc530` | High | The assignability OK finding reports the evaluated reader count under a "resolved" label, so an all-clear can cover 1 of 3 readers |
-| [H2](#h2) | Open | High | `type.extensibility` still emits one WARN per endpoint — 96 identical warnings for one type |
-| [H3](#h3) | Open | High | `o` on the issue-detail screen can never work for `qos.rxo_mismatch`, the flagship ERROR |
-| [H4](#h4) | Open | High | Topic-scoped dedup withholds participant identity, so `type.name_conflict` shows every involved participant as "OK" |
+| [H2](#h2) | **Fixed** `428585c` | High | `type.extensibility` still emits one WARN per endpoint — 96 identical warnings for one type |
+| [H3](#h3) | **Fixed** `ce3f553` | High | `o` on the issue-detail screen can never work for `qos.rxo_mismatch`, the flagship ERROR |
+| [H4](#h4) | **Fixed** `cb2adb1` | High | Topic-scoped dedup withholds participant identity, so `type.name_conflict` shows every involved participant as "OK" |
 | [H5](#h5) | Open | High | `TopologyHealthScreen` raises `AttributeError` from four key handlers when the first scan failed |
 | [H6](#h6) | Open | High | Every `cleanup` EXIT trap in `run_manual_scenario.sh` reads function-locals, so it aborts before `docker rm` and fails a successful run |
 | [H7](#h7) | Open | High | The participant and startup tshark are created outside the `try/finally` that closes them |
@@ -662,6 +663,19 @@ check returns `[]`: an unevaluable comparison is recorded as *nothing*, never as
 
 ### H2
 
+**Status: Fixed** in `428585c`, both halves. The system census no longer runs
+`check_extensibility` at all - what a type is declared to be is the same
+answer for every endpoint using it, and it describes the IDL rather than
+anything observed - so it runs only in targeted diagnosis, where the type map
+is the point. The `finals or mixed` branch is now INFO rather than WARN, and
+its text says outright that it describes the declaration and not an observed
+failure, pointing at `type.assignability` for the latter. The review's
+suggested escalation (WARN when `type.assignability` is False) was not built:
+with the note out of the census there is nothing left to escalate, and the
+assignability finding already carries that verdict itself. The regression
+test was checked against the unfixed code - 8 endpoints, 8 identical issues.
+See H2 in `DESIGN_DECISIONS.md`.
+
 **`type.extensibility` is still emitted once per endpoint, so 96 endpoints
 sharing one FINAL type produce 96 byte-identical WARNs.**
 `../rti_doctor/checks/type_compat.py#L243-L293`, keyed at
@@ -685,6 +699,17 @@ False or a name conflict is present.
 
 ### H3
 
+**Status: Fixed** in `ce3f553`. An issue naming more than one endpoint opens
+`EndpointChoiceScreen`, which lists each with its RxO role - "Writer (offers)"
+/ "Reader (requests)" - rather than defaulting to a side; one naming exactly
+one still opens directly. Both the issue list and the issue detail now route
+through one function, so the contradiction the finding's second half
+describes cannot recur. Endpoints that departed since the snapshot are
+dropped from the choices, and the message when none is left says that instead
+of talking about writers. The chooser is general over N endpoints, which is
+what [H4](#h4) needs for a topic-scoped issue. See H3 in
+`DESIGN_DECISIONS.md`.
+
 **`o` on the issue-detail screen can never work for `qos.rxo_mismatch`, and the
 parent screen contradicts it for the same row.**
 `../rti_doctor/views/system_overview.py#L424-L435`. `_endpoint()` unions
@@ -698,6 +723,17 @@ factually wrong about what the code accepts. `IssueListScreen.action_open_report
 **Confirmed.**
 
 ### H4
+
+**Status: Fixed** in `cb2adb1`, by separating the two jobs the one field was
+doing rather than by changing the dedup. `check_type_name_conflict` carries
+`linked_writer_keys`, `linked_reader_keys` and `linked_participant_keys`, and
+`_issues` unions them into the issue's key tuples that the Health column and
+the `i` filter read; `_issue_key` still reads only the singular fields, so the
+condition stays one issue. Verified live against two fixtures publishing one
+topic under different type names: one issue, scope still `topic`, both writers
+and both participants named. The finding's closing observation - that the
+dedup key and the linkage identity need to be separate fields - is exactly
+what was built. See H4 in `DESIGN_DECISIONS.md`.
 
 **Topic-scoped dedup withholds participant identity, so `type.name_conflict`
 shows every involved participant as "OK" and its `i` filter is empty.**
@@ -2054,9 +2090,9 @@ review was written. Rows marked **written** exist now.
 | `run_headless_all` on a registry with zero participants and a blind-spot condition set, asserting a non-empty audit | [C2](#c2) |
 | **Written** (`d339403`): `SystemOverviewScreen` / `IssueListScreen` on an empty registry whose snapshot has one ERROR, asserting the count is shown | [C3](#c3) |
 | Any test of `--format json` that parses stdout of the *wrapper script* — moot: [H1](#h1) removed `--format`, and `test/test_doctor_e2e.py` now round-trips the text report through `doctor_e2e.parse_report` | [H1](#h1) |
-| A registry with N endpoints sharing one FINAL type, asserting exactly one `type.extensibility` issue | [H2](#h2) |
-| `_endpoint()` on a `qos.rxo_mismatch` issue, asserting `o` resolves an endpoint | [H3](#h3) |
-| Two participants disagreeing on type name, asserting both are linked to the `type.name_conflict` issue | [H4](#h4) |
+| **Written** (`428585c`), as its stronger form: N endpoints sharing one FINAL type, asserting the census produces *no* `type.extensibility` issue | [H2](#h2) |
+| **Written** (`ce3f553`): a paired issue asserting `o` offers both sides with their RxO roles, and that both issue screens route through one action | [H3](#h3) |
+| **Written** (`cb2adb1`): two participants disagreeing on type name, asserting both are linked to the single `type.name_conflict` issue | [H4](#h4) |
 | Every `TopologyHealthScreen` action driven with `snapshot = None` | [H5](#h5) |
 | `refresh_participants` where one of three handles raises inside `transport_info`, asserting the other two are upserted | [H10](#h10) |
 | `_endpoint_from_data` / `_participant_from_data` field-by-field against a realistic fake, asserting every field is non-`None` | [S2](#s2) |

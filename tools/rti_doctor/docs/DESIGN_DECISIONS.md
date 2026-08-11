@@ -396,6 +396,14 @@ stays readable.
 
 - **Date:** 2026-08-10
 - **Status:** Accepted
+- **Amendment (2026-08-10):** Implemented as decided. The targeted severity
+	chosen was INFO, not OK: the clean branch stays OK because there is nothing
+	to say, while a FINAL or mixed type is something an operator should know
+	before changing the IDL. The review's alternative - keep it in the census but
+	escalate to WARN when `type.assignability` is False - was deliberately not
+	built. With the note out of the census there is nothing left to escalate, and
+	`type.assignability` already carries that verdict itself, so the escalation
+	would only have restated one finding inside another.
 - **Problem:** The system scan runs extensibility analysis for every endpoint,
 	producing repeated FINAL-type warnings for one shared schema even when no
 	observed incompatibility exists.
@@ -420,6 +428,14 @@ stays readable.
 
 - **Date:** 2026-08-10
 - **Status:** Accepted
+- **Amendment (2026-08-10):** Implemented, generalised past a pair. The
+	selector takes any number of endpoints rather than exactly two, because H4
+	lets a topic-scoped issue name several and a picker special-cased to
+	writer-plus-reader would have had to be rebuilt immediately. The issue list's
+	own open action was folded into the same function, which this entry did not
+	ask for: it was silently opening the writer for the same row the detail
+	screen refused, so `o` meant two different things depending on which screen
+	the operator pressed it from.
 - **Problem:** A `qos.rxo_mismatch` names both a writer and reader, but the issue
 	detail open action requires exactly one combined endpoint and therefore cannot
 	open either report.

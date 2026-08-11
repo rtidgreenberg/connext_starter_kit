@@ -55,6 +55,11 @@ no entry in `DESIGN_DECISIONS.md` are decided (as one entry, C1a-C1c) and
 fixed. Every remaining finding has a decision, so the next one worked can be
 picked by severity alone.
 
+Nine further findings, [N1](#n1)-[N9](#n9), were added on 2026-08-11 and are
+**not** counted above. They came from running the tool and its suites rather
+than reading them, and four are residuals of the H8/H9 fix itself. They are in
+[their own section](#findings-from-the-2026-08-11-session) at the end.
+
 [H8](#h8) and [H9](#h9) were worked as the one piece of work they are -
 [H9](#h9) deleted the automatic startup capture and [H8](#h8) replaced it with
 an explicit `c` action, and neither would have been coherent alone - together
@@ -131,6 +136,11 @@ row still marked Open has not been re-verified either.
   [C1](#c1) is what made them fire — and are now Fixed. No finding is currently
   Live.
 * **Open** — untouched.
+
+Findings discovered *after* this review was written are not in this table. See
+[Findings from the 2026-08-11 session](#findings-from-the-2026-08-11-session)
+for [N1](#n1)-[N9](#n9), which were found by running the tool rather than
+reading it, and which are numbered separately so these counts stay comparable.
 
 | ID | Status | Severity | One line |
 |---|---|---|---|
@@ -2449,3 +2459,148 @@ Terra: Do not implement behavioral fixes for `Q5`, `Q6`, `X5` through `X8`, or
 `X10` solely from this review. Record them as deferred until their DDS and
 binding assumptions are confirmed. The decision workflow for all remaining
 findings is defined by `DESIGN_DECISIONS.md` and the `iterate issues` prompt.
+
+---
+
+# Findings from the 2026-08-11 session
+
+These were **not** in the original static review. They were found while fixing
+[H8](#h8)/[H9](#h9)/[M13](#m13) (`ccaaa7b`) and while measuring [Q3](#q3)
+(`4aed446`), and they are numbered separately so the review's own counts stay
+what they were. Several are residuals of that work rather than pre-existing
+defects; where that is true it says so, because a defect introduced by a fix is
+the one most likely to be defended rather than fixed.
+
+Unlike the original review, these were found by **running** the tool and its
+suites, not by reading. Each says how it was observed.
+
+| ID | Status | Severity | One line |
+|---|---|---|---|
+| [N1](#n1) | Open | Medium | One capture is parsed twice, by two tshark subprocesses over the same file |
+| [N2](#n2) | Open | Medium | Capture artifacts still have no retention policy; every `c` leaves a PCAPNG and a log forever |
+| [N3](#n3) | Open | Medium | The TUI cannot choose a capture interface, and the enumerator that would let it was deleted |
+| [N4](#n4) | Open | Low | A capture keeps running after its screen is popped, and its result is discarded silently |
+| [N5](#n5) | Open | Low | "not advertised" cannot distinguish an explicitly XCDR1 writer from a default one |
+| [N6](#n6) | Open | Medium | The AUTO sentinel may never appear in discovered data, which would make [Q5](#q5) unreachable rather than wrong |
+| [N7](#n7) | Open | Low | The multi-value writer branch is unreachable for Connext and untested for any vendor |
+| [N8](#n8) | Open | Low | `--no-probe` with a capture now costs a fixed 8-second window |
+| [N9](#n9) | Open | Low | The Q3 evidence artifact is written to a gitignored directory |
+
+### N1
+
+**`diagnose_endpoint` parses one capture file twice, with two separate tshark
+subprocesses.**
+`../rti_doctor/engine.py#L202-L209`. `capture.finish()` runs `inspect_pcap` and
+`capture.finish_discovery()` runs `inspect_discovery_pcap`, each a
+`subprocess.run(..., capture_output=True, timeout=120)` over the same PCAPNG.
+That is deliberate - one capture answering both the user-data and the discovery
+question is better than two captures - but the *parse* need not be doubled, and
+`inspect_pcap` is the known-unbounded memory path (08-04 M9 residual): tshark's
+whole stdout is buffered in RAM, now twice per capture. Introduced by `ccaaa7b`.
+Bounded in practice by `-a duration:`, so this is a cost, not a hang.
+**Observed**: both calls are on the same `finally` path; confirmed by
+`test_one_capture_can_be_read_as_user_data_and_as_discovery`, which asserts
+exactly one `stop()` and two parses.
+
+### N2
+
+**Every explicit capture leaves a PCAPNG and a `.tshark.log` under
+`test_output/rti_doctor_captures/` and nothing ever removes them.**
+`../rti_doctor/wire.py#L495`. [H8](#h8) listed this among its consequences and
+the fix addressed only the disclosure half: the screen now says where the files
+land, which makes the accumulation visible rather than bounded. [H9](#h9)
+removed the startup capture that produced most of them, so the rate is far
+lower - one per `c` instead of one per session plus one per report - but the
+retention policy is still none. **Observed**: this checkout's
+`rti_doctor_captures/` already holds 20+ leftovers from before the fix.
+
+### N3
+
+**There is no way to choose a capture interface from inside the TUI.**
+`../rti_doctor/views/report_screen.py#L131-L134`. `c` uses
+`--capture-interface` if it was given at launch and `any` otherwise, so an
+operator who is already in the TUI and wants a specific interface has to quit
+and relaunch. [H8](#h8)'s decision assumed an interface had already been chosen,
+because startup used to prompt for one; [H9](#h9) removed that prompt, and
+`wire.capture_interfaces()` - the `tshark -D` enumerator that would populate a
+picker - was deleted with it. A picker would need it back; it is in the history
+of `ccaaa7b`. Capturing on `any` also needs broader privileges than capturing on
+one interface, so the default is the most privileged option. **Observed** while
+writing the H8 tests.
+
+### N4
+
+**Popping a report screen does not stop a capture started from it.**
+`../rti_doctor/views/report_screen.py#L157`. `_run_capture` awaits
+`asyncio.to_thread(...)`; cancelling the Textual worker does not interrupt the
+thread, so the capture runs to its full window, writes its files, and its result
+is discarded into an unmounted screen. Not a leak - `-a duration:` bounds the
+tshark process and the thread ends with it - but the operator is told nothing,
+and `session._fastdds_participant_versions` is still updated from a capture they
+walked away from. **Observed** by inspection of the worker path while adding the
+`capturing` guard.
+
+### N5
+
+**A writer that explicitly configured `[XCDR1]` is reported as "not
+advertised", identically to one that configured nothing.**
+`../rti_doctor/records.py#L204-L218`. Measured in `4aed446`: Connext omits the
+representation PID when the effective representation is XCDR1, so both
+configurations produce an empty advertised sequence. The report's `Representation`
+line therefore tells an operator "not advertised" about an application that did
+advertise, deliberately, and the operator's natural next step - "go set
+DATA_REPRESENTATION on the writer" - is a no-op. The label is a true statement
+about the wire and a misleading one about the application. **Observed**:
+`test_an_explicit_xcdr1_writer_is_indistinguishable_from_a_default_one`.
+
+### N6
+
+**The AUTO sentinel may never appear in discovered data, which would make
+[Q5](#q5) an unreachable branch rather than a wrong one.**
+`../rti_doctor/checks/qos_match.py#L342-L348` and `records.py#L199-L201`.
+[Q5](#q5) says the AUTO guard tests membership anywhere in the list, so a
+determinate writer skips the comparison. The `4aed446` sweep found that a
+default writer holds AUTO (`-1`) *locally* but advertises an **empty** sequence,
+and a default reader holds AUTO locally but advertises **XCDR1** concretely -
+so no endpoint in the sweep ever advertised `-1` at all. If that holds
+generally for Connext, the AUTO branch is dead for Connext peers and [Q5](#q5)
+should be re-scoped to foreign vendors before anyone spends effort on its
+membership test. **Not established**: the sweep did not try every way an
+application can request AUTO, and says nothing about other vendors. This is the
+same measurement [Q3](#q3) needs.
+
+### N7
+
+**No test covers a writer advertising more than one representation, and no
+Connext writer can produce one.**
+`../rti_doctor/checks/qos_match.py#L349-L357`. The rule's central case - "the
+reader must accept the writer's effective representation, which is the first
+entry in the writer's list" - requires a multi-value writer list. `4aed446`
+established that Connext rejects such a writer locally ("Writer can't have more
+than one"), so the branch is reachable only from a foreign vendor, and nothing
+in the suite constructs that input. The branch is not wrong; it is unverified
+and narrower in reach than it reads. **Observed**:
+`test_a_connext_writer_cannot_offer_more_than_one_representation`.
+
+### N8
+
+**`--topic --no-probe --capture-interface` now spends a fixed 8 seconds
+capturing where it used to return immediately.**
+`../rti_doctor/engine.py#L196-L200`. Capture and probe became independent in
+`ccaaa7b`, so a capture with no probe holding it open gets its own window
+(`DEFAULT_CAPTURE_SECONDS`). Before, that combination started tshark, ran the
+static checks, and stopped it - capturing essentially nothing and reporting it
+as the endpoint's wire evidence. The new behaviour is better and the old
+behaviour was useless, but it is an undocumented timing change for anything
+scripted against that flag combination, and 8 seconds is a guess rather than a
+measurement. **Observed** while wiring the two paths together; no test asserts
+the duration.
+
+### N9
+
+**The Q3 evidence matrix is written to `test_output/`, which is gitignored.**
+`../test/test_data_representation_spike.py`. The JSON does not survive a clean
+checkout, so the durable record is the prose in `DESIGN_DECISIONS.md` - which is
+why the six results are written out there longhand rather than cited. If the
+matrix is meant to be the artifact a decision is reviewed against, it belongs
+under `docs/`. **Observed**: `git check-ignore` on the artifact path.

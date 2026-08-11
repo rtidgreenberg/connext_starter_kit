@@ -301,6 +301,26 @@ class FakeDynamicType:
     return False
 
 
+class UnevaluableType(FakeDynamicType):
+  """A resolved type whose binding offers no structural comparison.
+
+  The cross-vendor case: the type is present and named, but nothing can be
+  asked of it. Shadowing the method with a non-callable is what a binding that
+  does not implement it looks like to `compat.get`.
+  """
+
+  def __init__(self, name):
+    super().__init__(name)
+    self.is_assignable_from = None
+
+
+class RaisingType(FakeDynamicType):
+  """A binding whose assignability call fails rather than answering."""
+
+  def is_assignable_from(self, other):
+    raise RuntimeError("binding refused the comparison")
+
+
 class TestTypeState(unittest.TestCase):
 
   def test_pending_is_informational_not_an_error(self):
@@ -409,6 +429,76 @@ class TestTypeState(unittest.TestCase):
     result = type_compat.check_assignability(context)
     self.assertEqual(ids(result), ["type.assignability"])
     self.assertEqual(result[0].severity, f.Severity.OK)
+
+  def test_ok_separates_evaluated_readers_from_resolved_readers(self):
+    """An all-clear must not report the evaluated count under a resolved label.
+
+    Two of three resolved readers expose no is_assignable_from(), so only one
+    was actually compared - and "every resolved reader accepts this writer
+    (1 reader)" is an all-clear covering a third of the topic.
+    """
+    writer = endpoint_record(key="writer", kind="Writer", type_name="WriterType",
+                             type=FakeDynamicType("WriterType", True))
+    readers = [
+        endpoint_record(key="r1", kind="Reader", type_name="Native",
+                        type=FakeDynamicType("Native", True)),
+        endpoint_record(key="r2", kind="Reader", type_name="Foreign",
+                        type=UnevaluableType("Foreign")),
+        endpoint_record(key="r3", kind="Reader", type_name="Broken",
+                        type=RaisingType("Broken")),
+    ]
+    context = CheckContext(endpoint=writer,
+                           registry=FakeRegistry([], [writer] + readers))
+    finding = type_compat.check_assignability(context)[0]
+    self.assertEqual(finding.severity, f.Severity.OK)
+    self.assertEqual(finding.evidence["resolved_reader_count"], 3)
+    self.assertEqual(finding.evidence["evaluated_reader_count"], 1)
+    self.assertEqual(finding.evidence["unevaluable_reader_count"], 2)
+    self.assertIn("1 of 3 resolved reader(s) evaluated", finding.observed)
+    self.assertIn("Not evaluated (2 reader(s): Broken, Foreign)", finding.observed)
+    reasons = {item["reader"]: item["reason"]
+               for item in finding.evidence["readers_unevaluated"]}
+    self.assertIn("no is_assignable_from()", reasons["Foreign"])
+    self.assertIn("raised RuntimeError", reasons["Broken"])
+
+  def test_wholly_unevaluable_readers_are_recorded_not_dropped(self):
+    """No comparison at all must not look like a topic with no readers.
+
+    Returning [] made "unknown" indistinguishable from "not applicable" on
+    exactly the cross-vendor topic this tool exists to diagnose.
+    """
+    writer = endpoint_record(key="writer", kind="Writer", type_name="WriterType",
+                             type=FakeDynamicType("WriterType", True))
+    reader = endpoint_record(key="reader", kind="Reader", type_name="Foreign",
+                             type=UnevaluableType("Foreign"))
+    context = CheckContext(endpoint=writer,
+                           registry=FakeRegistry([], [writer, reader]))
+    finding = type_compat.check_assignability(context)[0]
+    self.assertEqual(finding.id, "type.assignability")
+    self.assertEqual(finding.severity, f.Severity.INFO)
+    self.assertEqual(finding.evidence["evaluated_reader_count"], 0)
+    self.assertEqual(finding.evidence["resolved_reader_count"], 1)
+    # Topic-scoped: every writer on the topic faces the same unevaluable
+    # readers, so the system census must not repeat it per writer.
+    self.assertEqual(finding.evidence["scope"], "topic")
+
+  def test_incompatible_verdict_still_discloses_what_it_could_not_read(self):
+    writer = endpoint_record(key="writer", kind="Writer", type_name="WriterType",
+                             type=FakeDynamicType("WriterType", True))
+    readers = [
+        endpoint_record(key="r1", kind="Reader", type_name="ReaderType",
+                        type=FakeDynamicType("ReaderType", assignable=False)),
+        endpoint_record(key="r2", kind="Reader", type_name="Foreign",
+                        type=UnevaluableType("Foreign")),
+    ]
+    context = CheckContext(endpoint=writer,
+                           registry=FakeRegistry([], [writer] + readers))
+    finding = type_compat.check_assignability(context)[0]
+    self.assertEqual(finding.severity, f.Severity.ERROR)
+    self.assertIn("1 of 1 evaluated reader(s) reject this writer", finding.observed)
+    self.assertIn("2 resolved on the topic", finding.observed)
+    self.assertIn("Not evaluated (1 reader(s): Foreign)", finding.observed)
+    self.assertEqual(finding.evidence["unevaluable_reader_count"], 1)
 
   def test_reader_endpoint_does_not_duplicate_writer_monitoring(self):
     writer = endpoint_record(key="writer", kind="Writer",

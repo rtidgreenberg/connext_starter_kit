@@ -183,15 +183,52 @@ def check_assignability(context):
   if not readers:
     return []
 
+  # `readers` are all resolved - that is the filter above. Whether each one can
+  # actually be compared is a second question, and the two counts must not be
+  # reported as one: "every resolved reader accepts this writer (1 reader)" over
+  # three resolved readers is an all-clear covering a third of the topic.
   results = []
+  unevaluable = []
   for reader in readers:
-    assignable = _assignable(reader.type, endpoint.type)
+    assignable, reason = _assignable(reader.type, endpoint.type)
     if assignable is None:
+      unevaluable.append(_unevaluable(reader, reason))
       continue
     results.append((reader, assignable))
 
   if not results:
-    return []
+    return [Finding(
+        id="type.assignability",
+        rung=RUNG_TYPE,
+        # INFO, not OK: nothing was compared. Returning [] here made a topic
+        # whose readers cannot be evaluated indistinguishable from a topic with
+        # no readers at all - the absence of the finding read as "not
+        # applicable" when it meant "not knowable".
+        severity=Severity.INFO,
+        title=f"Assignability could not be evaluated on '{endpoint.topic_name}'",
+        observed=(f"{len(readers)} resolved reader type(s) on this topic, none of "
+                  f"which could be compared with '{endpoint.type_name}'."
+                  + _unevaluable_text(unevaluable)),
+        root_cause=(
+            "Connext's external assignability check runs on the reader's own "
+            "type binding. A type representation that exposes no "
+            "is_assignable_from(), or a call that fails, leaves the structural "
+            "comparison unavailable - which is neither compatible nor "
+            "incompatible. Cross-vendor and non-native type representations are "
+            "the usual reason."),
+        remedy=("Compare the two IDL definitions in appendix A by hand; this "
+                "tool could not do it for you on this topic."),
+        # Topic-scoped: every writer on the topic faces the same unevaluable
+        # readers, so this is one condition, not one per writer.
+        evidence={"scope": "topic",
+                  "topic_name": endpoint.topic_name,
+                  "writer_type": endpoint.type_name,
+                  "resolved_reader_count": len(readers),
+                  "evaluated_reader_count": 0,
+                  "unevaluable_reader_count": len(unevaluable),
+                  "readers_unevaluated": unevaluable},
+        refs=[DOC_ASSIGNABILITY],
+    )]
 
   incompatible = [(reader, value) for reader, value in results if not value]
   if incompatible:
@@ -202,8 +239,9 @@ def check_assignability(context):
         severity=Severity.ERROR,
       title=f"External assignability check fails on '{endpoint.topic_name}'",
         observed=(f"is_assignable_from: {reader.type_name} <- {endpoint.type_name} = "
-                  f"False ({len(incompatible)} of {len(results)} resolved reader(s) "
-                  "reject this writer)."),
+                  f"False ({len(incompatible)} of {len(results)} evaluated "
+                  f"reader(s) reject this writer; {len(readers)} resolved on the "
+                  "topic)." + _unevaluable_text(unevaluable)),
         root_cause=(
             "Connext's external TypeObject assignability check compares the "
             "writer's schema with each discovered reader schema. It found a "
@@ -220,7 +258,10 @@ def check_assignability(context):
             "writer_type": endpoint.type_name,
             "reader_type": reader.type_name,
             "reader_accepts_writer": False,
-            "resolved_reader_count": len(results),
+            "resolved_reader_count": len(readers),
+            "evaluated_reader_count": len(results),
+            "unevaluable_reader_count": len(unevaluable),
+            "readers_unevaluated": unevaluable,
             "incompatible_reader_count": len(incompatible),
         },
         refs=[DOC_ASSIGNABILITY],
@@ -231,12 +272,17 @@ def check_assignability(context):
       rung=RUNG_TYPE,
       severity=Severity.OK,
       title=f"Writer type is assignable to discovered readers on '{endpoint.topic_name}'",
-      observed=(f"is_assignable_from: every resolved reader type <- "
-                f"{endpoint.type_name} = True ({len(results)} reader(s))."),
+      observed=(f"is_assignable_from: every evaluated reader type <- "
+                f"{endpoint.type_name} = True ({len(results)} of {len(readers)} "
+                "resolved reader(s) evaluated)."
+                + _unevaluable_text(unevaluable)),
       evidence={
           "topic_name": endpoint.topic_name,
           "writer_type": endpoint.type_name,
-          "resolved_reader_count": len(results),
+          "resolved_reader_count": len(readers),
+          "evaluated_reader_count": len(results),
+          "unevaluable_reader_count": len(unevaluable),
+          "readers_unevaluated": unevaluable,
           "reader_accepts_writer": True,
       },
       refs=[DOC_ASSIGNABILITY],
@@ -244,14 +290,48 @@ def check_assignability(context):
 
 
 def _assignable(target, source):
-  """target.is_assignable_from(source), or None when it cannot be evaluated."""
+  """`(target.is_assignable_from(source), None)`, or `(None, reason)`.
+
+  Two different failures used to collapse into one bare `None`: a binding that
+  offers no structural comparison at all, and a comparison that was attempted
+  and raised. Both leave the pair unevaluated, and an operator reading the
+  report needs to know which.
+  """
   method = compat.get(target, "is_assignable_from", None)
   if not callable(method):
-    return None
+    return None, ("this type binding exposes no is_assignable_from(), so no "
+                  "structural comparison could be attempted")
   try:
-    return bool(method(source))
-  except Exception:
-    return None
+    return bool(method(source)), None
+  except Exception as error:  # noqa: BLE001 - an unevaluable reader, not a crash
+    return None, f"is_assignable_from() raised {type(error).__name__}: {error}"
+
+
+def _unevaluable(reader, reason):
+  """One reader that could not be compared, and why.
+
+  `{policy, reason}` is the incomplete-evidence shape the QoS rules already
+  use; `reader`/`reader_key` name which of several readers this record is
+  about, which a per-policy record has no need for.
+  """
+  return {"policy": "type assignability",
+          "reader": reader.type_name or reader.key,
+          "reader_key": reader.key,
+          "reason": reason}
+
+
+def _unevaluable_text(unevaluable):
+  """Sentence naming the readers that were not compared, or an empty string.
+
+  Appended to the `observed` line of every assignability verdict: an operator
+  reading "every evaluated reader accepts this writer" needs to know when a
+  reader was skipped for want of a usable binding rather than found compatible.
+  """
+  if not unevaluable:
+    return ""
+  names = ", ".join(sorted({item["reader"] for item in unevaluable}))
+  return (f" Not evaluated ({len(unevaluable)} reader(s): {names}): these were "
+          "neither confirmed compatible nor found incompatible.")
 
 
 def check_extensibility(context):

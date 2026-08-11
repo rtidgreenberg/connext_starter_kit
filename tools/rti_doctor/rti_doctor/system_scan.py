@@ -93,10 +93,13 @@ def scan(registry, own_qos, type_lookup_settings, domain_id, active_domains=(),
       censused_topics.add(endpoint.topic_name)
       endpoint_checks.append(type_compat.check_type_name_conflict)
     if endpoint.is_writer:
-      # check_type_state's ERROR is titled and remedied for a writer ("enable
-      # full type propagation on the publisher"). Pointed at a DataReader it
-      # names the wrong entity and sends the operator to the wrong side of the
-      # system, so the system scan asks it about writers only.
+      # check_type_state is role-aware now, so a reader would no longer be
+      # described as a writer. The system census still asks about writers only,
+      # deliberately: a topic whose schema never propagates fails at its
+      # publisher, and reporting the same unresolved schema again once per
+      # subscriber would multiply one condition across the issue list. A
+      # reader's own type state is still diagnosed when it is the target of a
+      # focused run. Widening the census is a separate decision.
       endpoint_checks.append(type_compat.check_type_state)
       endpoint_checks.append(type_compat.check_assignability)
     findings.extend(_annotate(run_checks(context, tuple(endpoint_checks)), "endpoint",

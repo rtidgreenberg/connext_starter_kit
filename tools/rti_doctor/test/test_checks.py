@@ -324,8 +324,39 @@ class TestTypeState(unittest.TestCase):
     endpoint = endpoint_record(type_state=records.TYPE_UNAVAILABLE,
                                vendor_id=FakeVendorId((0x01, 0x0F)))
     result = type_compat.check_type_state(CheckContext(endpoint=endpoint))
-    self.assertIn("upgrade the publisher to Fast DDS 3.6.2 or newer",
+    self.assertIn("upgrade that publisher to Fast DDS 3.6.2 or newer",
                   result[0].remedy)
+
+  def test_unavailable_type_on_a_writer_names_the_publisher(self):
+    endpoint = endpoint_record(kind="Writer", type_state=records.TYPE_UNAVAILABLE)
+    finding = type_compat.check_type_state(CheckContext(endpoint=endpoint))[0]
+    self.assertEqual(finding.title, "No type information available for this writer")
+    self.assertEqual(finding.evidence["endpoint_role"], "writer")
+    self.assertIn("publisher that owns this writer", finding.remedy)
+    self.assertNotIn("subscriber", finding.remedy)
+
+  def test_unavailable_type_on_a_reader_names_the_subscriber(self):
+    """The same check is reachable for either role from a focused run.
+
+    Its ERROR used to be written exclusively for a writer, so targeting a
+    DataReader whose schema never resolved sent the operator to a publisher
+    that may be entirely healthy.
+    """
+    endpoint = endpoint_record(kind="Reader", type_state=records.TYPE_UNAVAILABLE)
+    finding = type_compat.check_type_state(CheckContext(endpoint=endpoint))[0]
+    self.assertEqual(finding.title, "No type information available for this reader")
+    self.assertEqual(finding.evidence["endpoint_role"], "reader")
+    self.assertIn("subscriber that owns this reader", finding.remedy)
+    self.assertNotIn("publisher", finding.remedy)
+    # The claim is about this endpoint's schema and no other.
+    self.assertIn("other side of the topic", finding.root_cause)
+
+  def test_fastdds_reader_upgrade_advice_names_the_subscriber(self):
+    endpoint = endpoint_record(kind="Reader", type_state=records.TYPE_UNAVAILABLE,
+                               vendor_id=FakeVendorId((0x01, 0x0F)))
+    finding = type_compat.check_type_state(CheckContext(endpoint=endpoint))[0]
+    self.assertIn("upgrade that subscriber to Fast DDS 3.6.2 or newer",
+                  finding.remedy)
 
   def test_other_vendor_unavailable_does_not_get_fastdds_advice(self):
     endpoint = endpoint_record(type_state=records.TYPE_UNAVAILABLE,

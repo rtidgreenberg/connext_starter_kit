@@ -227,7 +227,12 @@ class TestSystemScan(unittest.TestCase):
                      {"participant-w", "participant-r"})
 
   def test_no_type_info_error_is_never_raised_against_a_reader(self):
-    """Its title and remedy name a writer; pointed at a reader they mislead."""
+    """The census reports one unresolved schema once, at its publisher.
+
+    The check itself is role-aware now, so a reader would be described
+    correctly - but reporting the same missing schema again once per
+    subscriber would multiply one condition across the issue list.
+    """
     snapshot = system_scan.scan(
         registry_with_reliability_fault(), own_qos=None,
         type_lookup_settings={"request_types_filter": "*"}, domain_id=7,

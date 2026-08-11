@@ -60,6 +60,13 @@ def check_type_state(context):
 
   # UNAVAILABLE: the wait elapsed with no type. Enumerate the real causes rather
   # than asserting one, and rule out the one cause that would be our own fault.
+  #
+  # Everything below is phrased for the role of the endpoint being diagnosed.
+  # Targeted diagnosis accepts either role, and a reader whose schema never
+  # resolved used to be reported as a writer fault - sending the operator to a
+  # publisher that may be entirely healthy.
+  role = "writer" if endpoint.is_writer else "reader"
+  peer_side = "publisher" if endpoint.is_writer else "subscriber"
   request_filter = context.type_lookup_settings.get("request_types_filter")
   our_filter_ok = request_filter == "*"
   causes = [
@@ -80,31 +87,37 @@ def check_type_state(context):
 
   remedy = (
       "A TypeIdentifier alone is an identifier, not a schema, so no reader can "
-      "be created from it. Either enable full type propagation on the "
-      "publisher, or supply the IDL locally and use a compile-time type "
-      "instead of DynamicData.")
+      f"be created from it. Either enable full type propagation on the "
+      f"{peer_side} that owns this {role}, or supply the IDL locally and use a "
+      "compile-time type instead of DynamicData.")
   if endpoint.vendor_name == vendors.FASTDDS:
     remedy += (
-        " For Fast DDS, first upgrade the publisher to Fast DDS 3.6.2 or newer: "
-        "the validated 3.6.2 fixture resolves a Connext DynamicType before "
-        "investigating TypeLookup or TypeObject compatibility further.")
+        f" For Fast DDS, first upgrade that {peer_side} to Fast DDS 3.6.2 or "
+        "newer: the validated 3.6.2 fixture resolves a Connext DynamicType "
+        "before investigating TypeLookup or TypeObject compatibility further.")
+
+  scope_note = (
+      "This is the schema of the endpoint named above and of no other: an "
+      f"unresolved {role} type says nothing about the health of the endpoints "
+      "on the other side of the topic.")
 
   return [Finding(
       id="type.no_type_info",
       rung=RUNG_TYPE,
       severity=Severity.ERROR,
-      title="No type information available for this writer",
+      title=f"No type information available for this {role}",
       observed=(f"Topic '{endpoint.topic_name}' type name '{endpoint.type_name}' is "
-                f"visible, but no DynamicType arrived within "
+                f"visible on this {role}, but no DynamicType arrived within "
                 f"{context.type_wait:.1f}s. request_types_filter = {request_filter}."),
       root_cause=(
           "The topic and type NAME come from plain endpoint-discovery strings, but "
           "the schema comes from a separate request/reply service. Seeing the name "
-          "without the schema is the single most common cross-vendor state. "
-          "Possible causes: " + "; ".join(causes) + "."),
+          "without the schema is the single most common cross-vendor state. " +
+          scope_note + " Possible causes: " + "; ".join(causes) + "."),
         remedy=remedy,
       evidence={"topic_name": endpoint.topic_name,
                 "type_name": endpoint.type_name,
+                "endpoint_role": role,
                 "request_types_filter": request_filter,
                 "type_wait_seconds": context.type_wait},
       refs=[DOC_TYPELOOKUP, DOC_TYPE_REPR],

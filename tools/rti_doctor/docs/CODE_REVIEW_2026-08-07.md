@@ -39,19 +39,25 @@ folded in below as [C1a](#c1a), [C1b](#c1b), [C1c](#c1c) and [S12](#s12).
 sub-findings under [C1](#c1)). 43 are marked Confirmed or Re-verified; the rest
 are Plausible and should be reproduced before being scheduled.
 
-**Status as of 2026-08-10: 15 Fixed, 2 Partial, 3 Live, 51 Open.** Fixed:
-[C1](#c1), [C2](#c2), [C3](#c3), [Q1](#q1), [Q2](#q2), [X1](#x1), [X2](#x2),
-[X3](#x3), [X4](#x4), [H1](#h1), [H2](#h2), [H3](#h3), [H4](#h4),
-[S4](#s4), [M12](#m12) - **all six
-Criticals**, and all three of the false-ERROR findings called out below.
-Partial: [Q3](#q3), [Q4](#q4). Live: [C1a](#c1a), [C1b](#c1b), [C1c](#c1c),
-which the [C1](#c1) fix unblocked. Every status is recorded per finding; see
-the legend under [Index](#index).
+**Status as of 2026-08-10: 26 Fixed, 2 Partial, 0 Live, 43 Open.** Fixed:
+[C1](#c1), [C1a](#c1a), [C1b](#c1b), [C1c](#c1c), [C2](#c2), [C3](#c3),
+[Q1](#q1), [Q2](#q2), [X1](#x1), [X2](#x2), [X3](#x3), [X4](#x4), [H1](#h1),
+[H2](#h2), [H3](#h3), [H4](#h4), [H5](#h5), [H6](#h6), [H7](#h7), [H10](#h10),
+[S1](#s1), [S2](#s2), [S3](#s3), [S4](#s4), [M11](#m11), [M12](#m12) - **all
+six Criticals and all three of their sub-findings**, and all three of the
+false-ERROR findings called out below. Partial: [Q3](#q3), [Q4](#q4). Every
+status is recorded per finding; see the legend under [Index](#index).
 
-**What blocks work now is decisions, not implementations.** [C1a](#c1a),
-[C1b](#c1b) and [C1c](#c1c) have no entry in `DESIGN_DECISIONS.md`.
-Everything else outstanding does, so the next finding worked can be picked by
-severity alone.
+**Nothing is blocked on a decision any more.** The three sub-findings that had
+no entry in `DESIGN_DECISIONS.md` are decided (as one entry, C1a-C1c) and
+fixed. Every remaining finding has a decision, so the next one worked can be
+picked by severity alone.
+
+The three Highs still open are [H8](#h8) and [H9](#h9), which are one piece of
+work - [H9](#h9) deletes the automatic startup capture and [H8](#h8) replaces it
+with an explicit `c` action, and neither is coherent without the other - and the
+Medium-heavy remainder. That makes [H8](#h8)/[H9](#h9) the next thing to
+schedule.
 
 The single most important result is that **the tool's failure modes are
 concentrated at the reporting boundary, not in its DDS logic.** The RxO comparison
@@ -115,8 +121,9 @@ row still marked Open has not been re-verified either.
 * **Partial** — part of the finding is closed and part is not. The finding's own
   section says which half.
 * **Live** — was latent behind another finding, is now reachable. Sub-findings
-  [C1a](#c1a), [C1b](#c1b) and [C1c](#c1c) are all in this state: fixing
-  [C1](#c1) is what made them fire.
+  [C1a](#c1a), [C1b](#c1b) and [C1c](#c1c) passed through this state — fixing
+  [C1](#c1) is what made them fire — and are now Fixed. No finding is currently
+  Live.
 * **Open** — untouched.
 
 | ID | Status | Severity | One line |
@@ -135,15 +142,15 @@ row still marked Open has not been re-verified either.
 | [H2](#h2) | **Fixed** `428585c` | High | `type.extensibility` still emits one WARN per endpoint — 96 identical warnings for one type |
 | [H3](#h3) | **Fixed** `ce3f553` | High | `o` on the issue-detail screen can never work for `qos.rxo_mismatch`, the flagship ERROR |
 | [H4](#h4) | **Fixed** `cb2adb1` | High | Topic-scoped dedup withholds participant identity, so `type.name_conflict` shows every involved participant as "OK" |
-| [H5](#h5) | Open | High | `TopologyHealthScreen` raises `AttributeError` from four key handlers when the first scan failed |
-| [H6](#h6) | Open | High | Every `cleanup` EXIT trap in `run_manual_scenario.sh` reads function-locals, so it aborts before `docker rm` and fails a successful run |
-| [H7](#h7) | Open | High | The participant and startup tshark are created outside the `try/finally` that closes them |
+| [H5](#h5) | **Fixed** `2c291b6` | High | `TopologyHealthScreen` raises `AttributeError` from four key handlers when the first scan failed |
+| [H6](#h6) | **Fixed** `9e7ccfe` | High | Every `cleanup` EXIT trap in `run_manual_scenario.sh` reads function-locals, so it aborts before `docker rm` and fails a successful run |
+| [H7](#h7) | **Fixed** `d6b5c39` | High | The participant and startup tshark are created outside the `try/finally` that closes them |
 | [H8](#h8) | Open | High | Every TUI report probe spawns a `tshark -i any` capture, undisclosed and unconditional |
 | [H9](#h9) | Open | High | The startup discovery capture is unbounded on disk, and its full re-parse at exit is computed and discarded |
-| [H10](#h10) | Open | High | `refresh_participants` guards only the data fetch, so one unreadable field aborts the whole poll cycle |
-| [S1](#s1) | Open | High | The scale suite skips itself when the regression it exists to catch occurs |
-| [S2](#s2) | Open | High | The discovery field-name mapping is asserted by nothing, and `compat.get` turns a wrong name into a silent default |
-| [S3](#s3) | Open | High | `unittest.main()` sits mid-file in `test_checks.py`; 13 of 20 classes are unreachable when run directly |
+| [H10](#h10) | **Fixed** `598f6ae` | High | `refresh_participants` guards only the data fetch, so one unreadable field aborts the whole poll cycle |
+| [S1](#s1) | **Fixed** `a9080ec` | High | The scale suite skips itself when the regression it exists to catch occurs |
+| [S2](#s2) | **Fixed** `598f6ae` | High | The discovery field-name mapping is asserted by nothing, and `compat.get` turns a wrong name into a silent default |
+| [S3](#s3) | **Fixed** `598f6ae` | High | `unittest.main()` sits mid-file in `test_checks.py`; 13 of 20 classes are unreachable when run directly |
 | [S4](#s4) | **Fixed** `e9f5da1` | High | `FakeSession.sweep` hardcodes the two values `--all` is judged by |
 | [Q4](#q4) | Partial | Medium | The `qos.compatible` OK finding records nothing about which policies were actually evaluated |
 | [Q5](#q5) | Open | Medium | The AUTO-sentinel guard tests membership anywhere in the list, so a determinate writer skips the comparison |
@@ -162,7 +169,7 @@ row still marked Open has not been re-verified either.
 | [M8](#m8) | Open | Medium | Topology rows come from the live registry while the Health column comes from a stale snapshot |
 | [M9](#m9) | Open | Medium | `IssueListScreen`'s key filter is frozen at push time and mislabels itself "All" |
 | [M10](#m10) | Open | Medium | The verdict line drops the problem summary on every non-FULL payload |
-| [M11](#m11) | Open | Medium | Both cleanups share one `try`, so a capture-teardown failure skips `participant.close()` |
+| [M11](#m11) | **Fixed** `d6b5c39` | Medium | Both cleanups share one `try`, so a capture-teardown failure skips `participant.close()` |
 | [M12](#m12) | **Fixed** `7e6bfc1` | Medium | `--format json` produces no JSON at all on the two non-zero non-error exits |
 | [M13](#m13) | Open | Medium | A startup failure and "found ERROR findings" are both exit 1 |
 | [M14](#m14) | Open | Medium | `--ready-timeout` is the one numeric flag omitted from the finiteness check; `inf` hangs forever |
@@ -966,6 +973,15 @@ empty. **Confirmed** for the unguarded region; **Plausible** that a binding fiel
 raises there in practice.
 
 ### S1
+
+**Status: Fixed** in `a9080ec`. `_require_scale()` raises from `setUpClass` and
+names every shortfall it observed against what it required, so a partial domain
+fails rather than skipping. `test_the_domain_really_is_at_scale` is gone: it was
+the same assertion one gate too late. Because `tearDownClass` does not run when
+`setUpClass` raises, the fixture stop and the participant close moved to
+`addClassCleanup`, registered immediately after each resource is created.
+Verified with a partial-domain double: 40 of 96 endpoints produces one error
+naming the counts, no skips, and both cleanups still run.
 
 **The scale suite skips itself when the regression it exists to catch occurs.**
 `../test/run_tests.sh` `live` tier, `../test/test_scale.py#L91-L94`.
@@ -1836,6 +1852,19 @@ identity set it carries, so a topic-scoped issue can dedup once and still name
 every participant involved. Until that exists, each new check will land in one of
 the three failure modes above.
 
+**Resolved, and the structural fix is the one described.** [H4](#h4) added
+`linked_writer_keys` / `linked_reader_keys` / `linked_participant_keys`, which
+`_issues` unions into the issue's key tuples while `_issue_key` keeps reading
+only the singular fields - exactly the separation this section argues for. Each
+row then closed in the way that section's own analysis implies: `type.extensibility`
+left the system census entirely ([H2](#h2)), because what a type is *declared*
+to be is one answer for every endpoint using it; and the Fast DDS version
+finding took a `participant_key`, which `_issue_key` already reads, so N
+versions became N issues and the linkage followed from the same field
+([C1a](#c1a), [C1b](#c1b)). A new check now has a correct combination available
+to declare, which is what "each new check will land in one of the three failure
+modes" was warning about.
+
 ## 2. "Unreadable" is rendered as "fine" — except where it is rendered as "broken"
 
 This is the most consequential theme in the review, and it spans four modules.
@@ -2094,9 +2123,11 @@ departures worth noting:
   pair, so no finding can hide another at all.
 
 [C1a](#c1a)/[C1b](#c1b)/[C1c](#c1c) were **not** fixed alongside [C1](#c1) as
-item 2 advises, so the feature did land broken a second time. They are the
-first thing to pick up. Item 6 ([X3](#x3) + [X4](#x4)) is next in the decision
-log's order.
+item 2 advises, so the feature did land broken a second time — and then was
+fixed in one follow-up change that treated all three as the single defect they
+turned out to be: version evidence describing the domain rather than the
+participant that advertised it. Every Critical, every one of their
+sub-findings, and every High except [H8](#h8)/[H9](#h9) is now closed.
 
 1. **[Q1](#q1)** + **[Q2](#q2)** — the two false ERRORs. These are the worst
    findings in the review in operational terms: the tool asserts, at ERROR

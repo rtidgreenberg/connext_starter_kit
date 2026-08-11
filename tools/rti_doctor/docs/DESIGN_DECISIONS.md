@@ -832,6 +832,33 @@ stays readable.
 - **References:** `CODE_REVIEW_2026-08-07.md` M10;
 	`rti_doctor/findings.py`; `test/test_findings.py`.
 
+### M11: Two Owned Resources Share One Cleanup
+
+- **Date:** 2026-08-10
+- **Status:** Accepted
+- **Problem:** `main()`'s `finally` wrapped `close_discovery_capture()` and
+	`participant.close()` in one `try`, so a raising capture teardown skipped the
+	participant close entirely. `Session.close_discovery_capture` also cleared
+	`discovery_capture` only after `finish_discovery()` returned, leaving the
+	capture attached when it raised.
+- **Decision:** Release each owned resource in its own `try/except`, logging and
+	continuing rather than abandoning the rest, and detach the capture before
+	finishing it rather than after.
+- **Rationale:** The capture is the more failure-prone of the two - the log file
+	close can raise `OSError`, and the `kill()`/`wait()` after a `TimeoutExpired`
+	is unguarded - and the participant is the more important to close. Sequencing
+	them under one `try` put the likelier failure in front of the one that
+	matters more. Detaching first makes a failed close idempotent instead of
+	leaving a retry to re-terminate a dead process.
+- **Consequences:** A capture teardown failure is now one logged line rather
+	than a leaked participant at interpreter exit. A failed close does not leave
+	the session able to retry the same dead capture.
+- **Follow-up:** Fixed alongside H7, which rewrote the same `finally`; both are
+	covered by `TestMainReleasesWhatItOwns` and
+	`TestCaptureDetachesBeforeItFinishes`.
+- **References:** `CODE_REVIEW_2026-08-07.md` M11 and H7;
+	`rti_doctor/__main__.py`; `rti_doctor/engine.py`; `test/test_cli.py`.
+
 ### M13: Startup Failure Shares the Finding-Error Exit Code
 
 - **Date:** 2026-08-10

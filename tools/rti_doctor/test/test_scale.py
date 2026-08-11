@@ -58,10 +58,16 @@ class TestScanAtScale(unittest.TestCase):
          "--scale-topics", str(TOPICS),
          "--scale-endpoints-per-participant", str(ENDPOINTS_PER_PARTICIPANT)],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+    # addClassCleanup, not tearDownClass: unittest does not run tearDownClass
+    # when setUpClass raises, and the scale precondition below is deliberately
+    # a raise. Registered immediately after each resource is created so a
+    # failure between them still stops the fixture and closes the participant.
+    cls.addClassCleanup(cls._stop_fixture)
 
     cls.registry = discovery.DiscoveryRegistry(type_wait=4.0)
     cls.participant, settings = discovery.create_participant(
         cls.domain, name="RTI DOCTOR SCALE", registry=cls.registry)
+    cls.addClassCleanup(cls._close_participant)
     cls.session = engine.Session(
         participant=cls.participant, registry=cls.registry,
         own_qos=cls.participant.qos, type_lookup_settings=settings,
@@ -75,34 +81,60 @@ class TestScanAtScale(unittest.TestCase):
       time.sleep(0.5)
     cls.registry.expire_type_waits()
     cls.discovered = len(cls.registry.endpoint_list())
+    cls._require_scale()
 
   @classmethod
-  def tearDownClass(cls):
-    try:
-      cls.participant.close()
-    except Exception:
-      pass
+  def _require_scale(cls):
+    """Fail the suite when the domain did not reach scale. Never skip.
+
+    This was a `setUp` skip, which put the guard behind the same gate as the
+    thing it guards: reintroduce the sample-dropping bug in
+    `discovery._drain_endpoints` or the departure-sweep bug in
+    `refresh_participants` so only 40 of 96 endpoints arrive, and every test
+    here - including the one whose docstring read "guards the guard" - skipped,
+    `run_tests.sh live` printed `OK (skipped=7)`, and the run exited 0. The
+    regression this suite exists to catch was the regression that silenced it.
+
+    Scale is a precondition, not an optional condition, so a partial domain is
+    a hard failure that prints what it observed against what it required.
+    """
+    participants = len(cls.registry.participant_list())
+    topics = len(cls.registry.topic_names())
+    shortfalls = []
+    if cls.discovered < EXPECTED_ENDPOINTS:
+      shortfalls.append(f"{cls.discovered} of {EXPECTED_ENDPOINTS} endpoints")
+    if participants < PARTICIPANTS:
+      shortfalls.append(f"{participants} of {PARTICIPANTS} participants")
+    if topics < TOPICS:
+      shortfalls.append(f"{topics} of {TOPICS} topics")
+    if shortfalls:
+      raise AssertionError(
+          "the scale fixture did not reach scale: discovered "
+          + ", ".join(shortfalls)
+          + ". Every assertion in this suite is about behaviour at scale, so a "
+            "partial domain fails rather than skipping. If the host is "
+            "genuinely contended, re-run; if it is not, this is the discovery "
+            "regression the suite exists to catch.")
+
+  @classmethod
+  def _stop_fixture(cls):
     cls.fixture.terminate()
     try:
       cls.fixture.wait(timeout=15)
     except subprocess.TimeoutExpired:  # pragma: no cover
       cls.fixture.kill()
 
-  def setUp(self):
-    if self.discovered < EXPECTED_ENDPOINTS:
-      self.skipTest(f"only {self.discovered} of {EXPECTED_ENDPOINTS} endpoints "
-                    f"were discovered; the domain may be contended")
+  @classmethod
+  def _close_participant(cls):
+    try:
+      cls.participant.close()
+    except Exception:
+      pass
 
   def _scan(self):
     started = time.monotonic()
     snapshot = self.session.system_scan()
     return snapshot, time.monotonic() - started
-
-  def test_the_domain_really_is_at_scale(self):
-    """Guards the guard: the rest of this suite is meaningless on 2 endpoints."""
-    self.assertGreaterEqual(self.discovered, EXPECTED_ENDPOINTS)
-    self.assertGreaterEqual(len(self.registry.participant_list()), PARTICIPANTS)
-    self.assertGreaterEqual(len(self.registry.topic_names()), TOPICS)
 
   def test_a_scan_completes_and_reports_its_cost(self):
     snapshot, elapsed = self._scan()

@@ -800,7 +800,7 @@ Even in the no-participants case where `_health` is never reached,
 
 ### H6
 
-**Status: Fixed** in `PENDING_H6`. All three per-scenario `cleanup` closures are
+**Status: Fixed** in `9e7ccfe`. All three per-scenario `cleanup` closures are
 replaced by one `cleanup_scenario` that takes `PID... -- CONTAINER...` as
 arguments, plus `trap_scenario_cleanup`, which registers the EXIT trap with
 those values already substituted (`printf %q`) rather than by name - so nothing

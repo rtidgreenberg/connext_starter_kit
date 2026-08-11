@@ -764,7 +764,7 @@ and the linkage identity need to be separate fields, not one field doing both.
 
 ### H5
 
-**Status: Fixed** in `7835cc7`. One `_without_snapshot()` guard, named for
+**Status: Fixed** in `2c291b6`. One `_without_snapshot()` guard, named for
 the state rather than for each caller, now covers `_render_table` (so `1`-`4`),
 `action_issues` and `action_save`. It was centralized rather than repeated at
 each site because this screen has six entry points into the snapshot against
@@ -902,6 +902,18 @@ leftovers. **Confirmed.**
 
 ### H10
 
+**Status: Fixed** in `PENDING_H10`. The whole per-handle body is inside the
+guard now, not just the fetch: the mapping moved into a new
+`_participant_from_data()` and the `try` wraps the fetch and the mapping
+together, so `transport_info`, `default_unicast_locators`, `first_locator_ip`
+and `participant_name` can all raise without leaving the function. The
+departure-sweep skip and the "unreadable data is not a record" rule are both
+unchanged and now tested: `TestOneBadParticipantDoesNotDropTheRest` fails a
+middle participant on sequence *iteration* rather than on the fetch - the case
+the old guard missed - and asserts the later peer still registers, no partial
+record is invented for the failing one, the sweep is skipped for that cycle,
+and a clean cycle still sweeps. Reproduced against the narrower guard first.
+
 **`refresh_participants` guards only the data fetch, so one unreadable field on
 one participant aborts the whole poll cycle and silently drops the rest.**
 `../rti_doctor/discovery.py#L436-L476`. The `try/except` covers
@@ -947,6 +959,16 @@ assertion a `setUpClass`-level hard failure, not a per-test skip.
 
 ### S2
 
+**Status: Fixed** in `PENDING_H10`. `TestDiscoveryFieldMapping` is the
+table-driven test the finding asks for, over both mappers: 19 endpoint fields
+and 14 participant fields, each asserted to arrive non-default from a fake that
+answers **only** to the real binding names. That last part is the point - a Mock
+would pass whatever the mapper asked for - so a fourth test deletes a field to
+confirm the fake cannot answer for one the binding lacks. Verified by making the
+finding's own example change, `rtps_vendor_id` to a wrong name: the suite now
+fails and names `vendor_id` as the field that did not arrive. The participant
+half became testable as a side effect of the [H10](#h10) extraction.
+
 **The discovery field-name mapping is asserted by nothing in the unit tier, and
 `compat.get` turns a wrong field name into a silent default.**
 `../rti_doctor/discovery.py#L310-L331` and `#L457-L474`.
@@ -977,6 +999,11 @@ one table-driven test that feeds a realistic fake `data` object through
 `_endpoint_from_data` and asserts every field arrives non-`None` would close it.
 
 ### S3
+
+**Status: Fixed** in `PENDING_H10`. The `if __name__` block is at the end of the
+file, with a comment recording what it cost so it is not moved back. Verified:
+`python test/test_checks.py` now collects 125 tests, the same count as
+`-m unittest` on the module, where it previously ran 7 classes and printed OK.
 
 **`unittest.main()` sits mid-file in `test_checks.py`; 13 of the 20 test classes
 are defined after it and are unreachable when the file is run directly.**

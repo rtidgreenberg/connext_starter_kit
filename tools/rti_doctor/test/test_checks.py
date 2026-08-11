@@ -684,10 +684,6 @@ class TestPayloadChecks(unittest.TestCase):
     self.assertEqual(probe_payload.check_silent(CheckContext(probe=probe)), [])
 
 
-if __name__ == "__main__":
-  unittest.main()
-
-
 class TestOffSubnetIsNotAWarning(unittest.TestCase):
   """A peer on another subnet is normal in a routed network and must stay silent."""
 
@@ -1561,3 +1557,246 @@ class TestWriterSelectionIsDeterministic(unittest.TestCase):
             key=key, kind="Writer", topic_name="Telemetry")
       chosen.add(registry.find_writer("Telemetry").key)
     self.assertEqual(chosen, {"w-a"})
+
+
+class FakeSequence:
+  """A Connext sequence-like whose iteration can be made to raise.
+
+  The binding's sequences are C++ objects behind __bool__/__len__/__iter__, and
+  `compat.get` cannot protect a caller that then iterates the value it returned.
+  """
+
+  def __init__(self, items=(), raises=None):
+    self._items = list(items)
+    self._raises = raises
+
+  def __iter__(self):
+    if self._raises is not None:
+      raise self._raises
+    return iter(self._items)
+
+  def __len__(self):
+    if self._raises is not None:
+      raise self._raises
+    return len(self._items)
+
+
+class FakeParticipantData:
+  """A realistic ParticipantBuiltinTopicData, by the binding's field names.
+
+  Named attributes rather than a Mock: `compat.get` swallows every exception and
+  returns its default, so a Mock - which answers to any name - cannot fail when
+  the mapper asks for a field the binding does not actually have. That tolerance
+  is correct at runtime and useless in a test, which is why this fake only
+  answers to the names the real binding uses.
+  """
+
+  def __init__(self, key=(1, 2, 3, 4), name="peer-app", **overrides):
+    self.key = type("Key", (), {"value": list(key)})()
+    self.participant_name = type("Name", (), {"name": name})()
+    self.domain_id = 7
+    self.rtps_vendor_id = type("Vendor", (), {"value": [1, 1]})()
+    self.rtps_protocol_version = type("Protocol", (), {"major": 2, "minor": 5})()
+    self.product_version = type("Product", (), {"major": 7})()
+    self.default_unicast_locators = FakeSequence([FakeLocator("10.0.0.7")])
+    self.transport_info = FakeSequence([object()])
+    self.dds_builtin_endpoints = 3135
+    self.available_builtin_endpoints_ext = 12
+    self.vendor_builtin_endpoints = 4
+    self.partial_configuration = False
+    for field, value in overrides.items():
+      setattr(self, field, value)
+
+
+class FakeEndpointData:
+  """A realistic Publication/SubscriptionBuiltinTopicData, same discipline."""
+
+  def __init__(self, key=(1, 2, 3, 5), participant_key=(1, 2, 3, 4), **overrides):
+    self.key = type("Key", (), {"value": list(key)})()
+    self.participant_key = type("Key", (), {"value": list(participant_key)})()
+    self.topic_name = "Telemetry"
+    self.type_name = "TelemetryType"
+    self.type = object()
+    self.rtps_vendor_id = type("Vendor", (), {"value": [1, 1]})()
+    self.rtps_protocol_version = type("Protocol", (), {"major": 2, "minor": 5})()
+    self.reliability = type("Reliability", (), {"kind": "RELIABLE"})()
+    self.durability = type("Durability", (), {"kind": "TRANSIENT_LOCAL"})()
+    self.latency_budget = type("Latency", (), {"duration": 0})()
+    self.deadline = type("Deadline", (), {"period": 1})()
+    self.liveliness = type("Liveliness", (), {"kind": "AUTOMATIC"})()
+    self.ownership = type("Ownership", (), {"kind": "SHARED"})()
+    self.destination_order = type("Order", (), {"kind": "BY_RECEPTION_TIMESTAMP"})()
+    self.presentation = type("Presentation", (), {"access_scope": "INSTANCE"})()
+    self.partition = type("Partition", (), {"name": ["telemetry"]})()
+    self.representation = type("Repr", (), {"value": [0]})()
+    self.unicast_locators = FakeSequence([FakeLocator("10.0.0.7")])
+    self.multicast_locators = FakeSequence([FakeLocator("239.255.0.1", port=7400)])
+    for field, value in overrides.items():
+      setattr(self, field, value)
+
+
+class TestDiscoveryFieldMapping(unittest.TestCase):
+  """S2: the mapper's binding field names are asserted by nothing else.
+
+  Every other test in this file builds `EndpointRecord`/`ParticipantRecord`
+  directly, so `_endpoint_from_data` and `_participant_from_data` were reached
+  only by fakes carrying three or four fields. `compat.get` returns its default
+  for a name the object does not have, by design, which makes a renamed or
+  mistyped field indistinguishable from a genuinely absent one: changing
+  `rtps_vendor_id` to any wrong name turns every peer's vendor unknown and every
+  RxO policy unreadable, with the whole suite still green.
+
+  These assert that each mapped field arrives non-default from a fake that
+  answers only to the real binding names.
+  """
+
+  #: (record attribute, expected value or predicate) for every endpoint field
+  #: the mapper is responsible for.
+  ENDPOINT_FIELDS = (
+      ("key", "[1, 2, 3, 5]"),
+      ("participant_key", "[1, 2, 3, 4]"),
+      ("topic_name", "Telemetry"),
+      ("type_name", "TelemetryType"),
+      ("type", None),
+      ("vendor_id", None),
+      ("protocol_version", None),
+      ("reliability", None),
+      ("durability", None),
+      ("latency_budget", None),
+      ("deadline", None),
+      ("liveliness", None),
+      ("ownership", None),
+      ("destination_order", None),
+      ("presentation", None),
+      ("partition", None),
+      ("representation", None),
+      ("unicast_locators", None),
+      ("multicast_locators", None),
+  )
+
+  PARTICIPANT_FIELDS = (
+      ("key", "[1, 2, 3, 4]"),
+      ("name", "peer-app"),
+      ("ip", "10.0.0.7"),
+      ("domain_id", 7),
+      ("vendor_id", None),
+      ("protocol_version", None),
+      ("product_version", None),
+      ("default_unicast_locators", None),
+      ("transport_info", None),
+      ("dds_builtin_endpoints", 3135),
+      ("available_builtin_endpoints_ext", 12),
+      ("vendor_builtin_endpoints", 4),
+      ("rtps_host_id", 1),
+      ("rtps_app_id", 2),
+  )
+
+  def test_every_endpoint_field_arrives(self):
+    record = discovery._endpoint_from_data(FakeEndpointData(), "Writer")
+    self.assertEqual(record.kind, "Writer")
+    for field, expected in self.ENDPOINT_FIELDS:
+      with self.subTest(field=field):
+        value = getattr(record, field)
+        self.assertIsNotNone(value, f"{field} did not arrive from discovery")
+        if expected is not None:
+          self.assertEqual(value, expected)
+    # Not merely non-None: an empty list is what an unreadable sequence yields.
+    self.assertEqual(len(record.unicast_locators), 1)
+    self.assertEqual(len(record.multicast_locators), 1)
+
+  def test_every_participant_field_arrives(self):
+    record = discovery._participant_from_data(FakeParticipantData())
+    for field, expected in self.PARTICIPANT_FIELDS:
+      with self.subTest(field=field):
+        value = getattr(record, field)
+        self.assertIsNotNone(value, f"{field} did not arrive from discovery")
+        if expected is not None:
+          self.assertEqual(value, expected)
+    self.assertIs(record.partial_configuration, False)
+    self.assertEqual(len(record.default_unicast_locators), 1)
+    self.assertEqual(len(record.transport_info), 1)
+
+  def test_a_renamed_endpoint_field_is_caught(self):
+    """Guards the guard: the fake must not answer to a name the binding lacks.
+
+    A Mock, or a fake with __getattr__, would pass the two tests above no matter
+    what the mapper asked for - which is the exact hole S2 describes.
+    """
+    data = FakeEndpointData()
+    del data.reliability
+    record = discovery._endpoint_from_data(data, "Writer")
+    self.assertIsNone(record.reliability)
+
+  def test_a_renamed_participant_field_is_caught(self):
+    data = FakeParticipantData()
+    del data.rtps_vendor_id
+    record = discovery._participant_from_data(data)
+    self.assertIsNone(record.vendor_id)
+
+
+class TestOneBadParticipantDoesNotDropTheRest(unittest.TestCase):
+  """H10: the guard covered the sample fetch, not the field reads after it."""
+
+  class FakeParticipant:
+    def __init__(self, failing):
+      self.failing = failing
+
+    def discovered_participants(self):
+      return ["h1", "h2", "h3"]
+
+    def discovered_participant_data(self, handle):
+      if handle == self.failing:
+        # Not a fetch failure: the sample reads, and iterating one of its
+        # sequences is what raises. Every field read after the fetch used to
+        # sit outside the try, so this left refresh_participants entirely.
+        return FakeParticipantData(
+            key=(9, 9, 9, 9), name=f"peer-{handle}",
+            transport_info=FakeSequence(raises=RuntimeError(
+                "transport_info sequence will not iterate")))
+      index = int(handle[1:])
+      return FakeParticipantData(key=(index,) * 4, name=f"peer-{handle}")
+
+  def _refresh(self, failing):
+    registry = discovery.DiscoveryRegistry()
+    with mock.patch.object(discovery.logging, "debug"), \
+         mock.patch.object(discovery.logging, "warning"):
+      discovery.refresh_participants(self.FakeParticipant(failing), registry)
+    return registry
+
+  def test_a_later_participant_is_still_registered(self):
+    registry = self._refresh("h2")
+    self.assertIn("[3, 3, 3, 3]", registry.participants)
+    self.assertIn("[1, 1, 1, 1]", registry.participants)
+
+  def test_the_unreadable_participant_contributes_no_guessed_record(self):
+    """A partial record from unreadable data would be a fabricated peer."""
+    registry = self._refresh("h2")
+    self.assertNotIn("[9, 9, 9, 9]", registry.participants)
+    self.assertEqual(len(registry.participants), 2)
+
+  def test_the_departure_sweep_is_still_skipped_for_that_cycle(self):
+    """An unreadable handle is live, so nothing may be evicted on its account."""
+    registry = discovery.DiscoveryRegistry()
+    registry.participants["stale"] = records.ParticipantRecord(key="stale")
+    with mock.patch.object(discovery.logging, "debug"), \
+         mock.patch.object(discovery.logging, "warning"):
+      discovery.refresh_participants(self.FakeParticipant("h2"), registry)
+    self.assertIn("stale", registry.participants)
+
+  def test_a_clean_cycle_still_sweeps(self):
+    """Guards the guard: the skip must not become permanent."""
+    registry = discovery.DiscoveryRegistry()
+    registry.participants["stale"] = records.ParticipantRecord(key="stale")
+    discovery.refresh_participants(self.FakeParticipant(None), registry)
+    self.assertNotIn("stale", registry.participants)
+    self.assertEqual(len(registry.participants), 3)
+
+
+if __name__ == "__main__":
+  # At the end of the file, not mid-way through it: 13 of the 20 classes below
+  # the old position - the whole TestRxO matrix, TestProbeCorrelation,
+  # TestParticipantMerge, TestParticipantDepartureSweep - were never collected
+  # by `python test/test_checks.py`, which ran 7 classes and printed OK. CI was
+  # unaffected because run_tests.sh uses -m unittest, so a developer verifying
+  # an RxO change the obvious way got a green run that touched no RxO test.
+  unittest.main()

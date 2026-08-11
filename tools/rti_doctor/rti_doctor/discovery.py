@@ -423,6 +423,47 @@ def _sample_key(data, info, reader):
   return key
 
 
+def _participant_from_data(data):
+  """One ParticipantRecord from one ParticipantBuiltinTopicData sample.
+
+  Split out of `refresh_participants` so the whole mapping - every field read,
+  not only the sample fetch - sits inside the caller's per-handle guard, and so
+  the binding field names it depends on can be asserted by a unit test rather
+  than only by a live domain.
+  """
+  key_value = compat.get(compat.get(data, "key", None), "value", None)
+  host_id = app_id = 0
+  if key_value is not None:
+    try:
+      parts = [int(v) for v in key_value]
+      if len(parts) >= 2:
+        host_id, app_id = parts[0], parts[1]
+    except (TypeError, ValueError):
+      pass
+
+  locators = list(compat.get(data, "default_unicast_locators", []) or [])
+  name_policy = compat.get(data, "participant_name", None)
+
+  return ParticipantRecord(
+      key=str(key_value),
+      name=compat.get(name_policy, "name", "") or "",
+      ip=records.first_locator_ip(locators),
+      domain_id=compat.get_int(data, "domain_id"),
+      vendor_id=compat.get(data, "rtps_vendor_id", None),
+      protocol_version=compat.get(data, "rtps_protocol_version", None),
+      product_version=compat.get(data, "product_version", None),
+      default_unicast_locators=locators,
+      transport_info=list(compat.get(data, "transport_info", []) or []),
+      dds_builtin_endpoints=compat.get_int(data, "dds_builtin_endpoints"),
+      available_builtin_endpoints_ext=compat.get_int(
+          data, "available_builtin_endpoints_ext"),
+      vendor_builtin_endpoints=compat.get_int(data, "vendor_builtin_endpoints"),
+      partial_configuration=compat.get(data, "partial_configuration", None),
+      rtps_host_id=host_id,
+      rtps_app_id=app_id,
+  )
+
+
 def refresh_participants(participant, registry):
   """Poll DCPSParticipant for remote participants and update the registry."""
   try:
@@ -434,44 +475,25 @@ def refresh_participants(participant, registry):
   live_keys = set()
   unreadable = 0
   for handle in handles:
+    # The whole per-handle body is isolated, not just the data fetch. Reading
+    # the sample is only the first of several places a binding object can raise:
+    # `transport_info` and `default_unicast_locators` invoke __bool__/__len__/
+    # __iter__ on a Connext sequence, `first_locator_ip` iterates a locator
+    # address, and `participant_name` invokes the policy's own accessors. An
+    # exception from any of them used to leave the function, so one bad peer
+    # dropped every peer after it AND skipped the departure sweep - and in the
+    # TUI it escaped the set_interval callback entirely. This is the same
+    # requirement `_drain_endpoints` documents for endpoints, and its reasoning
+    # applies verbatim: losing peers silently makes rti_doctor report an empty
+    # or shrinking domain, a fabricated diagnosis caused by its own failed read.
     try:
-      data = participant.discovered_participant_data(handle)
+      record = _participant_from_data(
+          participant.discovered_participant_data(handle))
     except Exception as e:
       logging.debug(f"[refresh_participants] unreadable participant: {e}")
       unreadable += 1
       continue
 
-    key_value = compat.get(compat.get(data, "key", None), "value", None)
-    host_id = app_id = 0
-    if key_value is not None:
-      try:
-        parts = [int(v) for v in key_value]
-        if len(parts) >= 2:
-          host_id, app_id = parts[0], parts[1]
-      except (TypeError, ValueError):
-        pass
-
-    locators = list(compat.get(data, "default_unicast_locators", []) or [])
-    name_policy = compat.get(data, "participant_name", None)
-
-    record = ParticipantRecord(
-        key=str(key_value),
-        name=compat.get(name_policy, "name", "") or "",
-        ip=records.first_locator_ip(locators),
-        domain_id=compat.get_int(data, "domain_id"),
-        vendor_id=compat.get(data, "rtps_vendor_id", None),
-        protocol_version=compat.get(data, "rtps_protocol_version", None),
-        product_version=compat.get(data, "product_version", None),
-        default_unicast_locators=locators,
-        transport_info=list(compat.get(data, "transport_info", []) or []),
-        dds_builtin_endpoints=compat.get_int(data, "dds_builtin_endpoints"),
-        available_builtin_endpoints_ext=compat.get_int(
-            data, "available_builtin_endpoints_ext"),
-        vendor_builtin_endpoints=compat.get_int(data, "vendor_builtin_endpoints"),
-        partial_configuration=compat.get(data, "partial_configuration", None),
-        rtps_host_id=host_id,
-        rtps_app_id=app_id,
-    )
     live_keys.add(record.key)
     registry.upsert_participant(record)
 

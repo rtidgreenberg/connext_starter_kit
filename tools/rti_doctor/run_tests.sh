@@ -38,6 +38,7 @@ UNIT=(
 LIVE=(test_live_integration test_scale test_data_representation_spike)
 VENDOR=(
     test_fault_vendor_e2e
+    test_fastdds_representation_spike
     test_rxo_vendor_e2e
     test_vendor_wire_e2e
     test_extensibility_vendor_e2e

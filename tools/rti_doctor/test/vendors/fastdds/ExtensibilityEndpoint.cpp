@@ -116,7 +116,8 @@ int main(int argc, char** argv)
             (durability != "volatile" && durability != "transient-local") ||
             deadline_seconds <= 0 ||
             (ownership != "shared" && ownership != "exclusive") ||
-            (representation != "xcdr1" && representation != "xcdr2") ||
+            (representation != "xcdr1" && representation != "xcdr2" &&
+             representation != "default") ||
             (type_metadata != "full" && type_metadata != "none") ||
             (type_lookup != "enabled" && type_lookup != "disabled"))
     {
@@ -126,7 +127,7 @@ int main(int argc, char** argv)
                   << "[--durability volatile|transient-local] "
                   << "[--deadline-seconds positive] "
                   << "[--ownership shared|exclusive] "
-                  << "[--representation xcdr1|xcdr2] "
+                  << "[--representation xcdr1|xcdr2|default] "
                   << "[--type-metadata full|none] "
                   << "[--type-lookup enabled|disabled] "
                   << "[--wait-for-file PATH] [--wait-timeout positive] "
@@ -194,8 +195,15 @@ int main(int argc, char** argv)
             return 6;
         }
         DataWriterQos qos = DATAWRITER_QOS_DEFAULT;
-        qos.representation().m_value = {representation == "xcdr2"
-            ? XCDR2_DATA_REPRESENTATION : XCDR_DATA_REPRESENTATION};
+        // "default" leaves the policy untouched, which is not the same as
+        // setting it to the value the default resolves to: what an application
+        // that never configured DATA_REPRESENTATION advertises in discovery is
+        // the question, and setting it explicitly is what hides the answer.
+        if (representation != "default")
+        {
+            qos.representation().m_value = {representation == "xcdr2"
+                ? XCDR2_DATA_REPRESENTATION : XCDR_DATA_REPRESENTATION};
+        }
         qos.reliability().kind = reliability == "reliable"
             ? RELIABLE_RELIABILITY_QOS : BEST_EFFORT_RELIABILITY_QOS;
         qos.durability().kind = durability == "transient-local"
@@ -250,8 +258,11 @@ int main(int argc, char** argv)
             return 9;
         }
         DataReaderQos qos = DATAREADER_QOS_DEFAULT;
-        qos.representation().m_value = {representation == "xcdr2"
-            ? XCDR2_DATA_REPRESENTATION : XCDR_DATA_REPRESENTATION};
+        if (representation != "default")
+        {
+            qos.representation().m_value = {representation == "xcdr2"
+                ? XCDR2_DATA_REPRESENTATION : XCDR_DATA_REPRESENTATION};
+        }
         qos.reliability().kind = reliability == "reliable"
             ? RELIABLE_RELIABILITY_QOS : BEST_EFFORT_RELIABILITY_QOS;
         qos.durability().kind = durability == "transient-local"

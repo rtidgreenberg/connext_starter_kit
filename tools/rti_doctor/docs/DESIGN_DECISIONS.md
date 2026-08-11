@@ -188,6 +188,45 @@ stays readable.
 - **References:** `CODE_REVIEW_2026-08-07.md` C2, S4; C2 and S4 decisions;
 	`rti_doctor/__main__.py`; `test/test_cli.py`.
 
+### C3: Empty-Domain Screens Disagree About the Issue Count
+
+- **Date:** 2026-08-10 (recorded after the fact; the change shipped in
+	`d339403`)
+- **Status:** Accepted
+- **Problem:** The landing screen and the issue list suppressed the issue
+	counts whenever no participants were discovered, but the rung-0 blind-spot
+	checks run unconditionally and are exactly the ones that fire on an empty
+	domain. With a rung-0 finding present the issue list rendered its row while
+	the status line above it said "there is nothing to report", the landing
+	screen showed no count at all, and the severity menu showed the real one -
+	three answers on screen at once, and a saved report that agreed with none of
+	them.
+- **Decision:** Suppress the counts only when there is genuinely nothing to
+	count: both screens test `participants == 0` **and** an empty issue list. An
+	empty domain that produced a finding reports that finding and its count,
+	prefixed with "No DDS discovered on domain N" so the reader knows the count
+	did not come from observed traffic. The severity menu is left unguarded.
+- **Rationale:** "Nothing was observed" and "nothing is wrong" are different
+	statements, and the tool exists to keep them apart - but the guard that was
+	protecting the first had started denying the second. The counts are not the
+	hazard; counts *without* the empty-domain caveat are, so the caveat travels
+	with them instead of replacing them.
+- **Consequences:** Three of the four surfaces now state the empty-domain
+	caveat and the counts together. The fourth, `IssueSeverityScreen`, still
+	renders a bare `Errors 0 | Warnings 0 | Info 0` on a quiet domain. That is
+	accepted rather than fixed: it is reached only from a screen that has just
+	said nothing was observed, and every severity selectable from it lands on a
+	list that says the same, so a shared "these counts are meaningless"
+	mechanism across all four surfaces was judged not to earn its cost. Revisit
+	if a fifth surface appears, or if that menu ever becomes reachable directly.
+- **Follow-up:** None outstanding. The regression test
+	(`test_empty_domain_with_active_issue_shows_its_error_count`) covers the
+	landing screen and the issue list; it does not cover the severity menu or
+	the saved report, which is the gap to close first if this is reopened.
+- **References:** `CODE_REVIEW_2026-08-07.md` C3;
+	`rti_doctor/views/system_overview.py`; `rti_doctor/report.py`;
+	`test/test_views.py`.
+
 ### X1: Local Multicast Defaults Check Is Not a System Diagnostic
 
 - **Date:** 2026-08-10

@@ -39,19 +39,18 @@ folded in below as [C1a](#c1a), [C1b](#c1b), [C1c](#c1c) and [S12](#s12).
 sub-findings under [C1](#c1)). 43 are marked Confirmed or Re-verified; the rest
 are Plausible and should be reproduced before being scheduled.
 
-**Status as of 2026-08-10: 11 Fixed, 2 Partial, 3 Live, 55 Open.** Fixed:
-[C1](#c1), [C2](#c2), [Q1](#q1), [Q2](#q2), [X1](#x1), [X2](#x2), [X3](#x3),
-[X4](#x4), [H1](#h1), [S4](#s4), [M12](#m12) - five of the six Criticals
-([C3](#c3) is the exception), and all three of the false-ERROR findings
-called out below. Partial: [Q3](#q3), [Q4](#q4). Live: [C1a](#c1a),
-[C1b](#c1b), [C1c](#c1c), which the [C1](#c1) fix unblocked and which now
-need decisions of their own. Every status is recorded per finding; see the
-legend under [Index](#index).
+**Status as of 2026-08-10: 12 Fixed, 2 Partial, 3 Live, 54 Open.** Fixed:
+[C1](#c1), [C2](#c2), [C3](#c3), [Q1](#q1), [Q2](#q2), [X1](#x1), [X2](#x2),
+[X3](#x3), [X4](#x4), [H1](#h1), [S4](#s4), [M12](#m12) - **all six
+Criticals**, and all three of the false-ERROR findings called out below.
+Partial: [Q3](#q3), [Q4](#q4). Live: [C1a](#c1a), [C1b](#c1b), [C1c](#c1c),
+which the [C1](#c1) fix unblocked. Every status is recorded per finding; see
+the legend under [Index](#index).
 
-**The two things still blocking work are decisions, not implementations.**
-[C3](#c3), the one remaining Critical, has no entry in `DESIGN_DECISIONS.md`,
-and neither do [C1a](#c1a), [C1b](#c1b) or [C1c](#c1c). Everything below them
-in severity does.
+**What blocks work now is decisions, not implementations.** [C1a](#c1a),
+[C1b](#c1b) and [C1c](#c1c) have no entry in `DESIGN_DECISIONS.md`.
+Everything else outstanding does, so the next finding worked can be picked by
+severity alone.
 
 The single most important result is that **the tool's failure modes are
 concentrated at the reporting boundary, not in its DDS logic.** The RxO comparison
@@ -123,7 +122,7 @@ row still marked Open has not been re-verified either.
 |---|---|---|---|
 | [C1](#c1) | **Fixed** `b771412` | **Critical** | The discovery-capture tshark command has 13 `-e` fields and the parser maps 12; every field but the GUID prefix is off by one, and the Fast DDS version feature is dead |
 | [C2](#c2) | **Fixed** `e9f5da1` | **Critical** | `--all` never runs the blind-spot audit, so an unreachable domain reports a clean sweep and exit 0 |
-| [C3](#c3) | Open | **Critical** | On an empty domain the TUI prints "nothing to report" while three screens simultaneously disagree about the error count |
+| [C3](#c3) | **Fixed** `d339403` | **Critical** | On an empty domain the TUI prints "nothing to report" while three screens simultaneously disagree about the error count |
 | [X1](#x1) | **Fixed** `cfecce6` | **Critical** | The multicast blind-spot check's `initial_peers` half is dead code, so multicast-off-with-defaults produces no finding at all |
 | [X2](#x2) | **Fixed** `cfecce6` | **Critical** | Suppression matches on finding `id` alone, globally, so an explainer on one topic hides a real independent failure on another |
 | [Q1](#q1) | **Fixed** `4fadb43` | **Critical** | An unreadable PARTITION policy is converted into a positive claim of the default partition, producing a false ERROR and exit 1 |
@@ -335,10 +334,32 @@ all present as a passing build. **Confirmed.**
 
 ### C3
 
-**Status: Open.** One detail below has gone stale:
-`blind.no_multicast_no_peers` no longer exists ([X1](#x1)), so it is not among
-the rung-0 findings an empty domain can produce. The disagreement between the
-three screens is untouched.
+**Status: Fixed** in `d339403`. Both screens that discarded `counts` now test
+`participants == 0` **and** an empty issue list, so an empty domain carrying a
+rung-0 finding reports its counts on the landing screen and prefixes the issue
+list with "No DDS discovered on domain N;" rather than "there is nothing to
+report". `test_empty_domain_with_active_issue_shows_its_error_count` in
+`test/test_views.py` drives both through a Textual harness and asserts the
+count is shown. Re-verified 2026-08-10 by running an empty-registry
+`system_scan` through all four renderers: with an issue present they agree,
+and with no issue present all four say nothing was observed. See C3 in
+`DESIGN_DECISIONS.md`.
+
+Two details of the finding below have gone stale. `blind.no_multicast_no_peers`
+no longer exists ([X1](#x1)), so it is not among the rung-0 findings an empty
+domain can produce. More importantly the **scenario is not the interesting
+one**: a domain tag is rare enough in practice not to be worth designing
+around. The case that actually fires is `blind.other_domain_active` (WARN) -
+Doctor pointed at the wrong domain while the passive scan hears another one
+announcing - and that is the case the fix and its test were checked against.
+
+The residual is cosmetic and was deliberately not worked: on a domain with
+**no** issues, `IssueSeverityScreen._render_menu` (`:243`) still renders
+`Errors 0 | Warnings 0 | Info 0` unguarded. It cannot mislead - it is reached
+from a landing screen that has just said "nothing was observed … this is not a
+clean bill of health", and selecting any severity from it lands on an issue
+list that says the same - so a shared "counts are meaningless here" mechanism
+across all four surfaces was judged not to earn its cost.
 
 **On an empty domain the TUI prints "there is nothing to report" while three
 screens simultaneously disagree about the error count, and the saved text report
@@ -2024,14 +2045,15 @@ it — a Fast DDS discovery investigation conducted through
 
 # Test gaps implied by these findings
 
-Each of these would have caught a finding above, and none exists today.
+Each of these would have caught a finding above, and none existed when this
+review was written. Rows marked **written** exist now.
 
 | Missing test | Would have caught |
 |---|---|
 | `parse_discovery_fields` fed the output of the actual `-e` list, or asserting `len(command -e entries) == parser slots` | [C1](#c1) |
 | `run_headless_all` on a registry with zero participants and a blind-spot condition set, asserting a non-empty audit | [C2](#c2) |
-| `SystemOverviewScreen` / `IssueListScreen` on an empty registry whose snapshot has one ERROR, asserting the count is shown | [C3](#c3) |
-| Any test of `--format json` that parses stdout of the *wrapper script* | [H1](#h1) |
+| **Written** (`d339403`): `SystemOverviewScreen` / `IssueListScreen` on an empty registry whose snapshot has one ERROR, asserting the count is shown | [C3](#c3) |
+| Any test of `--format json` that parses stdout of the *wrapper script* — moot: [H1](#h1) removed `--format`, and `test/test_doctor_e2e.py` now round-trips the text report through `doctor_e2e.parse_report` | [H1](#h1) |
 | A registry with N endpoints sharing one FINAL type, asserting exactly one `type.extensibility` issue | [H2](#h2) |
 | `_endpoint()` on a `qos.rxo_mismatch` issue, asserting `o` resolves an endpoint | [H3](#h3) |
 | Two participants disagreeing on type name, asserting both are linked to the `type.name_conflict` issue | [H4](#h4) |

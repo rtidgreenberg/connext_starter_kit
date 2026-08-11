@@ -823,6 +823,19 @@ isolated 8-line bash reproduction. **Confirmed.**
 
 ### H7
 
+**Status: Fixed** in `PENDING_H7`. The `try` opens immediately after
+`build_session()` returns, and capture startup, the readiness wait and the
+ready-file write all moved inside it, so every post-session control path leaves
+through the same `finally`. The duplicated cleanup on the readiness-timeout
+return path is gone with it - that path now just returns 3. This is the
+`run_headless_topic` / `engine.diagnose_endpoint` pattern applied where the leak
+was largest. [M11](#m11) is fixed in the same change, since it is the same
+`finally`. `TestMainReleasesWhatItOwns` drives `main()` with a fake session and
+asserts both resources close exactly once on a clean run, a readiness timeout,
+a `KeyboardInterrupt` in capture startup, a `KeyboardInterrupt` in the readiness
+wait, and an `OSError` writing the ready file; all four leak cases were
+reproduced against the old structure first.
+
 **The participant and the startup tshark are created outside the `try/finally`
 that closes them.**
 `../rti_doctor/__main__.py#L519-L533` (creation) vs `#L545-L550` (cleanup).
@@ -902,7 +915,7 @@ leftovers. **Confirmed.**
 
 ### H10
 
-**Status: Fixed** in `PENDING_H10`. The whole per-handle body is inside the
+**Status: Fixed** in `598f6ae`. The whole per-handle body is inside the
 guard now, not just the fetch: the mapping moved into a new
 `_participant_from_data()` and the `try` wraps the fetch and the mapping
 together, so `transport_info`, `default_unicast_locators`, `first_locator_ip`
@@ -959,7 +972,7 @@ assertion a `setUpClass`-level hard failure, not a per-test skip.
 
 ### S2
 
-**Status: Fixed** in `PENDING_H10`. `TestDiscoveryFieldMapping` is the
+**Status: Fixed** in `598f6ae`. `TestDiscoveryFieldMapping` is the
 table-driven test the finding asks for, over both mappers: 19 endpoint fields
 and 14 participant fields, each asserted to arrive non-default from a fake that
 answers **only** to the real binding names. That last part is the point - a Mock
@@ -1000,7 +1013,7 @@ one table-driven test that feeds a realistic fake `data` object through
 
 ### S3
 
-**Status: Fixed** in `PENDING_H10`. The `if __name__` block is at the end of the
+**Status: Fixed** in `598f6ae`. The `if __name__` block is at the end of the
 file, with a comment recording what it cost so it is not moved back. Verified:
 `python test/test_checks.py` now collects 125 tests, the same count as
 `-m unittest` on the module, where it previously ran 7 classes and printed OK.
@@ -1383,6 +1396,16 @@ derived from findings (`__main__.py:430`), so exit-status correctness is
 unaffected. **Confirmed.**
 
 ### M11
+
+**Status: Fixed** in `PENDING_H7`, alongside [H7](#h7), which rewrote the same
+`finally`. `_close_session()` gives each resource its own `try/except`, so a
+raising capture teardown is logged and the participant is still closed - the
+ordering had put the likelier failure in front of the one that matters more.
+The unguarded early-return path is gone: [H7](#h7) routed it through the same
+`finally`. `Session.close_discovery_capture` also detaches the capture
+*before* calling `finish_discovery()` rather than after, so a raised teardown
+no longer leaves it attached for a retry that would re-terminate a dead
+process.
 
 **The two cleanups share one `try`, so a capture-teardown failure skips
 `participant.close()`.**

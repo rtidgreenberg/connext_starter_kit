@@ -5,6 +5,7 @@ module-scope import that was never added - after doing all the work. These
 drive them end to end without a participant.
 """
 
+import contextlib
 import io
 import os
 import sys
@@ -231,6 +232,131 @@ class TestSessionSurface(unittest.TestCase):
                            "discovery_capture"}
     self.assertEqual([name for name in missing if name not in instance_attributes],
                      [])
+
+
+class TestMainReleasesWhatItOwns(unittest.TestCase):
+  """H7/M11: the participant and the capture must survive every exit path.
+
+  `main()` used to create both and then run capture startup, the readiness wait
+  and the ready-file write *before* entering its cleanup `try`. Anything raising
+  in that stretch - and the widest window is Ctrl-C during
+  `LiveCapture.start()`'s one-second settle, or during the up-to-15-second
+  readiness wait - unwound straight past the `finally`, leaving a DomainParticipant
+  open and a `tshark` writing into `test_output/` with nothing left to reap it.
+  """
+
+  class FakeParticipant:
+    def __init__(self):
+      self.closed = 0
+
+    def close(self):
+      self.closed += 1
+
+  def _run(self, argv=("--domain", "7", "--system", "--no-domain-scan"),
+           closes_raise=False, **patches):
+    session = FakeSession()
+    session.closed_capture = 0
+    participant = self.FakeParticipant()
+
+    def close_discovery_capture():
+      session.closed_capture += 1
+      if closes_raise:
+        raise OSError("tshark log file is already closed")
+
+    session.close_discovery_capture = close_discovery_capture
+    defaults = {
+        "build_session": lambda *a, **k: (session, participant),
+        "start_discovery_capture": lambda *a, **k: None,
+        "_wait_for_remote_participants": lambda *a, **k: True,
+        "_write_ready_file": lambda *a, **k: None,
+        "run_headless_system": lambda *a, **k: 0,
+    }
+    defaults.update(patches)
+    with contextlib.ExitStack() as stack:
+      for name, value in defaults.items():
+        stack.enter_context(mock.patch.object(cli, name, value))
+      stack.enter_context(redirect_stdout(io.StringIO()))
+      stack.enter_context(mock.patch.object(sys, "stderr", io.StringIO()))
+      try:
+        code = cli.main(list(argv))
+      except BaseException as error:  # noqa: BLE001 - the point of the test
+        code = error
+    return session, participant, code
+
+  def test_a_clean_run_closes_both_exactly_once(self):
+    session, participant, code = self._run()
+    self.assertEqual(code, 0)
+    self.assertEqual(participant.closed, 1)
+    self.assertEqual(session.closed_capture, 1)
+
+  def test_an_interrupt_during_capture_startup_still_closes_both(self):
+    def interrupt(*args, **kwargs):
+      raise KeyboardInterrupt()
+
+    session, participant, code = self._run(start_discovery_capture=interrupt)
+    self.assertIsInstance(code, KeyboardInterrupt)
+    self.assertEqual(participant.closed, 1)
+    self.assertEqual(session.closed_capture, 1)
+
+  def test_an_interrupt_during_the_readiness_wait_still_closes_both(self):
+    def interrupt(*args, **kwargs):
+      raise KeyboardInterrupt()
+
+    session, participant, code = self._run(_wait_for_remote_participants=interrupt)
+    self.assertIsInstance(code, KeyboardInterrupt)
+    self.assertEqual(participant.closed, 1)
+    self.assertEqual(session.closed_capture, 1)
+
+  def test_an_unwritable_ready_file_still_closes_both(self):
+    def unwritable(*args, **kwargs):
+      raise OSError("read-only file system")
+
+    session, participant, code = self._run(_write_ready_file=unwritable)
+    self.assertIsInstance(code, OSError)
+    self.assertEqual(participant.closed, 1)
+    self.assertEqual(session.closed_capture, 1)
+
+  def test_the_readiness_timeout_closes_both_exactly_once(self):
+    """It used to close them itself as well as returning; now it just returns."""
+    session, participant, code = self._run(
+        _wait_for_remote_participants=lambda *a, **k: False)
+    self.assertEqual(code, 3)
+    self.assertEqual(participant.closed, 1)
+    self.assertEqual(session.closed_capture, 1)
+
+  def test_a_raising_capture_teardown_still_closes_the_participant(self):
+    """M11: one `try` around both put the likelier failure in front."""
+    with self.assertLogs(level="ERROR"):
+      session, participant, code = self._run(closes_raise=True)
+    self.assertEqual(code, 0)
+    self.assertEqual(session.closed_capture, 1)
+    self.assertEqual(participant.closed, 1)
+
+
+class TestCaptureDetachesBeforeItFinishes(unittest.TestCase):
+  """M11: a raising teardown left the capture attached for a doomed retry."""
+
+  class ExplodingCapture:
+    def __init__(self):
+      self.finishes = 0
+
+    def finish_discovery(self):
+      self.finishes += 1
+      raise OSError("tshark log file is already closed")
+
+  def test_a_failed_close_does_not_leave_the_capture_attached(self):
+    capture = self.ExplodingCapture()
+    session = engine.Session(
+        participant=object(), registry=discovery.DiscoveryRegistry(type_wait=0.0),
+        own_qos=None, type_lookup_settings={}, domain_id=7,
+        discovery_capture=capture)
+
+    with self.assertRaises(OSError):
+      session.close_discovery_capture()
+    self.assertIsNone(session.discovery_capture)
+    # A second close is a no-op rather than terminating a dead process again.
+    session.close_discovery_capture()
+    self.assertEqual(capture.finishes, 1)
 
 
 class TestArgumentValidation(unittest.TestCase):

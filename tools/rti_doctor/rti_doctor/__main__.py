@@ -500,18 +500,25 @@ def main(argv=None):
   session, participant = build_session(
       domain_id, args, active_domains=active_domains, domain_scan_ran=scanned,
       compliance=compliance)
-  start_discovery_capture(session, capture_interface)
-  session.type_lookup_settings.update(connext_logging)
-  if not _wait_for_remote_participants(
-      session, args.ready_after_participants, args.ready_timeout):
-    print("Doctor did not observe the requested remote participant count before "
-          "the readiness timeout.", file=sys.stderr)
-    session.close_discovery_capture()
-    participant.close()
-    return 3
-  _write_ready_file(args.ready_file)
 
+  # Everything from here on is inside the ownership boundary. Capture startup,
+  # readiness waiting and the ready file all used to run before the `try`, so
+  # anything raising in them left the participant open and the tshark process
+  # orphaned - and the widest window was the one nobody sees: Ctrl-C during
+  # `LiveCapture.start()`'s one-second settle, or during the up-to-
+  # --ready-timeout wait, unwound straight past this block. The duplicated
+  # cleanup that used to sit on the readiness return path is gone with it,
+  # because that path now leaves through the same `finally` as every other.
   try:
+    start_discovery_capture(session, capture_interface)
+    session.type_lookup_settings.update(connext_logging)
+    if not _wait_for_remote_participants(
+        session, args.ready_after_participants, args.ready_timeout):
+      print("Doctor did not observe the requested remote participant count before "
+            "the readiness timeout.", file=sys.stderr)
+      return 3
+    _write_ready_file(args.ready_file)
+
     if args.topic:
       return run_headless_topic(session, args)
     if headless:
@@ -522,11 +529,27 @@ def main(argv=None):
     RTIDoctorApp(session, interval=args.interval).run()
     return 0
   finally:
-    try:
-      session.close_discovery_capture()
-      participant.close()
-    except Exception as e:
-      logging.error(f"[main] error closing participant: {e}")
+    _close_session(session, participant)
+
+
+def _close_session(session, participant):
+  """Release both owned resources, independently.
+
+  One `try` around both meant a raising capture teardown skipped
+  `participant.close()` entirely and left the participant open at interpreter
+  exit - the capture is the more likely of the two to fail (`self._log.close()`
+  can raise `OSError`, and the `kill()`/`wait()` after a `TimeoutExpired` is
+  unguarded), so the ordering put the failure-prone cleanup in front of the one
+  that matters more.
+  """
+  try:
+    session.close_discovery_capture()
+  except Exception as e:
+    logging.error(f"[main] error closing discovery capture: {e}")
+  try:
+    participant.close()
+  except Exception as e:
+    logging.error(f"[main] error closing participant: {e}")
 
 
 if __name__ == "__main__":

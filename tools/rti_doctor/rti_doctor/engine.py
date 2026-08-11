@@ -51,10 +51,17 @@ class Session:
         self.registry, self.domain_id, self.active_domains, self.domain_scan_ran)
 
   def close_discovery_capture(self):
-    """Stop a startup discovery capture that never observed Fast DDS."""
-    if self.discovery_capture is not None:
-      self.discovery_capture.finish_discovery()
+    """Stop a startup discovery capture that never observed Fast DDS.
+
+    Detached before it is finished, not after: `finish_discovery()` can raise,
+    and clearing the attribute afterwards left a raised teardown with the
+    capture still attached - so a retry re-terminated an already-dead process
+    and raised again.
+    """
+    capture = self.discovery_capture
+    if capture is not None:
       self.discovery_capture = None
+      capture.finish_discovery()
 
   # --- Diagnoses -------------------------------------------------------------
 

@@ -376,6 +376,16 @@ data-representation selector or a missing dynamic member ID.
 
 ## Testing
 
+`requirements.txt` is what the launcher installs on every run, so it holds
+runtime dependencies only, with `textual` pinned exactly — the TUI uses APIs
+that have moved between releases, and an unpinned upgrade would land on a user
+at launch time. Development tooling is separate and no launch reads it:
+
+```bash
+pip install -r tools/rti_doctor/requirements.txt \
+            -r tools/rti_doctor/requirements-dev.txt
+```
+
 Unit tests — no DDS participant required, ~60 tests:
 
 ```bash

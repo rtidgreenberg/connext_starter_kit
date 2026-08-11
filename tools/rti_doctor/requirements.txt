@@ -1,5 +1,21 @@
-# RTI Doctor Tool Dependencies
-# rti.connext version is installed automatically by python_env_sync_rti_connext
-# based on the detected NDDSHOME Connext version.
-textual
-textual-dev
+# RTI Doctor runtime dependencies.
+#
+# run_rti_doctor.sh installs this file on EVERY end-user launch, so it holds
+# what the tool needs to run and nothing else. Development tooling belongs in
+# requirements-dev.txt, which no launch reads.
+#
+# rti.connext is not listed: python_env_sync_rti_connext installs the version
+# matching the detected NDDSHOME Connext version.
+#
+# textual is pinned rather than floated. The TUI uses APIs that have moved
+# between releases - TabbedContent/TabPane, run_worker, on_screen_resume - so an
+# unpinned upgrade lands on a user at launch time, with no code change to
+# explain it and no way to roll back from the field. Raise this deliberately,
+# with the suite green on the new version.
+textual==8.2.8
+
+# Imported directly (views/system_overview.py: `from rich.markup import
+# escape`), not merely inherited. It arrives today as a textual dependency, so
+# an undeclared import works until textual drops or vendors it; the floor is
+# the version validated against textual 8.2.8.
+rich>=15.0.0

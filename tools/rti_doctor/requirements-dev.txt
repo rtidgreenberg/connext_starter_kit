@@ -1,0 +1,17 @@
+# RTI Doctor development dependencies.
+#
+# Not installed by run_rti_doctor.sh. Everything here is for working ON the
+# tool rather than running it, and shipping it to a user costs them download
+# time and install surface for tools they will never invoke.
+#
+#   pip install -r tools/rti_doctor/requirements.txt \
+#               -r tools/rti_doctor/requirements-dev.txt
+
+# Textual's devtools: `textual console` and `textual run --dev` for debugging
+# the TUI. Was in the runtime file and installed on every end-user launch.
+textual-dev
+
+# The static gate the code review asks for alongside pyflakes. Not currently
+# runnable: `mypy --ignore-missing-imports rti_doctor` reports 11 annotation
+# errors that must be cleared before it can gate anything (backlog ENV-2).
+mypy

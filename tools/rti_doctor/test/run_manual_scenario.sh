@@ -187,6 +187,49 @@ python_env_sync_requirements "$TOOL_DIR/requirements.txt" \
     "textual:Textual"
 python_env_resolve_license_file
 
+# Cleanup takes its process ids and container names as arguments, because an
+# EXIT trap runs AFTER the enclosing function has returned. The previous
+# cleanups closed over the scenario functions' `local` variables, which no
+# longer exist by then: under `set -u` the very first line -
+# kill "$reader_pid" - was fatal, so a scenario that ran to completion printed
+# "unbound variable" and exited 1, and the abort happened before `docker rm`,
+# leaving rti-doctor-manual-* containers running. Only the normal-completion
+# path was affected, because on Ctrl-C the trap fires while the locals are
+# still in scope - so this bit exactly the case nobody watches.
+#
+# Arguments are `PID... -- CONTAINER...`, and callers register the trap with
+# the values already substituted (quoted with %q) rather than by name.
+cleanup_scenario() {
+    local pids=() containers=() after_separator=0 item
+    for item in "$@"; do
+        if [[ "$item" == "--" ]]; then
+            after_separator=1
+        elif (( after_separator )); then
+            containers+=("$item")
+        else
+            pids+=("$item")
+        fi
+    done
+    if (( ${#pids[@]} )); then
+        kill "${pids[@]}" 2>/dev/null || true
+        wait "${pids[@]}" 2>/dev/null || true
+    fi
+    if (( ${#containers[@]} )); then
+        docker rm --force "${containers[@]}" >/dev/null 2>&1 || true
+    fi
+}
+
+# Register the EXIT cleanup for a scenario, capturing its arguments now.
+# INT and TERM exit rather than cleaning up themselves, so every route out of a
+# scenario - normal completion, Ctrl-C, SIGTERM - runs cleanup exactly once,
+# through EXIT.
+trap_scenario_cleanup() {
+    local quoted
+    quoted="$(printf '%q ' "$@")"
+    trap "cleanup_scenario ${quoted}" EXIT
+    trap 'exit 130' INT TERM
+}
+
 run_fixture() {
     local mode="$1"
     local scenario_topic="$topic"
@@ -247,11 +290,7 @@ EOF
     start_rxo_endpoint "$writer_vendor" writer "$mode" &
     writer_pid=$!
 
-    cleanup() {
-        kill "$reader_pid" "$writer_pid" 2>/dev/null || true
-        wait "$reader_pid" "$writer_pid" 2>/dev/null || true
-    }
-    trap cleanup EXIT INT TERM
+    trap_scenario_cleanup "$reader_pid" "$writer_pid"
     wait "$reader_pid" "$writer_pid"
 }
 
@@ -334,13 +373,8 @@ EOF
     fi
     writer_pid=$!
 
-    cleanup() {
-        kill "$reader_pid" "$writer_pid" 2>/dev/null || true
-        wait "$reader_pid" "$writer_pid" 2>/dev/null || true
-        docker rm --force "$reader_container" "$writer_container" >/dev/null 2>&1 || true
-    }
-    trap cleanup EXIT
-    trap 'exit 130' INT TERM
+    trap_scenario_cleanup "$reader_pid" "$writer_pid" \
+        -- "$reader_container" "$writer_container"
     wait "$reader_pid" "$writer_pid"
 }
 
@@ -370,13 +404,7 @@ EOF
         --type-lookup disabled --duration "$duration" &
     docker_pid=$!
 
-    cleanup() {
-        kill "$docker_pid" 2>/dev/null || true
-        wait "$docker_pid" 2>/dev/null || true
-        docker rm --force "$container" >/dev/null 2>&1 || true
-    }
-    trap cleanup EXIT
-    trap 'exit 130' INT TERM
+    trap_scenario_cleanup "$docker_pid" -- "$container"
     wait "$docker_pid"
 }
 

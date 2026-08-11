@@ -800,6 +800,18 @@ Even in the no-participants case where `_health` is never reached,
 
 ### H6
 
+**Status: Fixed** in `PENDING_H6`. All three per-scenario `cleanup` closures are
+replaced by one `cleanup_scenario` that takes `PID... -- CONTAINER...` as
+arguments, plus `trap_scenario_cleanup`, which registers the EXIT trap with
+those values already substituted (`printf %q`) rather than by name - so nothing
+is read after the enclosing function's locals are gone. `INT`/`TERM` now `exit
+130` in all three, routing every exit through the one EXIT cleanup; `run_rxo_pair`
+previously ran its cleanup twice on Ctrl-C. Verified against the real helper
+definitions: the old form exits **1** with `reader_pid: unbound variable` after
+a successful run and never reaches `docker rm`, while the new form exits **0**
+and does run it; on `SIGINT` the new form exits **130**, runs cleanup exactly
+once, and leaves no child process behind.
+
 **Every `cleanup` EXIT trap in `run_manual_scenario.sh` dereferences function
 *locals*, so under `set -u` it dies on its first line — failing a successful run
 and skipping `docker rm`.**
@@ -823,7 +835,7 @@ isolated 8-line bash reproduction. **Confirmed.**
 
 ### H7
 
-**Status: Fixed** in `PENDING_H7`. The `try` opens immediately after
+**Status: Fixed** in `d6b5c39`. The `try` opens immediately after
 `build_session()` returns, and capture startup, the readiness wait and the
 ready-file write all moved inside it, so every post-session control path leaves
 through the same `finally`. The duplicated cleanup on the readiness-timeout
@@ -1397,7 +1409,7 @@ unaffected. **Confirmed.**
 
 ### M11
 
-**Status: Fixed** in `PENDING_H7`, alongside [H7](#h7), which rewrote the same
+**Status: Fixed** in `d6b5c39`, alongside [H7](#h7), which rewrote the same
 `finally`. `_close_session()` gives each resource its own `try/except`, so a
 raising capture teardown is logged and the participant is still closed - the
 ordering had put the likelier failure in front of the one that matters more.

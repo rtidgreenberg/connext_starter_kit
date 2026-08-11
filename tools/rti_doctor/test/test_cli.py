@@ -168,21 +168,24 @@ class TestWorkflowFlags(unittest.TestCase):
   not a tty - so a user at a shell had no way to ask for a system assessment.
   """
 
-  def test_json_is_refused_for_the_system_assessment(self):
-    # Silently emitting text under --format json is worse than refusing it,
-    # and refusing at parse time beats refusing after a participant exists.
-    for argv in (["-d", "1", "--system", "--format", "json"],
-                 ["-d", "1", "--format", "json"]):  # implicit: non-tty, no topic
-      with self.subTest(argv=argv):
-        with mock.patch.object(sys, "stdin", mock.Mock(isatty=lambda: False)):
-          with self.assertRaises(SystemExit):
-            with redirect_stdout(io.StringIO()), \
-                 mock.patch.object(sys, "stderr", io.StringIO()):
-              cli.parse_args(argv)
+  def test_the_removed_format_flag_is_rejected(self):
+    """One report format, so there is no format to choose.
 
-  def test_json_is_still_available_for_a_targeted_diagnosis(self):
-    args = cli.parse_args(["-d", "1", "-t", "Telemetry", "--format", "json"])
-    self.assertEqual(args.format, "json")
+    `--format json` was an explicitly unstable second schema that had to be
+    kept working for one test harness. Accepting the flag and ignoring it
+    would leave a CI job believing it was still getting JSON.
+    """
+    for argv in (["-d", "1", "-t", "Telemetry", "--format", "json"],
+                 ["-d", "1", "--system", "--format", "text"]):
+      with self.subTest(argv=argv):
+        with self.assertRaises(SystemExit):
+          with redirect_stdout(io.StringIO()), \
+               mock.patch.object(sys, "stderr", io.StringIO()):
+            cli.parse_args(argv)
+
+  def test_a_targeted_diagnosis_renders_the_text_report(self):
+    self.assertFalse(hasattr(cli.parse_args(["-d", "1", "-t", "Telemetry"]),
+                             "format"))
 
   def test_the_removed_sweep_flag_is_rejected(self):
     with self.assertRaises(SystemExit):

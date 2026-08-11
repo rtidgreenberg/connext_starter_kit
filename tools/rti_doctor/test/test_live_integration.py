@@ -23,6 +23,7 @@ sys.path.insert(0, TOOL_DIR)
 # some OTHER test module had already put the test directory on sys.path,
 # so the suite passed in a full run and failed when run on its own.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: E402
+import doctor_e2e  # noqa: E402
 import domains  # noqa: E402
 
 try:
@@ -158,11 +159,19 @@ class TestHealthy(LiveFixtureTest):
     self.assertTrue(line, "received_sample_count missing from the report")
     self.assertNotIn("n/a", line[0], "a real counter was reported as unavailable")
 
-  def test_json_report_parses(self):
-    import json
-    payload = json.loads(report.render_json(self.diagnose()))
-    self.assertTrue(payload["unstable_schema"])
-    self.assertIn("verdict", payload)
+  def test_the_report_can_be_read_back_by_the_e2e_harness(self):
+    """The text report is the only output contract, so it must parse.
+
+    `--format json` used to be the machine-readable path and this test parsed
+    it. The vendor suites now read the text report through
+    `doctor_e2e.parse_report`, so that is what has to survive a real run.
+    """
+    data = self.diagnose()
+    completed = subprocess.CompletedProcess(
+        ["doctor"], 0, report.render_text(data), "")
+    parsed = doctor_e2e.parse_report(completed)
+    self.assertTrue(parsed["verdict"])
+    self.assertEqual({item["id"] for item in parsed["findings"]}, self.ids(data))
 
   def test_probe_closes_its_entities(self):
     """A diagnostic must not leak readers into the system it measures."""

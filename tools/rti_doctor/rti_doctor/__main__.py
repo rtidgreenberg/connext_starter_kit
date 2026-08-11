@@ -78,10 +78,6 @@ def parse_args(argv=None):
   parser.add_argument("--system", action="store_true",
                       help="Headless: assess the DDS system - discovery, topology "
                            "and local configuration - and exit")
-  parser.add_argument("--format", dest="format", choices=("text", "json"),
-                      default="text",
-                      help="Headless output format for --topic (default: text). "
-                           "The system assessment is text only.")
   parser.add_argument("-o", "--output", default=None,
                       help="Write the report to PATH instead of stdout")
   parser.add_argument("--probe-timeout", type=float, default=DEFAULT_PROBE_TIMEOUT,
@@ -129,14 +125,6 @@ def parse_args(argv=None):
   args = parser.parse_args(argv)
   if args.topic and args.system:
     parser.error("--topic and --system are mutually exclusive")
-  # The system assessment's renderer is text only, and emitting text to a
-  # consumer that asked for JSON is worse than refusing. Checked against the
-  # dispatch rule rather than --system alone, because a non-tty run with no
-  # --topic reaches the same report - and refusing here beats refusing after a
-  # DomainParticipant has been created.
-  if args.format == "json" and not args.topic and is_headless(args):
-    parser.error("--format json is only available with --topic; the system "
-                 "assessment is a text report")
   if (args.pcap or args.capture_interface) and not args.topic:
     parser.error("--pcap and --capture-interface require --topic")
   if args.ready_after_participants < 0 or args.ready_timeout <= 0:
@@ -442,9 +430,7 @@ def run_headless_topic(session, args):
         args.pcap, writer_entity_id=wire.endpoint_entity_id(endpoint),
         writer_guid_prefix=wire.endpoint_guid_prefix(endpoint))
   data.wire_evidence = wire_evidence
-  text = (report.render_json(data) if args.format == "json"
-          else report.render_text(data))
-  path = _emit(text, args.output)
+  path = _emit(report.render_text(data), args.output)
   if path:
     print(f"Report written to {path}")
     print(f"VERDICT: {data.verdict}")

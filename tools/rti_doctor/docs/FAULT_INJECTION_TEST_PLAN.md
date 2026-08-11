@@ -11,8 +11,10 @@ This plan tests Doctor's diagnostic result, not merely the underlying DDS
 implementations. Every scenario therefore has two independent assertions:
 
 1. The endpoint pair exhibits the intended match/data-flow behavior.
-2. A headless `rti_doctor --format json` run reports the expected finding (or
-   reports no `ERROR` finding for a healthy control).
+2. A headless `rti_doctor` run reports the expected finding (or reports no
+   `ERROR` finding for a healthy control). `--format json` was removed by
+   decision H1; the suites read the text report through
+   `test/doctor_e2e.parse_report`, which returns the same finding fields.
 
 ## Existing Coverage And Gaps
 
@@ -170,10 +172,11 @@ The fault suite has reusable helpers for every scenario:
 - Use bounded file readiness gates rather than fixed sleeps. For Fast DDS P0,
   Doctor must observe both fixture participants before either endpoint is
   created; timeouts retain process streams and control markers.
-- Run the real CLI with `--domain`, `--topic`, `--format json`,
-  `--no-domain-scan`, a bounded settle period, a bounded type wait, and a
-  bounded probe timeout.
-- Parse JSON once and expose active, suppressed, and `ERROR` finding IDs.
+- Run the real CLI with `--domain`, `--topic`, `--no-domain-scan`, a bounded
+  settle period, a bounded type wait, and a bounded probe timeout.
+- Parse the text report once and expose the finding IDs and severities. There is
+  no suppressed set: decision X2 removed suppression, so every finding produced
+  is reported.
 - Assert endpoint facts first: expected match count and reader sample count.
   A negative scenario must show writers publishing while the incompatible
   reader remains unmatched and receives zero samples, unless its intended

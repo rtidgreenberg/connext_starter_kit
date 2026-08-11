@@ -1,6 +1,5 @@
 """Unit tests for per-run observed DDS topology metrics."""
 
-import json
 import os
 import sys
 import unittest
@@ -51,16 +50,17 @@ class TestTopologySnapshot(unittest.TestCase):
     self.assertEqual(snapshot["topic_count"], 2)
     self.assertFalse(snapshot["complete"])
 
-  def test_renderers_include_topology(self):
+  def test_the_report_includes_topology(self):
     snapshot = topology.snapshot(FakeRegistry(), selected_domain_id=7)
     data = report.ReportData(
         domain_id=7, scope="domain audit", all_findings=[], topology=snapshot)
     text = report.render_text(data)
     self.assertIn("OBSERVED TOPOLOGY", text)
     self.assertNotIn("Other domains", text)
-    payload = json.loads(report.render_json(data))
-    self.assertEqual(payload["topology"]["participants"], 2)
-    self.assertEqual(payload["topology"]["topics"], ["Commands", "Status"])
+    # The counts themselves, not just the section heading: the text report is
+    # the only place a consumer can read them now.
+    self.assertIn("Participants    2", text)
+    self.assertIn("Topics          Commands, Status", text)
 
 
 if __name__ == "__main__":

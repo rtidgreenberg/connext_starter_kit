@@ -83,7 +83,6 @@ system it was pointed at.
 -d, --domain          DDS domain ID (prompts on startup; 1 when non-interactive)
     --system          Headless: assess the DDS system and exit (stage one)
 -t, --topic TOPIC     Headless: diagnose one topic and exit (stage two)
-    --format          text (default) | json; json requires --topic
 -o, --output PATH     Write the report to PATH instead of stdout
     --probe-timeout   Seconds to observe a probed reader (default: 10.0)
     --type-wait       Seconds to wait for remote type resolution (default: 5.0)
@@ -150,6 +149,13 @@ The scenarios default to domain `42`; use `--domain ID` to override it. Press
 stop and remove their Docker containers during that cleanup.
 
 ## The Shareable Report
+
+The text report is the only output rti_doctor produces. There was a second,
+`--format json`, documented in its own code as an unstable dump with no schema —
+so nothing could safely depend on it, while it still had to be kept working and
+in step with the text. Everything a script needs is on the face of the report:
+one `[SEVERITY] rung N  finding.id` line per finding, labelled fields under it,
+and a fixed section order. `test/doctor_e2e.py` reads it back that way.
 
 `s` in the TUI, or `-o` headlessly, writes a plain-text report: fixed 100-column
 width, ASCII only, fixed section order so two reports diff cleanly. It carries an

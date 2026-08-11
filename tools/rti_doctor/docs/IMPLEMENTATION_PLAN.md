@@ -206,7 +206,10 @@ CLI:
   defaults as `rti_spy`, including the 32.0s justification.
 - `-t/--topic TOPIC` — headless, diagnose one topic and exit.
 - `--all` — headless sweep of every writer.
+  *(Removed: superseded by `--system` + `--topic`; see decisions C2/C2a/S4.)*
 - `--format text|json` (default `text`), `-o/--output PATH`.
+  *(Removed: `--format` is gone and the text report is the only output; see
+  decision H1. `-o/--output PATH` is unchanged.)*
 
 ## The Shareable Report File
 
@@ -674,5 +677,8 @@ be revisited later on real usage rather than speculation.
   finding fields, free to change between releases. No versioning, no documented
   schema, no structural tests. The text file is what gets shared; JSON is a
   convenience for whoever eventually wants to parse it, and gets a schema then.
+  *(Settled by decision H1: the convenience was never taken up outside the test
+  harness, so `--format json` is removed rather than given a schema. The text
+  report is the single output contract, and the harness parses it.)*
 - **Validation scope is Cyclone + Fast DDS.** OpenDDS and OpenSplice are
   recognized by vendor ID with advisory notes only.

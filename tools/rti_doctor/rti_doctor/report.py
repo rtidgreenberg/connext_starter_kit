@@ -1,6 +1,13 @@
-"""Report rendering: the shareable text file, JSON, and Textual-friendly text.
+"""Report rendering: the shareable text file and the Textual-friendly sections.
 
-The text file is the primary artifact. Its rules:
+The text report is the only output contract. There was a second, `--format
+json`, described in its own docstring as an unstable dump with no schema - so
+it could not be relied on, while still having to be kept working, tested, and
+free of anything the text report did not also carry. Everything a consumer
+needs is in the text: fixed section order, one line per finding id and
+severity, and labelled fields underneath.
+
+Its rules:
 
   * Only observed values. A counter unavailable on this Connext version renders
     as compat.na_text(), never as 0 and never omitted.
@@ -11,9 +18,7 @@ The text file is the primary artifact. Its rules:
     so on a "Likely explained by" line; nothing is filtered out by that guess.
 """
 
-import json
 import time
-from collections.abc import Mapping
 
 from . import compat, findings as f, probe as probe_mod, records, typewalk, wire
 
@@ -498,68 +503,4 @@ def _render_config_appendix(data):
       lines.append(f"    {key.ljust(50)}{value}")
   lines.append("")
   return lines
-
-
-# --- JSON renderer -----------------------------------------------------------
-
-def render_json(data):
-  """Unstable JSON dump.
-
-  Deliberately has no schema contract: field names and structure may change
-  between releases. The text report is the shareable artifact.
-  """
-  payload = {
-      "unstable_schema": True,
-      "generated_at": data.generated_at,
-      "environment": data.environment,
-      "domain_id": data.domain_id,
-      "scope": data.scope,
-      "verdict": data.verdict,
-      "topology": _jsonable(data.topology),
-      "findings": [
-          {
-              "id": finding.id,
-              "rung": finding.rung,
-              "severity": finding.severity.label,
-              "title": finding.title,
-              "observed": finding.observed,
-              "root_cause": finding.root_cause,
-              "remedy": finding.remedy,
-              "evidence": _jsonable(finding.evidence),
-              "refs": list(finding.refs),
-              "explained_by": list(finding.explained_by),
-          }
-          for finding in data.findings
-      ],
-  }
-  result = data.probe_result
-  if result is not None:
-    payload["probe"] = {
-        "attempted": result.attempted,
-        "created": result.created,
-        "create_error": result.create_error,
-        "matched_count": result.matched_count,
-        "samples_taken": result.samples_taken,
-        "elapsed_seconds": round(result.elapsed, 3),
-        "protocol_status": _jsonable(result.protocol),
-        "cache_status": _jsonable(result.cache),
-        "payload_verdict": result.walk.verdict if result.walk else None,
-        "unreadable_paths": result.walk.failed_paths if result.walk else [],
-    }
-  if data.wire_evidence is not None:
-    payload["wire_observation"] = _jsonable(data.wire_evidence)
-  return json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n"
-
-
-def _jsonable(value):
-  # Mapping, not dict: system_scan freezes evidence into MappingProxyType,
-  # which is not a dict subclass and would otherwise be stringified as
-  # "mappingproxy({...})".
-  if isinstance(value, Mapping):
-    return {str(k): _jsonable(v) for k, v in value.items()}
-  if isinstance(value, (list, tuple, set)):
-    return [_jsonable(v) for v in value]
-  if isinstance(value, (str, int, float, bool)) or value is None:
-    return value
-  return str(value)
 

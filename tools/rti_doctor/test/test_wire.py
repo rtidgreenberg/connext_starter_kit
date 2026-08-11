@@ -1,6 +1,5 @@
 """Unit tests for tshark RTPS field parsing."""
 
-import json
 import os
 import subprocess
 import sys
@@ -145,8 +144,8 @@ class TestTsharkFields(unittest.TestCase):
     frame is admitted whole: the other writer's entity id and its payload bytes
     are inside these totals. That is the aggregation the tool has, and the
     summary must therefore not claim the numbers belong to the target writer.
-    A JSON consumer reads the keys alone, so the disclaimer has to be a value in
-    the mapping and not only a label in the text appendix.
+    The disclaimer travels as a value in the mapping, not as a fixed label in
+    the renderer, so it cannot be separated from the numbers it qualifies.
     """
     prefix = "011000000000000000000001"
     observations = [
@@ -170,19 +169,22 @@ class TestTsharkFields(unittest.TestCase):
     self.assertEqual(summary["encapsulation_ids"], ["0x0001", "0x0007"])
 
   def test_the_scope_marker_survives_into_the_report(self):
-    """Both renderers must carry it: the text reader and the JSON consumer."""
+    """The caveat must reach the reader, not just the summary that carries it.
+
+    `writer_attributed` is a machine flag; the report is read by a person, so
+    the sentence it stands for has to be rendered rather than the flag.
+    """
     observations = [wire.parse_tshark_fields("1\t0x15\t80000002\t\t1\t0x0007\t00:01\t")]
+    summary = wire.summarize(observations, writer_entity_id="80000002")
+    self.assertIs(summary["writer_attributed"], False)
+    self.assertIn("scope_note", summary)
     data = report.ReportData(
         domain_id=7, scope="topic 'Sample'", all_findings=[],
-        wire_evidence={"source": "capture.pcapng",
-                       **wire.summarize(observations, writer_entity_id="80000002")})
+        wire_evidence={"source": "capture.pcapng", **summary})
 
     # The note is wrapped to the report width, so compare against a single line.
     rendered = " ".join(report.render_text(data).split())
     self.assertIn("filter, not an attribution claim", rendered)
-    payload = json.loads(report.render_json(data))["wire_observation"]
-    self.assertIs(payload["writer_attributed"], False)
-    self.assertIn("scope_note", payload)
 
   def test_wire_appendix_labels_do_not_collide_with_their_values(self):
     """`_kv` pads to a fixed width, and these labels are longer than the default.
@@ -290,7 +292,10 @@ class TestTsharkFields(unittest.TestCase):
     self.assertIn("Serialized bytes in matching frames", text)
     self.assertIn("APPENDIX D - RTI_DOCTOR OWN CONFIGURATION", text)
     self.assertIn("0x0007", text)
-    self.assertEqual(report.render_json(data).count("wire_observation"), 1)
+    # Once, and only in the appendix: the packet evidence used to be emitted a
+    # second time alongside it.
+    self.assertEqual(text.count("DIRECT RTPS PACKET OBSERVATION"), 1)
+    self.assertEqual(text.count("Frames matching filters"), 1)
 
 
 if __name__ == "__main__":

@@ -39,15 +39,16 @@ folded in below as [C1a](#c1a), [C1b](#c1b), [C1c](#c1c) and [S12](#s12).
 sub-findings under [C1](#c1)). 43 are marked Confirmed or Re-verified; the rest
 are Plausible and should be reproduced before being scheduled.
 
-**Status as of 2026-08-11: 29 Fixed, 2 Partial, 0 Live, 40 Open.** Fixed:
+**Status as of 2026-08-11 (later that day): 30 Fixed, 3 Partial, 0 Live,
+38 Open.** Fixed:
 [C1](#c1), [C1a](#c1a), [C1b](#c1b), [C1c](#c1c), [C2](#c2), [C3](#c3),
 [Q1](#q1), [Q2](#q2), [X1](#x1), [X2](#x2), [X3](#x3), [X4](#x4), [H1](#h1),
 [H2](#h2), [H3](#h3), [H4](#h4), [H5](#h5), [H6](#h6), [H7](#h7), [H8](#h8),
 [H9](#h9), [H10](#h10), [S1](#s1), [S2](#s2), [S3](#s3), [S4](#s4),
-[M11](#m11), [M12](#m12), [M13](#m13) - **all six Criticals, all three of
+[M11](#m11), [M12](#m12), [M13](#m13), [M16](#m16) - **all six Criticals, all three of
 their sub-findings, and every High except the verdict half of [Q3](#q3)** -
 and all three of the false-ERROR findings called out below. Partial:
-[Q3](#q3), [Q4](#q4). Every status is recorded per finding; see the legend
+[Q3](#q3), [Q4](#q4), [S14](#s14). Every status is recorded per finding; see the legend
 under [Index](#index).
 
 **Nothing is blocked on a decision any more.** The three sub-findings that had
@@ -190,7 +191,7 @@ reading it, and which are numbered separately so these counts stay comparable.
 | [M13](#m13) | **Fixed** `ccaaa7b` | Medium | A startup failure and "found ERROR findings" are both exit 1 |
 | [M14](#m14) | Open | Medium | `--ready-timeout` is the one numeric flag omitted from the finiteness check; `inf` hangs forever |
 | [M15](#m15) | Open | Medium | `run_tests.sh` truncates failure output to 40 lines, and `all` does not run all suites |
-| [M16](#m16) | Open | Medium | `rich` is imported but undeclared, `textual` is unpinned, and a dev-only package ships to users |
+| [M16](#m16) | **Fixed** `347327b` | Medium | `rich` is imported but undeclared, `textual` is unpinned, and a dev-only package ships to users |
 | [M17](#m17) | Open | Medium | The `no_type_info` fault fixture degrades to a healthy fixture on a warning |
 | [S5](#s5) | Open | Medium | The SPDP2 bitmask path is never executed by its own tests |
 | [S6](#s6) | Open | Medium | Four `static_discovery` checks and one `blind_spots` check have zero tests |
@@ -211,7 +212,7 @@ reading it, and which are numbered separately so these counts stay comparable.
 | [L8](#l8) | Open | Low | `fixture_publisher` scale mode has no cleanup path and divides by an unvalidated argument |
 | [S12](#s12) | Open | Low | `read -rsn1` EOF matches the Enter branch, so Ctrl-D launches a fixture instead of cancelling |
 | [S13](#s13) | Open | Low | `test_fastdds_type_metadata_spike.py` is in no `run_tests.sh` tier |
-| [S14](#s14) | Open | Low | Assorted test hazards: a collision guard that omits a suite, wall-clock assertions in the unit tier |
+| [S14](#s14) | **Partial** `51df741` | Low | Assorted test hazards: a collision guard that omits a suite, wall-clock assertions in the unit tier |
 
 ---
 
@@ -627,11 +628,26 @@ MUTABLE types. Three things the review did not know, all bearing on the fix:
   so this rule's "first entry in the writer's list" reasoning applies only to
   foreign vendors.
 
-Still not decided, and deliberately so: the reading is verified for Connext
-writers, and what a non-Connext writer means by an empty advertisement has not
-been observed. `test_the_tool_agrees_with_the_middleware` carries
-`@unittest.expectedFailure` so the defect executes on every live run and
-reports an *unexpected success* the day the verdict changes.
+**Reproduced cross-vendor the same day** by
+`test/test_fastdds_representation_spike.py` (`ac38165`) against the Fast DDS
+3.6.2 fixture, which needed a new `--representation default` mode so its writer could leave the
+policy unset rather than set it to whatever the default resolves to. A Fast DDS
+writer that never sets DATA_REPRESENTATION also advertises an empty sequence;
+that emptiness also behaves as XCDR1 - matched by an XCDR1 reader, refused by an
+XCDR2-only one with `DataRepresentation` named - and rti_doctor also calls the
+refused pair `compatible`. One difference between the vendors, which does not
+change the verdict but does sharpen [N5](#n5): a Fast DDS writer set explicitly
+to `[XCDR1]` advertises `XCDR1` **concretely**, where Connext omits the PID.
+From Fast DDS an empty advertisement means "the application set nothing"; from
+Connext it means "set nothing, or set XCDR1".
+
+Still not decided, but no longer blocked: two of two measured vendors agree that
+an empty writer advertisement means XCDR1 in practice. Cyclone is unmeasured
+because the package is absent from the test host (backlog `ENV-1`), and the
+README's note that Cyclone can resolve an unspecified policy to XCDR2 is now the
+outlier hypothesis rather than a symmetric unknown. Both agreement tests carry
+`@unittest.expectedFailure`, so the defect executes on every live *and* vendor
+run and reports an *unexpected success* the day the verdict changes.
 
 **DATA_REPRESENTATION — the only XTypes RxO rule in the tool — is silently
 skipped for the most common writer configuration, and the result is reported as a
@@ -1613,6 +1629,17 @@ see [S13](#s13). **Confirmed.**
 
 ### M16
 
+**Status: Fixed** in `347327b`. `textual` is pinned to `==8.2.8` exactly
+rather than floored, because the TUI uses APIs that have moved between
+releases and the failure lands on a customer's first launch with no way to
+roll back from the field; `rich>=15.0.0` is declared as the direct dependency
+it always was; `textual-dev` moved to a new `requirements-dev.txt` that no
+launch reads, along with `mypy`. The launcher now verifies `rich` imports
+after install alongside `textual` and `rti.connextdds`, which is what stops
+this class of defect returning quietly, and CI installs the requirements file
+instead of naming packages, so it tests the versions a user actually gets.
+See M16 in `DESIGN_DECISIONS.md`.
+
 **`rich` is imported directly but undeclared, `textual` is unpinned, and a
 dev-only package ships to users.**
 `../requirements.txt#L4-L5`. `views/system_overview.py:8` does
@@ -1917,6 +1944,15 @@ entry point ever runs it — despite the header comment saying the list lives th
 is also a tautology (`log_text` is always `handle.read()`). **Confirmed.**
 
 ### S14
+
+**Status: Partial.** The collision-guard half is fixed in `51df741`: the
+suite keys are derived from every `for_suite("...")` literal in the test
+sources rather than hand-listed, so a suite joins the guard by existing, and
+a second test asserts that coverage - the failure is a silent exemption, not
+a collision, so without it the list could go stale again with every
+assertion still passing. Found by adding two suites that the hardcoded list
+could not see; `test_scale` had been exempt as well. The wall-clock
+assertions in the unit tier are untouched.
 
 **Assorted test hazards.**
 * `../test/test_domains.py#L57-L60` — the "suites do not collide" guard lists 8
@@ -2541,6 +2577,13 @@ walked away from. **Observed** by inspection of the worker path while adding the
 `capturing` guard.
 
 ### N5
+
+**Update 2026-08-11 (cross-vendor):** this is a **Connext-only** collision. A
+Fast DDS writer set explicitly to `[XCDR1]` advertises `XCDR1` concretely
+(`test_fastdds_representation_spike.py`, `ac38165`), so from a Fast DDS peer "not
+advertised" really does mean the application set nothing. The finding stands as
+written for Connext writers, and the fix should say which vendor's emptiness it
+is describing rather than treating the label as vendor-neutral.
 
 **A writer that explicitly configured `[XCDR1]` is reported as "not
 advertised", identically to one that configured nothing.**

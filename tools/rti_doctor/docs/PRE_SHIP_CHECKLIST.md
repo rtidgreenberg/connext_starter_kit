@@ -6,14 +6,11 @@ HEAD `ca32e6f`. Findings cited are in `CODE_REVIEW_2026-08-07.md`; tasks are in
 
 ## Fix before handover
 
-- [ ] Pin `textual==8.2.8` in `requirements.txt` — it is unpinned and installed
-      on every launch, so a newer release can break the TUI on the customer's
-      first run (M16).
-- [ ] Declare `rich>=15.0.0` — imported directly at
-      `views/system_overview.py:8`, currently working only as textual's
-      transitive dependency (M16).
-- [ ] Move `textual-dev` to a new `requirements-dev.txt` — a dev tool that
-      currently ships to the customer (M16).
+- [x] ~~Pin `textual`, declare `rich`, move `textual-dev` out of the runtime
+      requirements~~ — done in `347327b`. `textual==8.2.8` and `rich>=15.0.0`
+      are the runtime file; `textual-dev` and `mypy` moved to
+      `requirements-dev.txt`; the launcher verifies all three imports after
+      install (M16).
 - [ ] Empty `test_output/rti_doctor_captures/` — captures accumulate with no
       retention policy and will otherwise go out with the logs (N2).
 
@@ -32,10 +29,15 @@ HEAD `ca32e6f`. Findings cited are in `CODE_REVIEW_2026-08-07.md`; tasks are in
       report.
 - [ ] `Run capture to ascertain` in a report means nobody captured — not that
       the peer is on a current version.
-- [ ] DATA_REPRESENTATION is unvalidated cross-vendor (Q3, backlog REP-1). On
-      any pair reporting `qos.compatible` with no data flowing, read the
-      report's `Representation` and `Not evaluated` lines before believing the
-      verdict. XCDR1-vs-XCDR2 is a classic Connext/Fast DDS failure.
+- [ ] **Doctor will call one specific broken pair healthy, on both vendors.**
+      Measured 2026-08-11 for Connext (`4aed446`) and Fast DDS (`ac38165`): a
+      writer that never set DATA_REPRESENTATION advertises nothing, which means
+      XCDR1 — and against a reader requesting XCDR2 only, the middleware refuses
+      the match and names `DataRepresentation`, while rti_doctor reports
+      `qos.compatible` and exits 0 (Q3). On any pair reporting `qos.compatible`
+      with no data flowing, read the report's `Representation` and
+      `Not evaluated` lines before believing the verdict. A writer showing
+      `not advertised` against a reader showing `XCDR2` **is** that case.
 - [ ] Exit codes: `0` clean, `1` ERROR findings, `2` topic absent, `3`
       readiness timeout, `4` could not run, `130` interrupted.
 - [ ] HAR-6's three Fast DDS vendor tests pass now with no product change that
@@ -57,8 +59,10 @@ HEAD `ca32e6f`. Findings cited are in `CODE_REVIEW_2026-08-07.md`; tasks are in
 
 - [ ] `./run_tests.sh unit` — 281 tests
 - [ ] `./run_tests.sh live` — 314 tests, 1 expected failure (Q3)
-- [ ] `./run_tests.sh vendor` — 28 tests, 12 skipped (Cyclone absent), 1
-      expected failure (Fast DDS v1-only)
+- [ ] `./run_tests.sh vendor` — 12 skipped (Cyclone absent), 2 expected
+      failures (Fast DDS v1-only, and the Q3 cross-vendor disagreement). Needs
+      the Fast DDS image rebuilt from `test/vendors/fastdds/build_image.sh`
+      since the fixture gained `--representation default`.
 - [ ] `bash scripts/test_python_env.sh` and
       `bash scripts/test_rti_spy_bundle.sh`
 - [ ] `./run_lint.sh`

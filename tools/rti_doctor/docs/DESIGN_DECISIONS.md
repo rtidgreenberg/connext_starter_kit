@@ -162,6 +162,39 @@ stays readable.
 - **References:** `CODE_REVIEW_2026-08-07.md` Q1, Q2, Q3, Q4, Q5, X4; Q1, Q2 and
 	X4 decisions; `rti_doctor/checks/qos_match.py`; `test/test_checks.py`.
 
+### M16: Runtime Dependencies Are Pinned and Complete
+
+- **Date:** 2026-08-11
+- **Status:** Accepted
+- **Problem:** `run_rti_doctor.sh` installs `requirements.txt` on **every
+	end-user launch**, and that file floated `textual`, omitted `rich` - which
+	the TUI imports directly - and shipped `textual-dev` to users. A textual
+	release lands on a user at launch time with no code change to explain it, an
+	air-gapped site fails at the pip step before Doctor starts, and the
+	undeclared `rich` import works only for as long as textual keeps depending
+	on it.
+- **Decision:** Pin `textual==8.2.8` exactly and declare `rich>=15.0.0` in the
+	runtime file; move `textual-dev` and `mypy` to a new `requirements-dev.txt`
+	that no launch reads. Add `rich` to the launcher's post-install import
+	verification alongside `textual` and `rti.connextdds`. Point CI at the
+	requirements file rather than naming packages, so it tests the versions a
+	user actually gets.
+- **Rationale:** An exact pin, not a floor: the TUI uses APIs that have moved
+	between textual releases (`TabbedContent`/`TabPane`, `run_worker`,
+	`on_screen_resume`), and the failure mode is a customer's first launch, where
+	there is no way to roll back from the field. A floor is right for `rich`,
+	which is used for one stable function. Verifying every directly-imported
+	module at install time is what makes the undeclared-import class of defect
+	impossible to reintroduce quietly.
+- **Consequences:** Upgrading textual becomes a deliberate act with the suite
+	green on the new version, rather than something that happens to a user.
+	Developers install two files instead of one. CI installs what ships.
+- **Follow-up:** Clear the 11 mypy annotation errors so `requirements-dev.txt`'s
+	mypy can become a real gate (backlog `ENV-2`).
+- **References:** `CODE_REVIEW_2026-08-07.md` M16; `tools/rti_doctor/requirements.txt`;
+	`tools/rti_doctor/requirements-dev.txt`; `tools/rti_doctor/run_rti_doctor.sh`;
+	`.github/workflows/rti-doctor.yml`.
+
 ### Q3: Data Representation Verdict for a Non-Advertising Writer
 
 - **Date:** 2026-08-11
@@ -192,12 +225,36 @@ stays readable.
 	6. Connext refuses to create a writer offering more than one representation
 		("Writer can't have more than one"), so the rule's "first entry in the
 		writer's list" reasoning can only ever apply to a foreign vendor.
-- **Decision:** Not yet taken. The evidence supports treating an empty writer
-	advertisement as `[XCDR1]` and comparing it, rather than declining - which
-	would turn results 4 and 5 into a correct ERROR - but that reading is
-	verified for Connext writers only, and what a non-Connext writer means by an
-	empty advertisement has not been observed. Decide before changing the
-	verdict, and record which vendors the reading is claimed for.
+- **Evidence, cross-vendor (2026-08-11):**
+	`test/test_fastdds_representation_spike.py` (`ac38165`), run against the Fast DDS 3.6.2
+	fixture image; matrix at
+	`test_output/rti_doctor_spikes/fastdds_representation_matrix.json`. The
+	fixture gained a `--representation default` mode that leaves
+	`DATAWRITER_QOS_DEFAULT` untouched, because setting the policy to whatever
+	the default resolves to is exactly what hides the answer. Four results:
+	1. A Fast DDS writer that never sets DATA_REPRESENTATION advertises an
+		**empty** sequence - the same wire state as Connext.
+	2. That empty advertisement **behaves as XCDR1**: it matches a Connext
+		reader requesting XCDR1 and is refused by one requesting XCDR2 only,
+		with `requested_incompatible_qos` naming `DataRepresentation`.
+	3. rti_doctor reports `compatible` for that refused cross-vendor pair, so
+		the Q3 false negative reproduces in the direction a Fast DDS engagement
+		actually hits.
+	4. **The vendors differ where it does not matter for the verdict:** a Fast
+		DDS writer set explicitly to `[XCDR1]` advertises `XCDR1` concretely,
+		where Connext omits the PID. So an empty advertisement from Fast DDS
+		means "the application set nothing", while from Connext it means "set
+		nothing, or set XCDR1" - two routes to one wire state that both mean
+		XCDR1 in effect.
+- **Decision:** Not yet taken, but no longer blocked. Two of two measured
+	vendors agree that an empty writer advertisement means XCDR1 in practice, so
+	treating it as `[XCDR1]` and comparing it - rather than declining - would
+	turn the false `compatible` into a correct ERROR on both. Cyclone remains
+	unmeasured (`ENV-1`: the package is not installed on the test host), and the
+	README's note that Cyclone can resolve an unspecified policy to XCDR2 is now
+	the outlier hypothesis rather than a symmetric unknown. Take the decision
+	with the vendors it is claimed for written into the finding text, and treat
+	a Cyclone peer as the case that must still decline until measured.
 - **Consequences (if adopted):** DATA_REPRESENTATION stops being unevaluated for
 	the most common writer configuration there is, so the rule finally runs on
 	the majority of pairs. `repr.not_advertised` becomes the cross-reference for

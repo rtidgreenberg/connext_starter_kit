@@ -287,6 +287,96 @@ class TestRefreshFailureIsVisible(unittest.TestCase):
                         for line in captured.output), captured.output)
 
 
+class TestTopologyBeforeAFirstSuccessfulScan(unittest.TestCase):
+  """H5: `snapshot is None` is a reachable, documented state on this screen.
+
+  A failed first scan leaves it None and tells the operator to press `r`. Every
+  key that reads the snapshot used to raise `AttributeError` from inside a
+  Textual action handler, which kills the interaction with nothing on screen
+  saying why - and `s` left a zero-byte report file, because the file was opened
+  before the raise.
+  """
+
+  def setUp(self):
+    logging.disable(logging.CRITICAL)
+    self.addCleanup(logging.disable, logging.NOTSET)
+
+  def _press(self, keys, tmp_path=None):
+    session = StubSession()
+    session.fail = RuntimeError("domain 7 is unreachable")
+    collected = {}
+
+    async def run():
+      screen = system_overview.TopologyHealthScreen(session)
+      app = Harness(screen)
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        collected["first_scan"] = screen.snapshot
+        for key in keys:
+          await pilot.press(key)
+          await app.workers.wait_for_complete()
+          await pilot.pause()
+        collected["status"] = status_text(screen)
+        collected["screens"] = len(app.screen_stack)
+
+    asyncio.run(run())
+    return collected
+
+  def test_no_view_key_raises_and_each_says_why(self):
+    for key in ("1", "2", "3", "4"):
+      with self.subTest(key=key):
+        result = self._press([key])
+        self.assertIsNone(result["first_scan"])
+        self.assertIn("No topology has been collected yet", result["status"])
+        self.assertIn("Press r to retry", result["status"])
+
+  def test_linked_issues_does_not_push_an_empty_screen(self):
+    result = self._press(["i"])
+    self.assertIn("No topology has been collected yet", result["status"])
+    # Harness screen + the topology screen, and nothing pushed on top: an issue
+    # list built from no snapshot would be an empty list presented as a result.
+    self.assertEqual(result["screens"], 2)
+
+  def test_save_writes_no_file_at_all(self):
+    with mock.patch("builtins.open", side_effect=AssertionError(
+        "a report was opened with no snapshot to write into it")) as opened:
+      result = self._press(["s"])
+    opened.assert_not_called()
+    self.assertIn("No topology has been collected yet", result["status"])
+
+  def test_the_scan_error_is_still_named(self):
+    """The operator needs the reason, not just that there is no data."""
+    result = self._press(["1"])
+    self.assertIn("domain 7 is unreachable", result["status"])
+
+  def test_a_recovered_scan_renders_normally(self):
+    """Guards the guard: the message must not outlive the failure."""
+    session = StubSession()
+    session.fail = RuntimeError("domain 7 is unreachable")
+    collected = {}
+
+    async def run():
+      screen = system_overview.TopologyHealthScreen(session)
+      app = Harness(screen)
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        session.fail = None
+        await pilot.press("r")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("3")
+        await pilot.pause()
+        collected["status"] = status_text(screen)
+        collected["snapshot"] = screen.snapshot
+
+    asyncio.run(run())
+    self.assertIsNotNone(collected["snapshot"])
+    self.assertIn("View: Writers", collected["status"])
+    self.assertNotIn("No topology has been collected yet", collected["status"])
+
+
 class FakeEndpoint:
   def __init__(self, key, kind, topic_name="Telemetry", type_name="TelemetryType"):
     self.key = key

@@ -268,7 +268,7 @@ count from the command instead of hard-coding 12.
 
 #### C1a
 
-**Status: Fixed** in `f9c3a7e`. `summarize_discovery` now pairs each version
+**Status: Fixed** in `85c962f`. `summarize_discovery` now pairs each version
 with the `rtps.guidPrefix.src` that advertised it, and the finding is emitted
 per participant carrying its `participant_key` - a slot `_issue_key` already
 reads, so N out-of-baseline versions are N issues with no new dedup
@@ -289,7 +289,7 @@ column mapping is fixed, and it will start mattering the moment it is.
 
 #### C1b
 
-**Status: Fixed** in `f9c3a7e`. The version notes are split out of
+**Status: Fixed** in `85c962f`. The version notes are split out of
 `_version_notes` into `_fastdds_version_notes`, which takes the registry,
 resolves the observed GUID prefix to a participant record, and is routed
 through `_annotate` like every other producer in the module. The finding
@@ -308,7 +308,7 @@ different producer.
 
 #### C1c
 
-**Status: Fixed** in `f9c3a7e`, by making the finding depend on the registry
+**Status: Fixed** in `85c962f`, by making the finding depend on the registry
 rather than by clearing the latch. The version list is still latched - the
 capture is read once and cannot be re-read - but a version now only produces a
 finding while a participant with that GUID prefix is still in the registry, so
@@ -763,6 +763,22 @@ the highlighted row") yields an empty list. Only Topics mode links it.
 and the linkage identity need to be separate fields, not one field doing both.
 
 ### H5
+
+**Status: Fixed** in `7835cc7`. One `_without_snapshot()` guard, named for
+the state rather than for each caller, now covers `_render_table` (so `1`-`4`),
+`action_issues` and `action_save`. It was centralized rather than repeated at
+each site because this screen has six entry points into the snapshot against
+the siblings' two. `_render_table` returns **before** `self.table.clear()`, so
+the residual the finding notes at its end - the View line overwriting the
+"Scan failed" banner - is closed by the same guard, and the message names the
+scan error rather than only stating that there is no data. `action_save`
+returns before `open()`, so the zero-byte report file is gone. The
+`_selected_endpoint` path was deliberately left alone: it reads the registry,
+not the snapshot, and a targeted report is legitimately available before a
+system scan has succeeded. Five tests in
+`TestTopologyBeforeAFirstSuccessfulScan` drive the real screen through a
+Textual harness; all six of the finding's symptoms were reproduced against the
+unguarded code first.
 
 **`TopologyHealthScreen` raises `AttributeError` out of four key handlers
 whenever the first scan failed — a deliberately reachable state.**

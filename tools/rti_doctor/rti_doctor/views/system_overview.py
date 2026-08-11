@@ -577,7 +577,33 @@ class TopologyHealthScreen(Screen):
     self.snapshot = snapshot
     self._render_table()
 
+  def _without_snapshot(self):
+    """True when no scan has succeeded yet, with the reason on the status line.
+
+    `None` is a supported state here, not an impossible one: `_scan` returns
+    None on a failed first scan and `_report` writes "Press r to retry" over a
+    screen that never got a snapshot. Every action that reads `self.snapshot`
+    has to survive that. Four of them did not - they raised `AttributeError`
+    inside a Textual action handler, which kills the interaction with nothing on
+    screen to say why, and `s` additionally left a zero-byte report file behind
+    because `open(..., "w")` had already run. The two sibling screens guard this
+    at `on_data_table_row_selected` and `action_save`; this is the same guard,
+    centralized because this screen has six entry points into the snapshot
+    rather than two.
+    """
+    if self.snapshot is not None:
+      return False
+    detail = f" ({escape(str(self.scan_error))})" if self.scan_error else ""
+    self.status.update(
+        f"[red]No topology has been collected yet{detail}.[/red] Press r to retry.")
+    return True
+
   def _render_table(self):
+    # Before clearing: a failed first scan must not blank the table and then
+    # overwrite its own "Scan failed" banner with a View line describing an
+    # empty view.
+    if self._without_snapshot():
+      return
     self.table.clear(columns=True)
     if self.mode == "participants":
       self.table.add_columns("Participant", "Vendor", "Readers", "Writers", "Topics", "Health")
@@ -653,6 +679,8 @@ class TopologyHealthScreen(Screen):
     self.app.push_screen(MetricsScreen(self.session))
 
   def action_issues(self):
+    if self._without_snapshot():
+      return
     keys = self._linked_issue_keys()
     self.app.push_screen(IssueListScreen(self.session, self.snapshot, keys))
 
@@ -695,6 +723,10 @@ class TopologyHealthScreen(Screen):
     self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=True))
 
   def action_save(self):
+    # Guarded before open(): the raise used to happen after the file was
+    # created, leaving a zero-byte report an operator could mistake for output.
+    if self._without_snapshot():
+      return
     path = os.path.abspath(report.system_filename(self.session.domain_id))
     with open(path, "w", encoding="utf-8") as handle:
       handle.write(report.render_system_text(

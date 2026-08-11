@@ -1,13 +1,34 @@
 """Unit tests for deterministic, port-safe domain selection."""
 
+import glob
 import os
+import re
 import sys
 import unittest
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(__file__))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 
 import domains  # noqa: E402
+
+_SUITE_KEY = re.compile(r'for_suite\(\s*"([^"]+)"')
+
+
+def suite_keys():
+  """Every key the repo actually passes to `domains.for_suite`.
+
+  Read out of the sources rather than listed here. The list used to be
+  hardcoded, so a suite added later was silently exempt from the collision
+  guard - and a guard that does not cover the newest suite is worst exactly
+  when it matters, because the newest suite is the one whose domain nobody has
+  thought about yet.
+  """
+  keys = set()
+  for path in glob.glob(os.path.join(HERE, "test_*.py")):
+    with open(path, encoding="utf-8") as handle:
+      keys.update(_SUITE_KEY.findall(handle.read()))
+  return sorted(keys)
 
 
 class TestPortSafety(unittest.TestCase):
@@ -54,13 +75,29 @@ class TestSuiteAssignment(unittest.TestCase):
       self.assertGreaterEqual(domain, domains.FIRST_TEST_DOMAIN, key)
 
   def test_the_repo_s_own_suites_do_not_collide(self):
-    keys = ["test_live_integration", "test_fault_vendor_e2e", "test_rxo_vendor_e2e",
-            "test_vendor_wire_e2e", "test_fastdds_type_object_e2e",
-            "test_fastdds_extensibility_vendor_e2e",
-            "test_fastdds_type_metadata_spike", "test_extensibility_vendor_e2e"]
+    keys = suite_keys()
     assigned = {key: domains.for_suite(key) for key in keys}
     self.assertEqual(len(set(assigned.values())), len(keys),
                      f"two suites share a domain: {assigned}")
+
+  def test_every_suite_that_picks_a_domain_is_covered(self):
+    """The guard above is only worth its runtime if it sees every suite.
+
+    Two suites added on 2026-08-11 - the Connext and Fast DDS representation
+    spikes - were exempt from the hardcoded list that used to live here, which
+    is the failure this asserts against rather than the collision itself.
+    """
+    keys = suite_keys()
+    self.assertIn("test_live_integration", keys)
+    self.assertIn("test_scale", keys)
+    self.assertIn("test_data_representation_spike", keys)
+    self.assertIn("test_fastdds_representation_spike", keys)
+    # Every module that names a domain is a module the guard now covers.
+    for path in glob.glob(os.path.join(HERE, "test_*.py")):
+      with open(path, encoding="utf-8") as handle:
+        found = _SUITE_KEY.findall(handle.read())
+      for key in found:
+        self.assertIn(key, keys, os.path.basename(path))
 
   @mock.patch.dict(os.environ, {"RTI_DOCTOR_DOMAIN_OFFSET": "7"})
   def test_the_offset_shifts_the_whole_band(self):

@@ -162,6 +162,53 @@ stays readable.
 - **References:** `CODE_REVIEW_2026-08-07.md` Q1, Q2, Q3, Q4, Q5, X4; Q1, Q2 and
 	X4 decisions; `rti_doctor/checks/qos_match.py`; `test/test_checks.py`.
 
+### Q3: Data Representation Verdict for a Non-Advertising Writer
+
+- **Date:** 2026-08-11
+- **Status:** Evidence gathered; decision pending
+- **Problem:** `qos_match` declines DATA_REPRESENTATION whenever either side's
+	advertised list is empty, and reports the pair `qos.compatible` /
+	`Severity.OK` anyway. Q1a closed the reporting half - the pair now says the
+	policy was not evaluated - but left the verdict undecided, and Terra's
+	reassessment held that changing it needed live DDS evidence rather than
+	inference from the spec.
+- **Evidence (2026-08-11):** `test/test_data_representation_spike.py` (`4aed446`), run
+	against Connext 7.7.0 on this host; matrix archived at
+	`test_output/rti_doctor_spikes/data_representation_matrix.json`. Six results,
+	identical for FINAL and MUTABLE types:
+	1. A default writer holds AUTO (`[-1]`) locally and advertises an **empty**
+		sequence in discovery. The premise of the finding is confirmed.
+	2. A writer configured **explicitly** `[XCDR1]` also advertises an empty
+		sequence. Discovery cannot distinguish the two, and both mean XCDR1.
+	3. A default **reader** also holds AUTO locally but advertises **XCDR1**
+		concretely. The evidence gap is writer-side only; the reader side is
+		always evaluable.
+	4. A non-advertising writer matches an XCDR1 reader and delivers samples, and
+		is **refused** by an XCDR2-only reader - `requested_incompatible_qos`
+		names `DataRepresentation`, zero samples. An empty advertisement is
+		therefore not "no information": it is XCDR1.
+	5. rti_doctor reports `compatible` for exactly those refused pairs. The false
+		clean bill of health in Q3 is real, reproducible, and exits 0.
+	6. Connext refuses to create a writer offering more than one representation
+		("Writer can't have more than one"), so the rule's "first entry in the
+		writer's list" reasoning can only ever apply to a foreign vendor.
+- **Decision:** Not yet taken. The evidence supports treating an empty writer
+	advertisement as `[XCDR1]` and comparing it, rather than declining - which
+	would turn results 4 and 5 into a correct ERROR - but that reading is
+	verified for Connext writers only, and what a non-Connext writer means by an
+	empty advertisement has not been observed. Decide before changing the
+	verdict, and record which vendors the reading is claimed for.
+- **Consequences (if adopted):** DATA_REPRESENTATION stops being unevaluated for
+	the most common writer configuration there is, so the rule finally runs on
+	the majority of pairs. `repr.not_advertised` becomes the cross-reference for
+	the residual unknown rather than the whole story.
+- **Follow-up:** Remove the `@unittest.expectedFailure` on
+	`test_the_tool_agrees_with_the_middleware` as part of the fix; it is written
+	to report an *unexpected success* the moment the verdict changes.
+- **References:** `CODE_REVIEW_2026-08-07.md` Q3, Q1a, Q5;
+	`test/test_data_representation_spike.py`;
+	`rti_doctor/checks/qos_match.py`; `rti_doctor/records.py`.
+
 ### C2: `--all` Omits the Domain Audit
 
 - **Date:** 2026-08-10
@@ -579,6 +626,14 @@ stays readable.
 
 - **Date:** 2026-08-10
 - **Status:** Accepted
+- **Amendment (2026-08-11):** This decision assumed an interface was already
+	chosen, because startup prompted for one. H9 removed that prompt, so the
+	`c` action takes its interface from `--capture-interface` and otherwise
+	uses `any`, naming it on screen either way. `--capture-interface` therefore
+	no longer requires `--topic` - it is now also how the TUI's capture is
+	pointed somewhere specific - and is rejected only with `--system`, which
+	captures nothing. The capture is bounded by tshark's own `-a duration:`
+	rather than by the tool remembering to stop it.
 - **Problem:** Opening a writer report in the TUI silently starts a privileged
 	`tshark` capture on `any`, creates packet-capture artifacts, and delays the
 	report even when the operator did not request wire evidence.
@@ -607,6 +662,14 @@ stays readable.
 
 - **Date:** 2026-08-10
 - **Status:** Accepted
+- **Amendment (2026-08-11):** Two consequences of the removal that this entry
+	did not anticipate, both kept. `LiveCapture` stops separately from parsing,
+	so the one capture an operator asked for is read twice - once as user data,
+	once as discovery metadata - instead of a second capture being started for
+	the second question. And the headless `--topic` capture routes through
+	`engine.diagnose_endpoint` rather than building its own `LiveCapture`, so
+	the CLI and the TUI cannot come to capture differently. M11's two-resource
+	cleanup ordering is retired by this: `main()` owns only the participant now.
 - **Problem:** Startup discovery capture can run for the whole TUI session,
 	captures all traffic within the domain RTPS port range, leaves PCAP/log
 	artifacts, and blocks at shutdown parsing evidence that is then discarded.
@@ -863,6 +926,12 @@ stays readable.
 
 - **Date:** 2026-08-10
 - **Status:** Accepted
+- **Amendment (2026-08-11):** Exit `4` covers the whole run, not startup alone.
+	Reserving `1` for a completed assessment means every other way a run can
+	end has to be something else, and a diagnosis that dies after the
+	participant exists is the same ambiguity arriving later. The traceback is
+	suppressed on stderr but written to `--debug-log` via `logging.exception`,
+	so an unexpected failure is still diagnosable.
 - **Problem:** A DDS startup failure currently exits with `1`, the same code as
 	a completed assessment that found ERROR findings. Automation cannot tell
 	whether a diagnosis ran.

@@ -39,25 +39,31 @@ folded in below as [C1a](#c1a), [C1b](#c1b), [C1c](#c1c) and [S12](#s12).
 sub-findings under [C1](#c1)). 43 are marked Confirmed or Re-verified; the rest
 are Plausible and should be reproduced before being scheduled.
 
-**Status as of 2026-08-10: 26 Fixed, 2 Partial, 0 Live, 43 Open.** Fixed:
+**Status as of 2026-08-11: 29 Fixed, 2 Partial, 0 Live, 40 Open.** Fixed:
 [C1](#c1), [C1a](#c1a), [C1b](#c1b), [C1c](#c1c), [C2](#c2), [C3](#c3),
 [Q1](#q1), [Q2](#q2), [X1](#x1), [X2](#x2), [X3](#x3), [X4](#x4), [H1](#h1),
-[H2](#h2), [H3](#h3), [H4](#h4), [H5](#h5), [H6](#h6), [H7](#h7), [H10](#h10),
-[S1](#s1), [S2](#s2), [S3](#s3), [S4](#s4), [M11](#m11), [M12](#m12) - **all
-six Criticals and all three of their sub-findings**, and all three of the
-false-ERROR findings called out below. Partial: [Q3](#q3), [Q4](#q4). Every
-status is recorded per finding; see the legend under [Index](#index).
+[H2](#h2), [H3](#h3), [H4](#h4), [H5](#h5), [H6](#h6), [H7](#h7), [H8](#h8),
+[H9](#h9), [H10](#h10), [S1](#s1), [S2](#s2), [S3](#s3), [S4](#s4),
+[M11](#m11), [M12](#m12), [M13](#m13) - **all six Criticals, all three of
+their sub-findings, and every High except the verdict half of [Q3](#q3)** -
+and all three of the false-ERROR findings called out below. Partial:
+[Q3](#q3), [Q4](#q4). Every status is recorded per finding; see the legend
+under [Index](#index).
 
 **Nothing is blocked on a decision any more.** The three sub-findings that had
 no entry in `DESIGN_DECISIONS.md` are decided (as one entry, C1a-C1c) and
 fixed. Every remaining finding has a decision, so the next one worked can be
 picked by severity alone.
 
-The three Highs still open are [H8](#h8) and [H9](#h9), which are one piece of
-work - [H9](#h9) deletes the automatic startup capture and [H8](#h8) replaces it
-with an explicit `c` action, and neither is coherent without the other - and the
-Medium-heavy remainder. That makes [H8](#h8)/[H9](#h9) the next thing to
-schedule.
+[H8](#h8) and [H9](#h9) were worked as the one piece of work they are -
+[H9](#h9) deleted the automatic startup capture and [H8](#h8) replaced it with
+an explicit `c` action, and neither would have been coherent alone - together
+with [M13](#m13), the last open piece of the machine-readable-contract batch
+whose other three parts ([H1](#h1), [M12](#m12), and the `2`/`4` split) were
+already done. The one remaining High is the **verdict** half of [Q3](#q3),
+which is not scheduled because it is the one finding still without a decision
+(`DESIGN_DECISIONS.md` Q1a records that it needs one); its reporting half is
+closed. Everything else open is Medium or below.
 
 The single most important result is that **the tool's failure modes are
 concentrated at the reporting boundary, not in its DDS logic.** The RxO comparison
@@ -136,7 +142,7 @@ row still marked Open has not been re-verified either.
 | [Q1](#q1) | **Fixed** `4fadb43` | **Critical** | An unreadable PARTITION policy is converted into a positive claim of the default partition, producing a false ERROR and exit 1 |
 | [H1](#h1) | **Fixed** `7e6bfc1` | High | `--format json` is not valid JSON through the documented entry point, and prompts/progress go to stdout |
 | [Q2](#q2) | **Fixed** `4fadb43` | High | An absent writer-side PRESENTATION boolean is treated as `false`, producing a false ERROR |
-| [Q3](#q3) | Partial | High | DATA_REPRESENTATION is silently skipped for default-QoS writers — the most common configuration — and the result is reported as OK |
+| [Q3](#q3) | Partial (verdict half **reproduced live** 2026-08-11) | High | DATA_REPRESENTATION is silently skipped for default-QoS writers — the most common configuration — and the result is reported as OK |
 | [X3](#x3) | **Fixed** `43e5cab` | High | `check_type_state` emits a writer-phrased ERROR for a DataReader on two of its three call paths |
 | [X4](#x4) | **Fixed** `acfc530` | High | The assignability OK finding reports the evaluated reader count under a "resolved" label, so an all-clear can cover 1 of 3 readers |
 | [H2](#h2) | **Fixed** `428585c` | High | `type.extensibility` still emits one WARN per endpoint — 96 identical warnings for one type |
@@ -145,8 +151,8 @@ row still marked Open has not been re-verified either.
 | [H5](#h5) | **Fixed** `2c291b6` | High | `TopologyHealthScreen` raises `AttributeError` from four key handlers when the first scan failed |
 | [H6](#h6) | **Fixed** `9e7ccfe` | High | Every `cleanup` EXIT trap in `run_manual_scenario.sh` reads function-locals, so it aborts before `docker rm` and fails a successful run |
 | [H7](#h7) | **Fixed** `d6b5c39` | High | The participant and startup tshark are created outside the `try/finally` that closes them |
-| [H8](#h8) | Open | High | Every TUI report probe spawns a `tshark -i any` capture, undisclosed and unconditional |
-| [H9](#h9) | Open | High | The startup discovery capture is unbounded on disk, and its full re-parse at exit is computed and discarded |
+| [H8](#h8) | **Fixed** `ccaaa7b` | High | Every TUI report probe spawns a `tshark -i any` capture, undisclosed and unconditional |
+| [H9](#h9) | **Fixed** `ccaaa7b` | High | The startup discovery capture is unbounded on disk, and its full re-parse at exit is computed and discarded |
 | [H10](#h10) | **Fixed** `598f6ae` | High | `refresh_participants` guards only the data fetch, so one unreadable field aborts the whole poll cycle |
 | [S1](#s1) | **Fixed** `a9080ec` | High | The scale suite skips itself when the regression it exists to catch occurs |
 | [S2](#s2) | **Fixed** `598f6ae` | High | The discovery field-name mapping is asserted by nothing, and `compat.get` turns a wrong name into a silent default |
@@ -171,7 +177,7 @@ row still marked Open has not been re-verified either.
 | [M10](#m10) | Open | Medium | The verdict line drops the problem summary on every non-FULL payload |
 | [M11](#m11) | **Fixed** `d6b5c39` | Medium | Both cleanups share one `try`, so a capture-teardown failure skips `participant.close()` |
 | [M12](#m12) | **Fixed** `7e6bfc1` | Medium | `--format json` produces no JSON at all on the two non-zero non-error exits |
-| [M13](#m13) | Open | Medium | A startup failure and "found ERROR findings" are both exit 1 |
+| [M13](#m13) | **Fixed** `ccaaa7b` | Medium | A startup failure and "found ERROR findings" are both exit 1 |
 | [M14](#m14) | Open | Medium | `--ready-timeout` is the one numeric flag omitted from the finiteness check; `inf` hangs forever |
 | [M15](#m15) | Open | Medium | `run_tests.sh` truncates failure output to 40 lines, and `all` does not run all suites |
 | [M16](#m16) | Open | Medium | `rich` is imported but undeclared, `textual` is unpinned, and a dev-only package ships to users |
@@ -591,8 +597,31 @@ DATA_REPRESENTATION unevaluated record and a "Not evaluated" line, so the OK
 finding no longer reads as a clean bill of health on this policy. The verdict
 half stands - the pair is still reported `qos.compatible` / Severity.OK rather
 than the ERROR the concrete scenario argues for, and `repr.not_advertised` is
-still not cross-referenced. Not decided; `DESIGN_DECISIONS.md` Q1a records
-that this verdict still needs one.
+still not cross-referenced.
+
+**The verdict half is no longer Plausible: it was reproduced against live
+Connext 7.7.0 on 2026-08-11** by `test/test_data_representation_spike.py` (`4aed446`)
+(matrix in `test_output/rti_doctor_spikes/data_representation_matrix.json`,
+evidence recorded as Q3 in `DESIGN_DECISIONS.md`). A default-QoS writer and a
+reader requesting XCDR2 only **do not match** - Connext names
+`DataRepresentation` as the incompatible policy and no sample is delivered -
+while rti_doctor reports `compatible` and exits 0. Identical for FINAL and
+MUTABLE types. Three things the review did not know, all bearing on the fix:
+
+* A writer configured **explicitly** `[XCDR1]` advertises an empty sequence
+  too, so "empty" is not "default" - both mean XCDR1, which is what licenses
+  reading an empty advertisement as XCDR1 rather than as unknown.
+* A default **reader** advertises `XCDR1` concretely, so the reader side is
+  always evaluable. The gap is writer-side only, which narrows the fix.
+* Connext **refuses** to create a writer offering more than one representation,
+  so this rule's "first entry in the writer's list" reasoning applies only to
+  foreign vendors.
+
+Still not decided, and deliberately so: the reading is verified for Connext
+writers, and what a non-Connext writer means by an empty advertisement has not
+been observed. `test_the_tool_agrees_with_the_middleware` carries
+`@unittest.expectedFailure` so the defect executes on every live run and
+reports an *unexpected success* the day the verdict changes.
 
 **DATA_REPRESENTATION — the only XTypes RxO rule in the tool — is silently
 skipped for the most common writer configuration, and the result is reported as a
@@ -877,6 +906,25 @@ recognised for the *timeout* return path but not the *exception* path.
 
 ### H8
 
+**Status: Fixed** in `ccaaa7b`. `c` is now
+an action on the report screen, for readers and writers alike, and
+`_run_probe` no longer passes an interface at all. Before tshark is spawned
+the screen states the interface, the exact file the capture will write (and
+the `.tshark.log` beside it), how long it will run, and that capture needs
+privileges on this host - and the path it names is the path the capture is
+given, rather than one recomputed a second later. Capture and probe are
+independent in `engine.diagnose_endpoint` now: capture is what
+`capture_interface` does, not what `probe` implies, which is what makes a
+reader report - nothing to probe - a legitimate capture target. Two
+departures from the decision as written, both forced by [H9](#h9) removing
+the startup interface prompt: the interface comes from `--capture-interface`,
+defaulting to `any` and always shown, and `--capture-interface` no longer
+requires `--topic` (it is rejected with `--system`, which captures nothing).
+The `Run capture to ascertain` placeholder is in both reports. Reproduced
+against the unfixed code first: the report screen's regression test fails with
+`'any'` in the interfaces the screen requested. See H8 in
+`DESIGN_DECISIONS.md`.
+
 **Every TUI report probe spawns a `tshark -i any` packet capture, undisclosed and
 with no way to decline.**
 `../rti_doctor/views/report_screen.py#L108-L109` passes `"any"` as the third
@@ -909,6 +957,27 @@ in the TUI. Either gate this behind an explicit key/flag, or state on screen tha
 a capture is being taken and where it lands.
 
 ### H9
+
+**Status: Fixed** in `ccaaa7b`, by removal.
+`start_discovery_capture`, `select_discovery_capture_interface`,
+`Session.discovery_capture`, `Session.close_discovery_capture` and the
+Fast DDS latch in `Session.system_scan` are all gone, so startup neither
+prompts about capture nor starts one, nothing re-parses a PCAP at exit, and
+the system scan is DDS-level and passive again. Fast DDS version evidence
+survives the move: `Session.record_wire_discovery` takes the pairs from an
+[H8](#h8) capture and the next scan reports them, so the C1a-C1c work - one
+WARN per still-present participant, expiring with its peer - is unchanged
+apart from where its input comes from. Two things the decision did not ask
+for and that the removal made possible: every capture now carries tshark's
+own `-a duration:` ceiling, so an abandoned one stops by itself, and
+`LiveCapture.stop()` is separate from parsing, so one capture file answers
+both the user-data and the discovery question without a second tshark. The
+headless `--topic` capture goes through `engine.diagnose_endpoint` too rather
+than building a second `LiveCapture`, so the CLI and the TUI cannot drift
+into capturing differently. `main()` is left owning one resource, so the
+two-resource cleanup ordering from [M11](#m11) is retired rather than
+regressed - the participant close keeps its guard so a raising close cannot
+replace the run's exit code.
 
 **The startup discovery capture is unbounded on disk, captures all user traffic,
 and its full re-parse at exit is computed and thrown away.**
@@ -1435,6 +1504,12 @@ The unguarded early-return path is gone: [H7](#h7) routed it through the same
 no longer leaves it attached for a retry that would re-terminate a dead
 process.
 
+Superseded rather than regressed by [H9](#h9) (2026-08-11): `main()` owns one
+resource now, so `_close_session` is `_close_participant` and there is no
+second cleanup to order against. The guard around it stays, for the half of
+this finding that still applies - a raising close inside a `finally` would
+otherwise replace the run's real exit code with an exception.
+
 **The two cleanups share one `try`, so a capture-teardown failure skips
 `participant.close()`.**
 `../rti_doctor/__main__.py#L546-L550` and `#L528-L529`.
@@ -1467,6 +1542,21 @@ Scenario: `rti_doctor -d 1 -t Absent --format json -o r.json; jq . r.json` →
 as a third state, which is what `--format json` exists to avoid. **Confirmed.**
 
 ### M13
+
+**Status: Fixed** in `ccaaa7b`. The exit
+contract is six named constants in `__main__` - `0`, `1`, `2`, `3`, `4`,
+`130` - and the README documents them as a table. Startup is inside a `try`
+that reports `ClassName: message` on one line and returns `4`. Wider than the
+decision asked for, deliberately: the run body is guarded too, because an
+assessment that died mid-diagnosis is not an assessment that found errors,
+and leaving that path uncaught would have kept the exact confusion this
+finding is about for every failure after `build_session` returned. The
+traceback is not discarded - `logging.exception` sends it to `--debug-log`,
+which stderr points the operator at. `KeyboardInterrupt` is a `BaseException`
+and passes straight through both guards to `130`.
+[L6](#l6) is untouched and still open: argparse still exits `2` for a bad
+command line, so `2` remains overloaded, and the README says so rather than
+documenting a contract the tool does not keep.
 
 **A startup failure and "found ERROR findings" are both exit 1, so the documented
 exit contract cannot express "could not run".**
@@ -2127,7 +2217,17 @@ item 2 advises, so the feature did land broken a second time — and then was
 fixed in one follow-up change that treated all three as the single defect they
 turned out to be: version evidence describing the domain rather than the
 participant that advertised it. Every Critical, every one of their
-sub-findings, and every High except [H8](#h8)/[H9](#h9) is now closed.
+sub-findings, and every High except the verdict half of [Q3](#q3) is now
+closed. Item 12 ([H8](#h8)/[H9](#h9)) and the [M13](#m13) remainder of item 8
+were worked next; two more departures from the sketches below:
+
+* [H9](#h9) removed the startup capture outright rather than bounding it, so
+  "bound the capture and disclose it" applies only to the [H8](#h8) capture
+  that replaced it - and the bound is tshark's own `-a duration:`, which
+  survives losing the process that started it.
+* [M13](#m13) guards the whole run, not only startup: the finding is about
+  exit `1` meaning two things, and a diagnosis that dies halfway is the same
+  ambiguity arriving later.
 
 1. **[Q1](#q1)** + **[Q2](#q2)** — the two false ERRORs. These are the worst
    findings in the review in operational terms: the tool asserts, at ERROR
@@ -2214,6 +2314,10 @@ review was written. Rows marked **written** exist now.
 | **Written** (`ce3f553`): a paired issue asserting `o` offers both sides with their RxO roles, and that both issue screens route through one action | [H3](#h3) |
 | **Written** (`cb2adb1`): two participants disagreeing on type name, asserting both are linked to the single `type.name_conflict` issue | [H4](#h4) |
 | Every `TopologyHealthScreen` action driven with `snapshot = None` | [H5](#h5) |
+| **Written** (`test_data_representation_spike.py`): a live writer/reader matrix over every DATA_REPRESENTATION combination, comparing rti_doctor's verdict against whether Connext actually matched the pair and delivered a sample | [Q3](#q3), [Q5](#q5) |
+| **Written** (`test_views.py`): opening a report asserts no capture is requested, and `c` asserts the interface, destination and duration are announced before tshark runs | [H8](#h8) |
+| **Written** (`test_cli.py`): `main()` over a full interactive startup asserting no `LiveCapture` is constructed and no capture prompt is printed | [H9](#h9) |
+| **Written** (`test_cli.py`): a raising `build_session` and a raising run body, each asserting exit 4 rather than 1 and no traceback on stderr | [M13](#m13) |
 | `refresh_participants` where one of three handles raises inside `transport_info`, asserting the other two are upserted | [H10](#h10) |
 | `_endpoint_from_data` / `_participant_from_data` field-by-field against a realistic fake, asserting every field is non-`None` | [S2](#s2) |
 | `engine.sweep` / `_sweep_row` at all, and `run_headless_all` against their real output | [S4](#s4) |

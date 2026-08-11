@@ -39,13 +39,19 @@ folded in below as [C1a](#c1a), [C1b](#c1b), [C1c](#c1c) and [S12](#s12).
 sub-findings under [C1](#c1)). 43 are marked Confirmed or Re-verified; the rest
 are Plausible and should be reproduced before being scheduled.
 
-**Status as of 2026-08-10: 7 Fixed, 2 Partial, 3 Live, 59 Open.** Fixed:
-[C1](#c1), [C2](#c2), [Q1](#q1), [Q2](#q2), [X1](#x1), [X2](#x2), [S4](#s4) -
-five of the six Criticals ([C3](#c3) is the exception), and two of the three
-false-ERROR findings called out below ([X3](#x3) is the exception).
-Partial: [Q3](#q3), [Q4](#q4). Live: [C1a](#c1a), [C1b](#c1b), [C1c](#c1c),
-which the [C1](#c1) fix unblocked and which now need decisions of their own.
-Every status is recorded per finding; see the legend under [Index](#index).
+**Status as of 2026-08-10: 11 Fixed, 2 Partial, 3 Live, 55 Open.** Fixed:
+[C1](#c1), [C2](#c2), [Q1](#q1), [Q2](#q2), [X1](#x1), [X2](#x2), [X3](#x3),
+[X4](#x4), [H1](#h1), [S4](#s4), [M12](#m12) - five of the six Criticals
+([C3](#c3) is the exception), and all three of the false-ERROR findings
+called out below. Partial: [Q3](#q3), [Q4](#q4). Live: [C1a](#c1a),
+[C1b](#c1b), [C1c](#c1c), which the [C1](#c1) fix unblocked and which now
+need decisions of their own. Every status is recorded per finding; see the
+legend under [Index](#index).
+
+**The two things still blocking work are decisions, not implementations.**
+[C3](#c3), the one remaining Critical, has no entry in `DESIGN_DECISIONS.md`,
+and neither do [C1a](#c1a), [C1b](#c1b) or [C1c](#c1c). Everything below them
+in severity does.
 
 The single most important result is that **the tool's failure modes are
 concentrated at the reporting boundary, not in its DDS logic.** The RxO comparison
@@ -121,11 +127,11 @@ row still marked Open has not been re-verified either.
 | [X1](#x1) | **Fixed** `cfecce6` | **Critical** | The multicast blind-spot check's `initial_peers` half is dead code, so multicast-off-with-defaults produces no finding at all |
 | [X2](#x2) | **Fixed** `cfecce6` | **Critical** | Suppression matches on finding `id` alone, globally, so an explainer on one topic hides a real independent failure on another |
 | [Q1](#q1) | **Fixed** `4fadb43` | **Critical** | An unreadable PARTITION policy is converted into a positive claim of the default partition, producing a false ERROR and exit 1 |
-| [H1](#h1) | Open | High | `--format json` is not valid JSON through the documented entry point, and prompts/progress go to stdout |
+| [H1](#h1) | **Fixed** `7e6bfc1` | High | `--format json` is not valid JSON through the documented entry point, and prompts/progress go to stdout |
 | [Q2](#q2) | **Fixed** `4fadb43` | High | An absent writer-side PRESENTATION boolean is treated as `false`, producing a false ERROR |
 | [Q3](#q3) | Partial | High | DATA_REPRESENTATION is silently skipped for default-QoS writers — the most common configuration — and the result is reported as OK |
-| [X3](#x3) | Open | High | `check_type_state` emits a writer-phrased ERROR for a DataReader on two of its three call paths |
-| [X4](#x4) | Open | High | The assignability OK finding reports the evaluated reader count under a "resolved" label, so an all-clear can cover 1 of 3 readers |
+| [X3](#x3) | **Fixed** `43e5cab` | High | `check_type_state` emits a writer-phrased ERROR for a DataReader on two of its three call paths |
+| [X4](#x4) | **Fixed** `acfc530` | High | The assignability OK finding reports the evaluated reader count under a "resolved" label, so an all-clear can cover 1 of 3 readers |
 | [H2](#h2) | Open | High | `type.extensibility` still emits one WARN per endpoint — 96 identical warnings for one type |
 | [H3](#h3) | Open | High | `o` on the issue-detail screen can never work for `qos.rxo_mismatch`, the flagship ERROR |
 | [H4](#h4) | Open | High | Topic-scoped dedup withholds participant identity, so `type.name_conflict` shows every involved participant as "OK" |
@@ -157,7 +163,7 @@ row still marked Open has not been re-verified either.
 | [M9](#m9) | Open | Medium | `IssueListScreen`'s key filter is frozen at push time and mislabels itself "All" |
 | [M10](#m10) | Open | Medium | The verdict line drops the problem summary on every non-FULL payload |
 | [M11](#m11) | Open | Medium | Both cleanups share one `try`, so a capture-teardown failure skips `participant.close()` |
-| [M12](#m12) | Open | Medium | `--format json` produces no JSON at all on the two non-zero non-error exits |
+| [M12](#m12) | **Fixed** `7e6bfc1` | Medium | `--format json` produces no JSON at all on the two non-zero non-error exits |
 | [M13](#m13) | Open | Medium | A startup failure and "found ERROR findings" are both exit 1 |
 | [M14](#m14) | Open | Medium | `--ready-timeout` is the one numeric flag omitted from the finiteness check; `inf` hangs forever |
 | [M15](#m15) | Open | Medium | `run_tests.sh` truncates failure output to 40 lines, and `all` does not run all suites |
@@ -486,6 +492,16 @@ have `_partitions_overlap` decline on the former. **Confirmed.**
 
 ### H1
 
+**Status: Fixed** in `7e6bfc1`, by removing `--format` rather than by making
+JSON safe on stdout. `render_json` described itself as an unstable dump with
+no schema contract, so nothing could depend on it, and its only consumer was
+`test/doctor_e2e.py`. The text report is now the whole output contract and
+`doctor_e2e.parse_report` reads it back into the same dict the vendor suites
+assert on. The second cause - prompts, progress and wrapper banners on
+stdout - is not fixed and is no longer a defect: with no machine format on
+stdout, decision H1 accepts human-oriented startup context there.
+[M12](#m12) closes with this. See H1 in `DESIGN_DECISIONS.md`.
+
 **`--format json` is not valid JSON through the documented entry point, and the
 interactive prompt and domain scan are not suppressed by the headless flags.**
 Two independent causes, both on the path a CI job would use:
@@ -563,6 +579,14 @@ effective representation implied by an empty advertised sequence.
 
 ### X3
 
+**Status: Fixed** in `43e5cab`. `check_type_state` is role-aware: title,
+observed line, remedy and the Fast DDS upgrade advice name the side that
+lacks the schema, `evidence["endpoint_role"]` records which, and the root
+cause states that the finding describes this endpoint and not the other side
+of the topic. The 08-06 call-site guard in `system_scan` stays, but as a
+scope choice - one unresolved schema reported once, at its publisher - not
+as protection against wrong wording. See X3 in `DESIGN_DECISIONS.md`.
+
 **`check_type_state` emits a writer-phrased ERROR when the target endpoint is a
 DataReader, on two of its three call paths.**
 `../rti_doctor/checks/type_compat.py#L96`, `#L105`.
@@ -584,6 +608,17 @@ host. **Confirmed.** The 08-06 fix belongs inside the check, not at one call
 site.
 
 ### X4
+
+**Status: Fixed** in `acfc530`. Every assignability verdict now carries
+`resolved_reader_count`, `evaluated_reader_count` and
+`unevaluable_reader_count` separately, plus `readers_unevaluated` and a
+"Not evaluated (...)" sentence naming the readers that could not be
+compared - the [Q1a](#q1a) `{policy, reason}` shape with the reader identity
+added. `_assignable` returns the reason, so "no `is_assignable_from()`" and
+"the call raised" no longer collapse into one bare `None`. The wholly
+unevaluable case emits a topic-scoped INFO instead of `[]`, so it is
+reported once per topic rather than once per writer. See X4 in
+`DESIGN_DECISIONS.md`.
 
 **The assignability OK finding reports the *evaluated* reader count under a
 "resolved" label, so an all-clear can cover one reader out of three — and a
@@ -1255,6 +1290,10 @@ process. **Confirmed** (the ordering skips the close); **Plausible** that
 `finish_discovery` raises in practice.
 
 ### M12
+
+**Status: Fixed** in `7e6bfc1`, by removal: [H1](#h1) removed `--format`, so
+there is no machine format left for these exits to omit. The exits
+themselves are unchanged and still write to stderr.
 
 **`--format json` produces no JSON at all on the two non-zero non-error exits.**
 `../rti_doctor/__main__.py#L386-L395` and `#L524-L530`. The topic-not-found path

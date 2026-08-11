@@ -288,7 +288,17 @@ stays readable.
 - **Date:** 2026-08-10
 - **Status:** Accepted
 - **Extended by:** Q1a, which chooses the incomplete-evidence shape this
-	entry's follow-up defers. X4 itself is not implemented.
+	entry's follow-up defers.
+- **Amendment (2026-08-10):** Implemented as decided, with two choices this
+	entry left open. The `{policy, reason}` record gained `reader`/`reader_key`,
+	because several readers can be unevaluable for different reasons and a
+	per-policy record has nothing to name them with. The "informational result"
+	is an unevaluated record on the existing OK/ERROR verdict - the Q1a
+	precedent - except when no reader at all could be evaluated, where there is
+	no verdict to carry it and an INFO finding is emitted instead. That finding
+	is topic-scoped, which is how it avoids the per-writer noise this entry's
+	consequences warn about: the unevaluable readers belong to the topic, so
+	every writer on it faces the same ones.
 - **Problem:** Assignability reporting labels only successfully evaluated readers
 	as resolved and returns no finding when all resolved readers are unevaluable.
 	This can present partial structural validation as a complete all-clear.
@@ -315,6 +325,16 @@ stays readable.
 
 - **Date:** 2026-08-10
 - **Status:** Accepted
+- **Amendment (2026-08-10):** Implemented, with two departures from the
+	follow-up. There was no deprecation period: `--format` is removed outright
+	and now fails argument parsing, on the same reasoning as S4 - a flag that is
+	accepted and ignored leaves a CI job believing it still gets JSON, and the
+	only consumer was this repo's own test harness. And no Markdown contract was
+	defined: the existing fixed-width plain-text report was adopted as the
+	contract unchanged, because it already carries one
+	`[SEVERITY] rung N  finding.id` line per finding with labelled fields under
+	it, which is what `test/doctor_e2e.parse_report` reads. Converting the report
+	to Markdown remains undecided and is not required by anything now shipping.
 - **Problem:** The current JSON mode is mixed with wrapper banners, prompts, and
 	progress output. Maintaining a strict machine-readable JSON contract is not a
 	product goal for RTI Doctor.

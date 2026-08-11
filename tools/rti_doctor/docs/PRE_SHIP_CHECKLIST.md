@@ -1,7 +1,7 @@
 # RTI Doctor Pre-Ship Checklist
 
 Fast DDS root-cause engagement. 2026-08-11, branch `rti-doctor-review-fixes`,
-HEAD `ca32e6f`. Findings cited are in `CODE_REVIEW_2026-08-07.md`; tasks are in
+HEAD `735d555`. Findings cited are in `CODE_REVIEW_2026-08-07.md`; tasks are in
 `IMPROVEMENT_BACKLOG.md`.
 
 ## Fix before handover
@@ -55,20 +55,28 @@ HEAD `ca32e6f`. Findings cited are in `CODE_REVIEW_2026-08-07.md`; tasks are in
     --capture-interface eth0 -o sensor.txt
 ```
 
-## Re-run if anything changes (all green 2026-08-11)
+## Re-run if anything changes
 
-- [ ] `./run_tests.sh unit` — 281 tests
-- [ ] `./run_tests.sh live` — 314 tests, 1 expected failure (Q3)
-- [ ] `./run_tests.sh vendor` — 12 skipped (Cyclone absent), 2 expected
-      failures (Fast DDS v1-only, and the Q3 cross-vendor disagreement). Needs
-      the Fast DDS image rebuilt from `test/vendors/fastdds/build_image.sh`
-      since the fixture gained `--representation default`.
+All five verified green at `735d555` on 2026-08-11. An expected failure here is
+a recorded defect that still executes, not a skip — if one turns into an
+*unexpected success*, the behaviour changed and the doc it cites needs revising.
+
+- [ ] `./run_tests.sh unit` — 282 tests
+- [ ] `./run_tests.sh live` — 315 tests, 1 expected failure (the Q3 verdict,
+      Connext↔Connext)
+- [ ] `./run_tests.sh vendor` — 32 tests, 12 skipped (Cyclone absent), 2
+      expected failures (Fast DDS v1-only discovery, and the Q3 verdict
+      cross-vendor). **Rebuild the Fast DDS image first**
+      (`test/vendors/fastdds/build_image.sh`) — the fixture gained
+      `--representation default` and an older image skips the spike.
 - [ ] `bash scripts/test_python_env.sh` and
       `bash scripts/test_rti_spy_bundle.sh`
 - [ ] `./run_lint.sh`
 
 ## Known, do not block on
 
-N1 (one capture parsed twice), N4 (capture outlives its screen), N8
-(`--no-probe` capture window), N9 (evidence artifact gitignored), CAP-1 and
-CAP-3, EVD-1, and the missing mypy tooling. None affects a diagnosis.
+N1 (one capture parsed twice), N4 (capture outlives its screen), N5 (an
+explicitly-XCDR1 Connext writer reads as "not advertised"), N8 (`--no-probe`
+capture window), N9 (evidence artifact gitignored), CAP-1 and CAP-3, EVD-1, and
+ENV-2 (mypy is installable now via `requirements-dev.txt`, but 11 annotation
+errors stand between it and being a gate). None affects a diagnosis.

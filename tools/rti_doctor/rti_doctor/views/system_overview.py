@@ -26,6 +26,51 @@ def _issue_counts(snapshot):
           for severity in (f.Severity.ERROR, f.Severity.WARN, f.Severity.INFO)}
 
 
+def _issue_endpoints(session, issue):
+  """Every endpoint an issue names, as `(role, label, endpoint)`, writers first.
+
+  RxO is directional - the writer offers, the reader requests the minimum it
+  will accept - so both sides of a `qos.rxo_mismatch` are legitimate places to
+  start. A topic-scoped condition can name more than two.
+  """
+  evidence = issue.evidence or {}
+  found = []
+  for keys, role, label_key in ((issue.writer_keys, "Writer (offers)", "writer"),
+                                (issue.reader_keys, "Reader (requests)", "reader")):
+    for key in keys:
+      endpoint = session.registry.endpoints.get(key)
+      if endpoint is None:
+        continue  # departed since the snapshot was taken
+      label = evidence.get(label_key) if len(keys) == 1 else None
+      found.append((role, str(label or endpoint.topic_name or key), endpoint))
+  return found
+
+
+def _open_issue_report(screen, session, issue):
+  """Open a targeted report for `issue`, asking which endpoint when ambiguous.
+
+  Both the issue list and the issue detail route through here. The detail
+  screen used to require exactly one endpoint across both roles, so the
+  flagship ERROR - `qos.rxo_mismatch`, which always names a writer AND a
+  reader - could never open one; the list screen silently opened the writer,
+  which hides the reader-driven constraint the mismatch is usually about.
+  """
+  if issue is None:
+    screen.status.update("Select an issue first.")
+    return
+  choices = _issue_endpoints(session, issue)
+  if not choices:
+    screen.status.update(
+        "This issue names no endpoint still in discovery, so there is no "
+        "targeted report to open.")
+    return
+  if len(choices) == 1:
+    screen.app.push_screen(
+        ReportScreen(session, endpoint=choices[0][2], probe=False))
+    return
+  screen.app.push_screen(EndpointChoiceScreen(session, issue, choices))
+
+
 def _spawn(screen, coroutine):
   """Run `coroutine` as a worker owned by `screen`.
 
@@ -384,13 +429,53 @@ class IssueListScreen(Screen):
     self.status.update(f"Saved system report to {path}")
 
   def action_open_report(self):
-    issue = self._selected_issue()
-    if issue is None or len(issue.writer_keys) != 1:
-      self.status.update("Select an issue with one writer to open its report.")
+    _open_issue_report(self, self.session, self._selected_issue())
+
+  def action_back(self):
+    self.app.pop_screen()
+
+  def action_quit_app(self):
+    self.app.exit()
+
+
+class EndpointChoiceScreen(Screen):
+  """Pick which endpoint of a multi-endpoint issue to diagnose."""
+
+  BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
+              ("q", "quit_app", "Quit")]
+
+  def __init__(self, session, issue, choices):
+    super().__init__()
+    self.session = session
+    self.issue = issue
+    self.choices = list(choices)
+    self.table = DataTable()
+
+  def compose(self):
+    yield Header()
+    yield Static(f"[bold]{escape(self.issue.title)}[/bold]")
+    yield Static("This issue involves more than one endpoint. Choose which one "
+                 "to diagnose - a targeted report describes one endpoint.")
+    with Container(id="endpoint_choice"):
+      yield self.table
+    yield Footer()
+
+  async def on_mount(self):
+    self.title = f"rti_doctor - choose endpoint domain {self.session.domain_id}"
+    self.table.add_columns("Role", "Endpoint", "Type")
+    self.table.cursor_type = "row"
+    for index, (role, label, endpoint) in enumerate(self.choices):
+      self.table.add_row(role, label, endpoint.type_name or "(none)", key=str(index))
+    self.table.focus()
+
+  async def on_data_table_row_selected(self, event):
+    if event.row_key is None:
       return
-    endpoint = self.session.registry.endpoints.get(issue.writer_keys[0])
-    if endpoint is not None:
-      self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=False))
+    _, _, endpoint = self.choices[int(event.row_key.value)]
+    # Pop first: Back from the report should return to the issue, not to this
+    # picker, which has nothing left to say once a side has been chosen.
+    self.app.pop_screen()
+    self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=False))
 
   def action_back(self):
     self.app.pop_screen()
@@ -432,18 +517,8 @@ class IssueDetailScreen(Screen):
     yield self.status
     yield Footer()
 
-  def _endpoint(self):
-    keys = set(self.issue.writer_keys) | set(self.issue.reader_keys)
-    if len(keys) != 1:
-      return None
-    return self.session.registry.endpoints.get(next(iter(keys)))
-
   def action_open_report(self):
-    endpoint = self._endpoint()
-    if endpoint is None:
-      self.status.update("Open report requires an issue with exactly one writer.")
-      return
-    self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=False))
+    _open_issue_report(self, self.session, self.issue)
 
   def action_save(self):
     path = os.path.abspath(report.system_filename(self.session.domain_id))

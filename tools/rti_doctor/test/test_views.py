@@ -11,6 +11,7 @@ import logging
 import os
 import sys
 import unittest
+from unittest import mock
 
 from textual.app import App
 
@@ -284,6 +285,116 @@ class TestRefreshFailureIsVisible(unittest.TestCase):
       self.drive(system_overview.MetricsScreen, steps)
     self.assertTrue(any("MetricsScreen" in line and "scan thread died" in line
                         for line in captured.output), captured.output)
+
+
+class FakeEndpoint:
+  def __init__(self, key, kind, topic_name="Telemetry", type_name="TelemetryType"):
+    self.key = key
+    self.kind = kind
+    self.topic_name = topic_name
+    self.type_name = type_name
+
+  @property
+  def is_writer(self):
+    return self.kind == "Writer"
+
+
+def issue_with(writer_keys=(), reader_keys=(), evidence=None):
+  return system_scan.SystemIssue(
+      key="issue", severity=findings.Severity.ERROR,
+      finding_ids=("qos.rxo_mismatch",),
+      title="QoS incompatible (RELIABILITY): writer-app -> reader-app",
+      observed="", root_cause="", recommendation="",
+      topic_name="Telemetry", scope="pair",
+      writer_keys=writer_keys, reader_keys=reader_keys, participant_keys=(),
+      evidence=evidence or {})
+
+
+class TestPairedIssueOpensAReport(unittest.TestCase):
+  """`o` on an issue that names two endpoints.
+
+  `qos.rxo_mismatch` always names a writer AND a reader, and the detail screen
+  required exactly one across both roles - so the flagship ERROR could never
+  open a report at all, while the list screen silently opened the writer and
+  hid the reader-driven constraint.
+  """
+
+  def setUp(self):
+    self.session = StubSession()
+    self.session.registry = StubRegistry()
+    self.session.registry.endpoints = {
+        "w1": FakeEndpoint("w1", "Writer"),
+        "r1": FakeEndpoint("r1", "Reader"),
+    }
+
+  def _choices(self, issue):
+    return system_overview._issue_endpoints(self.session, issue)
+
+  def test_a_pair_offers_both_sides_with_their_rxo_roles(self):
+    choices = self._choices(issue_with(
+        writer_keys=("w1",), reader_keys=("r1",),
+        evidence={"writer": "writer-app w1", "reader": "reader-app r1"}))
+    self.assertEqual([role for role, _, _ in choices],
+                     ["Writer (offers)", "Reader (requests)"])
+    self.assertEqual([label for _, label, _ in choices],
+                     ["writer-app w1", "reader-app r1"])
+    self.assertEqual([endpoint.key for _, _, endpoint in choices], ["w1", "r1"])
+
+  def test_a_single_endpoint_issue_needs_no_choice(self):
+    self.assertEqual(len(self._choices(issue_with(writer_keys=("w1",)))), 1)
+
+  def test_an_endpoint_that_departed_is_not_offered(self):
+    """The snapshot is a moment in time; the registry has moved on."""
+    choices = self._choices(issue_with(writer_keys=("w1",), reader_keys=("gone",)))
+    self.assertEqual([endpoint.key for _, _, endpoint in choices], ["w1"])
+
+  def _opened(self, issue):
+    """What `_open_issue_report` pushes, and what it says if it pushes nothing.
+
+    `Screen.app` is read-only in Textual, so this drives the routing through a
+    stand-in with the two attributes the function touches - which is the reason
+    the routing is a module function and not a method on one screen.
+    """
+    screen = mock.Mock()
+    system_overview._open_issue_report(screen, self.session, issue)
+    pushed = (screen.app.push_screen.call_args[0][0]
+              if screen.app.push_screen.call_args else None)
+    said = (screen.status.update.call_args[0][0]
+            if screen.status.update.call_args else "")
+    return pushed, said
+
+  def test_an_issue_naming_no_live_endpoint_says_so(self):
+    pushed, said = self._opened(issue_with(writer_keys=("gone",)))
+    self.assertIsNone(pushed)
+    self.assertIn("no endpoint still in discovery", said)
+
+  def test_a_pair_asks_rather_than_defaulting_to_the_writer(self):
+    pushed, _ = self._opened(
+        issue_with(writer_keys=("w1",), reader_keys=("r1",)))
+    self.assertIsInstance(pushed, system_overview.EndpointChoiceScreen)
+    self.assertEqual([role for role, _, _ in pushed.choices],
+                     ["Writer (offers)", "Reader (requests)"])
+
+  def test_one_endpoint_opens_its_report_directly(self):
+    pushed, _ = self._opened(issue_with(writer_keys=("w1",)))
+    self.assertNotIsInstance(pushed, system_overview.EndpointChoiceScreen)
+
+  def test_both_issue_screens_route_through_the_same_action(self):
+    """The list screen used to open the writer while the detail screen refused.
+
+    Two answers to `o` on the same row is the half of this the operator
+    actually notices.
+    """
+    issue = issue_with(writer_keys=("w1",), reader_keys=("r1",))
+    detail = system_overview.IssueDetailScreen(self.session, snapshot(), issue)
+    listing = system_overview.IssueListScreen(self.session, snapshot())
+    listing._selected_issue = lambda: issue
+
+    with mock.patch.object(system_overview, "_open_issue_report") as opened:
+      detail.action_open_report()
+      listing.action_open_report()
+    self.assertEqual([call[0][2] for call in opened.call_args_list],
+                     [issue, issue])
 
 
 if __name__ == "__main__":

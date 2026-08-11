@@ -48,6 +48,45 @@ stays readable.
 - **References:** `CODE_REVIEW_2026-08-07.md` C1; `rti_doctor/wire.py`;
 	`test/test_wire_discovery.py`.
 
+### C1a-C1c: Fast DDS Version Evidence Belongs to a Participant
+
+- **Date:** 2026-08-10
+- **Status:** Accepted
+- **Problem:** The C1 fix made the Fast DDS version feature reachable, and all
+	three latent defects in it fired. `environment.fastdds_version_older_than_validated`
+	carried no identity at all, so N distinct out-of-baseline versions collapsed
+	into one issue naming one version (C1a); it declared `RUNG_PARTICIPANT` but
+	bypassed `_annotate()`, so no `participant_key` reached the Health column or
+	the `i` filter (C1b); and the version list was latched on the first Fast DDS
+	scan, so the WARN kept firing for the rest of the session after that peer
+	departed (C1c).
+- **Decision:** Treat an observed version as evidence about the participant that
+	advertised it, not as a property of the domain. `summarize_discovery()` pairs
+	each version with the advertising `rtps.guidPrefix.src`, the scan matches that
+	prefix back to a registry record through the shared four-word builtin key,
+	and the finding is emitted once per still-present participant carrying its
+	`participant_key`. A prefix with no current registry record produces no
+	finding.
+- **Rationale:** One change addresses all three: `participant_key` is an
+	identity slot `_issue_key` already reads, so per-participant findings separate
+	without a new dedup mechanism; it is the field the Health column and the `i`
+	filter already read, so linkage follows; and requiring a live registry record
+	makes the WARN expire with its peer rather than needing the capture state
+	cleared. Keying on the participant rather than the version string is also the
+	more truthful claim - the operator upgrades a peer, not a domain.
+- **Consequences:** Two peers on the same out-of-baseline version are two
+	issues, which is correct: they are two upgrades. The flat
+	`fastdds_product_versions` list stays on the snapshot for the report's
+	session-level "Observed" line. The wire-to-registry match depends on the
+	participant key rendering `[w0, w1, w2, w3]`; a binding that renders it
+	otherwise yields no prefix and therefore no finding, which fails closed.
+- **Follow-up:** H9 removes the startup discovery capture that currently feeds
+	this, moving version evidence to the explicit H8 capture action. The pairing
+	decided here is the interface that survives that move.
+- **References:** `CODE_REVIEW_2026-08-07.md` C1a, C1b, C1c;
+	`rti_doctor/wire.py`; `rti_doctor/engine.py`; `rti_doctor/system_scan.py`;
+	`test/test_system_scan.py`; `test/test_wire_discovery.py`.
+
 ### Q1: Unreadable Partition Becomes a False Error
 
 - **Date:** 2026-08-10

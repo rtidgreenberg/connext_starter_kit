@@ -168,6 +168,17 @@ def summarize_discovery(observations, source, capture_filter=None):
   topics = sorted({item.topic_name for item in observations if item.topic_name})
   fastdds_versions = sorted({version for item in observations
                              for version in _fastdds_product_versions(item)})
+  # The same version paired with the GUID prefix that advertised it.
+  # `fastdds_product_versions` alone cannot say which peer is on which version,
+  # so a caller reporting one version per participant - or deciding whether the
+  # participant that advertised it is still present - has nothing to key on.
+  # `rtps.guidPrefix.src` is the sending participant, and the product-version
+  # PID travels in that participant's own SPDP payload, so the pairing is
+  # per-observation rather than inferred.
+  fastdds_participant_versions = sorted({
+      (item.guid_prefix.replace(":", "").lower(), version)
+      for item in observations if item.guid_prefix
+      for version in _fastdds_product_versions(item)})
   # One tuple per (prefix, writer, reader) actually paired in a submessage.
   # Zipping the occurrence lists positionally rather than crossing them keeps
   # a coalesced frame from fabricating pairs that were never on the wire.
@@ -189,6 +200,8 @@ def summarize_discovery(observations, source, capture_filter=None):
       "topics": topics,
       "topic_count": len(topics),
       "fastdds_product_versions": fastdds_versions,
+      "fastdds_participant_versions": [list(pair)
+                                       for pair in fastdds_participant_versions],
       "builtin_endpoint_sets": sorted({item.builtin_endpoint_set
                                          for item in observations
                                          if item.builtin_endpoint_set}),
@@ -270,7 +283,19 @@ def endpoint_entity_id(endpoint):
 
 def endpoint_guid_prefix(endpoint):
   """First three 32-bit words of a discovered endpoint GUID as RTPS bytes."""
-  key_text = str(getattr(endpoint, "key", ""))
+  return record_guid_prefix(endpoint)
+
+
+def record_guid_prefix(record):
+  """GUID prefix of any discovered record whose key is a four-word builtin key.
+
+  `EndpointRecord.key` and `ParticipantRecord.key` are both
+  `str(data.key.value)` over the same four-word BuiltinTopicKey, and the first
+  three words are the RTPS GUID prefix in both cases - so a participant
+  observed on the wire by GUID prefix can be matched back to its registry
+  record without a second key format.
+  """
+  key_text = str(getattr(record, "key", ""))
   match = re.search(r"\[([^]]+)\]", key_text)
   values = [int(value) for value in re.findall(r"\d+", match.group(1))] if match else []
   if len(values) != 4:

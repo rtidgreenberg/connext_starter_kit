@@ -133,6 +133,11 @@ class TestDiscoveryParsing(unittest.TestCase):
     self.assertEqual(summary["builtin_endpoint_sets"], ["0x00000c3f"])
     # Only the Fast DDS vendor id (0x010f) contributes a product version.
     self.assertEqual(summary["fastdds_product_versions"], ["3.6.2.0"])
+    # And it is attributed to the participant that advertised it, so a caller
+    # can say which peer is on which version rather than only that some peer
+    # was. The 0x0101 participant contributes no pair.
+    self.assertEqual(summary["fastdds_participant_versions"],
+                     [["010f00000000000000000001", "3.6.2.0"]])
     self.assertFalse(summary["complete"])
 
 

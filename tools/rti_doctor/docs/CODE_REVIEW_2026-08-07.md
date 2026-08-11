@@ -268,10 +268,13 @@ count from the command instead of hard-coding 12.
 
 #### C1a
 
-**Status: Live.** Unblocked by the C1 fix and reproduced since: three distinct
-out-of-baseline versions still collapse into one issue keyed
-`environment.fastdds_version_older_than_validated:::::`, naming one version.
-No decision recorded yet.
+**Status: Fixed** in `f9c3a7e`. `summarize_discovery` now pairs each version
+with the `rtps.guidPrefix.src` that advertised it, and the finding is emitted
+per participant carrying its `participant_key` - a slot `_issue_key` already
+reads, so N out-of-baseline versions are N issues with no new dedup
+mechanism. Two peers on the *same* old version are also two issues, which is
+the correct count: they are two upgrades. See C1a-C1c in
+`DESIGN_DECISIONS.md`.
 
 **All `environment.fastdds_version_older_than_validated` findings share one
 `_issue_key`, so N distinct out-of-baseline versions collapse into one issue
@@ -286,9 +289,13 @@ column mapping is fixed, and it will start mattering the moment it is.
 
 #### C1b
 
-**Status: Live.** Unblocked by the C1 fix. `_version_notes` still bypasses
-`_annotate`, so the finding carries no `participant_key`. No decision recorded
-yet.
+**Status: Fixed** in `f9c3a7e`. The version notes are split out of
+`_version_notes` into `_fastdds_version_notes`, which takes the registry,
+resolves the observed GUID prefix to a participant record, and is routed
+through `_annotate` like every other producer in the module. The finding
+carries `participant_key`, so `_health()` and `_linked_issue_keys()` link it
+and the report labels it `Scope participant`. See C1a-C1c in
+`DESIGN_DECISIONS.md`.
 
 **The same finding declares `RUNG_PARTICIPANT` but bypasses `_annotate()`, so it
 carries no `participant_key`.** `../rti_doctor/system_scan.py#L142`.
@@ -301,9 +308,13 @@ different producer.
 
 #### C1c
 
-**Status: Live.** Unblocked by the C1 fix. The version list is still latched
-and `discovery_capture` nulled on the same pass, so the WARN keeps firing
-after that participant departs. No decision recorded yet.
+**Status: Fixed** in `f9c3a7e`, by making the finding depend on the registry
+rather than by clearing the latch. The version list is still latched - the
+capture is read once and cannot be re-read - but a version now only produces a
+finding while a participant with that GUID prefix is still in the registry, so
+the WARN expires with its peer. Note H9 will delete the startup capture that
+feeds this entirely; the pairing survives that move. See C1a-C1c in
+`DESIGN_DECISIONS.md`.
 
 **`_fastdds_product_versions` is latched on the first Fast DDS-bearing scan and
 `discovery_capture` is nulled, so the WARN keeps firing on every later refresh

@@ -29,6 +29,7 @@ class Session:
     self.domain_scan_ran = domain_scan_ran
     self.discovery_capture = discovery_capture
     self._fastdds_product_versions = ()
+    self._fastdds_participant_versions = ()
     self._last_scan = None
 
   def _context(self, endpoint=None, participant_record=None, probe_result=None):
@@ -78,6 +79,13 @@ class Session:
       self.discovery_capture = None
       self._fastdds_product_versions = tuple(
           evidence.get("fastdds_product_versions", ()))
+      # Kept alongside the flat version list, which the report renders as
+      # "observed during this session". The paired form is what the version
+      # findings key on, so a version outlives the capture but not the
+      # participant that advertised it.
+      self._fastdds_participant_versions = tuple(
+          tuple(pair) for pair in evidence.get("fastdds_participant_versions", ())
+          if isinstance(pair, (list, tuple)) and len(pair) == 2)
       if evidence.get("error"):
         logging.warning("[engine] Fast DDS discovery capture unavailable: %s",
                         evidence["error"])
@@ -91,6 +99,7 @@ class Session:
         type_wait=self.type_wait,
         captured_at=captured_at,
         fastdds_product_versions=self._fastdds_product_versions,
+        fastdds_participant_versions=self._fastdds_participant_versions,
     )
     self._last_scan = snapshot
     return snapshot

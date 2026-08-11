@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 import time
 
-from . import compat, findings as f, topology
+from . import compat, findings as f, topology, wire
 from .checks import CheckContext, run_checks
 from .checks import blind_spots, qos_match, static_discovery, type_compat
 
@@ -43,7 +43,7 @@ class SystemScanSnapshot:
 
 def scan(registry, own_qos, type_lookup_settings, domain_id, active_domains=(),
          domain_scan_ran=False, type_wait=5.0, captured_at=None,
-         fastdds_product_versions=()):
+         fastdds_product_versions=(), fastdds_participant_versions=()):
   """Return one passive system snapshot without creating a diagnostic reader."""
   captured_at = time.time() if captured_at is None else captured_at
   common = dict(
@@ -58,7 +58,14 @@ def scan(registry, own_qos, type_lookup_settings, domain_id, active_domains=(),
   findings = []
 
   if registry.participant_list():
-    findings.extend(_version_notes(fastdds_product_versions))
+    findings.extend(_annotate(_connext_note(), "domain"))
+    # Routed through _annotate like every other producer in this module. It
+    # already sets its own participant-scoped identity, which _annotate's
+    # setdefault preserves; going around _annotate is what left this finding
+    # with no participant identity at all.
+    findings.extend(_annotate(
+        _fastdds_version_notes(registry, fastdds_participant_versions),
+        "participant"))
 
   findings.extend(_annotate(
       run_checks(CheckContext(**common), blind_spots.CHECKS), "domain"))
@@ -127,37 +134,81 @@ def scan(registry, own_qos, type_lookup_settings, domain_id, active_domains=(),
   )
 
 
-def _version_notes(fastdds_product_versions=()):
-  """Advise operators running older tested Connext or Fast DDS versions."""
-  notes = []
+def _connext_note():
+  """Advise operators running an older tested Connext line."""
   version = compat.version_tuple()
-  if version is not None and version[:2] == (7, 3):
-    notes.append(f.Finding(
-        id="environment.connext_7_3_upgrade",
-        rung=f.RUNG_OWN_CONFIG,
-        severity=f.Severity.INFO,
-        title="Connext 7.3 is in use",
-        observed=f"Detected Connext {compat.connext_version()}.",
-        root_cause="This scan is running against the older supported Connext 7.3 line.",
-        remedy="Plan an upgrade to Connext 7.7 for current fixes and capabilities.",
-        evidence={"connext_version": compat.connext_version()},
-    ))
-  for product_version in sorted(set(fastdds_product_versions)):
+  if version is None or version[:2] != (7, 3):
+    return []
+  return [f.Finding(
+      id="environment.connext_7_3_upgrade",
+      rung=f.RUNG_OWN_CONFIG,
+      severity=f.Severity.INFO,
+      title="Connext 7.3 is in use",
+      observed=f"Detected Connext {compat.connext_version()}.",
+      root_cause="This scan is running against the older supported Connext 7.3 line.",
+      remedy="Plan an upgrade to Connext 7.7 for current fixes and capabilities.",
+      evidence={"connext_version": compat.connext_version()},
+  )]
+
+
+def _fastdds_version_notes(registry, fastdds_participant_versions=()):
+  """One WARN per still-present Fast DDS participant below the tested baseline.
+
+  Three properties this has to hold, each of which it previously did not:
+
+  * The finding declares RUNG_PARTICIPANT, so it must carry the
+    `participant_key` the Health column and the `i` filter read. It names the
+    participant whose version was observed rather than describing the domain.
+  * Two peers on two different out-of-baseline versions are two conditions.
+    Identity comes from `participant_key`, which `_issue_key` reads, so they no
+    longer collapse into one issue naming whichever version sorted last.
+  * A version observed on the wire is evidence about the participant that
+    advertised it, not a standing property of the domain. A prefix no longer in
+    the registry is dropped, so the WARN stops when that peer departs instead
+    of outliving it for the rest of the session.
+  """
+  by_prefix = {}
+  for participant in registry.participant_list():
+    prefix = wire.record_guid_prefix(participant)
+    if prefix is not None:
+      by_prefix.setdefault(prefix, participant)
+
+  notes = []
+  for prefix, product_version in sorted(set(
+      _version_pairs(fastdds_participant_versions))):
+    participant = by_prefix.get(prefix)
+    if participant is None:
+      # The peer that advertised this version is gone from the registry.
+      continue
     parsed = _parse_version(product_version)
-    if parsed is not None and parsed < (3, 6, 2):
-      notes.append(f.Finding(
-          id="environment.fastdds_version_older_than_validated",
-          rung=f.RUNG_PARTICIPANT,
-          severity=f.Severity.WARN,
-          title="Fast DDS version is older than the validated baseline",
-          observed=(f"RTPS discovery reported Fast DDS {product_version}; "
-                    "the validated baseline is 3.6.2."),
-          root_cause="This Fast DDS version is older than the version covered by the interoperability fixtures.",
-          remedy="Retest with Fast DDS 3.6.2 or newer before relying on the validated interoperability results.",
-          evidence={"fastdds_product_version": product_version,
-                    "validated_baseline": "3.6.2"},
-      ))
+    if parsed is None or parsed >= (3, 6, 2):
+      continue
+    label = participant.name or participant.key
+    notes.append(f.Finding(
+        id="environment.fastdds_version_older_than_validated",
+        rung=f.RUNG_PARTICIPANT,
+        severity=f.Severity.WARN,
+        title="Fast DDS version is older than the validated baseline",
+        observed=(f"RTPS discovery reported Fast DDS {product_version} for "
+                  f"participant '{label}'; the validated baseline is 3.6.2."),
+        root_cause="This Fast DDS version is older than the version covered by the interoperability fixtures.",
+        remedy="Retest with Fast DDS 3.6.2 or newer before relying on the validated interoperability results.",
+        evidence={"scope": "participant",
+                  "participant_key": participant.key,
+                  "fastdds_product_version": product_version,
+                  "fastdds_guid_prefix": prefix,
+                  "validated_baseline": "3.6.2"},
+    ))
   return notes
+
+
+def _version_pairs(value):
+  """Normalize `(guid_prefix, version)` evidence that may arrive as lists."""
+  pairs = []
+  for item in value or ():
+    if isinstance(item, (list, tuple)) and len(item) == 2:
+      pairs.append((str(item[0]).replace(":", "").lower(), str(item[1])))
+  return pairs
 
 
 def _parse_version(value):

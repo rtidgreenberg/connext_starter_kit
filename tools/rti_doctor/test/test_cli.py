@@ -46,6 +46,7 @@ class FakeSession:
     self.discovery_capture = None
     self._last_scan = None
     self._fastdds_product_versions = ()
+    self._fastdds_participant_versions = ()
 
   def system_scan(self, captured_at=None, max_age=0.0):
     return engine.Session.system_scan(self, captured_at=captured_at,

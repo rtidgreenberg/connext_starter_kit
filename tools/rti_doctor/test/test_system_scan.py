@@ -40,6 +40,24 @@ def registry_with_reliability_fault():
   return registry
 
 
+def registry_with_fastdds_peers():
+  """Three Fast DDS peers whose keys yield distinct RTPS GUID prefixes.
+
+  Participant keys are `str(data.key.value)` over a four-word BuiltinTopicKey,
+  and `wire.record_guid_prefix` reads the first three words - so the fixture has
+  to use that real key shape for the wire-to-registry match to be exercised at
+  all.
+  """
+  registry = discovery.DiscoveryRegistry(type_wait=0.0)
+  peers = {}
+  for name, words in (("old", (1, 1, 1, 1)), ("older", (2, 2, 2, 2)),
+                      ("current", (3, 3, 3, 3))):
+    record = records.ParticipantRecord(key=str(list(words)), name=f"fastdds-{name}")
+    registry.participants[record.key] = record
+    peers[name] = "".join(f"{word:08x}" for word in words[:3])
+  return registry, peers
+
+
 class TestSystemScan(unittest.TestCase):
 
   def test_rxo_fault_has_one_identity_bearing_issue(self):
@@ -184,16 +202,66 @@ class TestSystemScan(unittest.TestCase):
     self.assertIn("Connext 7.7", note.recommendation)
 
   def test_older_fastdds_version_produces_warning(self):
+    registry, peers = registry_with_fastdds_peers()
     snapshot = system_scan.scan(
-        registry_with_reliability_fault(), own_qos=None,
+        registry, own_qos=None,
         type_lookup_settings={"request_types_filter": "*"}, domain_id=7,
-        captured_at=123.0, fastdds_product_versions=("3.5.4.0", "3.6.2.0"))
+        captured_at=123.0,
+        fastdds_participant_versions=((peers["old"], "3.5.4.0"),
+                                      (peers["current"], "3.6.2.0")))
     warning = next(item for item in snapshot.issues
                    if item.finding_ids ==
                    ("environment.fastdds_version_older_than_validated",))
     self.assertEqual(warning.severity, f.Severity.WARN)
     self.assertIn("3.5.4.0", warning.observed)
     self.assertNotIn("3.6.2.0", warning.observed)
+
+
+class TestFastDdsVersionFindings(unittest.TestCase):
+  """C1a-C1c: the version WARN must be per participant, linked, and transient."""
+
+  def _scan(self, registry, pairs):
+    return system_scan.scan(
+        registry, own_qos=None, type_lookup_settings={"request_types_filter": "*"},
+        domain_id=7, captured_at=123.0, fastdds_participant_versions=pairs)
+
+  def test_two_out_of_baseline_versions_are_two_issues(self):
+    """C1a: every identity slot was empty, so N versions hashed to one key."""
+    registry, peers = registry_with_fastdds_peers()
+    snapshot = self._scan(registry, ((peers["old"], "3.5.4.0"),
+                                     (peers["older"], "2.14.0.0")))
+    warnings = [item for item in snapshot.issues
+                if "environment.fastdds_version_older_than_validated"
+                in item.finding_ids]
+    self.assertEqual(len(warnings), 2)
+    self.assertEqual(len({item.key for item in warnings}), 2)
+    observed = " ".join(item.observed for item in warnings)
+    self.assertIn("3.5.4.0", observed)
+    self.assertIn("2.14.0.0", observed)
+
+  def test_the_warning_names_the_participant_it_describes(self):
+    """C1b: it declares RUNG_PARTICIPANT, so Health and `i` need its key."""
+    registry, peers = registry_with_fastdds_peers()
+    snapshot = self._scan(registry, ((peers["old"], "3.5.4.0"),))
+    warning = next(item for item in snapshot.issues
+                   if "environment.fastdds_version_older_than_validated"
+                   in item.finding_ids)
+    self.assertEqual(warning.scope, "participant")
+    self.assertEqual(warning.participant_keys, ("[1, 1, 1, 1]",))
+    self.assertIn("fastdds-old", warning.observed)
+
+  def test_a_departed_participant_stops_producing_the_warning(self):
+    """C1c: the version list outlived the peer, so the WARN never stopped."""
+    registry, peers = registry_with_fastdds_peers()
+    pairs = ((peers["old"], "3.5.4.0"),)
+    self.assertTrue([item for item in self._scan(registry, pairs).issues
+                     if "environment.fastdds_version_older_than_validated"
+                     in item.finding_ids])
+
+    registry.remove_participant("[1, 1, 1, 1]")
+    self.assertFalse([item for item in self._scan(registry, pairs).issues
+                      if "environment.fastdds_version_older_than_validated"
+                      in item.finding_ids])
 
   def test_topic_wide_condition_is_one_issue_not_one_per_endpoint(self):
     """A type-name conflict belongs to the topic, not to each endpoint on it."""

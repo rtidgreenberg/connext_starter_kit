@@ -410,6 +410,29 @@ class TestTypeState(unittest.TestCase):
     context = CheckContext(endpoint=a, registry=FakeRegistry([], [a, b]))
     self.assertEqual(type_compat.check_type_name_conflict(context), [])
 
+  def test_name_conflict_names_every_endpoint_on_the_topic(self):
+    """Topic scope must withhold identity from the key, not from the reader.
+
+    The issue key is built from the singular identity fields; these plural
+    ones are what the Health column and the `i` filter read, so the condition
+    stays one issue and is still reachable from each row involved in it.
+    """
+    writer = endpoint_record(key="w1", kind="Writer", participant_key="pw",
+                             type_name="Sensor")
+    reader = endpoint_record(key="r1", kind="Reader", participant_key="pr",
+                             type_name="sensors::Sensor")
+    context = CheckContext(endpoint=writer,
+                           registry=FakeRegistry([], [writer, reader]))
+    evidence = type_compat.check_type_name_conflict(context)[0].evidence
+    self.assertEqual(evidence["scope"], "topic")
+    self.assertEqual(evidence["linked_writer_keys"], ["w1"])
+    self.assertEqual(evidence["linked_reader_keys"], ["r1"])
+    self.assertEqual(evidence["linked_participant_keys"], ["pr", "pw"])
+    # Not under the names _issue_key reads, or one condition becomes one
+    # issue per endpoint again.
+    self.assertNotIn("writer_key", evidence)
+    self.assertNotIn("endpoint_key", evidence)
+
   def test_assignability_failure_reported_directionally(self):
     writer = endpoint_record(key="writer", kind="Writer", type_name="WriterType",
                              type=FakeDynamicType("WriterType", assignable=True))

@@ -195,6 +195,20 @@ class TestSystemScan(unittest.TestCase):
     self.assertIn("3.5.4.0", warning.observed)
     self.assertNotIn("3.6.2.0", warning.observed)
 
+  def test_topic_wide_condition_is_one_issue_not_one_per_endpoint(self):
+    """A type-name conflict belongs to the topic, not to each endpoint on it."""
+    registry = registry_with_reliability_fault()
+    registry.endpoints["reader-guid"].type_name = "sensors::TelemetryType"
+    snapshot = system_scan.scan(
+        registry, own_qos=None, type_lookup_settings={"request_types_filter": "*"},
+        domain_id=7, captured_at=123.0)
+
+    conflicts = [item for item in snapshot.issues
+                 if "type.name_conflict" in item.finding_ids]
+    self.assertEqual(len(conflicts), 1)
+    self.assertEqual(conflicts[0].scope, "topic")
+    self.assertEqual(conflicts[0].topic_name, "Telemetry")
+
   def test_the_census_does_not_describe_type_extensibility(self):
     """One shared type must not put one note per endpoint in the issue list.
 
@@ -227,23 +241,27 @@ class TestSystemScan(unittest.TestCase):
     self.assertEqual([item for item in snapshot.issues
                       if "type.extensibility" in item.finding_ids], [])
 
-  def test_topic_wide_condition_is_one_issue_not_one_per_endpoint(self):
-    """A type-name conflict belongs to the topic, not to each endpoint on it."""
+  def test_a_topic_wide_condition_still_names_every_endpoint_it_involves(self):
+    """One issue, but reachable from each endpoint and participant in it.
+
+    Withholding identity was how topic scope kept the dedup honest, and it
+    also emptied the Health column and the `i` filter for both participants:
+    a conflict existed and every row involved in it rendered "OK". The
+    linkage keys are carried separately from the identity the issue key is
+    built from, so the issue stays single and is still findable.
+    """
     registry = registry_with_reliability_fault()
     registry.endpoints["reader-guid"].type_name = "sensors::TelemetryType"
     snapshot = system_scan.scan(
         registry, own_qos=None, type_lookup_settings={"request_types_filter": "*"},
         domain_id=7, captured_at=123.0)
 
-    conflicts = [item for item in snapshot.issues
-                 if "type.name_conflict" in item.finding_ids]
-    self.assertEqual(len(conflicts), 1)
-    self.assertEqual(conflicts[0].scope, "topic")
-    self.assertEqual(conflicts[0].topic_name, "Telemetry")
-    # Endpoint identity is deliberately absent: it is what would have split one
-    # condition into one issue per endpoint.
-    self.assertEqual(conflicts[0].writer_keys, ())
-    self.assertEqual(conflicts[0].reader_keys, ())
+    conflict = next(item for item in snapshot.issues
+                    if "type.name_conflict" in item.finding_ids)
+    self.assertEqual(conflict.writer_keys, ("writer-guid",))
+    self.assertEqual(conflict.reader_keys, ("reader-guid",))
+    self.assertEqual(conflict.participant_keys,
+                     ("participant-r", "participant-w"))
 
   def test_participant_wide_condition_is_one_issue_not_one_per_endpoint(self):
     """Neither endpoint advertises locators, so both fall back to the participant."""

@@ -164,9 +164,20 @@ def check_type_name_conflict(context):
       remedy=("Align the type names, or configure type-consistency enforcement to "
               "ignore the name difference if the structures really are compatible."),
       # Topic-scoped: the condition belongs to the topic, not to whichever
-      # endpoint on it the caller happened to be iterating.
+      # endpoint on it the caller happened to be iterating. The `linked_*` keys
+      # name every endpoint involved without entering the issue key, so the
+      # Health column and the `i` filter can find this issue from any of them
+      # while it stays one issue. Identity under its own name is what would
+      # split it back into one issue per endpoint - see system_scan._issue_key.
       evidence={"scope": "topic", "topic_name": endpoint.topic_name,
-                "type_names": sorted(names)},
+                "type_names": sorted(names),
+                "linked_writer_keys": sorted(
+                    peer.key for peer in peers if peer.is_writer),
+                "linked_reader_keys": sorted(
+                    peer.key for peer in peers if not peer.is_writer),
+                "linked_participant_keys": sorted(
+                    {peer.participant_key for peer in peers
+                     if peer.participant_key})},
       refs=[DOC_ASSIGNABILITY],
   )]
 

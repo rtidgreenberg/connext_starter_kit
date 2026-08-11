@@ -231,11 +231,16 @@ def _issues(findings):
         recommendation=primary.remedy,
         topic_name=str(evidence.get("topic_name", "")),
         scope=str(evidence.get("scope", "domain")),
-        writer_keys=_tuple(evidence.get("writer_key")),
-        reader_keys=_tuple(evidence.get("reader_key")),
-        participant_keys=tuple(sorted(set(_tuple(evidence.get("participant_key")) +
-                                          _tuple(evidence.get("writer_participant_key")) +
-                                          _tuple(evidence.get("reader_participant_key"))))),
+        # `linked_*` are the keys a topic- or participant-scoped finding names
+        # without claiming them as its own identity. They reach the Health
+        # column and the `i` filter, which read these tuples, while staying out
+        # of _issue_key - so one topic-wide condition stays one issue and is
+        # still reachable from every endpoint it involves.
+        writer_keys=_keys(evidence, "writer_key", "linked_writer_keys"),
+        reader_keys=_keys(evidence, "reader_key", "linked_reader_keys"),
+        participant_keys=_keys(evidence, "participant_key",
+                               "writer_participant_key", "reader_participant_key",
+                               "linked_participant_keys"),
         evidence=_freeze(evidence),
         explained_by=tuple(sorted({cause for item in grouped_findings
                                    for cause in item.explained_by})),
@@ -244,8 +249,22 @@ def _issues(findings):
                                                   item.finding_ids, item.key)))
 
 
+def _keys(evidence, *names):
+  """Union of several evidence fields as one sorted, deduplicated tuple."""
+  found = ()
+  for name in names:
+    found += _tuple(evidence.get(name))
+  return tuple(sorted(set(found)))
+
+
 def _issue_key(finding, evidence):
-  """Stable identity for one condition, independent of its display text."""
+  """Stable identity for one condition, independent of its display text.
+
+  Reads only the singular identity fields. The `linked_*` fields are
+  deliberately not read: they exist so a topic-scoped condition can name every
+  endpoint it involves without that identity splitting it into one issue per
+  endpoint, which is the whole reason topic scope withheld identity before.
+  """
   identities = [
       str(evidence.get("writer_key", "")),
       str(evidence.get("reader_key", "")),

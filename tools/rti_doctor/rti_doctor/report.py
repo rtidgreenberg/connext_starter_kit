@@ -28,9 +28,9 @@ THIN = "-" * WIDTH
 
 #: What a field observable only in RTPS packets says when no capture has been
 #: run. Rendering the field as absent, or omitting its section, made "nobody
-#: looked" indistinguishable from "there is nothing there" - and since captures
-#: are now only ever started when an operator asks, "nobody looked" is the
-#: normal state rather than an unusual one.
+#: looked" indistinguishable from "there is nothing there" - and a capture is
+#: still only ever started when someone asked for one, so "nobody looked" stays
+#: a normal state: a report opened passively, or one where Skip was the answer.
 CAPTURE_PLACEHOLDER = "Run capture to ascertain"
 
 #: Label pad for the CAPTURE EVIDENCE summary. Its labels are indented two
@@ -38,9 +38,12 @@ CAPTURE_PLACEHOLDER = "Run capture to ascertain"
 #: value against the label rather than wrapping it.
 CAPTURE_LABEL_PAD = 24
 
-#: How to ascertain it, stated wherever the placeholder appears.
-CAPTURE_HINT = ("Open an endpoint report and press c to capture RTPS packets for "
-                "that endpoint.")
+#: How to ascertain it, stated wherever the placeholder appears. Opening an
+#: endpoint report for diagnosis offers a capture, but a report can reach here
+#: having been opened passively or with Skip as the answer, so name the key too.
+CAPTURE_HINT = ("Open an endpoint report for diagnosis and choose a capture "
+                "interface, or press c on one, to capture RTPS packets for that "
+                "endpoint.")
 
 
 def _section(title):
@@ -270,8 +273,8 @@ def render_view_sections(data):
           "No direct RTPS packet capture was requested.",
           "",
           f"Fast DDS version: {CAPTURE_PLACEHOLDER}.",
-          "Press c to capture RTPS packets for this endpoint. Nothing is "
-          "captured until you do.", ""]),
+          "Press c to capture RTPS packets for this endpoint, C to choose the "
+          "interface.", ""]),
       "config": "\n".join(_render_config_appendix(data)),
   }
 

@@ -819,12 +819,28 @@ class LiveCapture:
     self.duration = duration
     self.process = None
     self.error = None
+    #: Where `error` came from: "start" if the capture never ran at all, "stop"
+    #: if it ran and then ended badly, "read" if it left nothing to parse. The
+    #: caller needs the difference: a capture that could not start is a property
+    #: of the host - no tshark, no capture privileges - and says the next one
+    #: will fail the same way, while one that started and was killed late says
+    #: nothing about the next.
+    self.error_stage = None
     self.started_at = None
     # tshark writes "Capturing on ..." and a running packet count to stderr for
     # the whole capture. An undrained PIPE fills at 64KB and blocks the process
     # mid-capture, so it goes to a file that both start() and finish() read.
     self.log_path = self.output_path + ".tshark.log"
     self._log = None
+
+  def _fail(self, stage, reason):
+    """Record the first failure and what stage it happened at.
+
+    First only: a capture that could not start also exits non-zero, and the
+    start failure is the one that explains the run.
+    """
+    if self.error is None:
+      self.error, self.error_stage = reason, stage
 
   def _stderr_text(self):
     try:
@@ -835,7 +851,7 @@ class LiveCapture:
 
   def start(self):
     if not self.tshark_path:
-      self.error = "tshark was not found on PATH"
+      self._fail("start", "tshark was not found on PATH")
       return
     directory = os.path.dirname(self.output_path)
     if directory:
@@ -854,9 +870,10 @@ class LiveCapture:
       time.sleep(1.0)
       if self.process.poll() is not None:
         self.process.wait()
-        self.error = self._stderr_text() or "tshark stopped before capture began"
+        self._fail("start",
+                   self._stderr_text() or "tshark stopped before capture began")
     except OSError as error:
-      self.error = f"could not start tshark: {error}"
+      self._fail("start", f"could not start tshark: {error}")
 
   def stop(self):
     """Terminate the capture and record how it ended. Safe to call twice.
@@ -882,14 +899,14 @@ class LiveCapture:
       except subprocess.TimeoutExpired:
         self.process.kill()
         self.process.wait()
-        self.error = "tshark did not exit after termination and was killed"
+        self._fail("stop", "tshark did not exit after termination and was killed")
     # Outside the poll() guard on purpose. A tshark that died mid-capture -
     # interface removed, permissions revoked, disk full - has already exited
     # by now, and checking its status only when it was still running reported
     # the resulting empty file as a successful capture of zero packets.
     if self.error is None and self.process.returncode not in (0, -15):
-      self.error = (self._stderr_text()
-                    or f"tshark exited with {self.process.returncode}")
+      self._fail("stop", self._stderr_text()
+                 or f"tshark exited with {self.process.returncode}")
     if self._log is not None:
       self._log.close()
       self._log = None
@@ -897,11 +914,12 @@ class LiveCapture:
   def _unusable(self, evidence_kind):
     """The capture's own failure, or nothing to read, as an evidence mapping."""
     if self.error:
-      return {"error": self.error, "source": self.output_path,
-              "capture_filter": self.capture_filter}
+      return {"error": self.error, "error_stage": self.error_stage,
+              "source": self.output_path, "capture_filter": self.capture_filter}
     if not os.path.isfile(self.output_path):
       return {"error": "tshark exited without creating a capture file; no packets "
                        f"were available for {evidence_kind} evidence",
+              "error_stage": "read",
               "source": self.output_path, "capture_filter": self.capture_filter}
     return None
 

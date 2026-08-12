@@ -6,7 +6,7 @@ import os
 import sys
 import time
 
-from . import compat, discovery, domain_scan, engine, records, report, wire
+from . import compat, discovery, domain_scan, engine, paths, records, report, wire
 
 DEFAULT_SCAN_TIMEOUT = 32.0
 DEFAULT_PROBE_TIMEOUT = 10.0
@@ -142,8 +142,10 @@ def parse_args(argv=None):
                             help="Analyze RTPS user-data packets in an existing PCAP/PCAPNG")
   packet_group.add_argument("--capture-interface", default=None,
                             help="Interface for packet capture: captured while probing "
-                                 "with --topic, or used by the TUI 'c' capture action "
-                                 "(default: any)")
+                                 "with --topic. In the TUI it answers the capture "
+                                 "question up front, so every endpoint report captures "
+                                 "on entry without asking (no default: the TUI asks, "
+                                 "and Skip is an answer)")
   parser.add_argument("-i", "--interval", type=float, default=2.0,
                       help="UI refresh interval in seconds (default: 2.0)")
   parser.add_argument("--debug-log", default=os.environ.get("RTI_DOCTOR_DEBUG_LOG"),
@@ -516,6 +518,11 @@ def main(argv=None):
   # block. The duplicated cleanup that used to sit on the readiness return path
   # is gone with it, because that path now leaves through the same `finally` as
   # every other.
+  # Set once the TUI owns the session, so the capture sweep in `finally` knows
+  # whether there was a TUI session to sweep after. A plain flag rather than
+  # "did it write any artifacts": headless `--topic --capture-interface` writes
+  # one too, and that operator asked for it on the command line.
+  tui_ran = False
   try:
     session.type_lookup_settings.update(connext_logging)
     if not _wait_for_remote_participants(
@@ -532,6 +539,7 @@ def main(argv=None):
 
     from .app import RTIDoctorApp
     _settle(session, min(args.settle, 1.0))
+    tui_ran = True
     RTIDoctorApp(session, interval=args.interval).run()
     return EXIT_OK
   except Exception as error:  # noqa: BLE001 - reported, not swallowed
@@ -539,7 +547,31 @@ def main(argv=None):
     # cannot be allowed to reach the shell as the finding-error exit code.
     return _cannot_start("complete this run", error)
   finally:
+    # In the `finally`, not on the success path: a TUI that raised is exactly
+    # the run whose captures nobody will look at, and leaving them behind is
+    # the leak CAP-1 exists to close.
+    if tui_ran:
+      _sweep_captures(session)
     _close_participant(participant)
+
+
+def _sweep_captures(session):
+  """Remove the TUI session's unsaved captures on the way out (CAP-1).
+
+  The TUI now offers a capture on entry to every endpoint report, so a session
+  spent browsing leaves one PCAPNG and one tshark log per report opened, and
+  nothing removed them (N2). A saved report cites its capture in Appendix C and
+  keeps it; everything else was scaffolding for a report that is already gone.
+
+  TUI only. A headless `--capture-interface` run named the interface on the
+  command line and wants the file it asked for.
+  """
+  removed = session.sweep_capture_artifacts()
+  if removed:
+    print(f"Removed {len(removed)} unsaved capture artifact(s) from "
+          f"{paths.test_output_path('rti_doctor_captures')}. "
+          f"Set RTI_DOCTOR_KEEP_ARTIFACTS=1 to keep them, or save a report "
+          f"with 's' to keep the capture it cites.")
 
 
 def _close_participant(participant):

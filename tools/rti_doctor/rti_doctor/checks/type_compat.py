@@ -128,6 +128,8 @@ def check_type_state(context):
                 "type_name": endpoint.type_name,
                 "endpoint_role": role,
                 "request_types_filter": request_filter,
+                # Tri-state on purpose: `None` records that no capture looked,
+                # rather than reporting the peer as not having advertised.
                 "type_information_observed": context.type_information_observed,
                 "type_wait_seconds": context.type_wait},
       refs=[DOC_TYPELOOKUP, DOC_TYPE_REPR],

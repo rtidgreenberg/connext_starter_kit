@@ -5,6 +5,7 @@ a report that differs depending on how it was invoked would be worthless.
 """
 
 import logging
+import os
 import time
 
 from . import checks, paths, probe as probe_mod, report, system_scan, topology, wire
@@ -23,6 +24,22 @@ DEFAULT_CAPTURE_SECONDS = 8.0
 CAPTURE_DURATION_MARGIN = 15.0
 
 
+def _type_information_observed(endpoint, discovery_evidence):
+  """Whether the capture saw PID_TYPE_INFORMATION from this endpoint's peer.
+
+  Three-valued, and the third value is the point: `None` means no capture
+  produced discovery evidence to look in. `False` would say the peer did not
+  advertise TypeInformation, which is a claim about the peer - and a report
+  saved after `Skip`, or a headless run without `--capture-interface`, would be
+  making it having never looked. Both remain falsy, so the remedy text this
+  gates is unaffected; only what the finding records about itself changes.
+  """
+  if not discovery_evidence or discovery_evidence.get("error"):
+    return None
+  return wire.record_guid_prefix(endpoint) in set(
+      discovery_evidence.get("type_information_participants", ()))
+
+
 class Session:
   """One diagnostic session: a participant, a registry, and our own config."""
 
@@ -39,15 +56,119 @@ class Session:
     self.probe_timeout = probe_timeout
     self.active_domains = active_domains or set()
     self.domain_scan_ran = domain_scan_ran
-    # The interface an explicitly requested capture uses. Nothing starts a
-    # capture because this is set; it only says where one would listen.
+    # Where a capture listens. Once `capture_choice_made` is set, `None` means
+    # "nowhere" - a recorded Skip - rather than "not asked yet".
     self.capture_interface = capture_interface
+    # Whether the operator (or `--capture-interface`) has answered the capture
+    # question. A report asks on entry only while this is False, so one answer
+    # covers the session and navigating between reports does not re-prompt.
+    self.capture_choice_made = capture_interface is not None
+    # Set by the first capture that fails, which turns capture off for the rest
+    # of the session: on a host without capture privileges, every later report
+    # would otherwise carry tshark's refusal as its wire evidence.
+    self.capture_off_reason = None
+    # Single-flight across screens, as a deadline rather than a flag. See
+    # `claim_pass`.
+    self.pass_deadline = 0.0
+    # CAP-1. Every capture written this session, and the subset a saved report
+    # cites - a saved report names its capture in Appendix C, so deleting that
+    # file would break the report's own citation.
+    self.capture_artifacts = []
+    self.retained_artifacts = set()
     self._fastdds_product_versions = ()
     self._fastdds_participant_versions = ()
     self._last_scan = None
 
+  # --- Single-flight for the diagnostic pass ---------------------------------
+
+  def claim_pass(self, seconds):
+    """Hold the single-flight claim for at most `seconds`.
+
+    Only one combined probe+capture pass may run at a time, and the claim has
+    to outlive the screen that took it: workers are not cancelled synchronously
+    and `asyncio.to_thread` cannot be cancelled at all, so a report popped
+    mid-pass leaves tshark running and a probe sampling. Two passes on one
+    topic would each observe the other's traffic.
+
+    A deadline rather than a flag, for the same reason `LiveCapture` takes
+    tshark's own ``-a duration:`` ceiling: the holder is not guaranteed to come
+    back and release it. A worker cancelled between being scheduled and first
+    running executes neither its own `finally` nor the thread's, and a claim
+    left set that way would dead-end every later report for the life of the
+    session. `release_pass` is still the normal end; the ceiling is the
+    backstop, and it is the same ceiling that stops the abandoned tshark - past
+    it, there is nothing left running to protect.
+    """
+    self.pass_deadline = time.monotonic() + seconds
+
+  def release_pass(self):
+    """Give up the claim. Idempotent, and safe to call from any thread."""
+    self.pass_deadline = 0.0
+
+  def pass_in_flight(self):
+    return time.monotonic() < self.pass_deadline
+
+  # --- The capture question --------------------------------------------------
+
+  def record_capture_choice(self, interface):
+    """Remember an answer to the capture question: an interface, or Skip.
+
+    `interface=None` is Skip - probe without capturing - and is as much an
+    answer as a name is, so it stops the asking too. Also the re-enable path
+    after `disable_capture`: choosing again is how an operator says the reason
+    no longer applies.
+    """
+    self.capture_interface = interface
+    self.capture_choice_made = True
+    self.capture_off_reason = None
+
+  def disable_capture(self, reason):
+    """Turn capture off for the session after one failed attempt.
+
+    The harm is report *content*, not the status line: a failed capture attaches
+    `wire_evidence={"error": ...}` to every report that tries, which renders as
+    a wire-evidence error in reports nobody asked to include one in.
+    """
+    self.capture_off_reason = reason
+    self.capture_interface = None
+    self.capture_choice_made = True
+
+  # --- Capture artifacts (CAP-1) ---------------------------------------------
+
+  def retain_capture(self, path):
+    """Keep this capture past exit, because a saved report points at it."""
+    if path:
+      self.retained_artifacts.add(os.path.abspath(path))
+
+  def sweep_capture_artifacts(self):
+    """Delete captures no saved report cites; return what was removed.
+
+    Capture is now offered on entry to every endpoint report, so a session spent
+    browsing leaves one PCAPNG and one tshark log per report opened (N2/CAP-1).
+    `RTI_DOCTOR_KEEP_ARTIFACTS` opts out, matching the fault artifacts in HAR-3.
+    Never raises: this runs on the way out, where an unlink that fails must not
+    replace the run's real exit code.
+    """
+    if os.environ.get("RTI_DOCTOR_KEEP_ARTIFACTS"):
+      return []
+    removed = []
+    for path in self.capture_artifacts:
+      if os.path.abspath(path) in self.retained_artifacts:
+        continue
+      # The tshark log is written beside the capture and is only readable
+      # against it, so it goes with it rather than outliving it.
+      for candidate in (path, f"{path}.tshark.log"):
+        try:
+          os.remove(candidate)
+          removed.append(candidate)
+        except FileNotFoundError:
+          pass
+        except OSError as e:
+          logging.error(f"[engine] could not remove {candidate}: {e}")
+    return removed
+
   def _context(self, endpoint=None, participant_record=None, probe_result=None,
-               type_information_observed=False):
+               type_information_observed=None):
     return CheckContext(
         registry=self.registry,
         own_qos=self.own_qos,
@@ -174,11 +295,15 @@ class Session:
     if capture_seconds is None:
       capture_seconds = self.probe_timeout if probe else DEFAULT_CAPTURE_SECONDS
     if capture_interface:
+      # A caller that told the operator where the capture would land passes
+      # that path in, so the file named on screen is the file written.
+      destination = capture_path or self.capture_path()
+      # Recorded before the capture runs, not after: a capture that fails still
+      # leaves a tshark log, and one that is abandoned still leaves a file.
+      self.capture_artifacts.append(destination)
       capture = wire.LiveCapture(
           capture_interface,
-          # A caller that told the operator where the capture would land passes
-          # that path in, so the file named on screen is the file written.
-          capture_path or self.capture_path(),
+          destination,
           wire.capture_filter(
               self.domain_id, endpoint, self.own_qos,
               # An endpoint that advertises no locators of its own inherits its
@@ -218,10 +343,8 @@ class Session:
     context = self._context(endpoint=endpoint,
                             participant_record=participant_record,
                 probe_result=probe_result,
-                type_information_observed=(
-                  wire.record_guid_prefix(endpoint) in set(
-                    (discovery_evidence or {}).get(
-                      "type_information_participants", ()))) )
+                type_information_observed=_type_information_observed(
+                    endpoint, discovery_evidence))
     selected = checks.static_checks()
     if probe_result is not None:
       if probe_result.probe_kind == "writer":

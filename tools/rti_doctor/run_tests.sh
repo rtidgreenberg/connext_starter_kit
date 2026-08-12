@@ -26,6 +26,7 @@ TIER="${1:-unit}"
 UNIT=(
     test_cli
     test_checks
+    test_engine
     test_wire
     test_wire_discovery
     test_findings

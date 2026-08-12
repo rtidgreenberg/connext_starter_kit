@@ -29,13 +29,14 @@ selecting one shows only that severity. Keys:
 
 | Key | Action |
 |---|---|
-| `Up` / `Down` / `Enter` | Select a menu item, drill into a participant/topic, or deep-diagnose an endpoint |
+| `Up` / `Down` / `Enter` | Select a menu item, drill into a participant/topic, or run the full diagnostic on an endpoint |
 | `1` / `2` / `3` / `4` | In Topology: participants, readers, writers, topics |
-| `o` | Open a passive report for the selected writer where available |
+| `o` | Open a report for the selected endpoint *without* probing or capturing — the cheap look |
 | `i` | In Topology: the issues linked to the highlighted row |
 | `m` | Observed domain metrics |
 | `r` | Re-scan (every screen shows a snapshot, never a live feed) |
 | `c` | On an endpoint report: capture RTPS packets for that endpoint |
+| `C` | On an endpoint report: choose the capture interface, and run the pass again |
 | `s` | Save the current system or diagnostic report as a shareable text file |
 | `b` / `Esc` | Back |
 | `q` | Quit |
@@ -45,12 +46,31 @@ under you while you read it. `r` takes a new one.
 
 ## Packet Capture Is Something You Ask For
 
-Nothing runs `tshark` unless you press `c` on a reader or writer report. Before
-it starts, the screen states the interface, the file it will write (under
-`tools/rti_doctor/test_output/rti_doctor_captures/`, with a `.tshark.log` beside
-it) and how long it will run; the capture is bounded by tshark's own
-`-a duration:`, so one that is abandoned still stops. `--capture-interface`
-chooses the interface; without it, `c` uses `any`.
+Opening a reader or writer report runs the full diagnostic in **one pass** —
+a probe and, if you consent to one, a packet capture. The first such report of
+a session asks where to capture, with `Skip` at the top of the list for "probe,
+but capture nothing". Both answers are remembered, so later reports run without
+asking; `C` changes the answer, and `--capture-interface` gives it up front.
+
+One pass, not two. A capture with nothing on the wire is an empty file, so a
+capture on a probed endpoint has to be the thing that drives the probe — when
+capture was a separate keystroke, a full report cost two probes.
+
+Before anything starts, the screen states the interface, the file it will write
+(under `tools/rti_doctor/test_output/rti_doctor_captures/`, with a
+`.tshark.log` beside it) and how long it will run; the capture is bounded by
+tshark's own `-a duration:`, so one that is abandoned still stops. If a capture
+fails — no capture privileges on this host, no `tshark` — capture turns itself
+off for the rest of the session rather than filing that refusal as the wire
+evidence of every later report. `C` turns it back on.
+
+Reports opened *passively* — `o`, or from an issue — probe nothing and capture
+nothing, and never prompt. `c` is still how you ask for evidence on one of
+those, and it does not upgrade them to a probe.
+
+On exit, captures no saved report cites are removed; saving a report with `s`
+keeps the capture it names in Appendix C. `RTI_DOCTOR_KEEP_ARTIFACTS=1` keeps
+everything, matching the fault-injection artifacts.
 
 A few facts are observable **only** in RTPS packets — a Fast DDS peer's product
 version above all — and reports render those as `Run capture to ascertain`
@@ -110,8 +130,10 @@ system it was pointed at.
           Advertise TypeObject v1 and disable TypeLookup v2 for an experiment
     --pcap PATH       Analyze RTPS user-data packets in an existing capture (with --topic)
     --capture-interface IFACE
-              Interface for packet capture: captured while probing with --topic,
-              or used by the TUI's 'c' capture action (default: any)
+              Interface for packet capture: captured while probing with --topic.
+              In the TUI it answers the capture question up front, so every
+              endpoint report captures on entry without asking (no default:
+              the TUI asks, and Skip is an answer)
 -i, --interval        UI refresh interval (default: 2.0)
     --debug-log PATH  Discovery/probe log output
     --connext-log PATH
@@ -357,11 +379,13 @@ data-representation selector or a missing dynamic member ID.
   self-inflicted blindness but cannot see the peer's configuration.
 - **The domain scan is best-effort**: it relies on RTI's default domain
   announcements, so an empty result is not proof that no other domain is active.
-- **Wire observation is opt-in and bounded.** `--pcap`, `--capture-interface`
-  and the TUI's `c` action use `tshark` to count RTPS DATA/DATA_FRAG submessages
-  and report the encapsulation IDs Wireshark actually decodes. Nothing else
-  captures: no capture starts at startup, on navigation, or on a report you
-  merely opened. A live capture applies
+- **Wire observation is consented to and bounded.** `--pcap`,
+  `--capture-interface` and the TUI's endpoint reports use `tshark` to count
+  RTPS DATA/DATA_FRAG submessages and report the encapsulation IDs Wireshark
+  actually decodes. Nothing captures at startup, and nothing captures on a
+  report opened passively; an endpoint report captures on entry only after you
+  have chosen an interface, and `Skip` is an answer it remembers. A live capture
+  applies
   a BPF filter for the selected domain's configured RTPS port range before packets
   are written; discovered writer ports outside that range are added explicitly.
   The resulting observations are then limited to the selected endpoint's RTPS

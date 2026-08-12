@@ -541,7 +541,7 @@ class TopologyHealthScreen(Screen):
   BINDINGS = [("1", "participants", "Participants"), ("2", "readers", "Readers"),
               ("3", "writers", "Writers"), ("4", "topics", "Topics"),
               ("r", "refresh", "Refresh"), ("i", "issues", "Linked issues"),
-              ("o", "open_report", "Open report"),
+              ("o", "passive_report", "Open report"),
               ("m", "metrics", "Metrics"), ("s", "save", "Save report"),
               ("b", "back", "Back"),
               ("escape", "back", "Back"), ("q", "quit_app", "Quit")]
@@ -702,6 +702,11 @@ class TopologyHealthScreen(Screen):
     return self.session.registry.endpoints.get(self.selected_key)
 
   def action_open_report(self):
+    """What Enter does: drill in, or open the full diagnostic on an endpoint.
+
+    Not bound to a key - `on_data_table_row_selected` is its only caller, so
+    what Enter means on a row stays defined in one place.
+    """
     if self.mode == "participants" and self.selected_key:
       participant = self.session.registry.participants.get(self.selected_key)
       if participant is not None:
@@ -715,12 +720,27 @@ class TopologyHealthScreen(Screen):
     if endpoint is not None:
       self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=True))
 
-  def action_debug(self):
+  def action_passive_report(self):
+    """`o`: static findings for one endpoint. No probe, no capture, no prompt.
+
+    `o` meant the same thing as Enter here and the opposite of `o` everywhere
+    else - `EndpointListScreen` and `TopicEndpointsScreen` have always used it
+    for the cheap look. So this screen, which is the one an operator skims
+    endpoints on, was the only endpoint list with no way into a report that
+    does not probe. That mattered less when Enter merely probed; it matters
+    more now that Enter also asks about capturing.
+    """
+    if self.mode not in ("readers", "writers"):
+      self.status.update(
+          "Open report applies to a reader or writer row. Press 2 or 3 for "
+          "those; Enter drills into a participant or topic.")
+      return
     endpoint = self._selected_endpoint()
     if endpoint is None:
-      self.status.update("Debug is available only when one endpoint is selected.")
+      self.status.update("Select a reader or writer row first.")
       return
-    self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=True))
+    self.app.push_screen(ReportScreen(self.session, endpoint=endpoint,
+                                      probe=False))
 
   def action_save(self):
     # Guarded before open(): the raise used to happen after the file was

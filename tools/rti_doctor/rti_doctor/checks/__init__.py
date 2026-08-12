@@ -34,7 +34,11 @@ class CheckContext:
   #: Live probe result, when one was run.
   probe: object = None
   #: Selected endpoint's participant advertised PID_TYPE_INFORMATION in capture.
-  type_information_observed: bool = False
+  #: `None` when no capture looked, which is not the same claim as `False` and
+  #: is the common case: a passively opened report, a `Skip`, or a headless run
+  #: without `--capture-interface`. Both are falsy, so a check that only gates
+  #: on it needs no change.
+  type_information_observed: object = None
   type_wait: float = 5.0
 
 

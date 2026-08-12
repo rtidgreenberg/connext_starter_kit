@@ -46,6 +46,12 @@ class FakeSession:
     self.type_wait = 0.0
     self.probe_timeout = 0.0
     self.capture_interface = None
+    self.capture_choice_made = False
+    self.capture_off_reason = None
+    self.pass_deadline = 0.0
+    self.capture_artifacts = []
+    self.retained_artifacts = set()
+    self.swept = 0
     self._last_scan = None
     self._fastdds_product_versions = ()
     self._fastdds_participant_versions = ()
@@ -53,6 +59,13 @@ class FakeSession:
   def system_scan(self, captured_at=None, max_age=0.0):
     return engine.Session.system_scan(self, captured_at=captured_at,
                                       max_age=max_age)
+
+  def sweep_capture_artifacts(self):
+    # The real method, so the TUI exit path's CAP-1 sweep stays under test
+    # rather than being stubbed out of the run it is part of. Counted as well,
+    # because whether it was reached at all is its own question.
+    self.swept += 1
+    return engine.Session.sweep_capture_artifacts(self)
 
 
 class Policy:
@@ -400,6 +413,53 @@ class TestNothingIsCapturedWithoutBeingAsked(MainHarness):
   def test_the_startup_capture_entry_points_are_gone(self):
     for name in ("start_discovery_capture", "select_discovery_capture_interface"):
       self.assertFalse(hasattr(cli, name), f"{name} still exists")
+
+  def _run_tui(self, app_run):
+    """Run main() down the TUI path with `app_run` as the app's run method."""
+    session = FakeSession()
+
+    class FakeApp:
+      def __init__(self, session, interval=2.0):
+        self.session = session
+
+      def run(self):
+        return app_run()
+
+    with contextlib.ExitStack() as stack:
+      for name, value in (
+          ("build_session",
+           lambda *a, **k: (session, self.FakeParticipant())),
+          ("_wait_for_remote_participants", lambda *a, **k: True),
+          ("_write_ready_file", lambda *a, **k: None),
+          ("_settle", lambda s, seconds: None)):
+        stack.enter_context(mock.patch.object(cli, name, value))
+      stack.enter_context(mock.patch("rti_doctor.app.RTIDoctorApp", FakeApp))
+      stack.enter_context(mock.patch.object(
+          sys, "stdin", mock.Mock(isatty=lambda: True)))
+      stack.enter_context(redirect_stdout(io.StringIO()))
+      stack.enter_context(mock.patch.object(sys, "stderr", io.StringIO()))
+      code = cli.main(["--domain", "7", "--no-domain-scan"])
+    return session, code
+
+  def test_a_tui_that_raises_still_sweeps_its_captures(self):
+    """CAP-1's leak is worst on exactly the run that failed.
+
+    The sweep sat on the success path, so any exception out of the TUI left
+    every PCAPNG and tshark log the session had written - and a session that
+    crashed is the one whose captures nobody is coming back for.
+    """
+    def explode():
+      raise RuntimeError("the terminal went away")
+
+    session, code = self._run_tui(explode)
+
+    self.assertEqual(code, cli.EXIT_CANNOT_START)
+    self.assertEqual(session.swept, 1)
+
+  def test_a_headless_run_sweeps_nothing(self):
+    """`--topic --capture-interface` wrote the file that operator asked for."""
+    session, _participant, _code = self._run()
+    self.assertEqual(session.swept, 0)
 
   def test_a_capture_interface_is_accepted_without_a_topic(self):
     """It selects the TUI's capture interface; it does not start a capture."""

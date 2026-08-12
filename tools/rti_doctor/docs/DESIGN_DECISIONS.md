@@ -754,6 +754,62 @@ stays readable.
 	pointed somewhere specific - and is rejected only with `--system`, which
 	captures nothing. The capture is bounded by tshark's own `-a duration:`
 	rather than by the tool remembering to stop it.
+- **Amendment (2026-08-12): consent moves to entry, and the two passes become
+	one.** What this decision actually objected to was capture without consent,
+	and it fixed that by making capture a second, later action. That had a cost
+	it did not weigh: a capture with nothing on the wire is an empty file, so a
+	capture on a probed endpoint has to be the thing that drives the probe -
+	which made a full report cost **two** probes, one on mount and one under the
+	capture, roughly twenty seconds and two sets of DDS entities. It also left
+	the packet evidence behind a keystroke an operator had no way to know they
+	needed, in the one case where it decides the remedy: `type.no_type_info`
+	against a Fast DDS peer, where only SPDP carries the peer's product version.
+
+	An endpoint report opened for diagnosis (`Enter`, not `o`) therefore asks
+	the capture question **before** anything runs, and then runs one combined
+	`diagnose_endpoint`. The five properties this decision objected to stay
+	inverted: the interface is named before tshark is spawned, not assumed;
+	`Skip` is a first-class answer sitting under the cursor, so the reflexive
+	Enter captures nothing; either answer is remembered on the session, so
+	navigating does not re-prompt, and every entry still announces on screen
+	what is about to run and where the file lands; `C` changes the answer;
+	dismissing the picker is *not* an answer, so it probes, captures nothing,
+	and asks again next time. Reports opened passively - `o`, or from an issue -
+	still probe nothing, capture nothing, and never prompt.
+
+	Two consequences are new and are handled rather than accepted. A host
+	without capture privileges would otherwise carry tshark's refusal as the
+	wire evidence of every report, so the **first** failure turns capture off
+	for the session and says why; `C` turns it back on. And one artifact pair
+	per consented report is a real return of this decision's fifth objection,
+	so CAP-1 ships with it: captures no saved report cites are swept at exit,
+	with `RTI_DOCTOR_KEEP_ARTIFACTS=1` as the opt-out. `--capture-interface`
+	now means every endpoint report captures on entry, which is the honest
+	reading of "the flag already answered the question".
+
+	Also settled here: the `is_writer` gate on the report screen is gone, so
+	entering a **reader** report probes too. `probe_endpoint` already dispatched
+	non-writers to `probe_reader_endpoint` and the engine already selected the
+	right checks for the result; the gate was a TUI leftover that made the
+	reader probe reachable only headlessly.
+
+	Two review findings changed the shape of the above rather than just fixing
+	it. First, capture is disabled for the session only when the capture
+	**never started** - `LiveCapture` now records an `error_stage`, and only a
+	`start`-stage failure (no tshark, no capture privileges) is a property of
+	the host that predicts the next attempt. A capture that ran and ended badly
+	is one report's problem; disabling the session for it would be the opposite
+	mistake to the one this amendment is fixing. Second, the single-flight
+	guard is a **deadline, not a flag** (`claim_pass`/`release_pass`/
+	`pass_in_flight`). It must outlive the screen that took it, because
+	`asyncio.to_thread` cannot be cancelled and a popped report leaves tshark
+	running - so it cannot be released on unmount, and "the holder never comes
+	back" is therefore reachable: a worker cancelled between being scheduled and
+	first running executes no `finally` at all, and a flag left set that way
+	dead-ends every later report for the life of the session. The claim is taken
+	for the probe window plus `CAPTURE_DURATION_MARGIN`, so it expires no sooner
+	than the tshark it protects and no later than that same ceiling - the same
+	self-limiting shape `LiveCapture` already uses for the capture itself.
 - **Problem:** Opening a writer report in the TUI silently starts a privileged
 	`tshark` capture on `any`, creates packet-capture artifacts, and delays the
 	report even when the operator did not request wire evidence.

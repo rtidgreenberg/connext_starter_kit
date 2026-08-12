@@ -305,7 +305,7 @@ class TestTui(LiveFixtureTest):
         f"navigation went off course: {[c.__name__ for c in seen]}")
     self.assertEqual(self.selected_issue_severity, f.Severity.ERROR)
 
-  def test_opening_a_report_renders_it(self):
+  def test_opening_a_report_renders_it_and_asks_before_capturing(self):
     """Drill all the way to ReportScreen and confirm it renders.
 
     The navigation test stops at EndpointListScreen, so nothing exercised
@@ -313,11 +313,18 @@ class TestTui(LiveFixtureTest):
     `import asyncio` with it while ReportScreen still used it for
     `asyncio.to_thread`, and the whole suite stayed green - the screen would
     have raised NameError the first time an operator opened a report.
+
+    `o` on the topology screen opens a *probing* report, so it is also the
+    live check on the entry flow: the static findings are rendered before the
+    capture question is asked, the picker is what the operator lands on, and
+    dismissing it leaves a report rather than a dead end.
     """
     import asyncio
 
+    from rti_doctor.views.report_screen import (CaptureInterfaceScreen,
+                                                ReportScreen)
+
     from rti_doctor.app import RTIDoctorApp
-    from rti_doctor.views.report_screen import ReportScreen
 
     app = RTIDoctorApp(self.session, interval=1.0)
     seen = {}
@@ -329,16 +336,35 @@ class TestTui(LiveFixtureTest):
         await pilot.pause(0.6)
         await pilot.press("3")                 # writers
         await pilot.pause(0.4)
-        await pilot.press("o")                 # open a passive report
+
+        # `o` is the cheap look: a report, no probe, no capture, no question.
+        await pilot.press("o")
         await pilot.pause(1.5)
+        seen["passive"] = type(app.screen)
+        seen["passive_body"] = str(app.screen.body.render())
+        await pilot.press("escape")
+        await pilot.pause(0.5)
+
+        # Enter is the full diagnostic, so it asks first - on top of a report
+        # whose static findings are already rendered.
+        await pilot.press("enter")
+        await pilot.pause(1.5)
+        seen["asked"] = type(app.screen)
+        seen["body_behind_the_picker"] = str(app.screen_stack[-2].body.render())
+        await pilot.press("escape")            # dismissal is not an answer
+        await pilot.pause(0.5)
         seen["screen"] = type(app.screen)
-        seen["body"] = str(app.screen.body.render())
+        seen["answered"] = self.session.capture_choice_made
 
     asyncio.run(drive())
+    self.assertIs(seen["passive"], ReportScreen)
+    self.assertIs(seen["asked"], CaptureInterfaceScreen)
     self.assertIs(seen["screen"], ReportScreen)
-    self.assertIn("RTI DOCTOR INTEROP REPORT", seen["body"])
-    self.assertIn("VERDICT", seen["body"])
-    self.assertNotIn("Static checks failed", seen["body"])
+    self.assertFalse(seen["answered"])
+    for body in (seen["passive_body"], seen["body_behind_the_picker"]):
+      self.assertIn("RTI DOCTOR INTEROP REPORT", body)
+      self.assertIn("VERDICT", body)
+      self.assertNotIn("Static checks failed", body)
 
   def test_refresh_and_metrics_survive_navigating_away_mid_scan(self):
     """The refresh actions used to be bare asyncio.create_task.

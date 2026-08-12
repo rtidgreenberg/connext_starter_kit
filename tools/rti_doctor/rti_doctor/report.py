@@ -254,6 +254,11 @@ def render_view_sections(data):
   overview = _header_lines(data)
   overview += _section("VERDICT")
   overview += [data.verdict, ""]
+  # Same position as in render_text. The summary was added to the saved report
+  # first and not here, so pressing `c` in the TUI put the version in the Wire
+  # tab and nothing on Overview - the operator who ran the capture was the one
+  # person who could not see what it produced.
+  overview += _render_capture_summary(data)
   overview += _render_peer(data)
   overview += _render_topology(data)
   return {

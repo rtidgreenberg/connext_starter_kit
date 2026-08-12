@@ -682,6 +682,28 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     self.assertIn(report.CAPTURE_PLACEHOLDER, sections["wire"])
     self.assertIn("Press c", sections["wire"])
 
+  def test_the_overview_tab_shows_what_a_capture_produced(self):
+    """The operator who pressed `c` is the one who must see the result.
+
+    The capture summary went into the saved report first and not into
+    `render_view_sections`, so in the TUI the version landed in the Wire tab
+    and Overview showed nothing - the interactive path, which is the only way
+    to press `c` at all, was the one that did not report it.
+    """
+    sections = report.render_view_sections(report.ReportData(
+        domain_id=7, scope="topic 'Telemetry'", all_findings=[],
+        endpoint=FakeEndpoint("w1", "Writer"),
+        wire_evidence={"source": "c.pcapng", "packets": 0, "data_packets": 0},
+        discovery_evidence={"fastdds_product_versions": ["3.6.2.0"]}))
+    self.assertIn("CAPTURE EVIDENCE", sections["overview"])
+    self.assertIn("3.6.2.0", sections["overview"])
+
+  def test_the_overview_tab_is_unchanged_without_a_capture(self):
+    sections = report.render_view_sections(report.ReportData(
+        domain_id=7, scope="topic 'Telemetry'", all_findings=[],
+        endpoint=FakeEndpoint("w1", "Writer")))
+    self.assertNotIn("CAPTURE EVIDENCE", sections["overview"])
+
 
 if __name__ == "__main__":
   unittest.main()

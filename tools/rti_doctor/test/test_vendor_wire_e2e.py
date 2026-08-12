@@ -144,6 +144,27 @@ class TestFastDDSWireE2E(VendorWireE2E):
   FIXED_DOMAIN = 0
   FIXED_TOPIC = "hello_world_topic"
 
+  def test_the_reported_version_is_the_one_the_image_is_tagged_with(self):
+    """WIRE-1, against ground truth rather than against a synthetic row.
+
+    Every other product-version test builds tshark output by hand and so
+    assumes the columns are populated. They were not: Wireshark names
+    `rtps.param.product_version.*` only for RTI's vendor id, so a real Fast
+    DDS peer contributed no version at all while the bytes sat in the capture.
+    The image tag is what makes this checkable - it is the version the peer on
+    the other end of the capture is actually running.
+    """
+    expected = FASTDDS_IMAGE.rsplit(":", 1)[-1]
+    versions = self.run_doctor()["wire_observation"].get(
+        "fastdds_product_versions") or []
+    self.assertTrue(versions,
+                    "no Fast DDS product version in the report, though the "
+                    f"peer is {FASTDDS_IMAGE} and its SPDP carries the PID")
+    self.assertTrue(
+        any(version == expected or version.startswith(f"{expected}.")
+            for version in versions),
+        f"reported {versions}, expected the image's {expected}")
+
   @classmethod
   def start_publisher(cls):
     if not _command_available("docker"):

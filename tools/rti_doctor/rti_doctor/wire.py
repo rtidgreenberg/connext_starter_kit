@@ -10,12 +10,17 @@ import re
 import shutil
 import subprocess
 import time
+from xml.etree import ElementTree
 
 from . import compat, records
 
 #: Ceiling on a one-shot tshark read of an existing capture. An unbounded
 #: subprocess.run over an arbitrarily large PCAP hangs the whole report.
 TSHARK_READ_TIMEOUT = 120.0
+
+#: Ceiling on the field-support probe below, which opens no capture and should
+#: answer in milliseconds. Generous because it is paid at most once per field.
+TSHARK_FIELD_PROBE_TIMEOUT = 10.0
 
 
 #: DDS serialized-payload encapsulation identifiers observable in RTPS DATA.
@@ -66,6 +71,7 @@ class DiscoveryObservation:
   product_version_major: str = ""
   product_version_minor: str = ""
   product_version_release: str = ""
+  product_version_release_string: str = ""
   product_version_revision: str = ""
   writer_entity_id: str = ""
   reader_entity_id: str = ""
@@ -98,6 +104,7 @@ DISCOVERY_FIELDS = (
     ("rtps.param.product_version.major", "product_version_major"),
     ("rtps.param.product_version.minor", "product_version_minor"),
     ("rtps.param.product_version.release", "product_version_release"),
+    ("rtps.param.product_version.release_string", "product_version_release_string"),
     ("rtps.param.product_version.revision", "product_version_revision"),
     ("rtps.sm.wrEntityId", "writer_entity_id"),
     ("rtps.sm.rdEntityId", "reader_entity_id"),
@@ -106,6 +113,76 @@ DISCOVERY_FIELDS = (
     ("rtps.param.typeName", "type_name"),
     ("rtps.reliability_kind", "reliability_kind"),
 )
+
+
+#: Discovery columns whose tshark field is not in every Wireshark build.
+#:
+#: tshark validates every ``-e`` name *before* it opens the capture and refuses
+#: to run when one is unknown ("Some fields aren't valid"), so asking
+#: unconditionally for a field the local dissector lacks would trade one
+#: missing version line for every capture returning nothing at all. Each of
+#: these is probed once and dropped from the layout where it is absent.
+OPTIONAL_DISCOVERY_FIELDS = frozenset({
+    "rtps.param.product_version.release_string",
+})
+
+
+#: Answers, per (tshark, field), from `_tshark_supports_field`. The dissector
+#: cannot change under a running interpreter, so one probe per field is enough.
+_FIELD_SUPPORT = {}
+
+
+def reset_field_support_cache():
+  """Forget probed field support. For tests that vary the tshark they mock."""
+  _FIELD_SUPPORT.clear()
+
+
+def _tshark_supports_field(tshark_path, field):
+  """Whether this tshark build knows `field`.
+
+  `tshark -G fields` is the documented enumerator and costs about 12 s and
+  260,000 lines on the Wireshark 4.4.9 this was measured against - far too much
+  to pay before reading a capture. Field names are validated before the capture
+  file is opened, so naming the field against `os.devnull` answers the same
+  question in milliseconds: an unknown field is rejected outright, while a
+  known one gets far enough to complain about the file instead.
+  """
+  key = (tshark_path, field)
+  if key not in _FIELD_SUPPORT:
+    _FIELD_SUPPORT[key] = _probe_field(tshark_path, field)
+  return _FIELD_SUPPORT[key]
+
+
+def _probe_field(tshark_path, field):
+  """One `-e` validation run, keyed on the message rather than the exit code.
+
+  The rejection is identified by what tshark says, not by a status: a future
+  build that opened the file first would fail a valid field too, and the
+  message is what distinguishes the two cases.
+  """
+  try:
+    completed = subprocess.run(
+        [tshark_path, "-r", os.devnull, "-T", "fields", "-e", field],
+        text=True, capture_output=True, check=False,
+        timeout=TSHARK_FIELD_PROBE_TIMEOUT)
+  except (OSError, subprocess.TimeoutExpired):
+    # A probe that could not run has said nothing about the field. Treat it as
+    # absent: dropping an optional column costs one line of evidence, keeping
+    # an unknown one costs the entire capture.
+    return False
+  return not ("aren't valid" in completed.stderr and field in completed.stderr)
+
+
+def discovery_fields(tshark_path):
+  """The discovery layout this tshark can actually be asked for.
+
+  Both the ``-e`` list and the parser's positional mapping are built from the
+  return value, so a dropped optional column shifts neither out of step with
+  the other - the same reason `DISCOVERY_FIELDS` is one shared layout.
+  """
+  return tuple((field, attribute) for field, attribute in DISCOVERY_FIELDS
+               if field not in OPTIONAL_DISCOVERY_FIELDS
+               or _tshark_supports_field(tshark_path, field))
 
 
 def parse_tshark_fields(line):
@@ -140,34 +217,170 @@ def _hex_bytes(value):
   digits = value.replace(":", "").replace(OCCURRENCE_SEPARATOR, "")
   return len(digits) // 2
 
-def parse_discovery_fields(line):
+def parse_discovery_fields(line, layout=None):
   """Parse RTPS discovery metadata emitted by tshark's fields formatter.
 
-  Columns are assigned by position from ``DISCOVERY_FIELDS``, the same layout
-  that builds the capture command, so the two cannot drift apart.
+  Columns are assigned by position from `layout`, which defaults to the full
+  `DISCOVERY_FIELDS`. Callers that dropped an optional column from the capture
+  command must pass the same resolved layout here, or every column after the
+  gap is read one slot to the left.
   """
+  layout = layout or DISCOVERY_FIELDS
   fields = line.rstrip("\r\n").split("\t")
-  fields += [""] * (len(DISCOVERY_FIELDS) - len(fields))
+  fields += [""] * (len(layout) - len(fields))
   return DiscoveryObservation(**{attribute: fields[index]
-                                 for index, (_, attribute) in enumerate(DISCOVERY_FIELDS)})
+                                 for index, (_, attribute) in enumerate(layout)})
+
+
+#: Stands in for a version component the capture did not carry. A version keeps
+#: all four dot-separated components so its shape is stable for anything
+#: reading these strings, and an unknown component says so rather than being
+#: dropped or filled with a zero that was never advertised.
+UNKNOWN_VERSION_COMPONENT = "x"
 
 
 def _fastdds_product_versions(observation):
-  """Fast DDS versions advertised through its vendor-specific discovery PID."""
+  """Fast DDS versions advertised through its vendor-specific discovery PID.
+
+  Components are paired by position across the subfield columns, and a column
+  that is absent - or that carries a different number of occurrences than the
+  frame's major/minor - is rendered as `x` at every position rather than
+  truncating the pairing (M2). `zip` truncates to its shortest input, so an
+  empty release column used to discard the version whole, major and minor
+  included, and columns of unequal length used to pair the survivors into a
+  version that was never on the wire.
+
+  Major and minor are what make a version meaningful, so they must both be
+  present and of equal length. When they are not, nothing here can be paired by
+  position and no version is claimed at all.
+  """
   if not any(value.removeprefix("0x") == "010f" for value in _values(observation.vendor_id)):
     return []
-  parts = (observation.product_version_major, observation.product_version_minor,
-           observation.product_version_release, observation.product_version_revision)
-  values = [_values(part) for part in parts]
-  return [".".join(version) for version in zip(*values)]
+  major = _values(observation.product_version_major)
+  minor = _values(observation.product_version_minor)
+  if not major or len(major) != len(minor):
+    return []
+  # Not a second source: the dissector renders the one release octet under
+  # either name depending on the build, so the string form is a fallback for
+  # when the numeric column came back empty.
+  release = (_values(observation.product_version_release)
+             or _values(observation.product_version_release_string))
+  revision = _values(observation.product_version_revision)
+  count = len(major)
+  trailing = [part if len(part) == count else [] for part in (release, revision)]
+  return [".".join([major[index], minor[index]]
+                   + [part[index] if part else UNKNOWN_VERSION_COMPONENT
+                      for part in trailing])
+          for index in range(count)]
 
 
-def summarize_discovery(observations, source, capture_filter=None):
-  """Summarize observed RTPS SPDP/SEDP metadata without decoding user data."""
+#: The RTPS parameter carrying a product version. RTI and eProsima both use it,
+#: but Wireshark names its subfields only for RTI's vendor id - see
+#: `product_versions_from_pdml`.
+PRODUCT_VERSION_PID = "0x8000"
+
+#: eProsima's RTPS vendor id, in the form tshark renders it.
+FASTDDS_VENDOR_ID = "010f"
+
+
+def _version_from_parameter_data(octets):
+  """Four product-version octets, as tshark renders them, or None.
+
+  major.minor.release.revision, one octet each, so byte order does not apply.
+  """
+  if not octets or len(octets) != 8:
+    return None
+  try:
+    return ".".join(str(int(octets[index:index + 2], 16))
+                    for index in range(0, 8, 2))
+  except ValueError:
+    return None
+
+
+def product_versions_from_pdml(document, vendor_id=FASTDDS_VENDOR_ID):
+  """(guid prefix, version) for every peer of `vendor_id` in a PDML document.
+
+  Read from the parameter's own bytes rather than from
+  `rtps.param.product_version.*`, because Wireshark decodes those subfields
+  only for RTI's vendor id `0x0101`: the identical PID from eProsima's `0x010f`
+  dissects as `Unknown (0x8000)` and the named columns come back empty, so the
+  version was on the wire and absent from the report at the same time (WIRE-1).
+
+  PDML is what makes this safe. It nests each RTPS parameter as a node holding
+  its own `rtps.param.id` and `rtps.parameter_data`, so an id arrives already
+  paired with its bytes. The flat `-T fields` view cannot do this: it emits raw
+  parameter data only for the parameters the dissector leaves undissected, so
+  the id and data columns have different lengths and no correspondence - which
+  is `M2`'s defect in a new place.
+
+  Fields are walked in document order and attributed to the most recent GUID
+  prefix and vendor id seen, so a frame carrying more than one RTPS message
+  attributes each version to the message it actually arrived in.
+  """
+  try:
+    root = ElementTree.fromstring(document)
+  except ElementTree.ParseError:
+    return []
+  found = set()
+  for packet in root:
+    prefix = None
+    vendor = None
+    for field in packet.iter("field"):
+      name = field.get("name")
+      if name == "rtps.guidPrefix.src":
+        prefix = (field.get("show") or "").replace(":", "").lower()
+      elif name == "rtps.vendorId":
+        vendor = (field.get("show") or "").removeprefix("0x").lower()
+      children = {child.get("name"): child for child in field}
+      identifier = children.get("rtps.param.id")
+      payload = children.get("rtps.parameter_data")
+      if identifier is None or payload is None:
+        continue
+      if identifier.get("show") != PRODUCT_VERSION_PID or vendor != vendor_id:
+        continue
+      version = _version_from_parameter_data(payload.get("value"))
+      if version and prefix:
+        found.add((prefix, version))
+  return sorted(found)
+
+
+def read_product_versions(path, tshark_path=None, vendor_id=FASTDDS_VENDOR_ID):
+  """One PDML pass over `path` for peer product versions, or [] if it fails.
+
+  Narrowed to frames carrying the parameter, because PDML renders the whole
+  protocol tree and a discovery capture of any size would otherwise be read as
+  XML for nothing. It is a second pass over the same file either way (`N1`).
+  """
+  tshark_path = tshark_path or shutil.which("tshark")
+  if not tshark_path:
+    return []
+  try:
+    completed = subprocess.run(
+        [tshark_path, "-n", "-r", path,
+         "-Y", f"rtps.param.id == {PRODUCT_VERSION_PID}", "-T", "pdml"],
+        text=True, capture_output=True, check=False,
+        timeout=TSHARK_READ_TIMEOUT)
+  except (OSError, subprocess.TimeoutExpired):
+    return []
+  if completed.returncode:
+    return []
+  return product_versions_from_pdml(completed.stdout, vendor_id=vendor_id)
+
+
+def summarize_discovery(observations, source, capture_filter=None,
+                        participant_versions=()):
+  """Summarize observed RTPS SPDP/SEDP metadata without decoding user data.
+
+  `participant_versions` is the PDML-read (prefix, version) evidence, which is
+  the only source that works for a Fast DDS peer. It is merged with anything
+  the named subfields yielded rather than replacing it, so a Wireshark whose
+  dissector does name them agrees with itself instead of reporting twice.
+  """
   participants = {item.guid_prefix for item in observations if item.guid_prefix}
   topics = sorted({item.topic_name for item in observations if item.topic_name})
   fastdds_versions = sorted({version for item in observations
-                             for version in _fastdds_product_versions(item)})
+                             for version in _fastdds_product_versions(item)}
+                            | {version for _, version in participant_versions})
   # The same version paired with the GUID prefix that advertised it.
   # `fastdds_product_versions` alone cannot say which peer is on which version,
   # so a caller reporting one version per participant - or deciding whether the
@@ -178,7 +391,8 @@ def summarize_discovery(observations, source, capture_filter=None):
   fastdds_participant_versions = sorted({
       (item.guid_prefix.replace(":", "").lower(), version)
       for item in observations if item.guid_prefix
-      for version in _fastdds_product_versions(item)})
+      for version in _fastdds_product_versions(item)}
+      | {tuple(pair) for pair in participant_versions})
   # One tuple per (prefix, writer, reader) actually paired in a submessage.
   # Zipping the occurrence lists positionally rather than crossing them keeps
   # a coalesced frame from fabricating pairs that were never on the wire.
@@ -434,7 +648,9 @@ def inspect_discovery_pcap(path, tshark_path=None, capture_filter=None):
       "-T", "fields", "-E", "occurrence=a", "-E",
       f"aggregator={OCCURRENCE_SEPARATOR}",
   ]
-  for field, _ in DISCOVERY_FIELDS:
+  # Resolved once, and used for both the request and the parse below.
+  layout = discovery_fields(tshark_path)
+  for field, _ in layout:
     command += ["-e", field]
   try:
     completed = subprocess.run(command, text=True, capture_output=True,
@@ -447,9 +663,11 @@ def inspect_discovery_pcap(path, tshark_path=None, capture_filter=None):
   if completed.returncode:
     error = completed.stderr.strip() or f"tshark exited with {completed.returncode}"
     return {"error": error, "source": path}
-  observations = [parse_discovery_fields(line) for line in completed.stdout.splitlines()
-                  if line.strip()]
-  return summarize_discovery(observations, path, capture_filter=capture_filter)
+  observations = [parse_discovery_fields(line, layout)
+                  for line in completed.stdout.splitlines() if line.strip()]
+  return summarize_discovery(
+      observations, path, capture_filter=capture_filter,
+      participant_versions=read_product_versions(path, tshark_path=tshark_path))
 
 
 class LiveCapture:

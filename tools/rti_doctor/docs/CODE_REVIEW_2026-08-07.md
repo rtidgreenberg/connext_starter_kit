@@ -177,7 +177,7 @@ reading it, and which are numbered separately so these counts stay comparable.
 | [X7](#x7) | Open | Medium | Secure-vs-unsecure detection keys on the substring `secur` in a user-chosen plugin alias |
 | [X8](#x8) | Open | Medium | A wrong guess about `PropertyQosPolicy`'s shape silently disables two rung-0 checks |
 | [M1](#m1) | Open | Medium | `typewalk`'s type-graph recursion has no visited set and runs once per endpoint per scan |
-| [M2](#m2) | Open | Medium | `_fastdds_product_versions` zips four occurrence lists with no length check |
+| [M2](#m2) | **Fixed** 2026-08-11 | Medium | `_fastdds_product_versions` zips four occurrence lists with no length check |
 | [M3](#m3) | Open | Medium | `_walk_union` conflates "unparseable labels" with "this is the default member" |
 | [M4](#m4) | Open | Medium | `Session.system_scan` is not re-entrant and nothing serialises scans |
 | [M5](#m5) | Open | Medium | The scan copies the whole endpoint dict `P + T + 2W` times, re-paid every 3 s of navigation |
@@ -1332,6 +1332,42 @@ callers anywhere — dead code worth deleting rather than leaving as a trap.
 **Plausible** (depends on a peer advertising a wide reused type graph).
 
 ### M2
+
+**Status: Fixed** on 2026-08-11, branch `rti-doctor-review-fixes`, both halves.
+
+*The pairing.* `zip` is gone. Major and minor must both be present and of equal
+length — they are what makes a version meaningful, and if they cannot be paired
+by position nothing can. Every later component is rendered per occurrence from
+its own column when that column has the same length, and as `x` when it does
+not, so an absent release column now yields `3.6.x.0` instead of discarding a
+readable 3.6 outright, and a column of unequal length yields `x` rather than
+pairing one participant's release onto another's major. A version keeps all
+four dot-separated components, so the shape stays stable for anything reading
+these strings and an unknown component says that it is unknown.
+
+*The field name.* `rtps.param.product_version.release_string` is now a column
+of its own, consulted when the numeric `release` column comes back empty — one
+octet under two dissector names, not two sources. It is declared in a new
+`OPTIONAL_DISCOVERY_FIELDS`, because tshark validates every `-e` before opening
+the capture and **refuses to run** when one is unknown:
+
+```
+tshark: Some fields aren't valid:
+	rtps.param.product_version.bogus
+```
+
+Asking unconditionally would therefore have traded this finding's missing
+version line for every capture on an older Wireshark returning nothing at all.
+Support is probed once per field and cached. The probe is not `tshark -G
+fields`, which costs about 12 s and 260,000 lines on Wireshark 4.4.9; it names
+the field against `os.devnull` and reads the message, since validation happens
+before the file is opened — 0.124 s once, and free after. A probe that cannot
+run at all drops the column, on the same reasoning: one line of evidence is
+cheaper than the capture. Both the `-e` list and the parser's positional
+mapping are built from the resolved layout, so a dropped column cannot shift
+one out of step with the other — the defect [C1](#c1) was.
+
+Twelve tests in `test_wire_discovery.py`, all in the unit tier.
 
 **`_fastdds_product_versions` zips four independently-parsed occurrence lists
 with no length check, so one missing subfield discards the whole version.**

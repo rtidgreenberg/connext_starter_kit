@@ -87,6 +87,44 @@ stays readable.
 	`rti_doctor/wire.py`; `rti_doctor/engine.py`; `rti_doctor/system_scan.py`;
 	`test/test_system_scan.py`; `test/test_wire_discovery.py`.
 
+### WIRE-1: The Version Comes From the Parameter, Not From the Dissector's Names
+
+- **Date:** 2026-08-11
+- **Status:** Accepted
+- **Problem:** The pairing decided in C1a-C1c was sound and had nothing to pair.
+	Doctor read the version from `rtps.param.product_version.*`, and Wireshark
+	4.4.9 populates those subfields only for RTI's vendor id `0x0101`; the
+	identical PID from eProsima's `0x010f` dissects as `Unknown (0x8000)`. So a
+	Fast DDS peer's version sat in the capture as bytes while the report showed
+	nothing — on the one vendor the feature exists for. Measured against the
+	`rti-doctor-fastdds-e2e:3.6.2` fixture: its SPDP carries parameter `0x8000`
+	with `03060200`, which is 3.6.2.0.
+- **Decision:** Read parameter `0x8000`'s own bytes through a second, PDML pass,
+	and merge that with whatever the named subfields yielded rather than
+	replacing it. Keep the vendor gate on the reporting side: the read is
+	vendor-neutral, but only `0x010f` may contribute to a list the report labels
+	"Fast DDS versions advertised".
+- **Rationale:** PDML nests each RTPS parameter as a node holding its own
+	`rtps.param.id` and `rtps.parameter_data`, so an id arrives already paired
+	with its bytes. The flat `-T fields` view cannot do this — it emits raw data
+	only for parameters the dissector leaves undissected, so the id and data
+	columns have different lengths and no correspondence, which is M2's defect in
+	a new place. Merging rather than replacing means a Wireshark whose dissector
+	*does* name the subfields agrees with itself instead of reporting one peer
+	twice. Four octets, one each, so byte order does not arise.
+- **Consequences:** A second tshark pass over the same capture, narrowed by
+	`-Y "rtps.param.id == 0x8000"` because PDML renders the whole protocol tree;
+	this compounds N1. The `(prefix, version)` interface C1a-C1c depends on is
+	unchanged, so the per-participant finding, the Health column and the `i`
+	filter all keep working with no change.
+- **Follow-up:** If a Wireshark newer than 4.4.9 names `0x8000` for `0x010f`,
+	the subfield path starts contributing too and the merge already handles it.
+	The vendor gate is the piece to revisit if Doctor ever reports a non-Fast DDS
+	peer's product version.
+- **References:** `IMPROVEMENT_BACKLOG.md` WIRE-1; `CODE_REVIEW_2026-08-07.md`
+	C1, M2; `rti_doctor/wire.py`; `test/test_wire_discovery.py`;
+	`test/test_vendor_wire_e2e.py`.
+
 ### Q1: Unreadable Partition Becomes a False Error
 
 - **Date:** 2026-08-10

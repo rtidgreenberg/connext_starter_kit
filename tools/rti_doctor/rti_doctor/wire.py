@@ -22,6 +22,13 @@ TSHARK_READ_TIMEOUT = 120.0
 #: answer in milliseconds. Generous because it is paid at most once per field.
 TSHARK_FIELD_PROBE_TIMEOUT = 10.0
 
+#: Ceiling on `tshark -D`. Far below TSHARK_READ_TIMEOUT, which is sized for
+#: reading a whole capture file: enumerating interfaces opens nothing and should
+#: be near-instant, but extcap helpers are third-party binaries that tshark runs
+#: to enumerate remote-capture devices, and one of those hanging must not hold a
+#: picker open for two minutes.
+TSHARK_INTERFACE_LIST_TIMEOUT = 15.0
+
 
 #: DDS serialized-payload encapsulation identifiers observable in RTPS DATA.
 #: Each value identifies the encoding actually used on the wire, unlike the
@@ -614,7 +621,7 @@ def capture_interfaces(tshark_path=None):
     return (), "tshark was not found on PATH"
   try:
     completed = subprocess.run([tshark_path, "-D"], text=True, capture_output=True,
-                               check=False, timeout=TSHARK_READ_TIMEOUT)
+                               check=False, timeout=TSHARK_INTERFACE_LIST_TIMEOUT)
   except (OSError, subprocess.TimeoutExpired) as error:
     return (), f"could not list tshark interfaces: {error}"
   if completed.returncode:

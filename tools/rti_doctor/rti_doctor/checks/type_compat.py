@@ -418,7 +418,14 @@ def check_representation(context):
 
   ids = records.representation_ids(endpoint.representation)
   if not ids:
-    known = vendors.empty_representation_means_xcdr1(endpoint.vendor_id)
+    # Same distinction `qos_match` makes: an absent policy object is unreadable,
+    # not an advertised empty sequence, and only the latter has a measured
+    # meaning. The observed line below claims the sequence was "readable", so
+    # saying `empty_means_xcdr1` here for an unreadable policy would contradict
+    # it and licence an inference nothing measured.
+    advertised_empty = endpoint.representation is not None
+    known = advertised_empty and vendors.empty_representation_means_xcdr1(
+        endpoint.vendor_id)
     # Q3, decided 2026-08-12. This finding used to say the emptiness "says
     # nothing about what the writer supports, so NO incompatibility should be
     # inferred from it" - which, once `qos_match` started inferring XCDR1 and
@@ -437,7 +444,7 @@ def check_representation(context):
           "qos.rxo_mismatch above is the middleware's own verdict. This is "
           "recorded separately so the wire fact - that nothing was advertised - "
           "stays visible behind the inference drawn from it.")
-    else:
+    elif advertised_empty:
       root_cause = (
           "A writer using the default DataRepresentationQosPolicy advertises an "
           "empty sequence. What that means has not been measured for this "
@@ -447,6 +454,14 @@ def check_representation(context):
           "mean by the identical wire state. So NO incompatibility is inferred "
           "from it here, and the RxO comparison declines DATA_REPRESENTATION "
           "rather than guessing.")
+    else:
+      root_cause = (
+          "The DataRepresentation policy could not be read from this endpoint's "
+          "discovery data at all. That is not the same as a writer advertising "
+          "an empty sequence, and it carries none of the meaning measured for "
+          "one: NO incompatibility is inferred from it, and the RxO comparison "
+          "declines DATA_REPRESENTATION. An unreadable policy is not evidence "
+          "about what the writer offers, in either direction.")
     return [Finding(
         id="repr.not_advertised",
         rung=RUNG_TYPE,
@@ -455,12 +470,17 @@ def check_representation(context):
         # pair; when it is not, there is nothing to report. Neither case is an
         # issue in its own right.
         severity=Severity.OK,
-        title="Writer advertises no explicit data representation",
-        observed=("PublicationBuiltinTopicData.representation is an empty sequence "
-                  "(readable, but carrying no representation ids)."),
+        title=("Writer advertises no explicit data representation"
+               if advertised_empty else
+               "Writer data representation could not be read"),
+        observed=("PublicationBuiltinTopicData.representation is an empty "
+                  "sequence (readable, but carrying no representation ids)."
+                  if advertised_empty else
+                  "PublicationBuiltinTopicData.representation could not be read."),
         root_cause=root_cause,
         remedy="",
-        evidence={"representation": "not advertised",
+        evidence={"representation": "not advertised" if advertised_empty
+                                    else "unreadable",
                   "empty_means_xcdr1": known},
         refs=[DOC_TYPE_REPR],
     )]

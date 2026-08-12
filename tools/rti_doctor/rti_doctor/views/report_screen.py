@@ -51,16 +51,18 @@ class CaptureInterfaceScreen(Screen):
     self.session = session
     self.on_chosen = on_chosen
     self.table = DataTable()
-    self.interfaces, self.error = wire.capture_interfaces()
+    # Not enumerated here. `tshark -D` runs extcap helpers - third-party
+    # binaries - so it is a subprocess of unbounded duration, and __init__ runs
+    # on the Textual event loop where it would freeze the whole TUI. Same
+    # reason the probe runs in a worker, per this module's docstring.
+    self.interfaces, self.error = (), None
+    self.notice = None
 
   def compose(self):
     yield Header()
     yield Static("[bold]Capture interface[/bold]")
-    if self.error:
-      # A picker that cannot enumerate is still useful: `any` remains valid, and
-      # the reason belongs on screen rather than swallowed.
-      yield Static(f"Could not list interfaces: {escape(self.error)}. "
-                   f"'{wire.ANY_INTERFACE}' is still offered below.")
+    self.notice = Static("Listing capture interfaces...")
+    yield self.notice
     yield Static("Pick the interface to capture RTPS packets on. The choice is "
                  "remembered for this session. Capturing needs packet-capture "
                  f"privileges on whichever you choose, and '{wire.ANY_INTERFACE}' "
@@ -84,6 +86,14 @@ class CaptureInterfaceScreen(Screen):
     self.title = f"rti_doctor - capture interface domain {self.session.domain_id}"
     self.table.add_columns("#", "Interface", "Description")
     self.table.cursor_type = "row"
+    self.interfaces, self.error = await asyncio.to_thread(wire.capture_interfaces)
+    if self.error:
+      # A picker that cannot enumerate is still useful: `any` remains valid, and
+      # the reason belongs on screen rather than swallowed.
+      self.notice.update(f"Could not list interfaces: {escape(self.error)}. "
+                         f"'{wire.ANY_INTERFACE}' is still offered below.")
+    else:
+      self.notice.update(f"{len(self.interfaces)} interface(s) reported by tshark.")
     self.choices = self._choices()
     for index, (number, name, description) in enumerate(self.choices):
       self.table.add_row(number, name, description, key=str(index))

@@ -330,18 +330,10 @@ def _render_capture_summary(data):
                    "version for a non-RTI vendor"))
 
   encapsulations = (wire_evidence or {}).get("encapsulation_ids") or []
-  advertised = (records.representation_text(data.endpoint.representation)
-                if data.endpoint is not None else None)
   if encapsulations:
     observed = wire.encapsulation_text(encapsulations)
-    note = "what the writer actually serialized"
-    if advertised and advertised not in ("unreadable", "not advertised"):
-      # The one comparison worth making automatically: a peer can advertise one
-      # representation and serialize another, and only a capture can catch it.
-      agrees = advertised.split(",")[0].strip().lower() in observed.lower()
-      note = (f"agrees with the advertised {advertised}" if agrees else
-              f"**disagrees with the advertised {advertised}**")
-    gained.append(("Wire representation", observed, note))
+    gained.append(("Wire representation", observed,
+                   _representation_agreement(data.endpoint, observed)))
 
   data_frames = ((wire_evidence or {}).get("data_packets", 0)
                  + (wire_evidence or {}).get("data_fragments", 0))
@@ -366,6 +358,34 @@ def _render_capture_summary(data):
   lines.append("Full counts, filters and announcement details in Appendix C.")
   lines.append("")
   return lines
+
+
+def _representation_agreement(endpoint, observed):
+  """Whether the wire agrees with what a *writer* advertised, when that is knowable.
+
+  Deliberately narrow. The claim only holds for a writer, whose effective
+  representation is the first entry in its list; a reader's list is the set it
+  *accepts*, so a reader advertising [XCDR1, XCDR2] and receiving XCDR2 agrees
+  with the wire rather than contradicting it, and capture is supported on reader
+  reports. AUTO is excluded because its effective value is not determinable from
+  discovery at all - `qos_match` declines to compare it for the same reason, and
+  a summary claiming a disagreement it declines to claim would be the report
+  arguing with itself.
+
+  Returns a plain statement of fact when no comparison can honestly be made.
+  """
+  neutral = "what the writer actually serialized"
+  if endpoint is None or not getattr(endpoint, "is_writer", False):
+    return "observed on the wire"
+  ids = records.representation_ids(endpoint.representation)
+  if not ids or -1 in ids:
+    return neutral
+  advertised = records.REPRESENTATION_NAMES.get(ids[0])
+  if not advertised:
+    return neutral
+  if advertised.lower() in observed.lower():
+    return f"agrees with the advertised {advertised}"
+  return f"**disagrees with the advertised {advertised}**"
 
 
 def capture_headline(data):

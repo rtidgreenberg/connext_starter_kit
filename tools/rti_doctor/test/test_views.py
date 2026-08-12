@@ -705,22 +705,28 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     duplicate.
     """
     session = CaptureStubSession()
-    with mock.patch.object(
-        report_screen.wire, "capture_interfaces",
-        return_value=((("1", "any (Pseudo-device that captures on all interfaces)"),
-                       ("2", "lo")), None)):
-      choices = report_screen.CaptureInterfaceScreen(session, lambda _: None)._choices()
-    names = [name for _, name, _ in choices]
-    self.assertEqual(names, ["lo", "any"])
+    screen = report_screen.CaptureInterfaceScreen(session, lambda _: None)
+    screen.interfaces = (("1", "any (Pseudo-device that captures on all interfaces)"),
+                         ("2", "lo"))
+    self.assertEqual([name for _, name, _ in screen._choices()], ["lo", "any"])
 
   def test_the_picker_still_offers_any_when_tshark_cannot_enumerate(self):
     """A picker that cannot list must not become a dead end."""
     session = CaptureStubSession()
-    with mock.patch.object(report_screen.wire, "capture_interfaces",
-                           return_value=((), "tshark was not found on PATH")):
-      screen = report_screen.CaptureInterfaceScreen(session, lambda _: None)
+    screen = report_screen.CaptureInterfaceScreen(session, lambda _: None)
+    screen.interfaces, screen.error = (), "tshark was not found on PATH"
     self.assertEqual([name for _, name, _ in screen._choices()], ["any"])
-    self.assertEqual(screen.error, "tshark was not found on PATH")
+
+  def test_the_picker_does_not_enumerate_on_the_event_loop(self):
+    """`tshark -D` runs extcap helpers, so it must not block construction.
+
+    Constructing the screen is done from `action_capture`, on the Textual event
+    loop. Enumerating there froze the whole TUI for as long as tshark took.
+    """
+    session = CaptureStubSession()
+    with mock.patch.object(report_screen.wire, "capture_interfaces") as listed:
+      report_screen.CaptureInterfaceScreen(session, lambda _: None)
+    listed.assert_not_called()
 
   def test_a_participant_report_says_capture_needs_an_endpoint(self):
     session = CaptureStubSession()

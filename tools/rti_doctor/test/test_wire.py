@@ -270,6 +270,48 @@ class TestTsharkFields(unittest.TestCase):
         endpoint=endpoint)
     self.assertIn("disagrees with the advertised XCDR1", text)
 
+  def test_capture_summary_makes_no_claim_about_a_reader(self):
+    """The "first entry is effective" rule is writer-only.
+
+    A reader's list is the set it *accepts*, so a reader advertising both and
+    receiving XCDR2 agrees with the wire. Capture is supported on reader
+    reports, so applying the writer rule there reported a contradiction that
+    does not exist.
+    """
+    class Both:
+      value = [0, 2]
+
+    endpoint = records.EndpointRecord(key="r", kind="Reader",
+                                      representation=Both())
+    text = self._capture_report(
+        wire_evidence={"source": "c.pcapng", "packets": 1, "data_packets": 1,
+                       "encapsulation_ids": ["0x0007"]},
+        endpoint=endpoint)
+    self.assertIn("observed on the wire", text)
+    self.assertNotIn("disagrees", text)
+
+  def test_capture_summary_makes_no_claim_about_auto(self):
+    """AUTO's effective representation is not determinable from discovery.
+
+    `qos_match` declines to compare it for exactly that reason, so a summary
+    calling it a disagreement would be the report arguing with itself.
+    """
+    class Auto:
+      value = [-1]
+
+    endpoint = records.EndpointRecord(key="w", kind="Writer",
+                                      representation=Auto())
+    text = self._capture_report(
+        wire_evidence={"source": "c.pcapng", "packets": 1, "data_packets": 1,
+                       "encapsulation_ids": ["0x0007"]},
+        endpoint=endpoint)
+    summary = text.split("CAPTURE EVIDENCE", 1)[1].split("PEER", 1)[0]
+    self.assertNotIn("disagrees", summary)
+    # AUTO still belongs in the PEER block as the advertised fact; what must
+    # not happen is the summary drawing a conclusion from it.
+    self.assertNotIn("AUTO", summary)
+    self.assertIn("Representation  AUTO", text)
+
   def test_capture_summary_confirms_a_matching_representation(self):
     class Representation:
       value = [2]

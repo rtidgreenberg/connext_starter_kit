@@ -359,8 +359,15 @@ def compare_endpoints(writer, reader):
   writer_ids = records.representation_ids(writer.representation)
   reader_ids = records.representation_ids(reader.representation)
   writer_representation_inferred = False
-  if not writer_ids and reader_ids and vendors.empty_representation_means_xcdr1(
-      getattr(writer, "vendor_id", None)):
+  # `representation_ids` returns [] for BOTH an advertised empty sequence and a
+  # policy that could not be read at all, and only the first was measured to
+  # mean XCDR1. Inferring from the second would convert unreadable input into a
+  # positive claim and a false ERROR - which is precisely Q1 and Q2, in a new
+  # place. The presence of the policy object is what separates them.
+  if (not writer_ids and reader_ids
+      and writer.representation is not None
+      and vendors.empty_representation_means_xcdr1(
+          getattr(writer, "vendor_id", None))):
     writer_ids = [XCDR1_ID]
     writer_representation_inferred = True
   # An empty list is "could not read" (records.representation_ids says so), and

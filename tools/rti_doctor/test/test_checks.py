@@ -588,21 +588,44 @@ class TestTypeState(unittest.TestCase):
       def __init__(self, high, low):
         self.value = [high, low]
 
+    class Empty:
+      value = []
+
     measured = type_compat.check_representation(CheckContext(
-        endpoint=endpoint_record(representation=None,
+        endpoint=endpoint_record(representation=Empty(),
                                  vendor_id=VendorId(0x01, 0x0F))))[0]
     self.assertIs(measured.evidence["empty_means_xcdr1"], True)
     self.assertIn("XCDR1", measured.root_cause)
     self.assertNotIn("NO incompatibility", measured.root_cause)
 
     unmeasured = type_compat.check_representation(CheckContext(
-        endpoint=endpoint_record(representation=None,
+        endpoint=endpoint_record(representation=Empty(),
                                  vendor_id=VendorId(0x01, 0x10))))[0]
     self.assertIs(unmeasured.evidence["empty_means_xcdr1"], False)
     self.assertIn("NO incompatibility", unmeasured.root_cause)
     # Both stay OK: the ERROR, when there is one, belongs to the pair check.
     for finding in (measured, unmeasured):
       self.assertEqual(finding.severity, f.Severity.OK)
+
+  def test_an_unreadable_policy_is_not_an_advertised_empty_sequence(self):
+    """`representation_ids` returns [] for both, and only one has a meaning.
+
+    An absent policy object is unreadable input. Treating it as the measured
+    empty advertisement would claim XCDR1 about an endpoint that said nothing
+    readable at all - Q1 and Q2 in a new place - so it must decline whatever
+    the vendor is.
+    """
+    class VendorId:
+      value = [0x01, 0x0F]  # Fast DDS: measured, and still must not apply.
+
+    finding = type_compat.check_representation(CheckContext(
+        endpoint=endpoint_record(representation=None,
+                                 vendor_id=VendorId())))[0]
+    self.assertIs(finding.evidence["empty_means_xcdr1"], False)
+    self.assertEqual(finding.evidence["representation"], "unreadable")
+    self.assertIn("could not be read", finding.observed)
+    self.assertIn("NO incompatibility", finding.root_cause)
+    self.assertEqual(finding.severity, f.Severity.OK)
 
 
 class TestDiscoveryLifecycle(unittest.TestCase):
@@ -884,6 +907,23 @@ class TestRxO(unittest.TestCase):
     writer, reader, registry = self._pair(
         {"representation": self._representation([]),
          "vendor_id": self._vendor(0x7F, 0x7F)},
+        {"representation": self._representation([2])})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.compatible"])
+    unevaluated = [item["policy"]
+                   for item in result[0].evidence["policies_unevaluated"]]
+    self.assertIn("DATA_REPRESENTATION", unevaluated)
+
+  def test_an_unreadable_writer_representation_is_never_inferred_as_xcdr1(self):
+    """The Q1/Q2 trap the Q3 fix could have walked into.
+
+    `representation_ids` returns [] both for an advertised empty sequence and
+    for a policy that could not be read, and only the first was measured. If
+    the second is inferred as XCDR1 the tool converts unreadable input into a
+    false ERROR - which is what Q1 and Q2 were, in a new place.
+    """
+    writer, reader, registry = self._pair(
+        {"representation": None, "vendor_id": self._vendor(0x01, 0x0F)},
         {"representation": self._representation([2])})
     result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
     self.assertEqual(ids(result), ["qos.compatible"])

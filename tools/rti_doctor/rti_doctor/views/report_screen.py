@@ -183,9 +183,13 @@ class ReportScreen(Screen):
         self.status.update(f"Capture on '{self.capture_interface}' produced no "
                            f"packet evidence: {evidence['error']}")
       else:
+        # Name what was parsed, not just how many frames matched. A capture can
+        # yield the peer's product version while matching zero user-data
+        # frames, and the count alone reported that as nothing.
         self.status.update(
-            f"Capture complete: {evidence.get('packets', 0)} matching frames in "
-            f"{source}. See the Wire tab. {self.data.verdict}")
+            f"Capture complete: {report_mod.capture_headline(self.data)}. "
+            f"Written to {source}. See Overview for what it added, Wire for "
+            f"the full counts. {self.data.verdict}")
     except Exception as e:
       logging.error(f"[ReportScreen] capture failed: {e}")
       self.status.update(f"Capture failed: {e}")

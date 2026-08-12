@@ -698,6 +698,39 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     self.assertIn("CAPTURE EVIDENCE", sections["overview"])
     self.assertIn("3.6.2.0", sections["overview"])
 
+  def test_capture_headline_names_the_version_even_with_no_user_data(self):
+    """The fastdds-no-type-info case: zero frames, version still recovered.
+
+    This is the shape that made the old status line useless. It reported "0
+    matching frames" for a capture that had in fact read the peer's product
+    version out of parameter 0x8000, so the operator who pressed `c` was told
+    the capture found nothing.
+    """
+    headline = report.capture_headline(report.ReportData(
+        domain_id=7, scope="topic 'T'", all_findings=[],
+        wire_evidence={"source": "c.pcapng", "packets": 0, "data_packets": 0},
+        discovery_evidence={"fastdds_product_versions": ["3.6.2.0"]}))
+    self.assertIn("Fast DDS version 3.6.2.0", headline)
+    self.assertIn("no user DATA", headline)
+    self.assertIn("0 matching frames", headline)
+
+  def test_capture_headline_names_the_representation_it_parsed(self):
+    headline = report.capture_headline(report.ReportData(
+        domain_id=7, scope="topic 'T'", all_findings=[],
+        wire_evidence={"source": "c.pcapng", "packets": 4, "data_packets": 4,
+                       "encapsulation_ids": ["0x0001"]},
+        discovery_evidence={"fastdds_product_versions": []}))
+    self.assertIn("representation XCDR1", headline)
+    self.assertIn("no Fast DDS version advertised", headline)
+    self.assertIn("4 matching frames", headline)
+
+  def test_capture_headline_singularizes_one_frame(self):
+    headline = report.capture_headline(report.ReportData(
+        domain_id=7, scope="topic 'T'", all_findings=[],
+        wire_evidence={"source": "c.pcapng", "packets": 1}))
+    self.assertIn("1 matching frame;", headline + ";")
+    self.assertNotIn("1 matching frames", headline)
+
   def test_the_overview_tab_is_unchanged_without_a_capture(self):
     sections = report.render_view_sections(report.ReportData(
         domain_id=7, scope="topic 'Telemetry'", all_findings=[],

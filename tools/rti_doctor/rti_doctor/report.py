@@ -368,6 +368,45 @@ def _render_capture_summary(data):
   return lines
 
 
+def capture_headline(data):
+  """One line naming what a capture actually parsed, for the TUI status bar.
+
+  The status line used to report only a frame count, so the commonest real
+  result - "0 matching frames" - said nothing about whether the two facts a
+  capture exists to recover were recovered. A Fast DDS version can be read from
+  a capture carrying no user data at all, so the count alone is actively
+  misleading about what the operator just got.
+
+  Written for one line of status bar: no padding, no wrapping, present tense.
+  Kept beside `_render_capture_summary` so the headline and the report section
+  cannot drift into disagreeing about the same capture.
+  """
+  wire_evidence = data.wire_evidence or {}
+  discovery = data.discovery_evidence or {}
+  parts = []
+
+  versions = discovery.get("fastdds_product_versions") or []
+  if discovery.get("error"):
+    parts.append("version unreadable")
+  elif versions:
+    parts.append(f"Fast DDS version {', '.join(versions)}")
+  else:
+    parts.append("no Fast DDS version advertised")
+
+  encapsulations = wire_evidence.get("encapsulation_ids") or []
+  if encapsulations:
+    parts.append(f"representation {wire.encapsulation_text(encapsulations)}")
+  else:
+    # Name the reason rather than the absence: no user DATA and no readable
+    # representation are the same observation, and the operator needs to know
+    # which question went unanswered.
+    parts.append("no user DATA, so no wire representation")
+
+  frames = wire_evidence.get("packets", 0)
+  parts.append(f"{frames} matching frame{'' if frames == 1 else 's'}")
+  return "; ".join(parts)
+
+
 def _render_peer(data):
   endpoint = data.endpoint
   participant = data.participant

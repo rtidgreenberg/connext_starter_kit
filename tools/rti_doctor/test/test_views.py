@@ -590,16 +590,37 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     self.assertIn("Capture complete", result["after"])
     self.assertIn("12 matching frames", result["after"])
 
-  def test_c_defaults_to_any_only_when_nothing_was_selected(self):
-    session = CaptureStubSession()
+  def test_an_explicit_interface_captures_without_asking(self):
+    """`--capture-interface` already answered the question, so `c` must not ask."""
+    session = CaptureStubSession("eth0")
     result = self.drive(session, FakeEndpoint("w1", "Writer"), self._press_capture)
     requested = [call for call in session.calls if call["capture_interface"]]
-    self.assertEqual(requested[0]["capture_interface"], "any")
-    self.assertIn("'any'", result["announced"])
+    self.assertEqual(requested[0]["capture_interface"], "eth0")
+    self.assertIn("'eth0'", result["announced"])
+
+  def test_c_asks_for_an_interface_rather_than_defaulting_to_any(self):
+    """CAP-2/N3: `any` needs the broadest privileges, so it is not a default.
+
+    `c` used to capture on `any` whenever no `--capture-interface` was given,
+    which made the most privileged choice the silent one and left an operator
+    who may capture only `lo` no way to say so without relaunching.
+    """
+    session = CaptureStubSession()
+
+    async def steps(pilot, screen, out):
+      await pilot.press("c")
+      await pilot.pause()
+      out["screen"] = pilot.app.screen
+
+    result = self.drive(session, FakeEndpoint("w1", "Writer"), steps)
+    self.assertIsInstance(result["screen"], report_screen.CaptureInterfaceScreen)
+    # Nothing captured while the question is still open.
+    self.assertEqual([call for call in session.calls if call["capture_interface"]],
+                     [])
 
   def test_a_reader_report_can_capture_without_a_probe(self):
     """The reader half of the decision: capture is not a writer-only action."""
-    session = CaptureStubSession()
+    session = CaptureStubSession("lo")
     self.drive(session, FakeEndpoint("r1", "Reader"), self._press_capture)
     requested = [call for call in session.calls if call["capture_interface"]]
     self.assertEqual(len(requested), 1)
@@ -608,7 +629,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
                      engine.DEFAULT_CAPTURE_SECONDS)
 
   def test_a_failed_capture_is_reported_rather_than_filed_as_evidence(self):
-    session = CaptureStubSession()
+    session = CaptureStubSession("lo")
     session.wire_evidence = {"source": "one.pcapng",
                              "error": "you don't have permission to capture"}
     result = self.drive(session, FakeEndpoint("w1", "Writer"), self._press_capture)
@@ -646,12 +667,60 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
 
   def test_a_passive_report_captures_without_probing(self):
     """`o` opens a report with probing off; `c` must still collect evidence."""
-    session = CaptureStubSession()
+    session = CaptureStubSession("lo")
     self.drive(session, FakeEndpoint("w1", "Writer"), self._press_capture,
                probe=False)
     requested = [call for call in session.calls if call["capture_interface"]]
     self.assertEqual(len(requested), 1)
     self.assertFalse(requested[0]["probe"])
+
+  def test_choosing_an_interface_remembers_it_and_starts_the_capture(self):
+    """CAP-2's acceptance: capture on `lo` from a TUI launched with no flags."""
+    session = CaptureStubSession()
+
+    async def steps(pilot, screen, out):
+      with mock.patch.object(
+          report_screen.wire, "capture_interfaces",
+          return_value=((("1", "lo"), ("2", "eth0")), None)):
+        await pilot.press("c")
+        await pilot.pause()
+        picker = pilot.app.screen
+        # Row 0 is the first enumerated interface; `any` is last, not first.
+        picker.table.move_cursor(row=0)
+        await pilot.press("enter")
+        await pilot.app.workers.wait_for_complete()
+        await pilot.pause()
+      out["interface"] = session.capture_interface
+
+    result = self.drive(session, FakeEndpoint("w1", "Writer"), steps)
+    self.assertEqual(result["interface"], "lo")
+    requested = [call for call in session.calls if call["capture_interface"]]
+    self.assertEqual(requested[0]["capture_interface"], "lo")
+
+  def test_the_picker_offers_any_last_and_never_twice(self):
+    """`any` must be reachable but must not be the first thing under the cursor.
+
+    tshark -D lists it on some hosts and not others, so it is appended
+    unconditionally and filtered out of the enumerated rows to avoid a
+    duplicate.
+    """
+    session = CaptureStubSession()
+    with mock.patch.object(
+        report_screen.wire, "capture_interfaces",
+        return_value=((("1", "any (Pseudo-device that captures on all interfaces)"),
+                       ("2", "lo")), None)):
+      choices = report_screen.CaptureInterfaceScreen(session, lambda _: None)._choices()
+    names = [name for _, name, _ in choices]
+    self.assertEqual(names, ["lo", "any"])
+
+  def test_the_picker_still_offers_any_when_tshark_cannot_enumerate(self):
+    """A picker that cannot list must not become a dead end."""
+    session = CaptureStubSession()
+    with mock.patch.object(report_screen.wire, "capture_interfaces",
+                           return_value=((), "tshark was not found on PATH")):
+      screen = report_screen.CaptureInterfaceScreen(session, lambda _: None)
+    self.assertEqual([name for _, name, _ in screen._choices()], ["any"])
+    self.assertEqual(screen.error, "tshark was not found on PATH")
 
   def test_a_participant_report_says_capture_needs_an_endpoint(self):
     session = CaptureStubSession()

@@ -17,15 +17,93 @@ import asyncio
 import logging
 import os
 
-from textual.containers import VerticalScroll
+from rich.markup import escape
+from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Footer, Header, Static, TabbedContent, TabPane
+from textual.widgets import DataTable, Footer, Header, Static, TabbedContent, TabPane
 
-from .. import engine as engine_mod, report as report_mod
+from .. import engine as engine_mod, report as report_mod, wire
 
-#: Used when no `--capture-interface` was given. tshark's own pseudo-interface,
-#: named rather than guessed at, and always shown on screen before it is used.
+#: Used when no `--capture-interface` was given and the operator dismissed the
+#: picker. tshark's own pseudo-interface, named rather than guessed at, and
+#: always shown on screen before it is used.
 DEFAULT_CAPTURE_INTERFACE = "any"
+
+
+class CaptureInterfaceScreen(Screen):
+  """Choose which interface `c` captures on (CAP-2).
+
+  Before this, the interface came from `--capture-interface` or defaulted to
+  `any`, so choosing one meant quitting and relaunching - and `any` needs the
+  broadest capture privileges of any choice, making the default the most
+  privileged one (N3). An operator on a host where they may capture `lo` and
+  nothing else had no way to say so.
+
+  The choice is remembered on the session, so this asks once rather than before
+  every capture. `--capture-interface` still wins outright and skips it.
+  """
+
+  BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
+              ("q", "quit_app", "Quit")]
+
+  def __init__(self, session, on_chosen):
+    super().__init__()
+    self.session = session
+    self.on_chosen = on_chosen
+    self.table = DataTable()
+    self.interfaces, self.error = wire.capture_interfaces()
+
+  def compose(self):
+    yield Header()
+    yield Static("[bold]Capture interface[/bold]")
+    if self.error:
+      # A picker that cannot enumerate is still useful: `any` remains valid, and
+      # the reason belongs on screen rather than swallowed.
+      yield Static(f"Could not list interfaces: {escape(self.error)}. "
+                   f"'{wire.ANY_INTERFACE}' is still offered below.")
+    yield Static("Pick the interface to capture RTPS packets on. The choice is "
+                 "remembered for this session. Capturing needs packet-capture "
+                 f"privileges on whichever you choose, and '{wire.ANY_INTERFACE}' "
+                 "needs the broadest of all.")
+    with Container(id="capture_interface_choice"):
+      yield self.table
+    yield Footer()
+
+  def _choices(self):
+    """Enumerated interfaces, with `any` last and never duplicated."""
+    choices = []
+    for number, description in self.interfaces:
+      name = wire.interface_name(description)
+      if name and name != wire.ANY_INTERFACE:
+        choices.append((number, name, description))
+    choices.append(("", wire.ANY_INTERFACE,
+                    "every interface - needs the broadest privileges"))
+    return choices
+
+  async def on_mount(self):
+    self.title = f"rti_doctor - capture interface domain {self.session.domain_id}"
+    self.table.add_columns("#", "Interface", "Description")
+    self.table.cursor_type = "row"
+    self.choices = self._choices()
+    for index, (number, name, description) in enumerate(self.choices):
+      self.table.add_row(number, name, description, key=str(index))
+    self.table.focus()
+
+  async def on_data_table_row_selected(self, event):
+    if event.row_key is None:
+      return
+    _, name, _ = self.choices[int(event.row_key.value)]
+    self.session.capture_interface = name
+    # Pop before starting the capture, so the report screen is what the
+    # operator watches it run on.
+    self.app.pop_screen()
+    self.on_chosen(name)
+
+  def action_back(self):
+    self.app.pop_screen()
+
+  def action_quit_app(self):
+    self.app.exit()
 
 
 class ReportScreen(Screen):
@@ -35,6 +113,7 @@ class ReportScreen(Screen):
       ("b", "back", "Back"),
       ("escape", "back", "Back"),
       ("c", "capture", "Capture packets"),
+      ("C", "choose_interface", "Capture interface"),
       ("s", "save", "Save report"),
       ("q", "quit_app", "Quit"),
   ]
@@ -140,16 +219,41 @@ class ReportScreen(Screen):
 
   def action_capture(self):
     """Capture RTPS packets for this endpoint, on request and only on request."""
+    if not self._capture_allowed():
+      return
+    # Ask before the first capture of the session rather than silently using
+    # the most privileged interface there is (CAP-2). `--capture-interface`
+    # already answered the question, so it skips this.
+    if getattr(self.session, "capture_interface", None) is None:
+      self.app.push_screen(
+          CaptureInterfaceScreen(self.session, self._start_capture))
+      return
+    self._start_capture(self.capture_interface)
+
+  def action_choose_interface(self):
+    """Re-open the picker, so one choice does not bind the whole session."""
+    if not self._capture_allowed():
+      return
+    self.app.push_screen(CaptureInterfaceScreen(self.session, self._start_capture))
+
+  def _capture_allowed(self):
     if self.endpoint is None:
       self.status.update("Packet capture needs an endpoint; this is a "
                          "participant report.")
-      return
+      return False
     if self.capturing:
       self.status.update("A capture is already running for this endpoint.")
-      return
+      return False
     if self.probing:
       # Two probes on one topic at once would each report the other's traffic.
       self.status.update("Wait for the probe to finish, then press c.")
+      return False
+    return True
+
+  def _start_capture(self, interface):
+    # Re-checked rather than assumed: the picker is a screen, and a probe can
+    # have started while it was open.
+    if not self._capture_allowed():
       return
     # A capture with nothing to observe is an empty file, so a writer report
     # probes again while capturing - that is what puts matched user data on the
@@ -162,25 +266,25 @@ class ReportScreen(Screen):
     # Said before tshark is spawned, not after it returns: what is being
     # collected, from where, for how long, and what it leaves on disk.
     self.status.update(
-        f"Capturing RTPS packets on interface '{self.capture_interface}' for "
+        f"Capturing RTPS packets on interface '{interface}' for "
         f"{seconds:.0f}s, writing {destination} (and a .tshark.log beside it). "
         f"Capture needs packet-capture privileges on this host.")
     self.capturing = True
-    self.run_worker(self._run_capture(probing, seconds, destination),
+    self.run_worker(self._run_capture(probing, seconds, destination, interface),
                     exit_on_error=False)
 
-  async def _run_capture(self, probing, seconds, destination):
+  async def _run_capture(self, probing, seconds, destination, interface):
     try:
       self.data = await asyncio.to_thread(
           lambda: self.session.diagnose_endpoint(
               self.endpoint, probe=probing,
-              capture_interface=self.capture_interface, capture_seconds=seconds,
+              capture_interface=interface, capture_seconds=seconds,
               capture_path=destination))
       self._update_sections()
       evidence = self.data.wire_evidence or {}
       source = evidence.get("source", "the capture file")
       if evidence.get("error"):
-        self.status.update(f"Capture on '{self.capture_interface}' produced no "
+        self.status.update(f"Capture on '{interface}' produced no "
                            f"packet evidence: {evidence['error']}")
       else:
         # Name what was parsed, not just how many frames matched. A capture can

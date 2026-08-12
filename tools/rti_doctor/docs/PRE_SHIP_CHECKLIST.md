@@ -30,14 +30,22 @@ not bear on a Fast DDS engagement.
 - [ ] `tshark` is installed.
 - [ ] The account running Doctor has capture rights on the interface you will
       name.
-- [ ] Pick that interface now. Without `--capture-interface` capture falls back
-      to `any`, which needs the widest privileges of any choice (N3).
+- [ ] Know which interface the engineer should pick. As of 2026-08-12 the TUI
+      asks: `c` opens an interface picker listing `tshark -D` when
+      `--capture-interface` was not given, remembers the answer for the session,
+      and offers `any` last rather than silently defaulting to it — `any` needs
+      the widest privileges of any choice (N3, CAP-2). `C` reopens the picker.
+      Headless runs still need `--capture-interface` explicitly.
 
 ## Brief the engineer
 
 - [ ] Packet capture is opt-in as of `ccaaa7b`. Headless:
       `--topic X --capture-interface eth0`. TUI: `c` on a reader or writer
-      report.
+      report, which asks which interface to use the first time and remembers
+      it; `C` changes it. The status line then names what the capture parsed —
+      the peer's Fast DDS version and the representation seen on the wire —
+      rather than only a frame count, and the same summary heads the Overview
+      tab and the saved report.
 - [ ] `Run capture to ascertain` in a report means nobody captured — not that
       the peer is on a current version.
 - [ ] **The version now comes from the parameter's own bytes, and it did not

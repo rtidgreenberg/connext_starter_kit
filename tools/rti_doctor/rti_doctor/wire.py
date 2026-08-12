@@ -597,6 +597,54 @@ def capture_filter(domain_id, endpoint, participant_qos, owner=None):
   return "udp"
 
 
+def capture_interfaces(tshark_path=None):
+  """tshark capture interfaces as ``(index, description)`` pairs, plus an error.
+
+  Restored for the TUI interface picker (CAP-2). It was removed in `ccaaa7b`
+  along with the startup capture prompt, which left `c` with no way to ask: the
+  interface could only come from `--capture-interface`, so choosing one meant
+  quitting and relaunching, and the fallback was `any` - the choice needing the
+  broadest privileges of all.
+
+  Returns `((), reason)` rather than raising, because "tshark is missing" and
+  "tshark refused" are things the picker must display, not crash on.
+  """
+  tshark_path = tshark_path or shutil.which("tshark")
+  if not tshark_path:
+    return (), "tshark was not found on PATH"
+  try:
+    completed = subprocess.run([tshark_path, "-D"], text=True, capture_output=True,
+                               check=False, timeout=TSHARK_READ_TIMEOUT)
+  except (OSError, subprocess.TimeoutExpired) as error:
+    return (), f"could not list tshark interfaces: {error}"
+  if completed.returncode:
+    return (), (completed.stderr.strip()
+                or f"tshark exited with {completed.returncode}")
+  interfaces = []
+  for line in completed.stdout.splitlines():
+    number, separator, description = line.partition(". ")
+    if separator and number.isdigit() and description:
+      interfaces.append((number, description))
+  return tuple(interfaces), None
+
+
+#: The name tshark gives the pseudo-interface that captures on every device.
+#: Always offered, even when `tshark -D` does not list it, so the picker can
+#: never be a dead end - and listed last, because it is the most privileged
+#: choice rather than the natural default (N3).
+ANY_INTERFACE = "any"
+
+
+def interface_name(description):
+  """The name to pass to `tshark -i` from a `tshark -D` description line.
+
+  `tshark -D` prints "eth0" or "lo" bare, but also "\\Device\\NPF_{GUID} (Local
+  Area Connection)" and "any (Pseudo-device that captures on all interfaces)".
+  Only the leading token is the name.
+  """
+  return str(description).split(" ", 1)[0].strip()
+
+
 def inspect_pcap(path, tshark_path=None, writer_entity_id=None, writer_guid_prefix=None,
                  reader_entity_id=None):
   """Return direct RTPS user-data observations from an existing PCAP/PCAPNG."""

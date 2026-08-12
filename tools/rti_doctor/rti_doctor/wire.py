@@ -537,7 +537,7 @@ def _is_builtin_writer(observation):
              for value in _values(observation.writer_entity_id))
 
 
-def capture_filter(domain_id, endpoint, participant_qos):
+def capture_filter(domain_id, endpoint, participant_qos, owner=None):
   """Narrow a live capture to the RTPS domain range and discovered extra ports.
 
   A BPF filter must use data available before capture starts. A discovered
@@ -545,9 +545,33 @@ def capture_filter(domain_id, endpoint, participant_qos):
   range for the requested domain is the primary portable scope. Discovered
   writer ports outside that range are added explicitly. If neither is usable,
   fall back to the writer ports, then finally unrestricted UDP.
+
+  `owner` is the endpoint's own participant record. An endpoint may advertise no
+  locators of its own and inherit its participant's defaults, which is legal
+  RTPS and is what Cyclone does: measured 2026-08-12, its writer's
+  `unicast_locators` is empty while its participant advertises one UDPv4 locator
+  on an ephemeral port - 41050 against domain 99, whose range is 32150-32399. So
+  such an endpoint contributed no ports at all, and the range term alone cannot
+  reach a vendor that ignores the participant-index port mapping. Connext and
+  Fast DDS both populate the endpoint list, so this changes nothing for them.
+
+  **This closes that gap and does not by itself fix WIRE-2.** Every port here is
+  a *receive* address, which is what the endpoint term has always contributed.
+  A writer's outgoing user DATA is addressed to its matched **reader's**
+  locator, so selecting a Cyclone writer still yields a filter that its own data
+  frames do not match: measured on the same fixtures, DATA left port 57276 for
+  port 34850 while the filter named the writer's advertised port. Capturing a
+  writer's data needs the counterpart endpoints' locators, which is the decision
+  WIRE-2 records.
   """
   locators = []
-  for locator in getattr(endpoint, "unicast_locators", ()) or ():
+  sources = [getattr(endpoint, "unicast_locators", ()) or ()]
+  if not sources[0]:
+    # Only as a fallback. When an endpoint names its own locators those are
+    # narrower, and mixing in participant defaults would widen the capture for
+    # every vendor to fix one that needs it.
+    sources.append(getattr(owner, "default_unicast_locators", ()) or ())
+  for locator in [item for source in sources for item in source]:
     if compat.get_int(locator, "kind") != 1:  # UDPv4 only; IPv6 needs a BPF variant.
       continue
     address = records.locator_ip(locator)

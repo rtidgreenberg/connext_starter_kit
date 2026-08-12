@@ -44,6 +44,22 @@ HEAD `11b6776`. Findings cited are in `CODE_REVIEW_2026-08-07.md`; tasks are in
       you capture, and the version you now see has been checked against ground
       truth — the vendor suite asserts it against the container image's own
       tag, which is the check that was missing.
+- [ ] **Packet capture sees nothing from a Cyclone peer.** Not "less" — nothing.
+      Measured 2026-08-12 (WIRE-2): the capture's BPF filter is the domain's
+      RTPS port range plus the selected endpoint's own locators, and against
+      Cyclone both miss. Cyclone advertises no endpoint-level locators, its
+      participant sits on an ephemeral port outside the domain range, and a
+      writer's user data is addressed to its *reader's* port — a receive
+      address the filter never names. In the measured run all 68 user-data
+      frames were on the wire and none were in the capture. So a Cyclone peer's
+      `Representation` reads `none observed` and the Fast DDS version line
+      reads `none observed in this capture` **after a capture that saw
+      nothing**, which is indistinguishable from a quiet peer. This is WIRE-1's
+      shape in a new place, and it is not fixed. Connext and Fast DDS are
+      unaffected — both follow the standard port mapping, and the Fast DDS wire
+      test passes through the identical code path. If the engagement needs wire
+      evidence from Cyclone, capture by hand with `tshark -i any -f udp` and
+      filter afterwards.
 - [ ] **`x` in a version means that component was not on the wire.** A peer may
       report as `3.6.x.0` or `3.6.x.x`: major and minor are what the capture
       carried, and `x` is a component the local Wireshark did not render. Read
@@ -104,43 +120,46 @@ PYTHONPATH=tools/rti_doctor <that interpreter> \
     -m unittest tools.rti_doctor.test.<module> -v
 ```
 
-- [x] `./run_tests.sh unit` — 304 tests. Green at `7b57c51`, 13.8 s.
-- [x] `./run_tests.sh live` — 337 tests, 1 expected failure (the Q3 verdict,
-      Connext↔Connext). Green at `7b57c51`, 114 s. The Q3 spike prints a
+- [x] `./run_tests.sh unit` — 307 tests. Green, 14.1 s.
+- [x] `./run_tests.sh live` — 340 tests, 1 expected failure (the Q3 verdict,
+      Connext↔Connext). Green, 114 s. The Q3 spike prints a
       20-row matrix on its way past, which pushes the count line out of
       `tail -40` — this is M15 on a *green* run, so read the counts by running
       the modules directly, per the command above.
-- [x] `./run_tests.sh vendor` — **34 tests, 9 failures, 1 skipped, 2 expected
-      failures** at `7b57c51`, 640 s. Read the next bullet before treating the
-      red as a blocker. Image checked and current: created 2026-08-11 13:08,
-      fixture last touched 12:31. Takes over ten minutes now, so it will not
-      fit inside a single foreground command timeout — run it in the
-      background. **Rebuild the Fast DDS image if
+- [x] `./run_tests.sh vendor` — **34 tests, 1 skipped, 4 expected failures,
+      no failures**, 636 s. Green with Cyclone present, which it has not been
+      since 2026-08-06. Image checked and current: created 2026-08-11 13:08,
+      fixture last touched 12:31. Takes over ten minutes, so it will not fit
+      inside a single foreground command timeout — run it in the background.
+      The four expected failures are the Fast DDS v1-only discovery
+      experiment, the Q3 verdict cross-vendor, and the two added on
+      2026-08-12: the Cyclone-writer→Connext-reader extensibility matrix
+      (CYC-1) and the Cyclone wire capture (WIRE-2). **Rebuild the Fast DDS image if
       the fixture is newer than the image** — compare
       `test/vendors/fastdds/ExtensibilityEndpoint.cpp` against
       `docker image inspect rti-doctor-fastdds-e2e:3.6.2 --format
       '{{.Created}}'`, and rebuild with `test/vendors/fastdds/build_image.sh`.
       The fixture gained `--representation default` in `ac38165`, and an image
       older than that skips the spike.
-- [x] **The vendor tier's nine failures are one known interop condition, not
-      new breakage** (CYC-1). Cyclone was reinstalled on 2026-08-12 —
-      `cyclonedds==11.0.1`, now pinned in `requirements-dev.txt` — after being
-      lost on 2026-08-06 when the venv was rebuilt for Connext 7.7 on Python
-      3.11 with the package listed in no requirements file. That turned eleven
-      silent skips into nine real failures. Every one is the same shape:
-      whichever endpoint is Cyclone reports `matched: 0` while the Connext side
-      writes 75–77 samples. It is `CYCLONE_CONNEXT_INTEROP_FINDINGS.md` —
-      under default Connext 7.7 TypeObject v2 propagation Cyclone never
-      reciprocally associates, and only `--type-object-v1-only` restores
-      delivery — and the fixtures set no such control. **These tests therefore
-      cannot have passed since the matrix was added on 2026-08-04**, and
-      Cyclone vanished two days later, which is what kept it invisible.
-      Unit (304), live (337) and lint are green at the same commit, so nothing
-      on this branch caused it. The honest handover statement is that the
-      vendor tier is red for a documented cross-vendor reason, with 22 of its
-      34 tests passing — including all five Connext/Cyclone fault controls,
-      both RxO vendor directions, and the Fast DDS wire test that asserts the
-      WIRE-1 version against the image tag — not that it is green.
+- [x] **Cyclone was restored on 2026-08-12, and the nine failures that exposed
+      are resolved.** `cyclonedds==11.0.1` is installed and pinned in
+      `requirements-dev.txt`; it had been lost on 2026-08-06 when the venv was
+      rebuilt for Connext 7.7 on Python 3.11 with the package listed in no
+      requirements file, which turned eleven tests into silent skips. Two
+      genuine defects came out of the nine failures that followed, both
+      pre-existing and neither caused by this branch:
+      **CYC-1** — the extensibility matrix asserted delivery under default
+      Connext 7.7 TypeObject v2 propagation, which
+      `CYCLONE_CONNEXT_INTEROP_FINDINGS.md` says cannot deliver. A 16-run
+      matrix settled it: with `--type-object-v1-only` the whole
+      Connext→Cyclone direction delivers (all four FINAL/APPENDABLE
+      combinations, ~95 samples), and Cyclone→Connext delivers in none. The
+      fixture gained the control, the working direction now asserts real data,
+      and the other is an expected failure. Those tests cannot have passed
+      since the matrix was added on 2026-08-04.
+      **WIRE-2** — see the capture bullet above. Not fixed; expected failure.
+      Both directions of the matrix now run the same propagation setting, so
+      the only variable is which vendor holds the writer.
 - [x] `bash scripts/test_python_env.sh` and
       `bash scripts/test_rti_spy_bundle.sh` — both PASS at `7b57c51`.
 - [x] `./run_lint.sh` — clean at `7b57c51`: no undefined names, no unused

@@ -177,7 +177,12 @@ class Session:
           # A caller that told the operator where the capture would land passes
           # that path in, so the file named on screen is the file written.
           capture_path or self.capture_path(),
-          wire.capture_filter(self.domain_id, endpoint, self.own_qos),
+          wire.capture_filter(
+              self.domain_id, endpoint, self.own_qos,
+              # An endpoint that advertises no locators of its own inherits its
+              # participant's defaults, which is where Cyclone's user-traffic
+              # port is (WIRE-2).
+              owner=self.registry.participants.get(endpoint.participant_key)),
           writer_entity_id=(wire.endpoint_entity_id(endpoint)
                             if endpoint.is_writer else None),
           writer_guid_prefix=(wire.endpoint_guid_prefix(endpoint)

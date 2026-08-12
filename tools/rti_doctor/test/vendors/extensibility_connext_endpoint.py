@@ -13,6 +13,38 @@ import rti.connextdds as dds
 dds.compliance.set_xtypes_mask(dds.compliance.XTypesMask(0x000001A9))
 dds.Logger.instance.verbosity = dds.Verbosity.SILENT
 
+#: Positive cap required alongside `type_code_max_serialized_length = 0` for
+#: the TypeObject-v1-only control below. Same value as the manual fixtures.
+TYPE_OBJECT_V1_MAX_SERIALIZED_LENGTH = 65536
+
+
+def configure_type_object_v1_only(participant_qos):
+  """Restrict type propagation to TypeObject v1, as Cyclone needs.
+
+  `CYCLONE_CONNEXT_INTEROP_FINDINGS.md` establishes that Connext 7.7's default
+  TypeObject v2 / TypeInformation propagation is what stops Cyclone
+  reciprocally associating: under it Cyclone reports `max_matched=0` however
+  long the writer runs, and with this control it matches and data flows. This
+  is independent of application `DataRepresentation` and of the process-global
+  XTypes compliance mask set above.
+
+  Copied deliberately rather than imported: `connext_cyclone_reader` and
+  `shared_connext_reader` each hold their own copy, and all three are manual
+  and vendor-matrix fixtures whose participants are built differently. Sharing
+  it means one import path across three fixtures that are otherwise
+  standalone scripts.
+  """
+  participant_qos.resource_limits.type_code_max_serialized_length = 0
+  participant_qos.resource_limits.type_object_max_serialized_length = (
+      TYPE_OBJECT_V1_MAX_SERIALIZED_LENGTH)
+  type_lookup = getattr(dds.DiscoveryConfigBuiltinChannelKindMask,
+                        "TYPE_LOOKUP_SERVICE", None)
+  if type_lookup is not None:
+    channels = participant_qos.discovery_config.enabled_builtin_channels
+    participant_qos.discovery_config.enabled_builtin_channels = (
+        dds.DiscoveryConfigBuiltinChannelKindMask(
+            int(channels) & ~int(type_lookup)))
+
 
 def build_type(extensibility, schema):
   sample = dds.StructType("DoctorExtensibility::Sample")
@@ -70,11 +102,19 @@ def main():
   parser.add_argument("--wait-timeout", type=float, default=15.0)
   parser.add_argument("--endpoint-ready-file",
                       help="Write PATH after creating the requested endpoint")
+  parser.add_argument("--type-object-v1-only", action="store_true",
+                      help="Propagate TypeObject v1 only, which is what lets "
+                           "Cyclone reciprocally associate (see "
+                           "CYCLONE_CONNEXT_INTEROP_FINDINGS.md)")
   args = parser.parse_args()
   if args.deadline_seconds <= 0:
     parser.error("--deadline-seconds must be positive")
 
   participant_qos = dds.DomainParticipantQos()
+  if args.type_object_v1_only:
+    # Must precede participant creation: the propagation settings are read
+    # when the participant is built, not when an endpoint is added to it.
+    configure_type_object_v1_only(participant_qos)
   participant = dds.DomainParticipant(args.domain, qos=participant_qos)
   wait_for_file(args.wait_for_file, args.wait_timeout)
   sample_type = build_type(args.extensibility, args.schema)
@@ -141,6 +181,7 @@ def main():
                     "deadline_seconds": args.deadline_seconds,
                     "ownership": args.ownership,
                     "representation": args.representation,
+                    "type_object_v1_only": args.type_object_v1_only,
                     "results": results}),
         flush=True)
 

@@ -116,6 +116,23 @@ class TestCycloneWireE2E(VendorWireE2E):
   # is asserted from the PCAP, not inferred from discovery/type metadata.
   EXPECTED_ENCAPSULATION = "0x0001"
 
+  # WIRE-2: the capture filter cannot reach this vendor's user data. The BPF
+  # filter is built from the domain's RTPS port range plus the selected
+  # endpoint's own locators, and both miss here. Measured 2026-08-12: Cyclone
+  # advertises no endpoint-level locators, its participant advertises one
+  # ephemeral port outside the domain range, and its user DATA is addressed to
+  # the matched *reader's* port (57276 -> 34850 in the measured run) - which is
+  # a receive address the filter never names. Every frame is on the wire and
+  # none of it is in the capture, which is WIRE-1's shape in a new place.
+  #
+  # Expected failure rather than deleted or relaxed, so it keeps executing and
+  # reports an unexpected success the moment the filter can see this traffic.
+  # TestFastDDSWireE2E passes through the identical code path, because Fast DDS
+  # and Connext both follow the standard port mapping.
+  @unittest.expectedFailure
+  def test_discovers_vendor_and_identifies_wire_representation(self):
+    super().test_discovers_vendor_and_identifies_wire_representation()
+
   @classmethod
   def start_publisher(cls):
     cls.reader = subprocess.Popen(

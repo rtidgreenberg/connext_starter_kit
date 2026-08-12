@@ -36,6 +36,12 @@ class TestTsharkFields(unittest.TestCase):
     def __init__(self, locators):
       self.unicast_locators = locators
 
+  class Owner:
+    """A participant record, which is where an endpoint's defaults live."""
+
+    def __init__(self, locators):
+      self.default_unicast_locators = locators
+
   class Ports:
     port_base = 7400
     domain_id_gain = 250
@@ -215,6 +221,39 @@ class TestTsharkFields(unittest.TestCase):
   def test_capture_filter_falls_back_to_domain_port_range(self):
     actual = wire.capture_filter(7, self.Endpoint([]), self.Qos())
     self.assertEqual(actual, "udp and (portrange 9150-9399)")
+
+  def test_capture_filter_uses_participant_locators_when_the_endpoint_has_none(self):
+    """WIRE-2: Cyclone advertises its data port only at participant level.
+
+    Measured 2026-08-12 against a real Cyclone writer: its endpoint's
+    `unicast_locators` is empty, its participant advertises one UDPv4 locator,
+    and that port is outside the domain's RTPS range - so the range term alone
+    excluded every user DATA frame it sent, and the capture reported "none
+    observed" after seeing none of it. An endpoint inheriting its
+    participant's default locators is legal RTPS, not a Cyclone quirk.
+    """
+    owner = self.Owner([self.Locator("192.0.2.9", 41050)])
+    actual = wire.capture_filter(7, self.Endpoint([]), self.Qos(), owner=owner)
+    self.assertEqual(actual, "udp and (portrange 9150-9399 or port 41050)")
+
+  def test_capture_filter_prefers_endpoint_locators_over_participant_defaults(self):
+    """The fallback must not widen the filter when the endpoint is specific.
+
+    Connext and Fast DDS both name endpoint locators. Adding participant
+    defaults on top would broaden every capture to fix the one vendor that
+    needs it, so the participant list is consulted only when the endpoint's is
+    empty.
+    """
+    owner = self.Owner([self.Locator("192.0.2.9", 41050)])
+    endpoint = self.Endpoint([self.Locator("192.0.2.5", 7411)])
+    actual = wire.capture_filter(7, endpoint, self.Qos(), owner=owner)
+    self.assertEqual(actual, "udp and (portrange 9150-9399 or port 7411)")
+
+  def test_capture_filter_without_an_owner_is_unchanged(self):
+    """`owner` is optional, and omitting it must behave as it did before."""
+    self.assertEqual(wire.capture_filter(7, self.Endpoint([]), self.Qos()),
+                     wire.capture_filter(7, self.Endpoint([]), self.Qos(),
+                                         owner=None))
 
   def test_live_capture_kills_a_tshark_process_that_ignores_terminate(self):
     class Process:

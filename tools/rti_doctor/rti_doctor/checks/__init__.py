@@ -33,6 +33,8 @@ class CheckContext:
   participant_record: object = None
   #: Live probe result, when one was run.
   probe: object = None
+  #: Selected endpoint's participant advertised PID_TYPE_INFORMATION in capture.
+  type_information_observed: bool = False
   type_wait: float = 5.0
 
 

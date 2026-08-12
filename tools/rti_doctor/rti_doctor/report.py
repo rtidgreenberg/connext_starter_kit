@@ -680,6 +680,10 @@ def _render_discovery_evidence(data):
   lines.append(_kv("  Fast DDS versions advertised",
                    ", ".join(versions) if versions
                    else "none observed in this capture", WIRE_LABEL_PAD))
+  type_information = evidence.get("type_information_participants") or []
+  lines.append(_kv("  TypeInformation participants",
+                   ", ".join(type_information) if type_information
+                   else "none observed in this capture", WIRE_LABEL_PAD))
   lines.append(_kv("  Participants announcing",
                    str(evidence.get("participants", 0)), WIRE_LABEL_PAD))
   topics = evidence.get("topics") or []

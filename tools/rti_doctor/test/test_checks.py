@@ -348,6 +348,32 @@ class TestTypeState(unittest.TestCase):
     self.assertIn("upgrade that publisher to Fast DDS 3.6.2 or newer",
                   result[0].remedy)
 
+  @mock.patch("rti_doctor.compat.connext_version", return_value="7.3.1")
+  def test_fastdds_dynamic_type_on_connext_73_recommends_connext_77(self, _version):
+    endpoint = endpoint_record(type_state=records.TYPE_UNAVAILABLE,
+                               vendor_id=FakeVendorId((0x01, 0x0F)))
+    finding = type_compat.check_type_state(CheckContext(
+        endpoint=endpoint, type_information_observed=True))[0]
+    self.assertIn("local Connext runtime to 7.7 or newer", finding.remedy)
+    self.assertIn("Recording Service needs the runtime schema", finding.remedy)
+    self.assertIn("PID_TYPE_INFORMATION", finding.remedy)
+
+  @mock.patch("rti_doctor.compat.connext_version", return_value="7.3.1")
+  def test_fastdds_without_type_information_has_no_connext_77_advice(self, _version):
+    endpoint = endpoint_record(type_state=records.TYPE_UNAVAILABLE,
+                               vendor_id=FakeVendorId((0x01, 0x0F)))
+    finding = type_compat.check_type_state(CheckContext(endpoint=endpoint))[0]
+    self.assertNotIn("local Connext runtime to 7.7 or newer", finding.remedy)
+
+  @mock.patch("rti_doctor.compat.connext_version", return_value="7.7.0")
+  def test_fastdds_dynamic_type_on_connext_77_has_no_upgrade_advice(self, _version):
+    endpoint = endpoint_record(type_state=records.TYPE_UNAVAILABLE,
+                               vendor_id=FakeVendorId((0x01, 0x0F)))
+    finding = type_compat.check_type_state(CheckContext(
+        endpoint=endpoint, type_information_observed=True))[0]
+    self.assertNotIn("local Connext runtime to 7.7 or newer",
+                     finding.remedy)
+
   def test_unavailable_type_on_a_writer_names_the_publisher(self):
     endpoint = endpoint_record(kind="Writer", type_state=records.TYPE_UNAVAILABLE)
     finding = type_compat.check_type_state(CheckContext(endpoint=endpoint))[0]

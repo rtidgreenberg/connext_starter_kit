@@ -361,6 +361,29 @@ class TestProductVersionFromParameterBytes(unittest.TestCase):
                      [[prefix, "3.6.2.0"]])
 
 
+class TestTypeInformationFromParameterBytes(unittest.TestCase):
+  """TypeObject v2 evidence must be retained separately from resolved types."""
+
+  FASTDDS = "01:0f:65:91:01:00:df:ea:00:00:00:00"
+
+  def test_type_information_is_attributed_to_its_source_participant(self):
+    document = pdml((self.FASTDDS, "0x010f",
+                     [pdml_parameter(wire.TYPE_INFORMATION_PID, "00000000")]))
+    self.assertEqual(wire.type_information_participants_from_pdml(document),
+                     ["010f65910100dfea00000000"])
+
+  def test_another_parameter_is_not_type_information(self):
+    document = pdml((self.FASTDDS, "0x010f",
+                     [pdml_parameter("0x8000", "03060200")]))
+    self.assertEqual(wire.type_information_participants_from_pdml(document), [])
+
+  def test_the_summary_retains_type_information_participants(self):
+    prefix = "010f65910100dfea00000000"
+    summary = wire.summarize_discovery(
+        [], "sample.pcapng", type_information_participants=[prefix, prefix])
+    self.assertEqual(summary["type_information_participants"], [prefix])
+
+
 class TestFastDdsProductVersions(unittest.TestCase):
   """M2: what a version reports when the capture carried only part of one.
 

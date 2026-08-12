@@ -95,6 +95,15 @@ def check_type_state(context):
         f" For Fast DDS, first upgrade that {peer_side} to Fast DDS 3.6.2 or "
         "newer: the validated 3.6.2 fixture resolves a Connext DynamicType "
         "before investigating TypeLookup or TypeObject compatibility further.")
+    connext_version = compat.version_tuple()
+    if (context.type_information_observed
+        and connext_version is not None and connext_version < (7, 7)):
+      remedy += (
+          " The capture observed PID_TYPE_INFORMATION from this Fast DDS "
+          f"participant, but Connext {compat.connext_version()} did not resolve "
+          "a DynamicType. Recording Service needs the runtime schema; upgrade "
+          "the local Connext runtime to 7.7 or newer before diagnosing the "
+          "Fast DDS TypeLookup exchange further.")
 
   scope_note = (
       "This is the schema of the endpoint named above and of no other: an "
@@ -119,6 +128,7 @@ def check_type_state(context):
                 "type_name": endpoint.type_name,
                 "endpoint_role": role,
                 "request_types_filter": request_filter,
+                "type_information_observed": context.type_information_observed,
                 "type_wait_seconds": context.type_wait},
       refs=[DOC_TYPELOOKUP, DOC_TYPE_REPR],
   )]

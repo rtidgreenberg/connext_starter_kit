@@ -286,6 +286,10 @@ def _fastdds_product_versions(observation):
 #: `product_versions_from_pdml`.
 PRODUCT_VERSION_PID = "0x8000"
 
+#: XTypes TypeInformation carried in SEDP endpoint discovery. Its presence is
+#: direct wire evidence that a participant advertised TypeObject v2 identifiers.
+TYPE_INFORMATION_PID = "0x0075"
+
 #: eProsima's RTPS vendor id, in the form tshark renders it.
 FASTDDS_VENDOR_ID = "010f"
 
@@ -374,8 +378,48 @@ def read_product_versions(path, tshark_path=None, vendor_id=FASTDDS_VENDOR_ID):
   return product_versions_from_pdml(completed.stdout, vendor_id=vendor_id)
 
 
+def type_information_participants_from_pdml(document):
+  """GUID prefixes that advertised PID_TYPE_INFORMATION in a PDML document."""
+  try:
+    root = ElementTree.fromstring(document)
+  except ElementTree.ParseError:
+    return []
+  participants = set()
+  for packet in root:
+    prefix = None
+    for field in packet.iter("field"):
+      name = field.get("name")
+      if name == "rtps.guidPrefix.src":
+        prefix = (field.get("show") or "").replace(":", "").lower()
+      children = {child.get("name"): child for child in field}
+      identifier = children.get("rtps.param.id")
+      if (identifier is not None
+          and identifier.get("show") == TYPE_INFORMATION_PID
+          and prefix):
+        participants.add(prefix)
+  return sorted(participants)
+
+
+def read_type_information_participants(path, tshark_path=None):
+  """Read TypeInformation-advertising participant prefixes from one capture."""
+  tshark_path = tshark_path or shutil.which("tshark")
+  if not tshark_path:
+    return []
+  try:
+    completed = subprocess.run(
+        [tshark_path, "-n", "-r", path,
+         "-Y", f"rtps.param.id == {TYPE_INFORMATION_PID}", "-T", "pdml"],
+        text=True, capture_output=True, check=False,
+        timeout=TSHARK_READ_TIMEOUT)
+  except (OSError, subprocess.TimeoutExpired):
+    return []
+  if completed.returncode:
+    return []
+  return type_information_participants_from_pdml(completed.stdout)
+
+
 def summarize_discovery(observations, source, capture_filter=None,
-                        participant_versions=()):
+                        participant_versions=(), type_information_participants=()):
   """Summarize observed RTPS SPDP/SEDP metadata without decoding user data.
 
   `participant_versions` is the PDML-read (prefix, version) evidence, which is
@@ -423,6 +467,7 @@ def summarize_discovery(observations, source, capture_filter=None,
       "fastdds_product_versions": fastdds_versions,
       "fastdds_participant_versions": [list(pair)
                                        for pair in fastdds_participant_versions],
+      "type_information_participants": sorted(set(type_information_participants)),
       "builtin_endpoint_sets": sorted({item.builtin_endpoint_set
                                          for item in observations
                                          if item.builtin_endpoint_set}),
@@ -746,7 +791,9 @@ def inspect_discovery_pcap(path, tshark_path=None, capture_filter=None):
                   for line in completed.stdout.splitlines() if line.strip()]
   return summarize_discovery(
       observations, path, capture_filter=capture_filter,
-      participant_versions=read_product_versions(path, tshark_path=tshark_path))
+      participant_versions=read_product_versions(path, tshark_path=tshark_path),
+      type_information_participants=read_type_information_participants(
+        path, tshark_path=tshark_path))
 
 
 class LiveCapture:

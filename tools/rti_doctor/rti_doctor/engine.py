@@ -46,7 +46,8 @@ class Session:
     self._fastdds_participant_versions = ()
     self._last_scan = None
 
-  def _context(self, endpoint=None, participant_record=None, probe_result=None):
+  def _context(self, endpoint=None, participant_record=None, probe_result=None,
+               type_information_observed=False):
     return CheckContext(
         registry=self.registry,
         own_qos=self.own_qos,
@@ -57,6 +58,7 @@ class Session:
         endpoint=endpoint,
         participant_record=participant_record,
         probe=probe_result,
+        type_information_observed=type_information_observed,
         type_wait=self.type_wait,
     )
 
@@ -215,7 +217,11 @@ class Session:
 
     context = self._context(endpoint=endpoint,
                             participant_record=participant_record,
-                            probe_result=probe_result)
+                probe_result=probe_result,
+                type_information_observed=(
+                  wire.record_guid_prefix(endpoint) in set(
+                    (discovery_evidence or {}).get(
+                      "type_information_participants", ()))) )
     selected = checks.static_checks()
     if probe_result is not None:
       if probe_result.probe_kind == "writer":

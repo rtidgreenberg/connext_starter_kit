@@ -385,18 +385,6 @@ class TestConnextFastDdsFaultControls(unittest.TestCase):
     self.assertEqual(mismatch[0]["severity"], "ERROR", mismatch[0])
     self.assertIn(scenario.upper(), mismatch[0]["title"], mismatch[0])
 
-  def _assert_representation_blind_spot(self, writer_vendor):
-    doctor, report, writer, reader = self._run_case(
-        writer_vendor, "mismatch", "data_representation")
-    self.assertEqual(doctor.returncode, 0, f"{doctor.stderr}\n{report}")
-    self.assertGreater(writer["results"]["samples"], 0, writer)
-    self.assertEqual(writer["results"]["matched"], 0, writer)
-    self.assertEqual(reader["results"]["matched"], 0, reader)
-    self.assertEqual(reader["results"]["samples"], 0, reader)
-    findings = report["findings"]
-    self.assertIn("qos.compatible", [item["id"] for item in findings], report)
-    self.assertIn("repr.not_advertised", [item["id"] for item in findings], report)
-
   def test_connext_writer_to_fastdds_reader_healthy(self):
     self._assert_healthy("connext")
 
@@ -428,7 +416,15 @@ class TestConnextFastDdsFaultControls(unittest.TestCase):
     self._assert_rxo_fault("fastdds", "ownership")
 
   def test_connext_writer_to_fastdds_reader_data_representation_fault(self):
-    self._assert_representation_blind_spot("connext")
+    # Until Q3 was decided on 2026-08-12 this called a dedicated
+    # `_assert_representation_blind_spot` helper, which asserted exit 0 and a
+    # `qos.compatible` finding - it pinned Doctor's blind spot as expected
+    # behaviour for a pair the middleware refuses and blames
+    # DataRepresentation for. The Connext writer here advertises nothing, which
+    # means XCDR1, and the Fast DDS reader requests XCDR2 only. Now that the
+    # emptiness is resolved, this direction is an ordinary RxO fault and uses
+    # the same assertion as every other policy, in both directions.
+    self._assert_rxo_fault("connext", "data_representation")
 
   def test_fastdds_writer_to_connext_reader_data_representation_fault(self):
     self._assert_rxo_fault("fastdds", "data_representation")

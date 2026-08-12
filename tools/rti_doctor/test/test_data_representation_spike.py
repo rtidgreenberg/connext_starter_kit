@@ -401,17 +401,19 @@ class TestDataRepresentationEvidence(unittest.TestCase):
       self.assertTrue(agreed["matched"], agreed)
       self.assertEqual(agreed["doctor_verdict"], "compatible", agreed)
 
-  @unittest.expectedFailure
   def test_the_tool_agrees_with_the_middleware(self):
-    """Q3's verdict half, executable. Expected to fail until it is decided.
+    """Q3's verdict half, executable. Was expected to fail until 2026-08-12.
 
-    This is not a skip: it runs every time, and `unittest` reports an
-    *unexpected success* the day the verdict changes - which is the signal to
-    delete this decorator rather than the test. What it currently proves is
-    that rti_doctor reports `qos.compatible` (Severity.OK, exit 0) for pairs
-    Connext refuses to match and blames DATA_REPRESENTATION for.
+    It proved that rti_doctor reported `qos.compatible` (Severity.OK, exit 0)
+    for pairs Connext refuses to match and blames DATA_REPRESENTATION for. Q3
+    was then decided: `qos_match` resolves an empty writer advertisement to
+    XCDR1 for the vendors where that meaning has been measured, RTI among them
+    by this suite, so those pairs now report the ERROR the middleware agrees
+    with.
 
-    Remove the decorator as part of the Q3 fix.
+    The assertion never changed - the product did. It remains the guard that
+    rti_doctor's verdict and Connext's own matching decision agree across the
+    whole matrix.
     """
     disagreements = [
         (item["extensibility"], item["writer_qos"], item["reader_qos"])

@@ -469,9 +469,30 @@ class TestArgumentValidation(unittest.TestCase):
   """argparse accepts negatives, "nan" and "inf" for these; Connext does not."""
 
   def _rejects(self, argv):
-    with self.assertRaises(SystemExit):
+    with self.assertRaises(SystemExit) as raised:
       with redirect_stdout(io.StringIO()), mock.patch.object(sys, "stderr", io.StringIO()):
         cli.parse_args(argv)
+    # L6: never EXIT_TARGET_ABSENT. A rejected command line and "the topic was
+    # not found" were both 2, so a CI job acting on 2 read a typo as a clean
+    # result from a run that never started.
+    self.assertEqual(raised.exception.code, cli.EXIT_CANNOT_START)
+    return raised.exception.code
+
+  def test_a_rejected_command_line_is_not_the_topic_absent_code(self):
+    """The collision itself, stated once rather than only via `_rejects`.
+
+    Covers argparse's own rejections as well as the hand-written
+    `parser.error` calls, because the two reach `SystemExit` by different
+    paths and only the latter is exercised by the validation tests below.
+    """
+    for argv, why in (
+        (["--no-such-flag"], "unknown flag"),
+        (["-d", "not-a-number"], "argparse type conversion"),
+        (["--topic", "T", "--system"], "hand-written parser.error"),
+    ):
+      with self.subTest(why=why):
+        code = self._rejects(argv)
+        self.assertNotEqual(code, cli.EXIT_TARGET_ABSENT)
 
   def test_negative_domain_is_rejected(self):
     self._rejects(["-d", "-1"])

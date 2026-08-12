@@ -39,17 +39,20 @@ folded in below as [C1a](#c1a), [C1b](#c1b), [C1c](#c1c) and [S12](#s12).
 sub-findings under [C1](#c1)). 43 are marked Confirmed or Re-verified; the rest
 are Plausible and should be reproduced before being scheduled.
 
-**Status as of 2026-08-11 (later that day): 30 Fixed, 3 Partial, 0 Live,
-38 Open.** Fixed:
+**Status as of 2026-08-12: 32 Fixed, 2 Partial, 0 Live, 37 Open.** Fixed:
 [C1](#c1), [C1a](#c1a), [C1b](#c1b), [C1c](#c1c), [C2](#c2), [C3](#c3),
-[Q1](#q1), [Q2](#q2), [X1](#x1), [X2](#x2), [X3](#x3), [X4](#x4), [H1](#h1),
+[Q1](#q1), [Q2](#q2), [Q3](#q3), [X1](#x1), [X2](#x2), [X3](#x3), [X4](#x4), [H1](#h1),
 [H2](#h2), [H3](#h3), [H4](#h4), [H5](#h5), [H6](#h6), [H7](#h7), [H8](#h8),
 [H9](#h9), [H10](#h10), [S1](#s1), [S2](#s2), [S3](#s3), [S4](#s4),
-[M11](#m11), [M12](#m12), [M13](#m13), [M16](#m16) - **all six Criticals, all three of
-their sub-findings, and every High except the verdict half of [Q3](#q3)** -
-and all three of the false-ERROR findings called out below. Partial:
-[Q3](#q3), [Q4](#q4), [S14](#s14). Every status is recorded per finding; see the legend
-under [Index](#index).
+[M11](#m11), [M12](#m12), [M13](#m13), [M16](#m16), [L6](#l6) - **every Critical and
+every High, all three Critical sub-findings** - and all three of the
+false-ERROR findings called out below. Partial: [Q4](#q4), [S14](#s14). Every
+status is recorded per finding; see the legend under [Index](#index).
+
+[Q3](#q3) and [L6](#l6) closed on 2026-08-12. Q3 was the last High and the one
+finding that had reached "evidence gathered, decision pending"; the decision was
+taken on the evidence and scoped to the vendors it was measured for. **No
+Critical or High finding remains open.**
 
 **Nothing is blocked on a decision any more.** The three sub-findings that had
 no entry in `DESIGN_DECISIONS.md` are decided (as one entry, C1a-C1c) and
@@ -66,10 +69,8 @@ than reading them, and four are residuals of the H8/H9 fix itself. They are in
 an explicit `c` action, and neither would have been coherent alone - together
 with [M13](#m13), the last open piece of the machine-readable-contract batch
 whose other three parts ([H1](#h1), [M12](#m12), and the `2`/`4` split) were
-already done. The one remaining High is the **verdict** half of [Q3](#q3),
-which is not scheduled because it is the one finding still without a decision
-(`DESIGN_DECISIONS.md` Q1a records that it needs one); its reporting half is
-closed. Everything else open is Medium or below.
+already done. [L6](#l6) completed that batch on 2026-08-12 by taking the last
+exit-code collision out of it. Everything now open is Medium or below.
 
 The single most important result is that **the tool's failure modes are
 concentrated at the reporting boundary, not in its DDS logic.** The RxO comparison
@@ -153,7 +154,7 @@ reading it, and which are numbered separately so these counts stay comparable.
 | [Q1](#q1) | **Fixed** `4fadb43` | **Critical** | An unreadable PARTITION policy is converted into a positive claim of the default partition, producing a false ERROR and exit 1 |
 | [H1](#h1) | **Fixed** `7e6bfc1` | High | `--format json` is not valid JSON through the documented entry point, and prompts/progress go to stdout |
 | [Q2](#q2) | **Fixed** `4fadb43` | High | An absent writer-side PRESENTATION boolean is treated as `false`, producing a false ERROR |
-| [Q3](#q3) | Partial (verdict half **reproduced live** 2026-08-11) | High | DATA_REPRESENTATION is silently skipped for default-QoS writers — the most common configuration — and the result is reported as OK |
+| [Q3](#q3) | **Fixed** 2026-08-12 | High | DATA_REPRESENTATION is silently skipped for default-QoS writers — the most common configuration — and the result is reported as OK |
 | [X3](#x3) | **Fixed** `43e5cab` | High | `check_type_state` emits a writer-phrased ERROR for a DataReader on two of its three call paths |
 | [X4](#x4) | **Fixed** `acfc530` | High | The assignability OK finding reports the evaluated reader count under a "resolved" label, so an all-clear can cover 1 of 3 readers |
 | [H2](#h2) | **Fixed** `428585c` | High | `type.extensibility` still emits one WARN per endpoint — 96 identical warnings for one type |
@@ -207,7 +208,7 @@ reading it, and which are numbered separately so these counts stay comparable.
 | [L3](#l3) | Open | Low | `selected_key` survives a re-render that resets the cursor |
 | [L4](#l4) | Open | Low | `check_extensibility` passes the raw type map as `evidence`, sharing a namespace with `_annotate` |
 | [L5](#l5) | Open | Low | `s` on a severity-filtered issue list saves an unfiltered report with different numbering |
-| [L6](#l6) | Open | Low | Exit code 2 means both "bad command line" and "topic not found" |
+| [L6](#l6) | **Fixed** 2026-08-12 | Low | Exit code 2 means both "bad command line" and "topic not found" |
 | [L7](#l7) | Open | Low | The cleanup trap is installed after the background children are started |
 | [L8](#l8) | Open | Low | `fixture_publisher` scale mode has no cleanup path and divides by an unvalidated argument |
 | [S12](#s12) | Open | Low | `read -rsn1` EOF matches the Enter branch, so Ctrl-D launches a fixture instead of cancelling |
@@ -602,13 +603,30 @@ correctly declines to evaluate for exactly that input. **Confirmed.**
 
 ### Q3
 
-**Status: Partial.** The reporting half is closed by the [Q1](#q1) work in
-`4fadb43`: an empty advertised sequence now produces an explicit
+**Status: Fixed** 2026-08-12, both halves. The reporting half was closed by the
+[Q1](#q1) work in `4fadb43`: an empty advertised sequence produces an explicit
 DATA_REPRESENTATION unevaluated record and a "Not evaluated" line, so the OK
-finding no longer reads as a clean bill of health on this policy. The verdict
-half stands - the pair is still reported `qos.compatible` / Severity.OK rather
-than the ERROR the concrete scenario argues for, and `repr.not_advertised` is
-still not cross-referenced.
+finding no longer reads as a clean bill of health on this policy.
+
+The verdict half is now closed too. `qos_match` resolves an empty *writer*
+advertisement to `[XCDR1]` and compares it, so the pair this finding describes
+reports `qos.rxo_mismatch` at exit 1 instead of `qos.compatible` at exit 0. The
+resolution is scoped to `vendors.EMPTY_REPRESENTATION_MEANS_XCDR1` - RTI and
+Fast DDS, the two vendors where the meaning was measured against live
+middleware - so a Cyclone or unrecognized writer still declines rather than
+inheriting RTI's semantics. Reader-side emptiness still declines, because the
+measured gap was writer-side only. The mismatch renders `offered` as
+`not advertised (XCDR1 in effect)`: the wire fact first, the inference second,
+because claiming the writer advertised XCDR1 would repeat the [Q1](#q1)/[Q2](#q2)
+mistake in a new place.
+
+The proof is that both spike suites carried an `expectedFailure` asserting
+rti_doctor and the middleware disagree; both decorators are gone and the
+assertions pass **unchanged**. See Q3 in `DESIGN_DECISIONS.md` for the decision
+and its scope, and backlog `REP-1` for Cyclone, which is now cheap to measure
+and is the only thing standing between this and a three-vendor claim.
+
+The original analysis follows.
 
 **The verdict half is no longer Plausible: it was reproduced against live
 Connext 7.7.0 on 2026-08-11** by `test/test_data_representation_spike.py` (`4aed446`)
@@ -1931,7 +1949,18 @@ but the numbering makes screen references unusable against the file.
 
 ### L6
 
-**Exit code 2 means both "bad command line" and "topic not found".**
+**Status: Fixed** 2026-08-12. A `_Parser` subclass overrides
+`ArgumentParser.error` to exit `EXIT_CANNOT_START` (4), so a rejected command
+line joins the other reasons Doctor could not run. `EXIT_TARGET_ABSENT` keeps
+`2` rather than moving, because it is the documented contract a CI job is most
+likely to already depend on, and a rejected command line is the side of the
+collision nobody scripted against on purpose. The fix covers argparse's own
+rejections and the hand-written `parser.error` calls alike, since both route
+through `error()`. `test_a_rejected_command_line_is_not_the_topic_absent_code`
+exercises all three paths, and the shared `_rejects` helper now asserts the code
+on every argument-validation test rather than only that `SystemExit` was raised.
+
+
 `parser.error()` exits 2 (argparse default) — `../rti_doctor/__main__.py#L128`,
 `#L130`, `#L132`, `#L138`, `#L143`, `#L145` — which is the same code the README
 documents for "the named topic was not found" (`#L395`). A CI wrapper written to

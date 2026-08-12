@@ -11,8 +11,13 @@ the constrained side: for each ordered policy the writer must offer at least wha
 the reader requests.
 """
 
-from .. import compat, records
+from .. import compat, records, vendors
 from ..findings import RUNG_MATCH, Finding, Severity
+
+#: XCDR1's DATA_REPRESENTATION id, per XTypes. The effective representation of a
+#: writer that advertised an empty sequence, for the vendors where that has been
+#: measured - see the Q3 comment in `_policy_mismatches`.
+XCDR1_ID = 0
 
 #: Ordered policy kinds. A writer must offer a value >= the reader's request.
 #: Keyed by the trailing enum name so this stays version- and binding-agnostic.
@@ -334,15 +339,30 @@ def compare_endpoints(writer, reader):
   # ever applies to a foreign vendor. The branch below is still correct; it is
   # narrower in reach than it looks.
   #
-  # The empty-list branch is the open half of Q3. A Connext writer that
-  # advertises nothing is effectively XCDR1 and really is refused by an
-  # XCDR2-only reader, so declining here reports a genuinely incompatible pair
-  # as `qos.compatible` at exit 0. It is left declining on purpose until the
-  # same emptiness is measured for a non-Connext writer: see Q3 in
-  # `docs/DESIGN_DECISIONS.md`, and the expectedFailure in the spike suite that
-  # runs this exact disagreement on every live test run.
+  # Q3, decided 2026-08-12. An empty *writer* advertisement is not "said
+  # nothing": for every vendor where it has been measured it means XCDR1, and
+  # such a writer really is refused by an XCDR2-only reader with
+  # `requested_incompatible_qos` naming DataRepresentation. Declining to compare
+  # it reported that genuinely broken pair as `qos.compatible` at exit 0 - on
+  # the most common configuration there is, a writer that never set the policy.
+  #
+  # So the emptiness is resolved to XCDR1 and compared, but only for the vendors
+  # in `vendors.EMPTY_REPRESENTATION_MEANS_XCDR1`, which is the measured scope
+  # and not a spec reading. A Cyclone or unrecognized writer still declines,
+  # because Cyclone documents resolving an unspecified policy to XCDR2 - the
+  # opposite meaning from the same wire state.
+  #
+  # Reader-side emptiness is untouched and still declines. That asymmetry is
+  # measured too: a default reader advertises XCDR1 concretely while a default
+  # writer advertises nothing, so an empty *reader* list is genuinely unread
+  # rather than meaningful.
   writer_ids = records.representation_ids(writer.representation)
   reader_ids = records.representation_ids(reader.representation)
+  writer_representation_inferred = False
+  if not writer_ids and reader_ids and vendors.empty_representation_means_xcdr1(
+      getattr(writer, "vendor_id", None)):
+    writer_ids = [XCDR1_ID]
+    writer_representation_inferred = True
   # An empty list is "could not read" (records.representation_ids says so), and
   # AUTO leaves the effective representation undetermined from discovery alone.
   if not (writer_ids and reader_ids):
@@ -361,13 +381,24 @@ def compare_endpoints(writer, reader):
         f"The {' and '.join(auto)} advertised AUTO, whose effective "
         f"representation is not determinable from discovery data."))
   elif writer_ids[0] not in set(reader_ids):
+    # Report what was on the wire, then what it means. Rendering an inferred
+    # XCDR1 as though the writer had advertised it would be a positive claim
+    # about discovery data that does not exist - the mistake Q1 and Q2 were.
+    offered = records.representation_text(writer.representation)
+    rule = ("The reader must accept the writer's effective data "
+            "representation, which is the first entry in the writer's list "
+            "(XCDR1/XCDR2).")
+    if writer_representation_inferred:
+      offered = f"{offered} (XCDR1 in effect)"
+      rule = ("A writer that advertises no data representation is using XCDR1, "
+              "measured for this vendor against live middleware, and the reader "
+              "does not accept XCDR1. The middleware refuses this pair with "
+              "requested_incompatible_qos naming DataRepresentation.")
     mismatches.append({
         "policy": "DATA_REPRESENTATION",
-        "offered": records.representation_text(writer.representation),
+        "offered": offered,
         "requested": records.representation_text(reader.representation),
-        "rule": "The reader must accept the writer's effective data "
-                "representation, which is the first entry in the writer's list "
-                "(XCDR1/XCDR2).",
+        "rule": rule,
     })
 
   overlap, writer_partitions, reader_partitions = _partitions_overlap(writer, reader)

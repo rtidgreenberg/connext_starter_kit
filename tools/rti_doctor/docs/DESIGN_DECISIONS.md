@@ -235,8 +235,9 @@ stays readable.
 
 ### Q3: Data Representation Verdict for a Non-Advertising Writer
 
-- **Date:** 2026-08-11
-- **Status:** Evidence gathered; decision pending
+- **Date:** 2026-08-11; decided 2026-08-12
+- **Status:** Accepted, for RTI and Fast DDS writers. A Cyclone or unrecognized
+	writer still declines the comparison.
 - **Problem:** `qos_match` declines DATA_REPRESENTATION whenever either side's
 	advertised list is empty, and reports the pair `qos.compatible` /
 	`Severity.OK` anyway. Q1a closed the reporting half - the pair now says the
@@ -284,19 +285,43 @@ stays readable.
 		means "the application set nothing", while from Connext it means "set
 		nothing, or set XCDR1" - two routes to one wire state that both mean
 		XCDR1 in effect.
-- **Decision:** Not yet taken, but no longer blocked. Two of two measured
-	vendors agree that an empty writer advertisement means XCDR1 in practice, so
-	treating it as `[XCDR1]` and comparing it - rather than declining - would
-	turn the false `compatible` into a correct ERROR on both. Cyclone remains
-	unmeasured (`ENV-1`: the package is not installed on the test host), and the
-	README's note that Cyclone can resolve an unspecified policy to XCDR2 is now
-	the outlier hypothesis rather than a symmetric unknown. Take the decision
-	with the vendors it is claimed for written into the finding text, and treat
-	a Cyclone peer as the case that must still decline until measured.
-- **Consequences (if adopted):** DATA_REPRESENTATION stops being unevaluated for
-	the most common writer configuration there is, so the rule finally runs on
-	the majority of pairs. `repr.not_advertised` becomes the cross-reference for
-	the residual unknown rather than the whole story.
+- **Decision (2026-08-12):** Taken as the evidence indicated. `qos_match`
+	resolves an **empty writer advertisement to `[XCDR1]`** and compares it,
+	instead of declining, but only for the vendors in
+	`vendors.EMPTY_REPRESENTATION_MEANS_XCDR1` — RTI and Fast DDS, the two where
+	the meaning was measured against live middleware. A Cyclone writer and any
+	unrecognized vendor id still decline, so an unknown peer does not inherit
+	RTI's semantics by default; Cyclone's README documents resolving an
+	unspecified policy to XCDR2, the opposite meaning from the same wire state,
+	and that remains unmeasured. Reader-side emptiness is untouched and still
+	declines, because a default reader advertises XCDR1 concretely — the
+	evidence gap was only ever writer-side.
+- **How the report says it:** the mismatch renders `offered` as
+	`not advertised (XCDR1 in effect)`. The wire fact comes first and the
+	inference second, because rendering an inferred XCDR1 as though the writer
+	had advertised it would be a positive claim about discovery data that does
+	not exist — which is exactly what Q1 and Q2 were. The rule text says the
+	middleware refuses the pair with `requested_incompatible_qos` naming
+	DataRepresentation, so the reader knows what to expect from the middleware.
+- **Consequences:** DATA_REPRESENTATION stops being unevaluated for the most
+	common writer configuration there is, so the rule finally runs on the
+	majority of pairs. `repr.not_advertised` becomes the cross-reference for the
+	residual unknown rather than the whole story. A pair that was silently
+	`qos.compatible` at exit 0 now exits 1, which is a **behaviour change for any
+	CI job** already scripting on Doctor's exit code against such a pair — that
+	is the point of the fix, and it is why the vendors are named in the code
+	rather than assumed.
+- **Verification:** both spike suites had an `expectedFailure` asserting that
+	rti_doctor and the middleware disagree; both decorators are removed and the
+	assertions now pass unchanged — the product moved, not the test. Connext in
+	`test_data_representation_spike.py` (live tier), Fast DDS cross-vendor in
+	`test_fastdds_representation_spike.py` (vendor tier). Five unit tests in
+	`test_checks.py` pin the vendor scoping, including that Cyclone and an
+	unrecognized vendor still decline and that the report does not claim the
+	writer advertised XCDR1.
+- **Still open:** Cyclone. `REP-1`'s remaining third is now cheap — the package
+	is installed as of 2026-08-12 — and measuring it either widens this list to
+	three vendors or confirms Cyclone as a genuine exception.
 - **Follow-up:** Remove the `@unittest.expectedFailure` on
 	`test_the_tool_agrees_with_the_middleware` as part of the fix; it is written
 	to report an *unexpected success* the moment the verdict changes.

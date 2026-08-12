@@ -312,20 +312,19 @@ class TestFastDdsRepresentationEvidence(unittest.TestCase):
       for row in rows:
         self.assertNotEqual(row["advertised"], "unreadable", row)
 
-  @unittest.expectedFailure
   def test_the_tool_agrees_with_the_middleware_cross_vendor(self):
     """The Q3 question in the direction that matters for a Fast DDS engagement.
 
-    Expected to fail until Q3's verdict is decided, and measured on 2026-08-11
-    to fail on exactly one row: a Fast DDS writer that advertises nothing
-    against a Connext reader requesting XCDR2 only. Connext refuses the pair
-    and names DataRepresentation; rti_doctor calls it `compatible` and exits 0.
-    That is the same defect the Connext-only spike found, now confirmed in the
-    cross-vendor direction that a Fast DDS engagement actually runs into.
+    Was an expected failure until Q3's verdict was decided on 2026-08-12. It
+    failed on exactly one row: a Fast DDS writer that advertises nothing against
+    a Connext reader requesting XCDR2 only, which Connext refuses while naming
+    DataRepresentation and rti_doctor called `compatible` at exit 0.
 
-    Not a skip: it executes every vendor run and reports an *unexpected
-    success* the day the verdict changes, which is the signal to delete this
-    decorator. Remove it as part of the Q3 fix.
+    That row is now an ERROR, because `qos_match` resolves an empty writer
+    advertisement to XCDR1 for the vendors where that meaning has been measured
+    - Fast DDS among them, by this very suite. The assertion is unchanged; only
+    the product moved. It stays here as the regression guard for the whole
+    matrix, in both directions and every representation mode.
     """
     disagreements = [
         (item["writer_mode"], item["reader_mode"], item["advertised"],

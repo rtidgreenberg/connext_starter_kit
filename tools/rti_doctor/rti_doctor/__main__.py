@@ -20,6 +20,12 @@ DEFAULT_DISCOVERY_SETTLE = 3.0
 #: too, by way of an uncaught traceback, so "Doctor could not run" and "your
 #: system has an error" were indistinguishable to the one consumer that cannot
 #: read the message.
+#:
+#: `2` means the requested target was absent and nothing else. argparse's own
+#: default for a rejected command line is also `2`, so until 2026-08-12 a CI job
+#: acting on `2` read a mistyped flag as "topic not found" - a clean result from
+#: a run that never started. `_Parser` below sends that case to
+#: `EXIT_CANNOT_START` instead (L6).
 EXIT_OK = 0
 EXIT_ERROR_FINDINGS = 1
 EXIT_TARGET_ABSENT = 2
@@ -77,8 +83,27 @@ def configure_connext_logging(log_path=None, verbosity="silent"):
   return settings
 
 
+class _Parser(argparse.ArgumentParser):
+  """An ArgumentParser that does not collide with `EXIT_TARGET_ABSENT`.
+
+  argparse exits `2` on a rejected command line, which is also Doctor's code for
+  "the topic was not found" - so a CI job scripting on `2` read a mistyped flag
+  as a clean "topic absent" result, and nothing but the stderr text told the two
+  apart (L6). A rejected command line is a reason Doctor could not run, so it
+  reports `EXIT_CANNOT_START` and joins the other startup failures.
+
+  `EXIT_TARGET_ABSENT` keeps `2` rather than moving: it is the documented
+  contract a CI job is most likely to already depend on, and this is the side of
+  the collision nobody has scripted against on purpose.
+  """
+
+  def error(self, message):
+    self.print_usage(sys.stderr)
+    self.exit(EXIT_CANNOT_START, f"{self.prog}: error: {message}\n")
+
+
 def parse_args(argv=None):
-  parser = argparse.ArgumentParser(
+  parser = _Parser(
       prog="rti_doctor",
       description="Diagnose DDS interoperability problems between RTI Connext and "
                   "other DDS vendors.")

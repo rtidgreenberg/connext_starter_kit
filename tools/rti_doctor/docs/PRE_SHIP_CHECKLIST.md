@@ -1,8 +1,15 @@
 # RTI Doctor Pre-Ship Checklist
 
-Fast DDS root-cause engagement. 2026-08-11, branch `rti-doctor-review-fixes`,
-HEAD `11b6776`. Findings cited are in `CODE_REVIEW_2026-08-07.md`; tasks are in
-`IMPROVEMENT_BACKLOG.md`.
+Fast DDS root-cause engagement. Updated 2026-08-12, branch
+`rti-doctor-review-fixes`. Findings cited are in `CODE_REVIEW_2026-08-07.md`;
+tasks are in `IMPROVEMENT_BACKLOG.md`.
+
+**Fast DDS status: no open Critical or High finding, and no Fast DDS expected
+failure outside the isolated FDD-2 discovery experiment.** Q3 - the one wrong
+verdict on the likeliest misconfiguration - was fixed on 2026-08-12, along with
+L6. The residual Fast DDS risk is HAR-6, which is unexplained rather than
+unfixed. Cyclone carries the two open expected failures (CYC-1, WIRE-2) and does
+not bear on a Fast DDS engagement.
 
 ## Fix before handover
 
@@ -68,26 +75,33 @@ HEAD `11b6776`. Findings cited are in `CODE_REVIEW_2026-08-07.md`; tasks are in
       reported *no version at all* — one absent subfield discarded the whole
       thing — so a Doctor older than this one showing nothing is not evidence
       that the peer advertised nothing (M2, fixed).
-- [ ] **Doctor will call one specific broken pair healthy, on both vendors.**
-      Measured 2026-08-11 for Connext (`4aed446`) and Fast DDS (`ac38165`): a
-      writer that never set DATA_REPRESENTATION advertises nothing, which means
-      XCDR1 — and against a reader requesting XCDR2 only, the middleware refuses
-      the match and names `DataRepresentation`, while rti_doctor reports
-      `qos.compatible` and exits 0 (Q3). On any pair reporting `qos.compatible`
-      with no data flowing, read the report's `Representation` and
-      `Not evaluated` lines before believing the verdict. A writer showing
-      `not advertised` against a reader showing `XCDR2` **is** that case.
-- [ ] Exit codes: `0` clean, `1` ERROR findings, `2` topic absent **or the
-      command line was rejected**, `3` readiness timeout, `4` could not run,
-      `130` interrupted. Those two meanings of `2` are argparse's and Doctor's,
-      and nothing but the stderr message separates them — a CI job scripting on
-      `2` reads a mistyped flag as "topic not found" (L6, open).
-- [ ] HAR-6's three Fast DDS vendor tests pass now — twice on 2026-08-11, the
-      second time at `11b6776` — with no product change that explains it.
-      Recorded as "no longer reproduces, cause not established". Two greens are
-      better evidence than one and still not a cause: an intermittent
+- [ ] **A default-QoS writer against an XCDR2-only reader is now reported
+      correctly, and it was not before 2026-08-12.** This is the single most
+      likely real misconfiguration in an engagement: a writer that never set
+      DATA_REPRESENTATION advertises nothing, which means XCDR1, and a reader
+      requesting XCDR2 only will never receive from it — the middleware refuses
+      the match and names `DataRepresentation`. Doctor used to report that pair
+      `qos.compatible` at exit 0. It now reports `qos.rxo_mismatch` at exit 1,
+      with `writer offers not advertised (XCDR1 in effect)` (Q3, fixed). Two
+      consequences for the field. A **Doctor older than this one calls that pair
+      healthy**, so a clean report from an earlier build is not evidence about
+      this policy. And the resolution is claimed only for RTI and Fast DDS
+      writers, the two vendors it was measured on: a Cyclone or unrecognized
+      writer still shows DATA_REPRESENTATION under `Not evaluated`, which is
+      honest rather than a gap.
+- [ ] Exit codes: `0` clean, `1` ERROR findings, `2` topic absent, `3` readiness
+      timeout, `4` could not run **or the command line was rejected**, `130`
+      interrupted. As of 2026-08-12 a rejected command line is `4` and no longer
+      collides with `2` (L6, fixed), so a CI job can act on `2` as "topic
+      absent" without a typo masquerading as a clean result. A job written
+      against an older build should not assume this.
+- [ ] HAR-6's three Fast DDS vendor tests pass now — twice on 2026-08-11, and
+      on every vendor run since, with no product change that explains it.
+      Recorded as "no longer reproduces, cause not established". Repeated greens
+      are better evidence than one and still not a cause: an intermittent
       cross-vendor match failure that stops reproducing is the kind that comes
-      back in the field.
+      back in the field. **This is the largest unquantified Fast DDS risk in the
+      handover.**
 
 ## Field commands
 
@@ -102,11 +116,12 @@ HEAD `11b6776`. Findings cited are in `CODE_REVIEW_2026-08-07.md`; tasks are in
 
 ## Re-run if anything changes
 
-All five verified green on 2026-08-11 at `11b6776`, and again after each of the
-M2 and WIRE-1 fixes on that same branch, counts as listed. An
-expected failure here is a recorded defect that still executes, not a skip — if
-one turns into an *unexpected success*, the behaviour changed and the doc it
-cites needs revising.
+All five verified green on 2026-08-12 after the Q3 and L6 fixes, counts as
+listed. An expected failure here is a recorded defect that still executes, not a
+skip — if one turns into an *unexpected success*, the behaviour changed and the
+doc it cites needs revising. That is exactly how Q3 was retired: its two spikes
+were expected failures asserting that Doctor and the middleware disagree, and
+fixing the product made both pass with their assertions untouched.
 
 `run_tests.sh` pipes the run through `tail -40`, so a red re-run reports its
 counts honestly but scrolls all but the last traceback or two out of the window
@@ -120,21 +135,24 @@ PYTHONPATH=tools/rti_doctor <that interpreter> \
     -m unittest tools.rti_doctor.test.<module> -v
 ```
 
-- [x] `./run_tests.sh unit` — 307 tests. Green, 14.1 s.
-- [x] `./run_tests.sh live` — 340 tests, 1 expected failure (the Q3 verdict,
-      Connext↔Connext). Green, 114 s. The Q3 spike prints a
+- [x] `./run_tests.sh unit` — 314 tests. Green, 14.4 s.
+- [x] `./run_tests.sh live` — 347 tests, **no expected failures**, 148 s. The
+      last one was the Q3 verdict Connext↔Connext, and it went when Q3 was
+      fixed on 2026-08-12: the spike's assertion is unchanged and now passes.
+      The Q3 spike prints a
       20-row matrix on its way past, which pushes the count line out of
       `tail -40` — this is M15 on a *green* run, so read the counts by running
       the modules directly, per the command above.
-- [x] `./run_tests.sh vendor` — **34 tests, 1 skipped, 4 expected failures,
-      no failures**, 636 s. Green with Cyclone present, which it has not been
+- [x] `./run_tests.sh vendor` — **34 tests, 1 skipped, 3 expected failures,
+      no failures**, 628 s. Green with Cyclone present, which it has not been
       since 2026-08-06. Image checked and current: created 2026-08-11 13:08,
       fixture last touched 12:31. Takes over ten minutes, so it will not fit
       inside a single foreground command timeout — run it in the background.
-      The four expected failures are the Fast DDS v1-only discovery
-      experiment, the Q3 verdict cross-vendor, and the two added on
+      The three expected failures are the Fast DDS v1-only discovery
+      experiment (FDD-2, isolated by design) and the two Cyclone ones added on
       2026-08-12: the Cyclone-writer→Connext-reader extensibility matrix
-      (CYC-1) and the Cyclone wire capture (WIRE-2). **Rebuild the Fast DDS image if
+      (CYC-1) and the Cyclone wire capture (WIRE-2). **No Fast DDS expected
+      failure remains for Q3** — that one passes now. **Rebuild the Fast DDS image if
       the fixture is newer than the image** — compare
       `test/vendors/fastdds/ExtensibilityEndpoint.cpp` against
       `docker image inspect rti-doctor-fastdds-e2e:3.6.2 --format

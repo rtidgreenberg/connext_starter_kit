@@ -575,6 +575,35 @@ class TestTypeState(unittest.TestCase):
     self.assertEqual(result[0].severity, f.Severity.OK)
     self.assertFalse(result[0].is_problem)
 
+  def test_not_advertised_does_not_contradict_the_rxo_verdict(self):
+    """Q3: two adjacent findings must not disagree about the same emptiness.
+
+    Before 2026-08-12 this finding said the emptiness "says nothing about what
+    the writer supports, so NO incompatibility should be inferred from it".
+    Once `qos_match` began inferring XCDR1 and raising an ERROR for exactly
+    that, a single report asserted both at once. The text is now vendor-
+    dependent, and this pins both branches.
+    """
+    class VendorId:
+      def __init__(self, high, low):
+        self.value = [high, low]
+
+    measured = type_compat.check_representation(CheckContext(
+        endpoint=endpoint_record(representation=None,
+                                 vendor_id=VendorId(0x01, 0x0F))))[0]
+    self.assertIs(measured.evidence["empty_means_xcdr1"], True)
+    self.assertIn("XCDR1", measured.root_cause)
+    self.assertNotIn("NO incompatibility", measured.root_cause)
+
+    unmeasured = type_compat.check_representation(CheckContext(
+        endpoint=endpoint_record(representation=None,
+                                 vendor_id=VendorId(0x01, 0x10))))[0]
+    self.assertIs(unmeasured.evidence["empty_means_xcdr1"], False)
+    self.assertIn("NO incompatibility", unmeasured.root_cause)
+    # Both stay OK: the ERROR, when there is one, belongs to the pair check.
+    for finding in (measured, unmeasured):
+      self.assertEqual(finding.severity, f.Severity.OK)
+
 
 class TestDiscoveryLifecycle(unittest.TestCase):
 
@@ -792,6 +821,92 @@ class TestRxO(unittest.TestCase):
         {"representation": self._representation([2])})
     result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
     self.assertEqual(ids(result), ["qos.compatible"])
+
+  @staticmethod
+  def _vendor(high, low):
+    class VendorId:
+      value = [high, low]
+    return VendorId()
+
+  def test_a_non_advertising_writer_is_xcdr1_and_an_xcdr2_only_reader_rejects_it(self):
+    """Q3, decided 2026-08-12. This exact pair used to report `qos.compatible`.
+
+    Measured against live middleware for both vendors: a writer that never set
+    DATA_REPRESENTATION advertises an empty sequence, and an XCDR2-only reader
+    refuses it with `requested_incompatible_qos` naming DataRepresentation. The
+    tool reported OK at exit 0 on the commonest configuration there is.
+    """
+    for vendor_name_, octets in (("RTI", (0x01, 0x01)), ("Fast DDS", (0x01, 0x0F))):
+      with self.subTest(vendor=vendor_name_):
+        writer, reader, registry = self._pair(
+            {"representation": self._representation([]),
+             "vendor_id": self._vendor(*octets)},
+            {"representation": self._representation([2])})
+        result = qos_match.check_rxo_pairs(
+            CheckContext(endpoint=writer, registry=registry))
+        self.assertEqual(ids(result), ["qos.rxo_mismatch"])
+        mismatch, = [m for m in result[0].evidence["mismatches"]
+                     if m["policy"] == "DATA_REPRESENTATION"]
+        # The report must not claim the writer advertised XCDR1. It advertised
+        # nothing; XCDR1 is what that means. Q1 and Q2 were the same mistake.
+        self.assertIn("not advertised", mismatch["offered"])
+        self.assertIn("XCDR1 in effect", mismatch["offered"])
+
+  def test_a_non_advertising_writer_still_matches_a_reader_accepting_xcdr1(self):
+    """The other half: resolving to XCDR1 must not invent a mismatch."""
+    writer, reader, registry = self._pair(
+        {"representation": self._representation([]),
+         "vendor_id": self._vendor(0x01, 0x0F)},
+        {"representation": self._representation([0])})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.compatible"])
+
+  def test_a_non_advertising_cyclone_writer_still_declines_the_comparison(self):
+    """Cyclone is outside the measured scope and must not inherit RTI's meaning.
+
+    Its README documents resolving an unspecified policy from the type's
+    defaults, which can select XCDR2 - the opposite meaning from the same wire
+    state. Until that is measured, this pair is unevaluated rather than an
+    ERROR, because a wrong ERROR is the Q1/Q2 defect in the other direction.
+    """
+    writer, reader, registry = self._pair(
+        {"representation": self._representation([]),
+         "vendor_id": self._vendor(0x01, 0x10)},
+        {"representation": self._representation([2])})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.compatible"])
+    unevaluated = [item["policy"]
+                   for item in result[0].evidence["policies_unevaluated"]]
+    self.assertIn("DATA_REPRESENTATION", unevaluated)
+
+  def test_a_non_advertising_writer_of_an_unknown_vendor_declines_the_comparison(self):
+    """An unrecognized vendor id must not default into RTI's semantics."""
+    writer, reader, registry = self._pair(
+        {"representation": self._representation([]),
+         "vendor_id": self._vendor(0x7F, 0x7F)},
+        {"representation": self._representation([2])})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.compatible"])
+    unevaluated = [item["policy"]
+                   for item in result[0].evidence["policies_unevaluated"]]
+    self.assertIn("DATA_REPRESENTATION", unevaluated)
+
+  def test_an_unreadable_reader_representation_still_declines(self):
+    """Reader-side emptiness is genuinely unread, and Q3 does not touch it.
+
+    Measured: a default *reader* advertises XCDR1 concretely while a default
+    writer advertises nothing, so an empty reader list means the policy could
+    not be read - not that the reader accepts XCDR1.
+    """
+    writer, reader, registry = self._pair(
+        {"representation": self._representation([0]),
+         "vendor_id": self._vendor(0x01, 0x01)},
+        {"representation": self._representation([])})
+    result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.compatible"])
+    unevaluated = [item["policy"]
+                   for item in result[0].evidence["policies_unevaluated"]]
+    self.assertIn("DATA_REPRESENTATION", unevaluated)
 
   def test_ownership_must_match_exactly(self):
     writer, reader, registry = self._pair(

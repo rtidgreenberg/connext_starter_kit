@@ -418,24 +418,50 @@ def check_representation(context):
 
   ids = records.representation_ids(endpoint.representation)
   if not ids:
+    known = vendors.empty_representation_means_xcdr1(endpoint.vendor_id)
+    # Q3, decided 2026-08-12. This finding used to say the emptiness "says
+    # nothing about what the writer supports, so NO incompatibility should be
+    # inferred from it" - which, once `qos_match` started inferring XCDR1 and
+    # raising an ERROR for it, made the report contradict itself in two
+    # adjacent findings. What the emptiness means now depends on the vendor,
+    # and this text says which.
+    if known:
+      root_cause = (
+          "A writer using the default DataRepresentationQosPolicy advertises an "
+          "empty sequence. For this vendor that emptiness has been measured "
+          "against live middleware to mean XCDR1: a writer configured "
+          "explicitly [XCDR1] advertises the same empty sequence, the pair "
+          "matches an XCDR1 reader and delivers, and an XCDR2-only reader "
+          "refuses it naming DataRepresentation. So the RxO comparison treats "
+          "this writer as XCDR1 rather than declining, and any resulting "
+          "qos.rxo_mismatch above is the middleware's own verdict. This is "
+          "recorded separately so the wire fact - that nothing was advertised - "
+          "stays visible behind the inference drawn from it.")
+    else:
+      root_cause = (
+          "A writer using the default DataRepresentationQosPolicy advertises an "
+          "empty sequence. What that means has not been measured for this "
+          "vendor, and it is not the same for all of them - Cyclone documents "
+          "resolving an unspecified policy from the type's defaults, which can "
+          "select XCDR2, the opposite of what RTI and Fast DDS were measured to "
+          "mean by the identical wire state. So NO incompatibility is inferred "
+          "from it here, and the RxO comparison declines DATA_REPRESENTATION "
+          "rather than guessing.")
     return [Finding(
         id="repr.not_advertised",
         rung=RUNG_TYPE,
-        # OK: the finding's own text says no incompatibility may be inferred
-        # from it and that it exists only so its absence is not mistaken for an
-        # oversight. That is a statement for a targeted report, not an issue.
+        # OK either way: this finding records a wire fact. When the emptiness is
+        # meaningful the ERROR belongs to qos.rxo_mismatch, which compares the
+        # pair; when it is not, there is nothing to report. Neither case is an
+        # issue in its own right.
         severity=Severity.OK,
         title="Writer advertises no explicit data representation",
         observed=("PublicationBuiltinTopicData.representation is an empty sequence "
                   "(readable, but carrying no representation ids)."),
-        root_cause=(
-            "A writer using the default DataRepresentationQosPolicy advertises an "
-            "empty sequence, which is what a Connext writer with default QoS looks "
-            "like. This says nothing about what the writer supports, so NO "
-            "incompatibility should be inferred from it - it is recorded here only "
-            "so that its absence from the report is not mistaken for an oversight."),
+        root_cause=root_cause,
         remedy="",
-        evidence={"representation": "not advertised"},
+        evidence={"representation": "not advertised",
+                  "empty_means_xcdr1": known},
         refs=[DOC_TYPE_REPR],
     )]
 

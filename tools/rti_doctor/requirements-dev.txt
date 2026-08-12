@@ -15,3 +15,22 @@ textual-dev
 # runnable: `mypy --ignore-missing-imports rti_doctor` reports 11 annotation
 # errors that must be cleared before it can gate anything (backlog ENV-2).
 mypy
+
+# Eclipse Cyclone DDS, the second vendor in the `vendor` tier: every
+# Connext/Cyclone fault control, the RxO vendor matrix, the extensibility
+# matrix and the Cyclone wire E2E need it, and eleven of them skip silently
+# without it because the suites guard on `find_spec("cyclonedds")`.
+#
+# It was listed in no requirements file until 2026-08-12, having been
+# installed by hand. `python_env.sh` names the venv from the detected Connext
+# and Python versions, so the move to Connext 7.7 on Python 3.11 built a new
+# venv (`connext_dds_env_7.7_py311`, 2026-08-06) and nothing reinstalled the
+# package into it - the vendor tier lost half its vendors and still reported
+# OK. This line is what makes a rebuilt venv get it back (backlog ENV-1).
+#
+# Pinned, not floated: 11.0.1 is the version every result in
+# docs/CYCLONE_CONNEXT_INTEROP_FINDINGS.md was measured against, including the
+# trace that identifies Cyclone's assignability rejection. An unpinned upgrade
+# would silently re-scope that evidence. The manylinux wheel carries its own
+# Cyclone shared library, so no separate native build is needed.
+cyclonedds==11.0.1

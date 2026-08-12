@@ -104,21 +104,47 @@ PYTHONPATH=tools/rti_doctor <that interpreter> \
     -m unittest tools.rti_doctor.test.<module> -v
 ```
 
-- [ ] `./run_tests.sh unit` — 304 tests
-- [ ] `./run_tests.sh live` — 337 tests, 1 expected failure (the Q3 verdict,
-      Connext↔Connext)
-- [ ] `./run_tests.sh vendor` — 33 tests, 12 skipped (Cyclone absent), 2
-      expected failures (Fast DDS v1-only discovery, and the Q3 verdict
-      cross-vendor). Takes about eight minutes. **Rebuild the Fast DDS image if
+- [x] `./run_tests.sh unit` — 304 tests. Green at `7b57c51`, 13.8 s.
+- [x] `./run_tests.sh live` — 337 tests, 1 expected failure (the Q3 verdict,
+      Connext↔Connext). Green at `7b57c51`, 114 s. The Q3 spike prints a
+      20-row matrix on its way past, which pushes the count line out of
+      `tail -40` — this is M15 on a *green* run, so read the counts by running
+      the modules directly, per the command above.
+- [x] `./run_tests.sh vendor` — **34 tests, 9 failures, 1 skipped, 2 expected
+      failures** at `7b57c51`, 640 s. Read the next bullet before treating the
+      red as a blocker. Image checked and current: created 2026-08-11 13:08,
+      fixture last touched 12:31. Takes over ten minutes now, so it will not
+      fit inside a single foreground command timeout — run it in the
+      background. **Rebuild the Fast DDS image if
       the fixture is newer than the image** — compare
       `test/vendors/fastdds/ExtensibilityEndpoint.cpp` against
       `docker image inspect rti-doctor-fastdds-e2e:3.6.2 --format
       '{{.Created}}'`, and rebuild with `test/vendors/fastdds/build_image.sh`.
       The fixture gained `--representation default` in `ac38165`, and an image
       older than that skips the spike.
-- [ ] `bash scripts/test_python_env.sh` and
-      `bash scripts/test_rti_spy_bundle.sh`
-- [ ] `./run_lint.sh`
+- [x] **The vendor tier's nine failures are one known interop condition, not
+      new breakage** (CYC-1). Cyclone was reinstalled on 2026-08-12 —
+      `cyclonedds==11.0.1`, now pinned in `requirements-dev.txt` — after being
+      lost on 2026-08-06 when the venv was rebuilt for Connext 7.7 on Python
+      3.11 with the package listed in no requirements file. That turned eleven
+      silent skips into nine real failures. Every one is the same shape:
+      whichever endpoint is Cyclone reports `matched: 0` while the Connext side
+      writes 75–77 samples. It is `CYCLONE_CONNEXT_INTEROP_FINDINGS.md` —
+      under default Connext 7.7 TypeObject v2 propagation Cyclone never
+      reciprocally associates, and only `--type-object-v1-only` restores
+      delivery — and the fixtures set no such control. **These tests therefore
+      cannot have passed since the matrix was added on 2026-08-04**, and
+      Cyclone vanished two days later, which is what kept it invisible.
+      Unit (304), live (337) and lint are green at the same commit, so nothing
+      on this branch caused it. The honest handover statement is that the
+      vendor tier is red for a documented cross-vendor reason, with 22 of its
+      34 tests passing — including all five Connext/Cyclone fault controls,
+      both RxO vendor directions, and the Fast DDS wire test that asserts the
+      WIRE-1 version against the image tag — not that it is green.
+- [x] `bash scripts/test_python_env.sh` and
+      `bash scripts/test_rti_spy_bundle.sh` — both PASS at `7b57c51`.
+- [x] `./run_lint.sh` — clean at `7b57c51`: no undefined names, no unused
+      imports.
 
 ## Clear the tree, last
 

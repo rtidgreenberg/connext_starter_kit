@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
 
 from rti_doctor import paths, wire  # noqa: E402
-from rti_doctor import report  # noqa: E402
+from rti_doctor import records, report  # noqa: E402
 import doctor_e2e  # noqa: E402
 
 
@@ -212,6 +212,76 @@ class TestTsharkFields(unittest.TestCase):
     self.assertIn("Observed DDS data representation      XCDR2 (little-endian) [0x0007]",
             text)
     self.assertIn("Encapsulation IDs in matching frames  0x0007", text)
+
+  def _capture_report(self, wire_evidence=None, discovery_evidence=None,
+                      endpoint=None):
+    return report.render_text(report.ReportData(
+        domain_id=7, scope="topic 'Sample'", all_findings=[], endpoint=endpoint,
+        wire_evidence=wire_evidence, discovery_evidence=discovery_evidence))
+
+  def test_capture_summary_puts_the_packet_only_version_near_the_top(self):
+    """The version is the one fact no DDS-level observation can produce.
+
+    It was reachable only in Appendix C, below every finding, which is the
+    wrong place for the main thing a capture just bought you.
+    """
+    text = self._capture_report(
+        wire_evidence={"source": "c.pcapng", "packets": 0, "data_packets": 0},
+        discovery_evidence={"fastdds_product_versions": ["3.6.2.0"],
+                            "participants": 1})
+    self.assertIn("CAPTURE EVIDENCE", text)
+    summary, appendix = text.split("APPENDIX", 1)
+    self.assertIn("3.6.2.0", summary)
+    # Still in the appendix too: the summary is a pointer, not a replacement.
+    self.assertIn("3.6.2.0", appendix)
+
+  def test_capture_summary_labels_do_not_collide_with_their_values(self):
+    """`_kv` defaults to a 16-char pad and these labels run to 21.
+
+    Caught in a live run rendering "Fast DDS version3.6.2.0". A substring
+    assertion on the label alone cannot see it, so assert the gap.
+    """
+    text = self._capture_report(
+        wire_evidence={"source": "c.pcapng", "packets": 0, "data_packets": 0},
+        discovery_evidence={"fastdds_product_versions": ["3.6.2.0"]})
+    self.assertIn("  Fast DDS version      3.6.2.0", text)
+
+  def test_no_capture_leaves_the_report_unchanged(self):
+    self.assertNotIn("CAPTURE EVIDENCE", self._capture_report())
+
+  def test_a_failed_capture_does_not_read_as_a_quiet_wire(self):
+    """"Nobody looked" and "there was nothing there" are opposite conclusions."""
+    text = self._capture_report(
+        wire_evidence={"source": "c.pcapng", "error": "tshark not found"})
+    self.assertIn("capture unavailable: tshark not found", text)
+    self.assertNotIn("No user DATA", text)
+
+  def test_capture_summary_flags_a_wire_representation_the_peer_did_not_advertise(self):
+    """The comparison only a capture can make: advertised versus serialized."""
+    class Representation:
+      value = [0]  # XCDR1 advertised...
+
+    endpoint = records.EndpointRecord(key="w", kind="Writer",
+                                      representation=Representation())
+    text = self._capture_report(
+        # ...while 0x0007 on the wire is XCDR2.
+        wire_evidence={"source": "c.pcapng", "packets": 1, "data_packets": 1,
+                       "encapsulation_ids": ["0x0007"]},
+        endpoint=endpoint)
+    self.assertIn("disagrees with the advertised XCDR1", text)
+
+  def test_capture_summary_confirms_a_matching_representation(self):
+    class Representation:
+      value = [2]
+
+    endpoint = records.EndpointRecord(key="w", kind="Writer",
+                                      representation=Representation())
+    text = self._capture_report(
+        wire_evidence={"source": "c.pcapng", "packets": 1, "data_packets": 1,
+                       "encapsulation_ids": ["0x0007"]},
+        endpoint=endpoint)
+    self.assertIn("agrees with the advertised XCDR2", text)
+    self.assertNotIn("disagrees", text)
 
   def test_capture_filter_prefers_selected_writer_locator(self):
     endpoint = self.Endpoint([self.Locator("192.0.2.5", 7411)])

@@ -33,6 +33,11 @@ THIN = "-" * WIDTH
 #: normal state rather than an unusual one.
 CAPTURE_PLACEHOLDER = "Run capture to ascertain"
 
+#: Label pad for the CAPTURE EVIDENCE summary. Its labels are indented two
+#: spaces and run to 21 characters, past `_kv`'s default 16, which collides the
+#: value against the label rather than wrapping it.
+CAPTURE_LABEL_PAD = 24
+
 #: How to ascertain it, stated wherever the placeholder appears.
 CAPTURE_HINT = ("Open an endpoint report and press c to capture RTPS packets for "
                 "that endpoint.")
@@ -272,6 +277,7 @@ def render_text(data):
   lines += _section("VERDICT")
   lines += [data.verdict, ""]
 
+  lines += _render_capture_summary(data)
   lines += _render_peer(data)
   lines += _render_topology(data)
   lines += _render_findings(data)
@@ -280,6 +286,81 @@ def render_text(data):
   lines += _render_wire_appendix(data)
   lines += _render_config_appendix(data)
   return "\n".join(lines) + "\n"
+
+
+def _render_capture_summary(data):
+  """What the capture added that discovery could not, near the top.
+
+  The full counts stay in Appendix C. This answers the question an engineer
+  actually has after pressing `c`: what do I know now that I did not know
+  before? Two things can only come from packets - the peer's product version,
+  which is an RTI discovery extension and therefore absent for every other
+  vendor, and the encapsulation actually used on the wire, as opposed to the
+  DataRepresentation the endpoint advertised it would use.
+
+  It renders only when a capture was run, so a report without one is unchanged.
+  """
+  wire_evidence = data.wire_evidence
+  discovery = data.discovery_evidence
+  if wire_evidence is None and discovery is None:
+    return []
+
+  lines = _section("CAPTURE EVIDENCE")
+  wire_error = (wire_evidence or {}).get("error")
+  discovery_error = (discovery or {}).get("error")
+  if wire_error and (discovery_error or discovery is None):
+    # Nothing was read at all. Say why, and do not let it read as "the wire was
+    # quiet" - those are opposite conclusions for whoever reads this next.
+    lines.append(_kv("Result", f"capture unavailable: {wire_error}",
+                     CAPTURE_LABEL_PAD))
+    lines.append("")
+    return lines
+
+  gained, unchanged = [], []
+
+  versions = (discovery or {}).get("fastdds_product_versions") or []
+  if versions and not discovery_error:
+    gained.append(("Fast DDS version", ", ".join(versions),
+                   "packets only - the discovery API cannot report a product "
+                   "version for a non-RTI vendor"))
+
+  encapsulations = (wire_evidence or {}).get("encapsulation_ids") or []
+  advertised = (records.representation_text(data.endpoint.representation)
+                if data.endpoint is not None else None)
+  if encapsulations:
+    observed = wire.encapsulation_text(encapsulations)
+    note = "what the writer actually serialized"
+    if advertised and advertised not in ("unreadable", "not advertised"):
+      # The one comparison worth making automatically: a peer can advertise one
+      # representation and serialize another, and only a capture can catch it.
+      agrees = advertised.split(",")[0].strip().lower() in observed.lower()
+      note = (f"agrees with the advertised {advertised}" if agrees else
+              f"**disagrees with the advertised {advertised}**")
+    gained.append(("Wire representation", observed, note))
+
+  data_frames = ((wire_evidence or {}).get("data_packets", 0)
+                 + (wire_evidence or {}).get("data_fragments", 0))
+  if wire_evidence is not None and not wire_error and not data_frames:
+    unchanged.append(
+        "No user DATA from the selected endpoint was captured. That is what a "
+        "writer with no matched reader looks like, and it is also what an "
+        "endpoint the capture filter could not reach looks like - the counts "
+        "and the filter in Appendix C separate the two.")
+  if not gained and not unchanged:
+    unchanged.append("The capture added nothing beyond what discovery already "
+                     "reported.")
+
+  if gained:
+    lines.append("New from packets, not available from discovery")
+    for label, value, note in gained:
+      lines.append(_kv(f"  {label}", value, CAPTURE_LABEL_PAD))
+      lines.extend(_wrap(note, indent=4))
+  for note in unchanged:
+    lines.extend(_wrap(note, indent=2))
+  lines.append("")
+  lines.append("Full counts, filters and announcement details in Appendix C.")
+  lines.append("")
+  return lines
 
 
 def _render_peer(data):

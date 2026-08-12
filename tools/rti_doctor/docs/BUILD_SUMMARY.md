@@ -9,7 +9,7 @@ diagnostic. Written 2026-08-03.
 - **Cross-vendor wire evidence:** validated against Eclipse Cyclone DDS and
   Fast DDS 2.14.6 with vendor-generated payloads saved as PCAPNG.
 
-Full usage documentation is in [README.md](README.md); design rationale and the
+Full usage documentation is in [README.md](../README.md); design rationale and the
 phase plan are in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
 ---

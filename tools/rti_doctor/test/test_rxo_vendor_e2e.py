@@ -8,17 +8,21 @@ offered rules against real DDS matching, not only Doctor's static comparison.
 
 import json
 import os
-import random
 import subprocess
 import sys
 import unittest
+
+# domains lives beside this file. Without this the import resolved only when
+# some OTHER test module had already put the test directory on sys.path,
+# so the suite passed in a full run and failed when run on its own.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: E402
+import domains  # noqa: E402
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VENDORS = os.path.join(HERE, "vendors")
 CONNEXT = os.path.join(VENDORS, "rxo_connext_matrix.py")
 CYCLONE = os.path.join(VENDORS, "rxo_cyclone_matrix.py")
-DOMAIN_BASE = 30
 SCENARIOS = (
     "reliability", "durability", "liveliness_kind", "liveliness_lease",
     "destination_order", "presentation_scope", "presentation_coherent",
@@ -54,7 +58,7 @@ class TestRxOVendorDataFlow(unittest.TestCase):
     self.fail(f"matrix endpoint produced no JSON\ncommand={command}\n{output}")
 
   def _run_pair(self, writer_script, reader_script, mode, scenarios):
-    domain = DOMAIN_BASE + random.randint(1, 100)
+    domain = domains.for_suite("test_rxo_vendor_e2e")
     prefix = f"RxOE2E_{domain}_{mode}"
     reader_command = self._command(
         reader_script, domain, prefix, "reader", mode, scenarios)

@@ -10,7 +10,6 @@ Run:
 """
 
 import os
-import random
 import subprocess
 import sys
 import time
@@ -19,6 +18,13 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL_DIR = os.path.dirname(HERE)
 sys.path.insert(0, TOOL_DIR)
+
+# domains lives beside this file. Without this the import resolved only when
+# some OTHER test module had already put the test directory on sys.path,
+# so the suite passed in a full run and failed when run on its own.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: E402
+import doctor_e2e  # noqa: E402
+import domains  # noqa: E402
 
 try:
   import rti.connextdds  # noqa: F401
@@ -30,13 +36,11 @@ if CONNEXT_AVAILABLE:
   from rti_doctor import compat, discovery, engine, findings as f, records, report
 
 FIXTURE = os.path.join(HERE, "fixture_publisher.py")
-#: High domain ids, randomised per run, so tests do not collide with each other
-#: or with whatever else is on the machine.
-DOMAIN_BASE = 20
 
 
 def _domain():
-  return DOMAIN_BASE + random.randint(1, 100)
+  """Deterministic per suite and port-safe; see test/domains.py."""
+  return domains.for_suite("test_live_integration")
 
 
 @unittest.skipUnless(CONNEXT_AVAILABLE, "RTI Connext Python API not available")
@@ -100,7 +104,7 @@ class LiveFixtureTest(unittest.TestCase):
     return self.session.diagnose_endpoint(writer, probe=probe)
 
   def ids(self, data):
-    return {x.id for x in f.active(data.findings)}
+    return {x.id for x in data.findings}
 
 
 class TestHealthy(LiveFixtureTest):
@@ -117,7 +121,7 @@ class TestHealthy(LiveFixtureTest):
   def test_no_unexpected_errors_on_a_healthy_system(self):
     """The single most important assertion: a healthy system must be quiet."""
     data = self.diagnose()
-    errors = [x.id for x in f.active(data.findings) if x.severity >= f.Severity.ERROR]
+    errors = [x.id for x in data.findings if x.severity >= f.Severity.ERROR]
     self.assertEqual(errors, [], f"healthy system produced errors: {errors}")
 
   def test_every_member_of_the_rich_type_is_readable(self):
@@ -141,6 +145,13 @@ class TestHealthy(LiveFixtureTest):
                     "APPENDIX A", "APPENDIX B", "APPENDIX C"):
       self.assertIn(heading, text)
 
+  def test_interactive_report_sections_are_split_by_concern(self):
+    sections = report.render_view_sections(self.diagnose())
+    self.assertEqual(set(sections), {"overview", "findings", "type", "probe", "wire", "config"})
+    self.assertIn("VERDICT", sections["overview"])
+    self.assertIn("FINDINGS", sections["findings"])
+    self.assertIn("DISCOVERED TYPE", sections["type"])
+
   def test_report_counters_are_real_not_na(self):
     """Regression: EventCount64 counters rendered as 'not available'."""
     text = report.render_text(self.diagnose())
@@ -148,11 +159,19 @@ class TestHealthy(LiveFixtureTest):
     self.assertTrue(line, "received_sample_count missing from the report")
     self.assertNotIn("n/a", line[0], "a real counter was reported as unavailable")
 
-  def test_json_report_parses(self):
-    import json
-    payload = json.loads(report.render_json(self.diagnose()))
-    self.assertTrue(payload["unstable_schema"])
-    self.assertIn("verdict", payload)
+  def test_the_report_can_be_read_back_by_the_e2e_harness(self):
+    """The text report is the only output contract, so it must parse.
+
+    `--format json` used to be the machine-readable path and this test parsed
+    it. The vendor suites now read the text report through
+    `doctor_e2e.parse_report`, so that is what has to survive a real run.
+    """
+    data = self.diagnose()
+    completed = subprocess.CompletedProcess(
+        ["doctor"], 0, report.render_text(data), "")
+    parsed = doctor_e2e.parse_report(completed)
+    self.assertTrue(parsed["verdict"])
+    self.assertEqual({item["id"] for item in parsed["findings"]}, self.ids(data))
 
   def test_probe_closes_its_entities(self):
     """A diagnostic must not leak readers into the system it measures."""
@@ -168,14 +187,15 @@ class TestHealthy(LiveFixtureTest):
 class TestNoTypeInfo(LiveFixtureTest):
   MODE = "no_type_info"
 
-  def test_reports_missing_type_and_suppresses_the_consequence(self):
+  def test_reports_missing_type_and_links_the_consequence(self):
     data = self.diagnose()
-    active = self.ids(data)
-    self.assertIn("type.no_type_info", active)
-    suppressed = {x.id: x.suppressed_by for x in f.suppressed(data.findings)}
-    self.assertEqual(suppressed.get("probe.not_created"), "type.no_type_info",
-                     "the unusable-reader finding should be explained by the "
-                     "missing type, not reported as a separate problem")
+    reported = self.ids(data)
+    self.assertIn("type.no_type_info", reported)
+    # Both are reported. The consequence is annotated with its likely cause
+    # rather than removed: hiding it also removed it from the counts.
+    self.assertIn("probe.not_created", reported)
+    links = {x.id: x.explained_by for x in data.findings}
+    self.assertIn("type.no_type_info", links.get("probe.not_created", ()))
 
   def test_verdict_says_not_probed(self):
     self.assertIn("not probed", self.diagnose().verdict)
@@ -186,14 +206,25 @@ class TestLargeData(LiveFixtureTest):
 
   def test_fragmentation_is_reported_without_a_false_error(self):
     data = self.diagnose()
-    fragmentation = [x for x in f.active(data.findings)
+    fragmentation = [x for x in data.findings
                      if x.id == "data.fragmentation"]
     self.assertTrue(fragmentation, "large data did not report fragmentation at all")
     self.assertEqual(fragmentation[0].severity, f.Severity.INFO,
                      "healthy large data must not be reported as an error")
 
   def test_large_sample_still_deserializes(self):
-    self.assertIn("payload FULL", self.diagnose().verdict)
+    """A 200000-element sequence<octet> is read whole, and says so.
+
+    The walk reads a primitive collection with one bulk read that covers every
+    element however long it is, so exceeding MAX_ELEMENTS_PER_COLLECTION must
+    not mark the walk truncated - only the aggregate-element branch, which
+    genuinely stops at the cap, can do that. Marking it truncated here reported
+    a fully-read healthy large-data topic as payload PARTIAL.
+    """
+    data = self.diagnose()
+    self.assertIn("payload FULL", data.verdict)
+    self.assertFalse(data.probe_result.walk.truncated,
+                     "a bulk-read primitive collection was not actually truncated")
 
 
 class TestPartition(LiveFixtureTest):
@@ -216,7 +247,7 @@ class TestBadPair(LiveFixtureTest):
 
   def test_names_the_offending_policies(self):
     data = self.diagnose()
-    finding = [x for x in f.active(data.findings) if x.id == "qos.rxo_mismatch"][0]
+    finding = [x for x in data.findings if x.id == "qos.rxo_mismatch"][0]
     self.assertIn("RELIABILITY", finding.title)
     self.assertIn("OWNERSHIP", finding.title)
     self.assertIn("BEST_EFFORT", finding.observed)
@@ -232,8 +263,11 @@ class TestTui(LiveFixtureTest):
     import asyncio
 
     from rti_doctor.app import RTIDoctorApp
-    from rti_doctor.views.browse import EndpointListScreen, ParticipantListScreen
-    from rti_doctor.views.report_screen import ReportScreen, SweepScreen
+    from rti_doctor.views.browse import EndpointListScreen
+    from rti_doctor.views.system_overview import (IssueListScreen,
+                IssueSeverityScreen,
+                            SystemOverviewScreen,
+                            TopologyHealthScreen)
 
     app = RTIDoctorApp(self.session, interval=1.0)
     seen = []
@@ -245,26 +279,107 @@ class TestTui(LiveFixtureTest):
         await pilot.press("enter")
         await pilot.pause(0.5)
         seen.append(type(app.screen))
+        await pilot.press("enter")
+        await pilot.pause(0.5)
+        seen.append(type(app.screen))
+        self.selected_issue_severity = app.screen.severity
         await pilot.press("b")
         await pilot.pause(0.3)
         seen.append(type(app.screen))
-        await pilot.press("d")
-        await pilot.pause(1.5)
-        seen.append(type(app.screen))
         await pilot.press("b")
         await pilot.pause(0.3)
-        await pilot.press("D")
-        await pilot.pause(8.0)
         seen.append(type(app.screen))
-        self.sweep_rows = getattr(app.screen, "rows", None)
+        await pilot.press("down", "enter")
+        await pilot.pause(0.5)
+        seen.append(type(app.screen))
+        await pilot.press("enter")
+        await pilot.pause(0.3)
+        seen.append(type(app.screen))
 
     asyncio.run(drive())
     self.assertEqual(
         seen,
-        [ParticipantListScreen, EndpointListScreen, ParticipantListScreen,
-         ReportScreen, SweepScreen],
+        [SystemOverviewScreen, IssueSeverityScreen, IssueListScreen,
+         IssueSeverityScreen, SystemOverviewScreen,
+         TopologyHealthScreen, EndpointListScreen],
         f"navigation went off course: {[c.__name__ for c in seen]}")
-    self.assertTrue(self.sweep_rows, "sweep produced no rows")
+    self.assertEqual(self.selected_issue_severity, f.Severity.ERROR)
+
+  def test_opening_a_report_renders_it(self):
+    """Drill all the way to ReportScreen and confirm it renders.
+
+    The navigation test stops at EndpointListScreen, so nothing exercised
+    ReportScreen's own body. Deleting SweepScreen from that module took
+    `import asyncio` with it while ReportScreen still used it for
+    `asyncio.to_thread`, and the whole suite stayed green - the screen would
+    have raised NameError the first time an operator opened a report.
+    """
+    import asyncio
+
+    from rti_doctor.app import RTIDoctorApp
+    from rti_doctor.views.report_screen import ReportScreen
+
+    app = RTIDoctorApp(self.session, interval=1.0)
+    seen = {}
+
+    async def drive():
+      async with app.run_test() as pilot:
+        await pilot.pause(0.8)
+        await pilot.press("down", "enter")     # DDS Topology & Health
+        await pilot.pause(0.6)
+        await pilot.press("3")                 # writers
+        await pilot.pause(0.4)
+        await pilot.press("o")                 # open a passive report
+        await pilot.pause(1.5)
+        seen["screen"] = type(app.screen)
+        seen["body"] = str(app.screen.body.render())
+
+    asyncio.run(drive())
+    self.assertIs(seen["screen"], ReportScreen)
+    self.assertIn("RTI DOCTOR INTEROP REPORT", seen["body"])
+    self.assertIn("VERDICT", seen["body"])
+    self.assertNotIn("Static checks failed", seen["body"])
+
+  def test_refresh_and_metrics_survive_navigating_away_mid_scan(self):
+    """The refresh actions used to be bare asyncio.create_task.
+
+    A bare task is only weakly referenced by the loop and nothing cancels it
+    when the screen is popped, so a scan that finished after the operator
+    navigated away wrote into unmounted widgets. Popping immediately after
+    pressing `r` is the case that exposed it.
+    """
+    import asyncio
+
+    from rti_doctor.app import RTIDoctorApp
+    from rti_doctor.views.system_overview import (MetricsScreen,
+                                                  SystemOverviewScreen)
+
+    app = RTIDoctorApp(self.session, interval=1.0)
+    seen = {}
+
+    async def drive():
+      async with app.run_test() as pilot:
+        await pilot.pause(0.8)
+        await pilot.press("m")
+        await pilot.pause(0.5)
+        seen["metrics"] = type(app.screen)
+        seen["body"] = str(app.screen.body.render())
+        # Refresh, then leave before it can finish.
+        await pilot.press("r")
+        await pilot.press("b")
+        await pilot.pause(0.8)
+        seen["after"] = type(app.screen)
+        # The overview must still be usable afterwards.
+        await pilot.press("r")
+        await pilot.pause(0.8)
+        seen["final"] = type(app.screen)
+
+    asyncio.run(drive())
+    self.assertIs(seen["metrics"], MetricsScreen)
+    self.assertIn("Observed Domain Metrics", seen["body"])
+    self.assertIn("Remote DataWriters", seen["body"])
+    self.assertIs(seen["after"], SystemOverviewScreen)
+    self.assertIs(seen["final"], SystemOverviewScreen)
 
 
 if __name__ == "__main__":

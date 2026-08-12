@@ -22,23 +22,48 @@ From the repository root:
 ./tools/rti_doctor/run_rti_doctor.sh
 ```
 
-You'll be asked for a domain ID exactly as `rti_spy` asks, then get the
-participant list. Keys:
+You'll be asked for a domain ID exactly as `rti_spy` asks, then get a system
+overview. Use `Up`/`Down` and `Enter` to choose Issues or DDS Topology & Health.
+The Issues menu shows Errors, Warnings, and Info with their current counts;
+selecting one shows only that severity. Keys:
 
 | Key | Action |
 |---|---|
-| `Enter` | Drill into a participant's endpoints, then into a report |
-| `d` | Diagnose the highlighted row |
-| `D` | Sweep **every** writer on the domain and rank the results |
-| `s` | Save the current report as a shareable text file |
+| `Up` / `Down` / `Enter` | Select a menu item, drill into a participant/topic, or deep-diagnose an endpoint |
+| `1` / `2` / `3` / `4` | In Topology: participants, readers, writers, topics |
+| `o` | Open a passive report for the selected writer where available |
+| `i` | In Topology: the issues linked to the highlighted row |
+| `m` | Observed domain metrics |
+| `r` | Re-scan (every screen shows a snapshot, never a live feed) |
+| `c` | On an endpoint report: capture RTPS packets for that endpoint |
+| `s` | Save the current system or diagnostic report as a shareable text file |
 | `b` / `Esc` | Back |
 | `q` | Quit |
+
+Every screen shows a *snapshot*, not a live view, so a reading never changes
+under you while you read it. `r` takes a new one.
+
+## Packet Capture Is Something You Ask For
+
+Nothing runs `tshark` unless you press `c` on a reader or writer report. Before
+it starts, the screen states the interface, the file it will write (under
+`tools/rti_doctor/test_output/rti_doctor_captures/`, with a `.tshark.log` beside
+it) and how long it will run; the capture is bounded by tshark's own
+`-a duration:`, so one that is abandoned still stops. `--capture-interface`
+chooses the interface; without it, `c` uses `any`.
+
+A few facts are observable **only** in RTPS packets — a Fast DDS peer's product
+version above all — and reports render those as `Run capture to ascertain`
+rather than as absent, because "nobody looked" and "there is nothing there" are
+different answers. One capture answers both questions: the user data that
+crossed the wire, and the discovery metadata around it.
 
 ## The Visibility Ladder
 
 Cross-vendor failures come in rungs, and each one fails differently. The report
-is ordered by this, and a lower-rung failure suppresses the higher-rung symptoms
-it explains.
+is ordered by this, and a higher-rung finding is annotated with the lower-rung
+findings that would explain it. Nothing is hidden: the link is context, and
+every finding stays in the list, the counts and the exit code.
 
 | Rung | Mechanism | How a failure looks |
 |---|---|---|
@@ -58,18 +83,22 @@ the peer may not implement.
 audit shown above the participant table. It covers the conditions that make an
 RTI participant and a third-party participant mutually invisible *on the same
 domain ID*: a domain tag set on our side, SPDP2 configured (which does not
-interoperate with standard SPDP at all), a secure-vs-unsecure mismatch, multicast
-unavailable with no usable `initial_peers`, `accept_unknown_peers = false`, and
-nonstandard RTPS port mappings. It also reuses the passive domain-0 announcement
-scan, so "nothing is here" can become "something is alive, but on domain 5".
+interoperate with standard SPDP at all), a secure-vs-unsecure mismatch,
+`accept_unknown_peers = false`, and nonstandard RTPS port mappings. It also
+reuses the passive domain-0 announcement scan, so "nothing is here" can become
+"something is alive, but on domain 5".
+
+It does **not** diagnose multicast reachability. Whether multicast works between
+two hosts is not observable from either side's participant QoS, and a finding
+derived from rti_doctor's own defaults would describe the diagnostic, not the
+system it was pointed at.
 
 ## CLI
 
 ```text
 -d, --domain          DDS domain ID (prompts on startup; 1 when non-interactive)
--t, --topic TOPIC     Headless: diagnose one topic and exit
-    --all             Headless: diagnose every discovered writer and exit
-    --format          text (default) | json
+    --system          Headless: assess the DDS system and exit (stage one)
+-t, --topic TOPIC     Headless: diagnose one topic and exit (stage two)
 -o, --output PATH     Write the report to PATH instead of stdout
     --probe-timeout   Seconds to observe a probed reader (default: 10.0)
     --type-wait       Seconds to wait for remote type resolution (default: 5.0)
@@ -77,42 +106,91 @@ scan, so "nothing is here" can become "something is alive, but on domain 5".
     --scan-timeout    Seconds to listen for active domains (default: 32.0)
     --no-domain-scan  Skip the active-domain scan before prompting
     --no-probe        Static checks only; never create a reader
-    --pcap PATH       Analyze RTPS user-data packets in an existing capture
+    --type-object-v1-only
+          Advertise TypeObject v1 and disable TypeLookup v2 for an experiment
+    --pcap PATH       Analyze RTPS user-data packets in an existing capture (with --topic)
     --capture-interface IFACE
-              Capture scoped RTPS UDP packets with tshark while probing one topic
+              Interface for packet capture: captured while probing with --topic,
+              or used by the TUI's 'c' capture action (default: any)
 -i, --interval        UI refresh interval (default: 2.0)
     --debug-log PATH  Discovery/probe log output
     --connext-log PATH
           Native Connext middleware diagnostics, including discovery parsing
     --connext-verbosity LEVEL
-          silent | exception | warning | status-local | status-remote | status-all
+          silent (default) | exception | warning | status-local | status-remote | status-all
 ```
 
-Headless examples:
+Headless work is two stages: assess the DDS system, then diagnose one endpoint.
+Stage one is cheap and answers whether the system is visible and healthy at all.
+Stage two is deliberately focused, because a full diagnosis probes, waits for
+type resolution and can start a capture - work that scales linearly with the
+number of writers and should be spent on the one you chose.
 
 ```bash
-# One topic, report to stdout
-./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData
+# Stage one - the system: discovery, topology and our own configuration
+./tools/rti_doctor/run_rti_doctor.sh --domain 1 --system -o system.txt
 
-# Whole domain, saved for a ticket
-./tools/rti_doctor/run_rti_doctor.sh --domain 1 --all -o interop.txt
+# Stage two - one topic, report to stdout
+./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData
 
 # Inspect direct RTPS packet evidence from a saved capture
 ./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData --pcap session.pcapng
 
-# Capture during one topic probe (writes test_output/rti_doctor_captures/*.pcapng)
+# Capture during one topic probe (writes tools/rti_doctor/test_output/rti_doctor_captures/*.pcapng)
 ./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData --capture-interface lo
 
 # Preserve native Connext discovery/TypeLookup diagnostics for later parsing.
 # status-all includes the Fast DDS TypeInformation deserialization failure.
 ./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData --no-probe \
-  --connext-log test_output/rti_doctor_connext.log --connext-verbosity status-all
+  --connext-log tools/rti_doctor/test_output/rti_doctor_connext.log \
+  --connext-verbosity status-all
 ```
 
-Exit status is `1` when any ERROR-severity finding survives, `0` otherwise, and
-`2` when the named topic was not found — usable directly in CI.
+### Exit status
+
+Usable directly in CI. No finding is excluded from that decision by a causal
+guess about another finding.
+
+| Code | Meaning |
+|---|---|
+| `0` | A diagnosis ran and reported no ERROR-severity finding |
+| `1` | A diagnosis ran and reported at least one ERROR-severity finding |
+| `2` | The named topic was not found — or the arguments were rejected |
+| `3` | `--ready-after-participants` was not met before `--ready-timeout` |
+| `4` | Doctor could not run: no license, an unusable domain, a failed startup |
+| `130` | Interrupted (`Ctrl-C`) |
+
+`1` means one thing only: **a diagnosis completed and found an error**. A
+startup failure used to reach the shell as `1` too, by way of an uncaught
+traceback, so a CI job could not tell "your system has an error" from "Doctor
+never ran". A `4` prints one line on stderr saying what failed; the traceback
+goes to `--debug-log`.
+
+`2` is still overloaded — argparse rejects a bad command line with it as well —
+so a wrapper that retries on "topic absent" should check stderr before looping.
+
+## Manual Scenarios
+
+Start a fixture in one terminal, then inspect the printed domain and topic from
+another:
+
+```bash
+./tools/rti_doctor/test/run_manual_scenario.sh --scenario healthy
+./tools/rti_doctor/run_rti_doctor.sh --domain 42
+```
+
+The scenarios default to domain `42`; use `--domain ID` to override it. Press
+`Ctrl-C` in the scenario terminal to stop it. Fast DDS scenarios explicitly
+stop and remove their Docker containers during that cleanup.
 
 ## The Shareable Report
+
+The text report is the only output rti_doctor produces. There was a second,
+`--format json`, documented in its own code as an unstable dump with no schema —
+so nothing could safely depend on it, while it still had to be kept working and
+in step with the text. Everything a script needs is on the face of the report:
+one `[SEVERITY] rung N  finding.id` line per finding, labelled fields under it,
+and a fixed section order. `test/doctor_e2e.py` reads it back that way.
 
 `s` in the TUI, or `-o` headlessly, writes a plain-text report: fixed 100-column
 width, ASCII only, fixed section order so two reports diff cleanly. It carries an
@@ -127,8 +205,10 @@ Three rules the writer follows:
   `n/a (not available on Connext X.Y.Z)` — never `0`, never omitted.
 - **The raw appendix is complete, not filtered**, so anyone who doubts a finding
   can check the evidence themselves.
-- **Suppressed findings are still listed by id** under `SUPPRESSED (explained
-  by ...)`, so causal ordering hides noise without hiding facts.
+- **Nothing is filtered out by a guess.** A finding whose likely cause is also
+  present says so on a `Likely explained by` line, but stays fully reported and
+  counted. The link matches on finding id alone, so it can point at a condition
+  on another topic — confirm it applies before acting on it.
 
 ## Reading a Verdict
 
@@ -183,6 +263,9 @@ Findings have stable, greppable ids. The ones that matter most:
 | 7.7.x | **Verified** — full check catalog, all tests pass |
 | 7.3.x | **Verified** — all tests pass; `request_types_filter` is unavailable, which the report records explicitly |
 | 6.1.2 | **Feature-detected but not verified here** — no 6.1.2 install was available to test against |
+
+For Connext 7.3.x, RTI Doctor supports Python 3.9. The launcher selects the
+matching Python 3.9 virtual environment and Connext API wheel automatically.
 
 Every version-sensitive field goes through `rti_doctor/compat.py`, which reports a
 missing field rather than assuming a value. The known differences are documented
@@ -245,6 +328,15 @@ the payload representation. Cyclone resolves an unspecified policy from the
 type's defaults, which can select XCDR2. Use the optional PCAP evidence to report
 the representation actually selected by that writer and type.
 
+**This is the same emptiness a Connext writer advertises, and it does not mean
+the same thing.** Measured against live Connext 7.7.0
+(`test/test_data_representation_spike.py`), an empty advertisement from a
+Connext writer means XCDR1: a writer configured explicitly `[XCDR1]` advertises
+an empty sequence too, and both are refused by an XCDR2-only reader. Cyclone's
+empty advertisement can mean XCDR2. So "advertised nothing" is a per-vendor
+question, not a single fact — which is why the tool still declines to judge it
+rather than guessing. See Q3 in `docs/DESIGN_DECISIONS.md`.
+
 The controlled manual `FINAL`/XCDR1 fixture additionally uses explicit sequential
 member IDs and a matching XCDR1-only writer/reader configuration. Cyclone still
 reported zero writer matches while Connext reported one reader match and received
@@ -265,9 +357,11 @@ data-representation selector or a missing dynamic member ID.
   self-inflicted blindness but cannot see the peer's configuration.
 - **The domain scan is best-effort**: it relies on RTI's default domain
   announcements, so an empty result is not proof that no other domain is active.
-- **Wire observation is opt-in and bounded.** `--pcap` and
-  `--capture-interface` use `tshark` to count RTPS DATA/DATA_FRAG submessages and
-  report the encapsulation IDs Wireshark actually decodes. A live capture applies
+- **Wire observation is opt-in and bounded.** `--pcap`, `--capture-interface`
+  and the TUI's `c` action use `tshark` to count RTPS DATA/DATA_FRAG submessages
+  and report the encapsulation IDs Wireshark actually decodes. Nothing else
+  captures: no capture starts at startup, on navigation, or on a report you
+  merely opened. A live capture applies
   a BPF filter for the selected domain's configured RTPS port range before packets
   are written; discovered writer ports outside that range are added explicitly.
   The resulting observations are then limited to the selected endpoint's RTPS
@@ -281,6 +375,16 @@ data-representation selector or a missing dynamic member ID.
   configured for RTPS discovery rather than InfoRepo.
 
 ## Testing
+
+`requirements.txt` is what the launcher installs on every run, so it holds
+runtime dependencies only, with `textual` pinned exactly — the TUI uses APIs
+that have moved between releases, and an unpinned upgrade would land on a user
+at launch time. Development tooling is separate and no launch reads it:
+
+```bash
+pip install -r tools/rti_doctor/requirements.txt \
+            -r tools/rti_doctor/requirements-dev.txt
+```
 
 Unit tests — no DDS participant required, ~60 tests:
 
@@ -302,8 +406,10 @@ PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
 Cross-vendor wire tests launch matching publisher/reader pairs for Cyclone DDS
 and Fast DDS, then run the complete `rti_doctor` CLI with a `tshark` capture.
 They assert that Wireshark decoded RTPS user data and an actual CDR
-encapsulation ID from the saved PCAPNG. The Fast DDS test uses a pinned Fast DDS
-2.14.6 Docker build; build it once before running the suite:
+encapsulation ID from the saved PCAPNG. The Fast DDS test uses the current Fast DDS
+3.6.2 Docker build. This fixture tracks the currently supported Fast DDS release;
+when diagnosing a vendor issue, update to the current fixture first, then retain
+the resulting evidence for follow-up. Build it once before running the suite:
 
 ```bash
 bash tools/rti_doctor/test/vendors/fastdds/build_image.sh
@@ -312,7 +418,8 @@ PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
 ```
 
 Set `RTI_DOCTOR_TEST_CAPTURE_INTERFACE` when `any` is not the interface that
-observes your DDS traffic. Test PCAPNG files remain under `test_output/`.
+observes your DDS traffic. All RTI Doctor test artifacts remain under
+`tools/rti_doctor/test_output/`.
 
 RxO data-flow tests construct all diagnosed requested/offered mismatches
 (reliability, durability, liveliness kind and lease, destination order,
@@ -330,7 +437,7 @@ PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
 Type-extensibility data-flow matrices use a controlled, identical schema and
 XCDR1 in both directions. They cover every FINAL/APPENDABLE writer-reader pair
 for Connext/Cyclone and Connext/Fast DDS; each case requires endpoint matching
-and actual reader samples. The Fast DDS matrix uses the same pinned Docker image
+and actual reader samples. The Fast DDS matrix uses the same current Docker image
 as the wire test and builds two generated TypeObject fixtures, one per
 extensibility kind.
 
@@ -339,6 +446,43 @@ PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
   -m unittest tools.rti_doctor.test.test_extensibility_vendor_e2e \
   tools.rti_doctor.test.test_fastdds_extensibility_vendor_e2e
 ```
+
+### Manual scenarios
+
+Start a long-running fixture in one terminal, then run the printed Doctor
+GUI command from another. The launcher initializes the same Connext Python
+environment as `run_rti_doctor.sh` and stops all fixture processes on Ctrl-C.
+The GUI discovers the fixture; select the printed topic to inspect its report.
+
+```bash
+tools/rti_doctor/test/run_manual_scenario.sh \
+  --scenario healthy --domain 42 --duration 300
+```
+
+Available scenarios are `healthy`, `no-type-info`, `large-data`, `partition`,
+`bad-pair`, `rxo-compatible`, and `rxo-reliability-mismatch`. Cross-vendor
+reliability controls are available in both directions as
+`connext-cyclone-compatible`, `connext-cyclone-reliability-mismatch`,
+`cyclone-connext-compatible`, `cyclone-connext-reliability-mismatch`,
+`connext-fastdds-compatible`, `connext-fastdds-reliability-mismatch`,
+`fastdds-connext-compatible`, `fastdds-connext-reliability-mismatch`, and
+`fastdds-no-type-info`. The latter starts only a Fast DDS writer with
+TypeInformation metadata suppressed; Doctor should discover the endpoint, emit
+`type.no_type_info`, and report a `not probed` verdict.
+
+The `rxo-` and cross-vendor scenarios start separate reader and writer
+endpoints. Their printed command starts the normal Doctor GUI, so you can see
+the same discovery and report flow as an interactive user. Cyclone cases require
+the `cyclonedds` Python package. Fast DDS cases require Docker and the current
+test image, which can be built with:
+
+```bash
+bash tools/rti_doctor/test/vendors/fastdds/build_image.sh
+```
+
+The `fastdds-connext-compatible` fixture deliberately uses the custom Fast DDS
+FINAL TypeObject from the vendor suite: its endpoints exchange data, but Doctor
+may also report `type.assignability`. Run `--help` for all flags.
 
 The fixture publisher can also be run by hand to create a system to point the
 tool at:

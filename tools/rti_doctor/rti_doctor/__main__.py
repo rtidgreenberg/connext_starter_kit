@@ -1,4 +1,4 @@
-"""rti_doctor CLI: interactive TUI by default, headless with --topic/--all."""
+"""rti_doctor CLI: interactive TUI by default, headless with --system/--topic."""
 
 import argparse
 import logging
@@ -13,6 +13,25 @@ DEFAULT_PROBE_TIMEOUT = 10.0
 DEFAULT_TYPE_WAIT = 5.0
 #: How long to let discovery settle before running headless checks.
 DEFAULT_DISCOVERY_SETTLE = 3.0
+
+#: The process exit contract. `1` means one thing only - a diagnosis ran to
+#: completion and reported an ERROR-severity finding - because a CI job reading
+#: `1` acts on the findings. A startup failure used to reach the shell as `1`
+#: too, by way of an uncaught traceback, so "Doctor could not run" and "your
+#: system has an error" were indistinguishable to the one consumer that cannot
+#: read the message.
+#:
+#: `2` means the requested target was absent and nothing else. argparse's own
+#: default for a rejected command line is also `2`, so until 2026-08-12 a CI job
+#: acting on `2` read a mistyped flag as "topic not found" - a clean result from
+#: a run that never started. `_Parser` below sends that case to
+#: `EXIT_CANNOT_START` instead (L6).
+EXIT_OK = 0
+EXIT_ERROR_FINDINGS = 1
+EXIT_TARGET_ABSENT = 2
+EXIT_READINESS_TIMEOUT = 3
+EXIT_CANNOT_START = 4
+EXIT_INTERRUPTED = 130
 CONNEXT_VERBOSITIES = {
   "silent": "SILENT",
   "exception": "EXCEPTION",
@@ -43,7 +62,7 @@ def configure_logging(debug_log_path=None):
   root_logger.setLevel(logging.INFO)
 
 
-def configure_connext_logging(log_path=None, verbosity="status-all"):
+def configure_connext_logging(log_path=None, verbosity="silent"):
   """Configure Connext's native logger before Doctor creates DDS entities."""
   import rti.connextdds as dds
 
@@ -64,8 +83,27 @@ def configure_connext_logging(log_path=None, verbosity="status-all"):
   return settings
 
 
+class _Parser(argparse.ArgumentParser):
+  """An ArgumentParser that does not collide with `EXIT_TARGET_ABSENT`.
+
+  argparse exits `2` on a rejected command line, which is also Doctor's code for
+  "the topic was not found" - so a CI job scripting on `2` read a mistyped flag
+  as a clean "topic absent" result, and nothing but the stderr text told the two
+  apart (L6). A rejected command line is a reason Doctor could not run, so it
+  reports `EXIT_CANNOT_START` and joins the other startup failures.
+
+  `EXIT_TARGET_ABSENT` keeps `2` rather than moving: it is the documented
+  contract a CI job is most likely to already depend on, and this is the side of
+  the collision nobody has scripted against on purpose.
+  """
+
+  def error(self, message):
+    self.print_usage(sys.stderr)
+    self.exit(EXIT_CANNOT_START, f"{self.prog}: error: {message}\n")
+
+
 def parse_args(argv=None):
-  parser = argparse.ArgumentParser(
+  parser = _Parser(
       prog="rti_doctor",
       description="Diagnose DDS interoperability problems between RTI Connext and "
                   "other DDS vendors.")
@@ -74,10 +112,9 @@ def parse_args(argv=None):
                            "non-interactive)")
   parser.add_argument("-t", "--topic", default=None,
                       help="Headless: diagnose one topic and exit")
-  parser.add_argument("--all", action="store_true",
-                      help="Headless: diagnose every discovered writer and exit")
-  parser.add_argument("--format", dest="format", choices=("text", "json"),
-                      default="text", help="Headless output format (default: text)")
+  parser.add_argument("--system", action="store_true",
+                      help="Headless: assess the DDS system - discovery, topology "
+                           "and local configuration - and exit")
   parser.add_argument("-o", "--output", default=None,
                       help="Write the report to PATH instead of stdout")
   parser.add_argument("--probe-timeout", type=float, default=DEFAULT_PROBE_TIMEOUT,
@@ -97,11 +134,16 @@ def parse_args(argv=None):
                       help="Skip scanning for active domains before prompting")
   parser.add_argument("--no-probe", action="store_true",
                       help="Static checks only; never create a reader")
+  parser.add_argument("--type-object-v1-only", action="store_true",
+                      help="Advertise inline TypeObject v1 and disable TypeLookup v2 "
+                           "for an interoperability experiment")
   packet_group = parser.add_mutually_exclusive_group()
   packet_group.add_argument("--pcap", default=None,
                             help="Analyze RTPS user-data packets in an existing PCAP/PCAPNG")
   packet_group.add_argument("--capture-interface", default=None,
-                            help="Capture UDP packets with tshark while probing one topic")
+                            help="Interface for packet capture: captured while probing "
+                                 "with --topic, or used by the TUI 'c' capture action "
+                                 "(default: any)")
   parser.add_argument("-i", "--interval", type=float, default=2.0,
                       help="UI refresh interval in seconds (default: 2.0)")
   parser.add_argument("--debug-log", default=os.environ.get("RTI_DOCTOR_DEBUG_LOG"),
@@ -109,15 +151,56 @@ def parse_args(argv=None):
   parser.add_argument("--connext-log", default=None,
                       help="Write native Connext middleware diagnostics to PATH")
   parser.add_argument("--connext-verbosity", choices=tuple(CONNEXT_VERBOSITIES),
-                      default="status-all", help="Native Connext log verbosity "
-                      "(default: status-all; applies to --connext-log or stderr)")
+                      default="silent", help="Native Connext log verbosity "
+                      "(default: silent; applies to --connext-log or stderr)")
+  parser.add_argument("--ready-file", default=None,
+                      help="Write PATH after Doctor creates its DDS participant")
+  parser.add_argument("--ready-after-participants", type=int, default=0,
+                      help="Test hook: wait for this many remote participants before "
+                      "writing --ready-file")
+  parser.add_argument("--ready-timeout", type=float, default=15.0,
+                      help="Seconds to wait for --ready-after-participants (default: 15)")
 
   args = parser.parse_args(argv)
-  if args.topic and args.all:
-    parser.error("--topic and --all are mutually exclusive")
-  if (args.pcap or args.capture_interface) and not args.topic:
-    parser.error("--pcap and --capture-interface require --topic")
+  if args.topic and args.system:
+    parser.error("--topic and --system are mutually exclusive")
+  if args.pcap and not args.topic:
+    parser.error("--pcap requires --topic")
+  # --capture-interface no longer implies --topic: it is also how the TUI's
+  # explicit capture action is pointed at an interface other than "any". It
+  # still has no meaning for the passive system assessment, which creates no
+  # DDS entities and captures nothing.
+  if args.capture_interface and args.system:
+    parser.error("--capture-interface is not used by --system; capture during "
+                 "a --topic diagnosis, or from an endpoint report in the TUI")
+  if args.ready_after_participants < 0 or args.ready_timeout <= 0:
+    parser.error("--ready-after-participants must be non-negative and --ready-timeout positive")
+  # argparse's type=int/float accepts negatives, and float() accepts "nan" and
+  # "inf". A negative probe timeout makes the probe window close before it
+  # opens, and a negative domain ID fails deep inside Connext with an error
+  # that says nothing about the argument that caused it.
+  if args.domain is not None and args.domain < 0:
+    parser.error("--domain must be a non-negative integer")
+  for name in ("probe_timeout", "type_wait", "settle", "scan_timeout", "interval"):
+    value = getattr(args, name)
+    flag = "--" + name.replace("_", "-")
+    if value != value or value in (float("inf"), float("-inf")):
+      parser.error(f"{flag} must be a finite number")
+    if value < 0:
+      parser.error(f"{flag} must not be negative")
+  if args.interval <= 0:
+    parser.error("--interval must be greater than zero")
   return args
+
+
+def is_headless(args):
+  """Whether this invocation runs a report and exits rather than the TUI.
+
+  `--system` and `--topic` are the two explicit stages; a non-tty stdin means
+  nobody is there to drive the TUI. Without an explicit stage flag a user at a
+  shell has no way to ask for stage one, since a tty would always win.
+  """
+  return bool(args.topic) or bool(args.system) or not sys.stdin.isatty()
 
 
 def resolve_domain_id(domain_arg, scan_timeout=DEFAULT_SCAN_TIMEOUT, do_scan=True):
@@ -215,7 +298,8 @@ def build_session(domain_id, args, active_domains=None, domain_scan_ran=False,
 
   registry = discovery.DiscoveryRegistry(type_wait=args.type_wait)
   participant, type_lookup_settings = discovery.create_participant(
-      domain_id, name="RTI DOCTOR", registry=registry)
+      domain_id, name="RTI DOCTOR", registry=registry,
+      type_object_v1_only=args.type_object_v1_only)
 
   # Record the QoS we actually used, so the blind-spot audit inspects reality
   # rather than a freshly-defaulted object.
@@ -238,6 +322,7 @@ def build_session(domain_id, args, active_domains=None, domain_scan_ran=False,
       probe_timeout=args.probe_timeout,
       active_domains=active_domains or set(),
       domain_scan_ran=domain_scan_ran,
+      capture_interface=args.capture_interface,
   ), participant
 
 
@@ -261,6 +346,31 @@ def _emit(text, output_path):
   with open(path, "w", encoding="utf-8") as handle:
     handle.write(text)
   return path
+
+
+def _write_ready_file(path):
+  """Signal that Doctor has joined the domain for an external test fixture."""
+  if not path:
+    return
+  normalized_path = os.path.abspath(path)
+  directory = os.path.dirname(normalized_path)
+  if directory:
+    os.makedirs(directory, exist_ok=True)
+  with open(normalized_path, "w", encoding="utf-8") as handle:
+    handle.write("ready\n")
+
+
+def _wait_for_remote_participants(session, count, timeout):
+  """Wait for a bounded number of peers before a test fixture creates endpoints."""
+  if count == 0:
+    return True
+  deadline = time.monotonic() + timeout
+  while time.monotonic() < deadline:
+    discovery.refresh_participants(session.participant, session.registry)
+    if len(session.registry.participant_list()) >= count:
+      return True
+    time.sleep(0.05)
+  return False
 
 
 def run_headless_topic(session, args):
@@ -293,142 +403,158 @@ def run_headless_topic(session, args):
     if topics:
       print("Discovered topics: " + ", ".join(topics), file=sys.stderr)
     else:
-      print("No topics were discovered at all. Run without --topic to see the "
-            "blind-spot audit.", file=sys.stderr)
-    return 2
+      print("No topics were discovered at all. Run with --system instead of "
+            "--topic for the system assessment.", file=sys.stderr)
+    return EXIT_TARGET_ABSENT
 
-  capture = None
+  # The capture is the engine's, not a second one built here: one code path
+  # decides where a capture writes, how long it may run and how its file is
+  # read, so the CLI and the TUI cannot drift into capturing differently.
   if args.capture_interface:
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    capture_path = os.path.join(
-        "test_output", "rti_doctor_captures",
-        f"rti_doctor_domain{session.domain_id}_{timestamp}.pcapng")
-    capture = wire.LiveCapture(
-      args.capture_interface, capture_path,
-      wire.capture_filter(session.domain_id, endpoint, session.own_qos),
-      writer_entity_id=wire.endpoint_entity_id(endpoint),
-      writer_guid_prefix=wire.endpoint_guid_prefix(endpoint))
-    capture.start()
-
-  try:
-    data = session.diagnose_endpoint(endpoint, probe=not args.no_probe)
-  finally:
-    wire_evidence = capture.finish() if capture is not None else None
+    print(f"Capturing RTPS packets on interface '{args.capture_interface}' while "
+          f"diagnosing '{args.topic}'.", file=sys.stderr)
+  data = session.diagnose_endpoint(endpoint, probe=not args.no_probe,
+                                   capture_interface=args.capture_interface)
   if args.pcap:
-    wire_evidence = wire.inspect_pcap(
+    data.wire_evidence = wire.inspect_pcap(
         args.pcap, writer_entity_id=wire.endpoint_entity_id(endpoint),
         writer_guid_prefix=wire.endpoint_guid_prefix(endpoint))
-  data.wire_evidence = wire_evidence
-  text = (report.render_json(data) if args.format == "json"
-          else report.render_text(data))
-  path = _emit(text, args.output)
+  path = _emit(report.render_text(data), args.output)
   if path:
     print(f"Report written to {path}")
     print(f"VERDICT: {data.verdict}")
 
-  worst = max((x.severity for x in f.active(data.findings)), default=f.Severity.OK)
-  return 1 if worst >= f.Severity.ERROR else 0
+  worst = max((x.severity for x in data.findings), default=f.Severity.OK)
+  return EXIT_ERROR_FINDINGS if worst >= f.Severity.ERROR else EXIT_OK
 
 
-def run_headless_all(session, args):
-  """Sweep every writer and emit a summary. Returns a process exit code."""
-  _settle(session, args.settle)
-  time.sleep(max(0.0, args.type_wait))
-  session.registry.expire_type_waits()
+def run_headless_system(session, args):
+  """Stage one: assess the DDS system as a whole and exit.
 
-  rows, _ = session.sweep(probe=not args.no_probe)
-  if args.format == "json":
-    import json
-    payload = {
-        "unstable_schema": True,
-        "domain_id": session.domain_id,
-        "environment": compat.environment_info(),
-        "writers": [
-            {"topic": row["topic"], "vendor": row["vendor"],
-             "severity": row["severity"], "verdict": row["verdict"],
-             "findings": [{"id": i, "severity": s, "title": t}
-                          for i, s, t in row["findings"]]}
-            for row in rows
-        ],
-    }
-    text = json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n"
-  else:
-    text = report.render_sweep_text(rows, session.domain_id)
+  The rung-0/1 blind-spot audit that leaves no row to click on, plus the
+  system-wide discovery, type and RxO census over everything discovered. It
+  creates no reader and probes nothing, so it stays cheap no matter how large
+  the system is - unlike diagnosing an endpoint, which is the separate,
+  explicitly targeted stage two.
 
-  path = _emit(text, args.output)
-  if path:
-    errors = sum(1 for r in rows if r["severity"] == "ERROR")
-    print(f"Sweep written to {path} ({len(rows)} writer(s), {errors} with ERROR)")
-  return 1 if any(r["severity"] == "ERROR" for r in rows) else 0
-
-
-def run_headless_domain(session, args):
-  """No topic given and not interactive: emit the blind-spot audit."""
+  This is the TUI's scan minus the packet-capture evidence: a capture needs an
+  interface, and choosing one is an interactive prompt.
+  """
   from . import findings as f
 
+  # Type resolution is asynchronous: expire_type_waits only reclassifies a
+  # pending type once --type-wait has elapsed, so scanning before then reports
+  # "still in flight" for a type that never arrives, and exits 0. Both waits go
+  # through _settle rather than time.sleep, because a participant announcing
+  # during the wait is only recorded by polling for it - sleeping through it
+  # produced a report with live endpoints under zero participants.
   _settle(session, args.settle)
-  audit = f.rank(f.suppress(session.diagnose_domain()))
-  data = report.ReportData(
-      domain_id=session.domain_id,
-      scope="domain audit (no topic selected)",
-      all_findings=audit,
-      type_lookup_settings=session.type_lookup_settings,
-  )
-  text = (report.render_json(data) if args.format == "json"
-          else report.render_text(data))
+  _settle(session, args.type_wait)
+  snapshot = session.system_scan()
+  text = report.render_system_text(
+      snapshot, session.domain_id,
+      type_lookup_settings=session.type_lookup_settings)
   path = _emit(text, args.output)
   if path:
-    print(f"Report written to {path}")
-  worst = max((x.severity for x in f.active(audit)), default=f.Severity.OK)
-  return 1 if worst >= f.Severity.ERROR else 0
+    print(f"System report written to {path}")
+  worst = max((issue.severity for issue in snapshot.issues), default=f.Severity.OK)
+  return EXIT_ERROR_FINDINGS if worst >= f.Severity.ERROR else EXIT_OK
+
+
+def _cannot_start(stage, error):
+  """Report an operational failure on one line and return its exit code.
+
+  A traceback is the wrong output for "no license", "domain 500 is out of
+  range" or "the participant could not be created": it buries the one sentence
+  that matters and, because CPython exits 1 on an uncaught exception, it makes
+  a Doctor that never ran indistinguishable from a system Doctor found errors
+  in. The traceback still reaches --debug-log, which is where an unexpected
+  failure is actually diagnosed.
+  """
+  logging.exception("[main] %s failed", stage)
+  print(f"rti_doctor could not {stage}: {error.__class__.__name__}: {error}",
+        file=sys.stderr)
+  print("Run with --debug-log PATH for the full traceback.", file=sys.stderr)
+  return EXIT_CANNOT_START
 
 
 def main(argv=None):
   args = parse_args(argv)
   configure_logging(args.debug_log)
-  compat.configure_rti_environment()
 
-  # Native Connext diagnostics include middleware parsing failures that cannot
-  # be observed through Python's logging module. Configure them before the
-  # first DDS entity is created so discovery startup is captured as well.
-  connext_logging = configure_connext_logging(
-      args.connext_log, args.connext_verbosity)
-
-  # Before ANY DDS entity exists: Connext's default XTypes compliance mask is not
-  # fully OMG-compliant, and RTI's cross-vendor guidance is to use the VENDOR
-  # mask. A diagnostic must not fail to decode a peer because of its own encoding
-  # defaults. What was actually applied is recorded in every report.
-  compliance = compat.set_vendor_xtypes_mask()
-
-  headless = bool(args.topic) or args.all or not sys.stdin.isatty()
-
-  domain_id, active_domains, scanned = resolve_domain_id(
-      args.domain,
-      scan_timeout=args.scan_timeout,
-      do_scan=not args.no_domain_scan)
-
-  session, participant = build_session(
-      domain_id, args, active_domains=active_domains, domain_scan_ran=scanned,
-      compliance=compliance)
-  session.type_lookup_settings.update(connext_logging)
-
+  headless = is_headless(args)
   try:
+    compat.configure_rti_environment()
+
+    # Native Connext diagnostics include middleware parsing failures that cannot
+    # be observed through Python's logging module. Configure them before the
+    # first DDS entity is created so discovery startup is captured as well.
+    connext_logging = configure_connext_logging(
+        args.connext_log, args.connext_verbosity)
+
+    # Before ANY DDS entity exists: Connext's default XTypes compliance mask is not
+    # fully OMG-compliant, and RTI's cross-vendor guidance is to use the VENDOR
+    # mask. A diagnostic must not fail to decode a peer because of its own encoding
+    # defaults. What was actually applied is recorded in every report.
+    compliance = compat.set_vendor_xtypes_mask()
+
+    domain_id, active_domains, scanned = resolve_domain_id(
+        args.domain,
+        scan_timeout=args.scan_timeout,
+        do_scan=not args.no_domain_scan)
+
+    session, participant = build_session(
+        domain_id, args, active_domains=active_domains, domain_scan_ran=scanned,
+        compliance=compliance)
+  except Exception as error:  # noqa: BLE001 - reported, not swallowed
+    return _cannot_start("start", error)
+
+  # Everything from here on is inside the ownership boundary. The readiness wait
+  # and the ready file used to run before the `try`, so anything raising in them
+  # left the participant open - and the widest window was the one nobody sees:
+  # a Ctrl-C during the wait for `--ready-timeout` unwound straight past this
+  # block. The duplicated cleanup that used to sit on the readiness return path
+  # is gone with it, because that path now leaves through the same `finally` as
+  # every other.
+  try:
+    session.type_lookup_settings.update(connext_logging)
+    if not _wait_for_remote_participants(
+        session, args.ready_after_participants, args.ready_timeout):
+      print("Doctor did not observe the requested remote participant count before "
+            "the readiness timeout.", file=sys.stderr)
+      return EXIT_READINESS_TIMEOUT
+    _write_ready_file(args.ready_file)
+
     if args.topic:
       return run_headless_topic(session, args)
-    if args.all:
-      return run_headless_all(session, args)
     if headless:
-      return run_headless_domain(session, args)
+      return run_headless_system(session, args)
 
     from .app import RTIDoctorApp
     _settle(session, min(args.settle, 1.0))
     RTIDoctorApp(session, interval=args.interval).run()
-    return 0
+    return EXIT_OK
+  except Exception as error:  # noqa: BLE001 - reported, not swallowed
+    # An assessment that died is not an assessment that found errors, so this
+    # cannot be allowed to reach the shell as the finding-error exit code.
+    return _cannot_start("complete this run", error)
   finally:
-    try:
-      participant.close()
-    except Exception as e:
-      logging.error(f"[main] error closing participant: {e}")
+    _close_participant(participant)
+
+
+def _close_participant(participant):
+  """Release the one resource main() owns.
+
+  It used to own two: the participant and a startup packet capture that ran for
+  the whole session. The capture is gone (nothing captures without being asked
+  now), so the ordering that put the failure-prone cleanup first has nothing
+  left to order - but the guard stays, because a close that raises must not
+  escape a `finally` and replace the run's real exit code.
+  """
+  try:
+    participant.close()
+  except Exception as e:
+    logging.error(f"[main] error closing participant: {e}")
 
 
 if __name__ == "__main__":
@@ -436,4 +562,4 @@ if __name__ == "__main__":
     sys.exit(main())
   except KeyboardInterrupt:
     print("Aborted.")
-    sys.exit(130)
+    sys.exit(EXIT_INTERRUPTED)

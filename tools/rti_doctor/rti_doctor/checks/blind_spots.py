@@ -6,6 +6,8 @@ real cross-vendor blocker; each is a property of *our* configuration or of the
 domain choice, not of a discovered peer.
 """
 
+import rti.connextdds as dds
+
 from .. import compat
 from ..findings import (RUNG_OWN_CONFIG, RUNG_PARTICIPANT, Finding, Severity)
 
@@ -62,6 +64,25 @@ def check_domain_tag(context):
   )]
 
 
+def _spdp2_enabled(plugins):
+  """True when the discovery-plugin mask has the SPDP2 bit set.
+
+  `str(mask)` can render as a decimal or hex number rather than a name list, in
+  which case a substring search for "SPDP2" never matches and this check could
+  not fire at all. So the flag is resolved from the binding and tested as a bit
+  first; the substring is only the fallback for a version whose mask type does
+  not expose it.
+  """
+  flag = compat.get(
+      getattr(dds, "DiscoveryConfigBuiltinPluginKindMask", None), "SPDP2", None)
+  if flag is not None:
+    try:
+      return bool(int(plugins) & int(flag))
+    except (TypeError, ValueError):
+      pass
+  return "SPDP2" in str(plugins).upper()
+
+
 def check_spdp2(context):
   """SPDP2 does not interoperate with standard SPDP."""
   qos = context.own_qos
@@ -73,7 +94,7 @@ def check_spdp2(context):
     # Not present on this version, which also means SPDP2 cannot be enabled.
     return []
   text = str(plugins)
-  if "SPDP2" not in text.upper():
+  if not _spdp2_enabled(plugins):
     return []
   return [Finding(
       id="blind.spdp2",
@@ -119,62 +140,6 @@ def check_security_enabled(context):
       evidence={"load_plugin": str(library)},
       refs=[DOC_DISCOVERY],
   )]
-
-
-def check_multicast_and_peers(context):
-  """Multicast unusable with no usable initial_peers means nothing is reachable."""
-  qos = context.own_qos
-  if qos is None:
-    return []
-  discovery = compat.get(qos, "discovery", None)
-  if discovery is None:
-    return []
-
-  peers = compat.get(discovery, "initial_peers", None)
-  peer_list = []
-  try:
-    peer_list = [str(p) for p in (peers or ())]
-  except TypeError:
-    peer_list = [str(peers)] if peers else []
-
-  has_multicast_peer = any(_looks_multicast(p) for p in peer_list)
-  receive_addresses = compat.get(discovery, "multicast_receive_addresses", None)
-  receive_list = []
-  try:
-    receive_list = [str(a) for a in (receive_addresses or ())]
-  except TypeError:
-    receive_list = [str(receive_addresses)] if receive_addresses else []
-
-  if receive_list and (has_multicast_peer or len(peer_list) > 1):
-    return []
-  if not receive_list:
-    return [Finding(
-        id="blind.no_multicast_no_peers",
-        rung=RUNG_OWN_CONFIG,
-        severity=Severity.WARN,
-        title="No multicast receive addresses configured",
-        observed=(f"discovery.multicast_receive_addresses is empty; "
-                  f"initial_peers = {peer_list or '[]'}"),
-        root_cause=(
-            "With no multicast receive address, this participant only discovers "
-            "peers it can reach through initial_peers unicast. Any peer not in "
-            "that list is invisible even when it is running correctly."),
-        remedy=("Restore the default multicast receive address, or add every "
-                "peer host to initial_peers (NDDS_DISCOVERY_PEERS)."),
-        evidence={"initial_peers": peer_list, "multicast_receive_addresses": receive_list},
-        refs=[DOC_DISCOVERY],
-    )]
-  return []
-
-
-def _looks_multicast(peer):
-  """True for a peer string in the IPv4 multicast range 224-239."""
-  text = peer.split("@")[-1].split(":")[0]
-  first = text.split(".")[0]
-  try:
-    return 224 <= int(first) <= 239
-  except ValueError:
-    return False
 
 
 def check_accept_unknown_peers(context):
@@ -289,15 +254,25 @@ def check_empty_domain(context):
   return [Finding(
       id="blind.empty_domain",
       rung=RUNG_PARTICIPANT,
-      severity=Severity.ERROR,
+      # An empty domain is a state, not a fault. Doctor looked and found no DDS;
+      # that is the answer to the question, not a condition to triage, and
+      # reporting it as an ERROR meant pointing the tool at a quiet domain
+      # produced an issue list and a nonzero exit code with nothing wrong
+      # anywhere. The guidance below is unchanged and still renders in a report,
+      # which shows OK findings; what it no longer does is manufacture an issue.
+      # blind.other_domain_active stays actionable: peers on ANOTHER domain is
+      # something to report.
+      severity=Severity.OK,
       title=f"No participants discovered on domain {context.domain_id}",
       observed=f"0 remote participants; {scan_note}.",
       root_cause=(
-          "Participant discovery (SPDP) is not completing. In cross-vendor "
-          "systems the usual causes are, in rough order of likelihood: nothing "
-          "is actually running on this domain ID; multicast is blocked and "
-          "initial_peers does not name the peer host; a domain tag is set on the "
-          "Connext side; the peer is an OpenDDS application still using InfoRepo "
+          "No remote participant announced itself during the observation "
+          "window. Most often that simply means nothing is running on this "
+          "domain ID. If peers were expected, participant discovery (SPDP) is "
+          "not completing, and in cross-vendor systems the usual causes are, in "
+          "rough order of likelihood: multicast is blocked and initial_peers "
+          "does not name the peer host; a domain tag is set on the Connext "
+          "side; the peer is an OpenDDS application still using InfoRepo "
           "discovery rather than RTPS; a firewall is dropping UDP discovery "
           "traffic; or one side runs DDS Security and the other does not."),
       remedy=(
@@ -313,7 +288,6 @@ CHECKS = (
     check_domain_tag,
     check_spdp2,
     check_security_enabled,
-    check_multicast_and_peers,
     check_accept_unknown_peers,
     check_nonstandard_ports,
     check_other_domain_active,

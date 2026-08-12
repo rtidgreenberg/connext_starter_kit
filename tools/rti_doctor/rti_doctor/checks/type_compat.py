@@ -6,9 +6,9 @@ between "no type yet" and "no type ever", which is why type_state is a state
 machine rather than a snapshot.
 """
 
-from .. import compat, records, typewalk
+from .. import compat, records, typewalk, vendors
 from ..findings import RUNG_TYPE, Finding, Severity
-from ..records import TYPE_PENDING, TYPE_RESOLVED, TYPE_UNAVAILABLE
+from ..records import TYPE_PENDING, TYPE_RESOLVED
 
 DOC_TYPELOOKUP = ("https://community.rti.com/static/documentation/connext-dds/7.7.0/"
                   "doc/manuals/connext_dds_professional/users_manual/users_manual/"
@@ -60,6 +60,13 @@ def check_type_state(context):
 
   # UNAVAILABLE: the wait elapsed with no type. Enumerate the real causes rather
   # than asserting one, and rule out the one cause that would be our own fault.
+  #
+  # Everything below is phrased for the role of the endpoint being diagnosed.
+  # Targeted diagnosis accepts either role, and a reader whose schema never
+  # resolved used to be reported as a writer fault - sending the operator to a
+  # publisher that may be entirely healthy.
+  role = "writer" if endpoint.is_writer else "reader"
+  peer_side = "publisher" if endpoint.is_writer else "subscriber"
   request_filter = context.type_lookup_settings.get("request_types_filter")
   our_filter_ok = request_filter == "*"
   causes = [
@@ -78,26 +85,39 @@ def check_type_state(context):
         f"version ({request_filter}), so Connext may never have requested the "
         "type - this cause is on our side and should be ruled out first"))
 
+  remedy = (
+      "A TypeIdentifier alone is an identifier, not a schema, so no reader can "
+      f"be created from it. Either enable full type propagation on the "
+      f"{peer_side} that owns this {role}, or supply the IDL locally and use a "
+      "compile-time type instead of DynamicData.")
+  if endpoint.vendor_name == vendors.FASTDDS:
+    remedy += (
+        f" For Fast DDS, first upgrade that {peer_side} to Fast DDS 3.6.2 or "
+        "newer: the validated 3.6.2 fixture resolves a Connext DynamicType "
+        "before investigating TypeLookup or TypeObject compatibility further.")
+
+  scope_note = (
+      "This is the schema of the endpoint named above and of no other: an "
+      f"unresolved {role} type says nothing about the health of the endpoints "
+      "on the other side of the topic.")
+
   return [Finding(
       id="type.no_type_info",
       rung=RUNG_TYPE,
       severity=Severity.ERROR,
-      title="No type information available for this writer",
+      title=f"No type information available for this {role}",
       observed=(f"Topic '{endpoint.topic_name}' type name '{endpoint.type_name}' is "
-                f"visible, but no DynamicType arrived within "
+                f"visible on this {role}, but no DynamicType arrived within "
                 f"{context.type_wait:.1f}s. request_types_filter = {request_filter}."),
       root_cause=(
           "The topic and type NAME come from plain endpoint-discovery strings, but "
           "the schema comes from a separate request/reply service. Seeing the name "
-          "without the schema is the single most common cross-vendor state. "
-          "Possible causes: " + "; ".join(causes) + "."),
-      remedy=(
-          "A TypeIdentifier alone is an identifier, not a schema, so no reader can "
-          "be created from it. Either enable full type propagation on the "
-          "publisher, or supply the IDL locally and use a compile-time type "
-          "instead of DynamicData."),
+          "without the schema is the single most common cross-vendor state. " +
+          scope_note + " Possible causes: " + "; ".join(causes) + "."),
+        remedy=remedy,
       evidence={"topic_name": endpoint.topic_name,
                 "type_name": endpoint.type_name,
+                "endpoint_role": role,
                 "request_types_filter": request_filter,
                 "type_wait_seconds": context.type_wait},
       refs=[DOC_TYPELOOKUP, DOC_TYPE_REPR],
@@ -125,18 +145,39 @@ def check_type_name_conflict(context):
   return [Finding(
       id="type.name_conflict",
       rung=RUNG_TYPE,
-      severity=Severity.ERROR,
+      # WARN, not ERROR. A name difference is not proof of incompatibility: the
+      # reader's TypeConsistencyEnforcement is not published in discovery, and
+      # a reader that ignores the type name matches anyway. Asserting ERROR here
+      # contradicted this tool's own type.assignability finding, which compares
+      # the actual schemas, whenever the two disagreed.
+      severity=Severity.WARN,
       title=f"Topic '{endpoint.topic_name}' is advertised with {len(names)} different type names",
       observed=detail,
       root_cause=(
           "DDS matches a reader to a writer on topic name, and then requires the "
-          "types to be compatible. Two different type names on one topic means at "
-          "least one pairing cannot match. Cross-vendor this is often an IDL "
+          "types to be compatible. Cross-vendor this is often an IDL "
           "module/namespace difference rather than a genuinely different type - "
-          "for example 'Sensor' versus 'sensors::Sensor'."),
+          "for example 'Sensor' versus 'sensors::Sensor' - and a reader "
+          "configured to ignore the type name still matches. Check the "
+          "type.assignability finding, which compares the schemas themselves, "
+          "before treating this as the cause of a match failure."),
       remedy=("Align the type names, or configure type-consistency enforcement to "
               "ignore the name difference if the structures really are compatible."),
-      evidence={"topic_name": endpoint.topic_name, "type_names": sorted(names)},
+      # Topic-scoped: the condition belongs to the topic, not to whichever
+      # endpoint on it the caller happened to be iterating. The `linked_*` keys
+      # name every endpoint involved without entering the issue key, so the
+      # Health column and the `i` filter can find this issue from any of them
+      # while it stays one issue. Identity under its own name is what would
+      # split it back into one issue per endpoint - see system_scan._issue_key.
+      evidence={"scope": "topic", "topic_name": endpoint.topic_name,
+                "type_names": sorted(names),
+                "linked_writer_keys": sorted(
+                    peer.key for peer in peers if peer.is_writer),
+                "linked_reader_keys": sorted(
+                    peer.key for peer in peers if not peer.is_writer),
+                "linked_participant_keys": sorted(
+                    {peer.participant_key for peer in peers
+                     if peer.participant_key})},
       refs=[DOC_ASSIGNABILITY],
   )]
 
@@ -153,15 +194,52 @@ def check_assignability(context):
   if not readers:
     return []
 
+  # `readers` are all resolved - that is the filter above. Whether each one can
+  # actually be compared is a second question, and the two counts must not be
+  # reported as one: "every resolved reader accepts this writer (1 reader)" over
+  # three resolved readers is an all-clear covering a third of the topic.
   results = []
+  unevaluable = []
   for reader in readers:
-    assignable = _assignable(reader.type, endpoint.type)
+    assignable, reason = _assignable(reader.type, endpoint.type)
     if assignable is None:
+      unevaluable.append(_unevaluable(reader, reason))
       continue
     results.append((reader, assignable))
 
   if not results:
-    return []
+    return [Finding(
+        id="type.assignability",
+        rung=RUNG_TYPE,
+        # INFO, not OK: nothing was compared. Returning [] here made a topic
+        # whose readers cannot be evaluated indistinguishable from a topic with
+        # no readers at all - the absence of the finding read as "not
+        # applicable" when it meant "not knowable".
+        severity=Severity.INFO,
+        title=f"Assignability could not be evaluated on '{endpoint.topic_name}'",
+        observed=(f"{len(readers)} resolved reader type(s) on this topic, none of "
+                  f"which could be compared with '{endpoint.type_name}'."
+                  + _unevaluable_text(unevaluable)),
+        root_cause=(
+            "Connext's external assignability check runs on the reader's own "
+            "type binding. A type representation that exposes no "
+            "is_assignable_from(), or a call that fails, leaves the structural "
+            "comparison unavailable - which is neither compatible nor "
+            "incompatible. Cross-vendor and non-native type representations are "
+            "the usual reason."),
+        remedy=("Compare the two IDL definitions in appendix A by hand; this "
+                "tool could not do it for you on this topic."),
+        # Topic-scoped: every writer on the topic faces the same unevaluable
+        # readers, so this is one condition, not one per writer.
+        evidence={"scope": "topic",
+                  "topic_name": endpoint.topic_name,
+                  "writer_type": endpoint.type_name,
+                  "resolved_reader_count": len(readers),
+                  "evaluated_reader_count": 0,
+                  "unevaluable_reader_count": len(unevaluable),
+                  "readers_unevaluated": unevaluable},
+        refs=[DOC_ASSIGNABILITY],
+    )]
 
   incompatible = [(reader, value) for reader, value in results if not value]
   if incompatible:
@@ -172,8 +250,9 @@ def check_assignability(context):
         severity=Severity.ERROR,
       title=f"External assignability check fails on '{endpoint.topic_name}'",
         observed=(f"is_assignable_from: {reader.type_name} <- {endpoint.type_name} = "
-                  f"False ({len(incompatible)} of {len(results)} resolved reader(s) "
-                  "reject this writer)."),
+                  f"False ({len(incompatible)} of {len(results)} evaluated "
+                  f"reader(s) reject this writer; {len(readers)} resolved on the "
+                  "topic)." + _unevaluable_text(unevaluable)),
         root_cause=(
             "Connext's external TypeObject assignability check compares the "
             "writer's schema with each discovered reader schema. It found a "
@@ -190,7 +269,10 @@ def check_assignability(context):
             "writer_type": endpoint.type_name,
             "reader_type": reader.type_name,
             "reader_accepts_writer": False,
-            "resolved_reader_count": len(results),
+            "resolved_reader_count": len(readers),
+            "evaluated_reader_count": len(results),
+            "unevaluable_reader_count": len(unevaluable),
+            "readers_unevaluated": unevaluable,
             "incompatible_reader_count": len(incompatible),
         },
         refs=[DOC_ASSIGNABILITY],
@@ -201,12 +283,17 @@ def check_assignability(context):
       rung=RUNG_TYPE,
       severity=Severity.OK,
       title=f"Writer type is assignable to discovered readers on '{endpoint.topic_name}'",
-      observed=(f"is_assignable_from: every resolved reader type <- "
-                f"{endpoint.type_name} = True ({len(results)} reader(s))."),
+      observed=(f"is_assignable_from: every evaluated reader type <- "
+                f"{endpoint.type_name} = True ({len(results)} of {len(readers)} "
+                "resolved reader(s) evaluated)."
+                + _unevaluable_text(unevaluable)),
       evidence={
           "topic_name": endpoint.topic_name,
           "writer_type": endpoint.type_name,
-          "resolved_reader_count": len(results),
+          "resolved_reader_count": len(readers),
+          "evaluated_reader_count": len(results),
+          "unevaluable_reader_count": len(unevaluable),
+          "readers_unevaluated": unevaluable,
           "reader_accepts_writer": True,
       },
       refs=[DOC_ASSIGNABILITY],
@@ -214,18 +301,60 @@ def check_assignability(context):
 
 
 def _assignable(target, source):
-  """target.is_assignable_from(source), or None when it cannot be evaluated."""
+  """`(target.is_assignable_from(source), None)`, or `(None, reason)`.
+
+  Two different failures used to collapse into one bare `None`: a binding that
+  offers no structural comparison at all, and a comparison that was attempted
+  and raised. Both leave the pair unevaluated, and an operator reading the
+  report needs to know which.
+  """
   method = compat.get(target, "is_assignable_from", None)
   if not callable(method):
-    return None
+    return None, ("this type binding exposes no is_assignable_from(), so no "
+                  "structural comparison could be attempted")
   try:
-    return bool(method(source))
-  except Exception:
-    return None
+    return bool(method(source)), None
+  except Exception as error:  # noqa: BLE001 - an unevaluable reader, not a crash
+    return None, f"is_assignable_from() raised {type(error).__name__}: {error}"
+
+
+def _unevaluable(reader, reason):
+  """One reader that could not be compared, and why.
+
+  `{policy, reason}` is the incomplete-evidence shape the QoS rules already
+  use; `reader`/`reader_key` name which of several readers this record is
+  about, which a per-policy record has no need for.
+  """
+  return {"policy": "type assignability",
+          "reader": reader.type_name or reader.key,
+          "reader_key": reader.key,
+          "reason": reason}
+
+
+def _unevaluable_text(unevaluable):
+  """Sentence naming the readers that were not compared, or an empty string.
+
+  Appended to the `observed` line of every assignability verdict: an operator
+  reading "every evaluated reader accepts this writer" needs to know when a
+  reader was skipped for want of a usable binding rather than found compatible.
+  """
+  if not unevaluable:
+    return ""
+  names = ", ".join(sorted({item["reader"] for item in unevaluable}))
+  return (f" Not evaluated ({len(unevaluable)} reader(s): {names}): these were "
+          "neither confirmed compatible nor found incompatible.")
 
 
 def check_extensibility(context):
-  """Report extensibility kinds, and flag FINAL types as evolution hazards."""
+  """Describe the type's declared extensibility. Targeted diagnosis only.
+
+  This reads the IDL declaration, not the system: it says how the type is
+  allowed to evolve, never that anything has gone wrong. `type.assignability`
+  is the check that compares real schemas against real readers, and it is what
+  an operator should act on. Deliberately not in the system census - one
+  descriptive note about a type shared by 96 endpoints put 96 byte-identical
+  entries in the issue list.
+  """
   endpoint = context.endpoint
   if endpoint is None or endpoint.type is None:
     return []
@@ -236,18 +365,18 @@ def check_extensibility(context):
 
   finals = [name for name, kind in mapping.items() if "FINAL" in str(kind).upper()]
   mixed = len({str(k).upper().split(".")[-1] for k in mapping.values()}) > 1
+  observed = "; ".join(f"{n} = {k}" for n, k in sorted(mapping.items()))
 
   if not finals and not mixed:
     return [Finding(
         id="type.extensibility",
         rung=RUNG_TYPE,
-        severity=Severity.INFO,
+        severity=Severity.OK,
         title="Type extensibility",
-        observed="; ".join(f"{n} = {k}" for n, k in sorted(mapping.items())),
+        observed=observed,
         evidence=mapping,
     )]
 
-  severity = Severity.WARN if finals else Severity.INFO
   root = []
   if finals:
     root.append(
@@ -258,13 +387,21 @@ def check_extensibility(context):
     root.append(
         "Nested types use more than one extensibility kind, so a change that is "
         "safe in one part of the type can be fatal in another.")
+  root.append(
+      "This describes how the type is declared, not anything observed on this "
+      "system: no reader has been found to reject this writer here. Read it "
+      "alongside type.assignability, which compares the actual schemas.")
 
   return [Finding(
       id="type.extensibility",
       rung=RUNG_TYPE,
-      severity=severity,
-      title="Type extensibility may limit interoperability",
-      observed="; ".join(f"{n} = {k}" for n, k in sorted(mapping.items())),
+      # INFO, not WARN. A declared extensibility kind is a property of the IDL
+      # and a risk to future changes; calling it a warning put a type-design
+      # note into the issue list and the nonzero exit path of a system whose
+      # every pair the tool had just confirmed assignable.
+      severity=Severity.INFO,
+      title="Type extensibility limits how this type can evolve",
+      observed=observed,
       root_cause=" ".join(root),
       remedy=("If the two sides are built from separate IDL copies, prefer "
               "APPENDABLE or MUTABLE over FINAL."),
@@ -281,21 +418,70 @@ def check_representation(context):
 
   ids = records.representation_ids(endpoint.representation)
   if not ids:
+    # Same distinction `qos_match` makes: an absent policy object is unreadable,
+    # not an advertised empty sequence, and only the latter has a measured
+    # meaning. The observed line below claims the sequence was "readable", so
+    # saying `empty_means_xcdr1` here for an unreadable policy would contradict
+    # it and licence an inference nothing measured.
+    advertised_empty = endpoint.representation is not None
+    known = advertised_empty and vendors.empty_representation_means_xcdr1(
+        endpoint.vendor_id)
+    # Q3, decided 2026-08-12. This finding used to say the emptiness "says
+    # nothing about what the writer supports, so NO incompatibility should be
+    # inferred from it" - which, once `qos_match` started inferring XCDR1 and
+    # raising an ERROR for it, made the report contradict itself in two
+    # adjacent findings. What the emptiness means now depends on the vendor,
+    # and this text says which.
+    if known:
+      root_cause = (
+          "A writer using the default DataRepresentationQosPolicy advertises an "
+          "empty sequence. For this vendor that emptiness has been measured "
+          "against live middleware to mean XCDR1: a writer configured "
+          "explicitly [XCDR1] advertises the same empty sequence, the pair "
+          "matches an XCDR1 reader and delivers, and an XCDR2-only reader "
+          "refuses it naming DataRepresentation. So the RxO comparison treats "
+          "this writer as XCDR1 rather than declining, and any resulting "
+          "qos.rxo_mismatch above is the middleware's own verdict. This is "
+          "recorded separately so the wire fact - that nothing was advertised - "
+          "stays visible behind the inference drawn from it.")
+    elif advertised_empty:
+      root_cause = (
+          "A writer using the default DataRepresentationQosPolicy advertises an "
+          "empty sequence. What that means has not been measured for this "
+          "vendor, and it is not the same for all of them - Cyclone documents "
+          "resolving an unspecified policy from the type's defaults, which can "
+          "select XCDR2, the opposite of what RTI and Fast DDS were measured to "
+          "mean by the identical wire state. So NO incompatibility is inferred "
+          "from it here, and the RxO comparison declines DATA_REPRESENTATION "
+          "rather than guessing.")
+    else:
+      root_cause = (
+          "The DataRepresentation policy could not be read from this endpoint's "
+          "discovery data at all. That is not the same as a writer advertising "
+          "an empty sequence, and it carries none of the meaning measured for "
+          "one: NO incompatibility is inferred from it, and the RxO comparison "
+          "declines DATA_REPRESENTATION. An unreadable policy is not evidence "
+          "about what the writer offers, in either direction.")
     return [Finding(
         id="repr.not_advertised",
         rung=RUNG_TYPE,
-        severity=Severity.INFO,
-        title="Writer advertises no explicit data representation",
-        observed=("PublicationBuiltinTopicData.representation is an empty sequence "
-                  "(readable, but carrying no representation ids)."),
-        root_cause=(
-            "A writer using the default DataRepresentationQosPolicy advertises an "
-            "empty sequence, which is what a Connext writer with default QoS looks "
-            "like. This says nothing about what the writer supports, so NO "
-            "incompatibility should be inferred from it - it is recorded here only "
-            "so that its absence from the report is not mistaken for an oversight."),
+        # OK either way: this finding records a wire fact. When the emptiness is
+        # meaningful the ERROR belongs to qos.rxo_mismatch, which compares the
+        # pair; when it is not, there is nothing to report. Neither case is an
+        # issue in its own right.
+        severity=Severity.OK,
+        title=("Writer advertises no explicit data representation"
+               if advertised_empty else
+               "Writer data representation could not be read"),
+        observed=("PublicationBuiltinTopicData.representation is an empty "
+                  "sequence (readable, but carrying no representation ids)."
+                  if advertised_empty else
+                  "PublicationBuiltinTopicData.representation could not be read."),
+        root_cause=root_cause,
         remedy="",
-        evidence={"representation": "not advertised"},
+        evidence={"representation": "not advertised" if advertised_empty
+                                    else "unreadable",
+                  "empty_means_xcdr1": known},
         refs=[DOC_TYPE_REPR],
     )]
 
@@ -326,7 +512,7 @@ def check_representation(context):
   return [Finding(
       id="repr.offered",
       rung=RUNG_TYPE,
-      severity=Severity.INFO,
+      severity=Severity.OK,  # context for a report, not a domain-wide issue
       title="Writer data representation",
       observed=f"writer offers {text}",
       evidence={"representation": text, "representation_ids": ids},

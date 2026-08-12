@@ -1,7 +1,7 @@
 # Cyclone DDS to Connext DDS Investigation
 
 Evidence record for the observed one-way interoperability failure. Updated
-2026-08-03. This is a diagnostic note, not a claim of general incompatibility
+2026-08-12. This is a diagnostic note, not a claim of general incompatibility
 between the two implementations.
 
 ## Environment
@@ -16,6 +16,19 @@ between the two implementations.
 
 The source fixtures are [cyclone_publisher.py](test/vendors/cyclone_publisher.py)
 and [connext_cyclone_reader.py](test/vendors/connext_cyclone_reader.py).
+
+Reproducing any of this needs the `cyclonedds` package actually present, which
+is not automatic. It was installed by hand for the original 2026-08-03 work and
+listed in no requirements file, and `scripts/python_env.sh` names its venv from
+the detected Connext *and* Python versions — so the 2026-08-06 move to Connext
+7.7 on Python 3.11 built a new venv and left the package behind. Every Cyclone
+suite then skipped silently for six days, because they guard on
+`find_spec("cyclonedds")` rather than failing. It is pinned in
+`requirements-dev.txt` at 11.0.1 as of 2026-08-12 — the version every result
+here was measured against — so a rebuilt venv gets it back. The manylinux wheel
+carries its own Cyclone shared library, so no separate native build is needed.
+Backlog `ENV-1` tracks the remaining half: making the tier fail rather than skip
+when a vendor it claims to cover is missing.
 
 ## Reproduction
 
@@ -56,7 +69,11 @@ and [Connext log](../../test_output/connext_unkeyed_final_xcdr1_same_name_reader
 
 1. Connext locally accepts the discovered Cyclone writer, but Cyclone never
   reciprocally associates the Connext reader. A Connext local match count is
-  therefore not end-to-end communication proof.
+  therefore not end-to-end communication proof. The 2026-08-12 matrix bounds
+  this: the failure is specific to Cyclone holding the *writer*. With
+  TypeObject-v1-only propagation, a Connext writer reaches a Cyclone reader in
+  all four extensibility combinations, so Cyclone's reader-side assignability
+  accepts a Connext v1 type that its writer-side evaluation refuses.
 2. Explicit XCDR1, explicit member IDs, and the Connext vendor XTypes mask do
   not resolve this fixture.
 3. Removing the key while retaining the same DDS TypeName and payload layout
@@ -112,6 +129,13 @@ Cyclone never reciprocally matched; with TypeObject-v1-only propagation, it
 matched and Connext received a valid sample. Thus the TypeObject setting, not
 the final/XCDR1-only manual fixture, controls this cross-vendor behavior.
 
+Read that as scoped to the types measured in this section, not as general. The
+[2026-08-12 extensibility matrix](#2026-08-12-extensibility-matrix) runs the same
+control against a compact single-member keyed type and gets no
+Cyclone-writer-to-Connext-reader delivery from any of four extensibility
+combinations. The TypeObject setting is necessary in every case measured here and
+sufficient only for some of them.
+
 The same generated appendable/XCDR2 type delivered with the default Connext
 7.3.1 participant. The shared 7.3 reader initially failed before participant
 creation because it imported generated code before applying the required `0x1A9`
@@ -131,6 +155,84 @@ without an assignability rejection; the earlier result is therefore inconclusive
 The historical Cyclone key-member TypeObject mismatch remains relevant upstream
 context, but is not reproduced by this fixture with the compatible Connext
 TypeObject-v1 propagation.
+
+## 2026-08-12 Extensibility Matrix
+
+The automated extensibility fixture adds a narrower, separately measured scope:
+a single keyed `int32` member, all four `FINAL`/`APPENDABLE` writer-reader
+combinations, and the same Connext TypeObject-v1-only control in both directions.
+The 16-run matrix used Cyclone 11.0.1 and Connext 7.7.0.
+
+| Direction | Connext TypeObject propagation | Combinations delivered | Result |
+|---|---|---:|---|
+| Connext writer to Cyclone reader | Default v2 / TypeInformation | 0 of 4 | No delivery |
+| Cyclone writer to Connext reader | Default v2 / TypeInformation | 0 of 4 | No delivery |
+| Connext writer to Cyclone reader | TypeObject-v1-only | 4 of 4 | Delivered about 95 samples per run |
+| Cyclone writer to Connext reader | TypeObject-v1-only | 0 of 4 | No delivery; Cyclone reported `matched=0` after about 78 writes |
+
+This does not contradict the earlier manual and shared-IDL fixtures above: those
+show that a Cyclone writer can deliver to a Connext reader with TypeObject-v1-only
+propagation when the type is richer (and in some rows unkeyed). The matrix shows
+that the control is type-dependent for the compact keyed extensibility type; it
+is not a universal cure for Cyclone-writer to Connext-reader delivery. The
+deciding type property is not yet known. Candidate differences are member count,
+the key, nested structure, sequence member, and extensibility annotation.
+
+The automated suite now asserts real delivered data for the Connext-writer
+direction and leaves the Cyclone-writer direction as an executing expected
+failure. An unexpected success is therefore a signal to repeat this matrix and
+revise this record, rather than an unnoticed behavior change.
+
+Both directions run the same TypeObject propagation setting, so the only
+variable between them is which vendor holds the writer. Backlog `CYC-1` tracks
+the suite change; `CYC-3` tracks bisecting the type between this compact type
+and the richer one above — member count, the key, the nested struct, the
+sequence, the extensibility annotation — to name the property that decides
+delivery. Until that is known, neither this matrix nor the reproduction above
+can be generalised to an arbitrary type. `CYC-2` tracks the separate question of
+what `rti_doctor` itself *reports* for a pair in this state, which nothing
+currently asserts: the concern is finding `Q3`, where an unevaluated
+`DataRepresentation` comparison is rendered as `qos.compatible` with exit 0 on a
+pair moving no data.
+
+## Packet-Capture Boundary
+
+The 2026-08-12 wire test established a separate observability limitation in
+`rti_doctor`, not evidence that Cyclone traffic is absent. Its capture BPF starts
+with the selected domain's RTPS port range and adds the selected endpoint's
+unicast locators. Cyclone supplied no endpoint-level locator for the measured
+writer; its participant supplied an ephemeral UDPv4 port outside the domain
+range. More importantly, writer user DATA was addressed to the matched reader's
+port, not to the selected writer's receive port. All 68 user-data frames were on
+the wire, and none matched Doctor's capture filter.
+
+The measured numbers, for anyone reproducing it: against domain 99, whose RTPS
+range is 32150-32399, the Cyclone writer's endpoint `unicast_locators` was empty
+and its participant's `default_unicast_locators` held one UDPv4 locator on port
+41050 — so `capture_filter` returned the bare `udp and (portrange
+32150-32399)`. In the traffic capture, every DATA frame from writer entity
+`0x00000202` travelled `57276 -> 34850`, and every port either filter term can
+contribute is a *receive* address, which is why neither end of that pair is ever
+named. Confirmed through Doctor's own `discovery.create_participant` and
+`wire.capture_filter`, not through a reimplementation.
+
+Doctor now falls back to the participant's default unicast locators when an
+endpoint has none. This closes the missing-locator gap, but it cannot capture a
+selected writer's outgoing DATA until the filter includes counterpart reader
+locators. Consequently, Cyclone wire-representation evidence remains an
+executing expected failure. Treat `none observed` for a Cyclone peer as
+inconclusive, not as proof of a quiet peer or of a particular representation.
+For an engagement needing that evidence, capture broadly with `tshark -i any -f
+udp` and filter the saved traffic afterwards.
+
+Backlog `WIRE-2` holds the two candidate fixes and the tradeoff between them:
+naming the counterpart readers' locators is precise but unbounded in filter
+terms, while falling back to unrestricted `udp` is simple and complete but grows
+every capture, which `N2`/`CAP-1` already flag as unbounded on disk. Note this
+is the same failure shape as `WIRE-1`, where a Fast DDS product version was on
+the wire and absent from the report: in both, a narrowing decision made before
+the capture opens silently excludes the evidence the report then says it did not
+observe.
 
 ## Relevant Upstream History
 
@@ -172,6 +274,16 @@ Create the participant with that immutable QoS. This produces the validated
 TypeObject-v1-only behavior. Keep `DataRepresentation` and the XTypes compliance
 mask as separate decisions: they control application-payload representation and
 serialization compliance, respectively, not the discovery TypeObject version.
+
+**What this configuration is validated to fix, and what it is not.** It restores
+Cyclone-writer-to-Connext-reader delivery for the four-member type in the
+reproduction above, and — per the 2026-08-12 matrix — Connext-writer-to-Cyclone-reader
+delivery for all four extensibility combinations of the compact keyed type. It
+does **not** restore Cyclone-writer-to-Connext-reader delivery for that compact
+type: measured 0 of 4 combinations, with the Cyclone writer reporting
+`matched=0`. So applying this override is not a guarantee that a given pair will
+communicate. Verify reciprocal user data for the actual type in use, in the
+actual direction that matters, before treating a pair as fixed.
 
 Connext 7.3.1 already uses the corresponding compatibility-oriented default
 (`SERVICE_REQUEST` and a positive TypeObject-v1 size), and delivered without

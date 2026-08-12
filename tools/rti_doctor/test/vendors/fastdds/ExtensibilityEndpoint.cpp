@@ -2,6 +2,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -18,11 +19,17 @@
 #include <fastdds/dds/topic/Topic.hpp>
 #include <fastdds/dds/topic/TypeSupport.hpp>
 
-#include "HelloWorld.h"
-#include "HelloWorldPubSubTypes.h"
-#include "HelloWorldTypeObject.h"
+#include "Sample.hpp"
+#include "SamplePubSubTypes.hpp"
 
 using namespace eprosima::fastdds::dds;
+
+class NoTypeMetadataSamplePubSubType : public DoctorExtensibility::SamplePubSubType {
+public:
+    void register_type_object_representation() override
+    {
+    }
+};
 
 struct WriterListener : DataWriterListener {
     std::atomic<int> matched{0};
@@ -41,9 +48,9 @@ struct ReaderListener : DataReaderListener {
     }
     void on_data_available(DataReader* reader) override
     {
-        HelloWorld sample;
+        DoctorExtensibility::Sample sample;
         SampleInfo info;
-        while (reader->take_next_sample(&sample, &info) == ReturnCode_t::RETCODE_OK)
+        while (reader->take_next_sample(&sample, &info) == RETCODE_OK)
         {
             if (info.valid_data)
             {
@@ -59,12 +66,29 @@ int main(int argc, char** argv)
     std::string topic_name;
     std::string role;
     std::string extensibility;
+    std::string reliability = "reliable";
+    std::string durability = "volatile";
+    int deadline_seconds = 1;
+    std::string ownership = "shared";
+    std::string representation = "xcdr1";
+    std::string type_metadata = "full";
+    std::string type_lookup = "disabled";
+    std::string wait_for_file;
+    std::string endpoint_ready_file;
     int duration_seconds = 6;
+    int wait_timeout_seconds = 15;
     for (int index = 1; index < argc; ++index)
     {
         std::string argument(argv[index]);
         if ((argument == "--domain" || argument == "--topic" || argument == "--role" ||
-             argument == "--duration" || argument == "--extensibility") && index + 1 < argc)
+             argument == "--duration" || argument == "--extensibility" ||
+             argument == "--reliability" || argument == "--durability" ||
+             argument == "--deadline-seconds" ||
+             argument == "--ownership" ||
+             argument == "--representation" ||
+             argument == "--type-metadata" ||
+             argument == "--type-lookup" || argument == "--wait-for-file" ||
+             argument == "--wait-timeout" || argument == "--endpoint-ready-file") && index + 1 < argc)
         {
             std::string value(argv[++index]);
             if (argument == "--domain") domain = std::stoi(value);
@@ -72,28 +96,80 @@ int main(int argc, char** argv)
             if (argument == "--role") role = value;
             if (argument == "--duration") duration_seconds = std::stoi(value);
             if (argument == "--extensibility") extensibility = value;
+            if (argument == "--reliability") reliability = value;
+            if (argument == "--durability") durability = value;
+            if (argument == "--deadline-seconds") deadline_seconds = std::stoi(value);
+            if (argument == "--ownership") ownership = value;
+            if (argument == "--representation") representation = value;
+            if (argument == "--type-metadata") type_metadata = value;
+            if (argument == "--type-lookup") type_lookup = value;
+            if (argument == "--wait-for-file") wait_for_file = value;
+            if (argument == "--wait-timeout") wait_timeout_seconds = std::stoi(value);
+            if (argument == "--endpoint-ready-file") endpoint_ready_file = value;
         }
     }
     if (domain < 0 || topic_name.empty() || duration_seconds <= 0 ||
+            wait_timeout_seconds <= 0 ||
             (role != "writer" && role != "reader") ||
-            (extensibility != "final" && extensibility != "appendable"))
+            (extensibility != "final" && extensibility != "appendable") ||
+            (reliability != "reliable" && reliability != "best-effort") ||
+            (durability != "volatile" && durability != "transient-local") ||
+            deadline_seconds <= 0 ||
+            (ownership != "shared" && ownership != "exclusive") ||
+            (representation != "xcdr1" && representation != "xcdr2" &&
+             representation != "default") ||
+            (type_metadata != "full" && type_metadata != "none") ||
+            (type_lookup != "enabled" && type_lookup != "disabled"))
     {
         std::cerr << "required: --domain --topic --role writer|reader --duration positive "
-                  << "--extensibility final|appendable" << std::endl;
+                  << "--extensibility final|appendable "
+                  << "[--reliability reliable|best-effort] "
+                  << "[--durability volatile|transient-local] "
+                  << "[--deadline-seconds positive] "
+                  << "[--ownership shared|exclusive] "
+                  << "[--representation xcdr1|xcdr2|default] "
+                  << "[--type-metadata full|none] "
+                  << "[--type-lookup enabled|disabled] "
+                  << "[--wait-for-file PATH] [--wait-timeout positive] "
+                  << "[--endpoint-ready-file PATH]" << std::endl;
         return 2;
     }
 
-    registerHelloWorldTypes();
+    DomainParticipantQos participant_qos = PARTICIPANT_QOS_DEFAULT;
     DomainParticipant* participant = DomainParticipantFactory::get_instance()->create_participant(
-        static_cast<uint32_t>(domain), PARTICIPANT_QOS_DEFAULT);
+        static_cast<uint32_t>(domain), participant_qos);
     if (participant == nullptr)
     {
         return 3;
     }
 
-    TypeSupport type(new HelloWorldPubSubType());
+    if (!wait_for_file.empty())
+    {
+        const auto deadline = std::chrono::steady_clock::now() +
+                std::chrono::seconds(wait_timeout_seconds);
+        while (std::chrono::steady_clock::now() < deadline)
+        {
+            std::ifstream start_signal(wait_for_file);
+            if (start_signal.good())
+            {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        }
+        std::ifstream start_signal(wait_for_file);
+        if (!start_signal.good())
+        {
+            std::cerr << "timed out waiting for start signal: " << wait_for_file << std::endl;
+            DomainParticipantFactory::get_instance()->delete_participant(participant);
+            return 11;
+        }
+    }
+
+    TypeSupport type(type_metadata == "none"
+            ? static_cast<TopicDataType*>(new NoTypeMetadataSamplePubSubType())
+            : static_cast<TopicDataType*>(new DoctorExtensibility::SamplePubSubType()));
     if (type.register_type(participant, "DoctorExtensibility::Sample") !=
-            ReturnCode_t::RETCODE_OK)
+            RETCODE_OK)
     {
         std::cerr << "failed to register DoctorExtensibility::Sample" << std::endl;
         DomainParticipantFactory::get_instance()->delete_participant(participant);
@@ -119,7 +195,22 @@ int main(int argc, char** argv)
             return 6;
         }
         DataWriterQos qos = DATAWRITER_QOS_DEFAULT;
-        qos.representation().m_value = {XCDR_DATA_REPRESENTATION};
+        // "default" leaves the policy untouched, which is not the same as
+        // setting it to the value the default resolves to: what an application
+        // that never configured DATA_REPRESENTATION advertises in discovery is
+        // the question, and setting it explicitly is what hides the answer.
+        if (representation != "default")
+        {
+            qos.representation().m_value = {representation == "xcdr2"
+                ? XCDR2_DATA_REPRESENTATION : XCDR_DATA_REPRESENTATION};
+        }
+        qos.reliability().kind = reliability == "reliable"
+            ? RELIABLE_RELIABILITY_QOS : BEST_EFFORT_RELIABILITY_QOS;
+        qos.durability().kind = durability == "transient-local"
+            ? TRANSIENT_LOCAL_DURABILITY_QOS : VOLATILE_DURABILITY_QOS;
+        qos.deadline().period = {deadline_seconds, 0u};
+        qos.ownership().kind = ownership == "exclusive"
+            ? EXCLUSIVE_OWNERSHIP_QOS : SHARED_OWNERSHIP_QOS;
         WriterListener listener;
         DataWriter* writer = publisher->create_datawriter(topic, qos, &listener);
         if (writer == nullptr)
@@ -130,13 +221,18 @@ int main(int argc, char** argv)
             DomainParticipantFactory::get_instance()->delete_participant(participant);
             return 7;
         }
+        if (!endpoint_ready_file.empty())
+        {
+            std::ofstream endpoint_ready_signal(endpoint_ready_file);
+            endpoint_ready_signal << "ready\n";
+        }
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(duration_seconds);
-        HelloWorld sample;
+        DoctorExtensibility::Sample sample;
         sample.message("DoctorExtensibility");
         while (std::chrono::steady_clock::now() < deadline)
         {
             sample.index(static_cast<uint32_t>(++samples));
-            if (!writer->write(&sample))
+            if (writer->write(&sample) != RETCODE_OK)
             {
                 std::cerr << "failed to write sample" << std::endl;
                 publisher->delete_datawriter(writer);
@@ -162,7 +258,18 @@ int main(int argc, char** argv)
             return 9;
         }
         DataReaderQos qos = DATAREADER_QOS_DEFAULT;
-        qos.type_consistency().representation.m_value = {XCDR_DATA_REPRESENTATION};
+        if (representation != "default")
+        {
+            qos.representation().m_value = {representation == "xcdr2"
+                ? XCDR2_DATA_REPRESENTATION : XCDR_DATA_REPRESENTATION};
+        }
+        qos.reliability().kind = reliability == "reliable"
+            ? RELIABLE_RELIABILITY_QOS : BEST_EFFORT_RELIABILITY_QOS;
+        qos.durability().kind = durability == "transient-local"
+            ? TRANSIENT_LOCAL_DURABILITY_QOS : VOLATILE_DURABILITY_QOS;
+        qos.deadline().period = {deadline_seconds, 0u};
+        qos.ownership().kind = ownership == "exclusive"
+            ? EXCLUSIVE_OWNERSHIP_QOS : SHARED_OWNERSHIP_QOS;
         ReaderListener listener;
         DataReader* reader = subscriber->create_datareader(topic, qos, &listener);
         if (reader == nullptr)
@@ -172,6 +279,11 @@ int main(int argc, char** argv)
             participant->delete_topic(topic);
             DomainParticipantFactory::get_instance()->delete_participant(participant);
             return 10;
+        }
+        if (!endpoint_ready_file.empty())
+        {
+            std::ofstream endpoint_ready_signal(endpoint_ready_file);
+            endpoint_ready_signal << "ready\n";
         }
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(duration_seconds);
         while (std::chrono::steady_clock::now() < deadline)
@@ -188,6 +300,13 @@ int main(int argc, char** argv)
     DomainParticipantFactory::get_instance()->delete_participant(participant);
     std::cout << "{\"vendor\":\"fastdds\",\"role\":\"" << role
               << "\",\"extensibility\":\"" << extensibility
+              << "\",\"reliability\":\"" << reliability
+              << "\",\"durability\":\"" << durability
+              << "\",\"deadline_seconds\":" << deadline_seconds
+              << ",\"ownership\":\"" << ownership
+              << "\",\"representation\":\"" << representation
+              << "\",\"type_metadata\":\"" << type_metadata
+              << "\",\"type_lookup\":\"" << type_lookup
               << "\",\"results\":{\"matched\":" << matched
               << ",\"samples\":" << samples << "}}" << std::endl;
     return 0;

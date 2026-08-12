@@ -1,12 +1,10 @@
 """The Textual application shell."""
 
-import asyncio
-
 from textual.app import App
 from textual.containers import Container
 
 from . import discovery
-from .views.browse import ParticipantListScreen
+from .views.system_overview import SystemOverviewScreen
 
 
 class RTIDoctorApp(App):
@@ -22,20 +20,17 @@ class RTIDoctorApp(App):
     super().__init__()
     self.session = session
     self.interval = interval
-    self._participant_screen = None
+    self._overview_screen = None
 
   def compose(self):
     yield Container()
 
   async def on_mount(self):
-    self._participant_screen = ParticipantListScreen(self.session)
-    await self.push_screen(self._participant_screen)
+    self._overview_screen = SystemOverviewScreen(self.session)
+    await self.push_screen(self._overview_screen)
     self.set_interval(self.interval, self._refresh)
 
   def _refresh(self):
     """Poll participant discovery and expire type waits on a timer."""
     discovery.refresh_participants(self.session.participant, self.session.registry)
     self.session.registry.expire_type_waits()
-    screen = self._participant_screen
-    if screen is not None and self.screen is screen:
-      asyncio.create_task(screen.refresh_table())

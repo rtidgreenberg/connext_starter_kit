@@ -16,9 +16,14 @@ python_env_resolve_nddshome
 python_env_ensure_venv
 python_env_activate_venv
 python_env_sync_rti_connext
+# Every module the tool imports directly is verified here, not just the ones
+# it declares. `rich` was imported by the TUI and declared nowhere, arriving
+# only as a textual dependency - the kind of gap that holds until an upgrade
+# and then fails at launch on someone else's machine.
 python_env_sync_requirements "$SCRIPT_DIR/requirements.txt" \
     "rti.connextdds:RTI Connext DDS Python API" \
-    "textual:Textual"
+    "textual:Textual" \
+    "rich:Rich"
 python_env_resolve_license_file
 
 # --- Run Application ---

@@ -10,7 +10,7 @@ import time
 
 import rti.connextdds as dds
 
-from . import compat, records, typewalk
+from . import compat, typewalk
 
 #: Protocol counters captured for the report appendix, in report order.
 PROTOCOL_COUNTERS = (
@@ -57,10 +57,26 @@ class ProbeResult:
     self.attempted = False
     self.created = False
     self.create_error = None
+    # A failure AFTER the reader was created - typically a status read that
+    # raised. Kept separate from create_error because `created` stays True and
+    # the samples already walked are still real; what is no longer safe is to
+    # present the run as a complete observation.
+    self.error = None
     self.matched_count = 0
     self.samples_taken = 0
     self.walk = None
     self.sample_repr = ""
+    # Writer-identity correlation. The probe's reader is created on a TOPIC, so
+    # subscription_matched, requested_incompatible_qos and every sample can
+    # belong to a different writer publishing the same topic. matched_count and
+    # samples_taken above are scoped to the selected writer whenever
+    # `correlated` is True; when it is False the binding could not report
+    # matched publications and they fall back to topic-wide counts, which no
+    # finding may attribute to the selected writer.
+    self.correlated = False
+    self.matched_other_count = 0
+    self.matched_unreadable_count = 0
+    self.samples_other = 0
     # Status snapshots, taken after the probe window.
     self.subscription_matched = None
     self.requested_incompatible_qos = None
@@ -70,6 +86,7 @@ class ProbeResult:
     self.cache = {}
     self.inconsistent_topic_count = None
     self.applied_reader_qos = {}
+    self.probe_kind = "reader"
     self.elapsed = 0.0
     self.listener_events = []
 
@@ -209,6 +226,152 @@ def build_subscriber(participant, endpoint):
   return subscriber, applied
 
 
+def build_writer_qos(endpoint):
+  """Writer QoS that offers the selected reader's advertised policies."""
+  qos = dds.DataWriterQos()
+  applied = {}
+  for name in ("reliability", "durability", "latency_budget", "deadline",
+               "ownership", "destination_order", "liveliness"):
+    policy = getattr(endpoint, name, None)
+    if policy is None:
+      continue
+    try:
+      if name == "deadline":
+        qos.deadline.period = policy.period
+      elif name == "latency_budget":
+        qos.latency_budget.duration = policy.duration
+      else:
+        getattr(qos, name).kind = policy.kind
+      applied[name] = str(policy)
+    except Exception as error:
+      applied[name] = f"not applied ({error})"
+  return qos, applied
+
+
+def build_publisher(participant, endpoint):
+  """Publisher matching the selected reader's partition and presentation."""
+  qos = dds.PublisherQos()
+  needed = False
+  applied = {}
+  names = compat.get(getattr(endpoint, "partition", None), "name", None)
+  if names:
+    try:
+      qos.partition.name = names
+      applied["partition"] = ", ".join(str(name) for name in names)
+      needed = True
+    except Exception as error:
+      applied["partition"] = f"not applied ({error})"
+  presentation = getattr(endpoint, "presentation", None)
+  if presentation is not None:
+    try:
+      qos.presentation.access_scope = presentation.access_scope
+      qos.presentation.coherent_access = presentation.coherent_access
+      qos.presentation.ordered_access = presentation.ordered_access
+      applied["presentation"] = str(presentation.access_scope)
+      needed = True
+    except Exception as error:
+      applied["presentation"] = f"not applied ({error})"
+  publisher = dds.Publisher(participant, qos) if needed else dds.Publisher(participant)
+  return publisher, applied
+
+
+def _publication_key(reader, handle):
+  """Builtin key text of one matched publication, or None when unreadable.
+
+  Formatted exactly as discovery._endpoint_from_data formats EndpointRecord.key,
+  so the two can be compared directly.
+  """
+  getter = compat.get(reader, "matched_publication_data", None)
+  if not callable(getter):
+    return None
+  try:
+    data = getter(handle)
+  except Exception:
+    return None
+  value = compat.get(compat.get(data, "key", None), "value", None)
+  return None if value is None else str(value)
+
+
+def _correlate(reader, endpoint, result):
+  """Instance handles among the reader's matched publications that ARE `endpoint`.
+
+  Returns None when the selected writer cannot be identified - the binding does
+  not expose matched publications, or none of their keys could be read. A None
+  return is not "no match": it means observations stay topic-scoped and no
+  finding may claim they describe the selected writer.
+
+  An empty set IS a conclusion: the reader matched, or failed to match, and the
+  selected writer was not among the publications it matched.
+  """
+  def uncorrelated():
+    """Every field describing correlation, cleared together.
+
+    `correlated` used to be a latch: set True on success and never cleared, so
+    a later poll that could not resolve a publication left `correlated=True`
+    beside a topic-wide matched_count and stale other/unreadable counts. Every
+    consumer then read a writer-scoped answer off topic-wide data - the scope
+    line claimed publication-handle correlation, and check_incompatible_qos
+    could promote a topic-level WARN into a writer-scoped ERROR.
+    The three fields must always describe the same reading.
+    """
+    result.correlated = False
+    result.matched_other_count = 0
+    result.matched_unreadable_count = 0
+    return None
+
+  handles = compat.get(reader, "matched_publications", None)
+  if handles is None:
+    return uncorrelated()
+  try:
+    handles = list(handles)
+  except TypeError:
+    return uncorrelated()
+
+  target, others, unreadable = set(), 0, 0
+  for handle in handles:
+    key = _publication_key(reader, handle)
+    if key is None:
+      unreadable += 1
+    elif key == endpoint.key:
+      target.add(str(handle))
+    else:
+      others += 1
+
+  # An empty target set is only a conclusion when EVERY publication resolved.
+  # An unreadable key could have been the selected writer, and reporting "never
+  # matched" from that would be the exact false certainty this function exists
+  # to prevent. Covers the all-unreadable case too.
+  if not target and unreadable:
+    return uncorrelated()
+
+  result.correlated = True
+  # Current values, deliberately NOT a running max. `attributable` and
+  # `exclusive` are present-tense questions: a writer that matched for one poll
+  # iteration and departed must not permanently downgrade a real ERROR to a
+  # topic-level WARN, nor permanently stop crediting the target's samples.
+  # _snapshot_statuses calls this last, so the final value is the authoritative
+  # post-window reading. matched_count stays a max - a transient match is still
+  # a match.
+  result.matched_other_count = others
+  result.matched_unreadable_count = unreadable
+  return target
+
+
+def _sample_is_target(sample, target_handles, exclusive):
+  """Is this sample from the selected writer?
+
+  When the reader matched only the selected writer, every sample on the topic is
+  necessarily its own, so an unreadable publication_handle is safe to attribute.
+  When other writers are matched too it is not, and the sample is counted as
+  another writer's rather than credited to the target - an unattributable sample
+  must never become evidence that the selected writer is delivering data.
+  """
+  handle = compat.get(sample.info, "publication_handle", None)
+  if handle is None:
+    return exclusive
+  return str(handle) in target_handles
+
+
 def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1):
   """Create a reader for `endpoint`, observe it for `timeout`, then tear down.
 
@@ -219,8 +382,7 @@ def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1):
   result.attempted = True
 
   if not endpoint.is_writer:
-    result.create_error = "endpoint is a DataReader; only writers can be probed"
-    return result
+    return probe_reader_endpoint(participant, endpoint, timeout, poll)
   if endpoint.type is None:
     result.create_error = "no type information available, cannot create a reader"
     return result
@@ -243,12 +405,24 @@ def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1):
 
     deadline = start + timeout
     while time.monotonic() < deadline:
-      matched = compat.get_int(reader.subscription_matched_status, "current_count")
-      if matched:
-        result.matched_count = max(result.matched_count, matched)
+      target_handles = _correlate(reader, endpoint, result)
+      if target_handles is None:
+        matched = compat.get_int(reader.subscription_matched_status, "current_count")
+        if matched:
+          result.matched_count = max(result.matched_count, matched)
+      else:
+        result.matched_count = max(result.matched_count, len(target_handles))
+      # "Exclusive" means nothing else this reader matched could have produced
+      # the sample - so an unresolvable publication counts against it too.
+      exclusive = (result.matched_other_count == 0
+                   and result.matched_unreadable_count == 0)
 
       for sample in reader.take():
         if not sample.info.valid:
+          continue
+        if target_handles is not None and not _sample_is_target(
+            sample, target_handles, exclusive):
+          result.samples_other += 1
           continue
         result.samples_taken += 1
         if result.walk is None:
@@ -261,9 +435,13 @@ def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1):
         break
       time.sleep(poll)
 
-    _snapshot_statuses(reader, topic, result)
+    _snapshot_statuses(reader, topic, endpoint, result)
   except Exception as e:
-    result.create_error = f"{type(e).__name__}: {e}"
+    detail = f"{type(e).__name__}: {e}"
+    if result.created:
+      result.error = detail
+    else:
+      result.create_error = detail
     logging.error(f"[probe] {endpoint.topic_name}: {e}")
   finally:
     result.elapsed = time.monotonic() - start
@@ -272,12 +450,60 @@ def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1):
   return result
 
 
-def _snapshot_statuses(reader, topic, result):
+def probe_reader_endpoint(participant, endpoint, timeout=10.0, poll=0.1):
+  """Create a non-writing DataWriter and observe whether it matches a reader."""
+  result = ProbeResult()
+  result.attempted = True
+  result.probe_kind = "writer"
+  if endpoint.type is None:
+    result.create_error = "no type information available, cannot create a writer"
+    return result
+
+  publisher = topic = writer = None
+  start = time.monotonic()
+  try:
+    topic = dds.DynamicData.Topic(participant, endpoint.topic_name, endpoint.type)
+    publisher, publisher_applied = build_publisher(participant, endpoint)
+    writer_qos, qos_applied = build_writer_qos(endpoint)
+    result.applied_reader_qos = {**publisher_applied, **qos_applied}
+    writer = dds.DynamicData.DataWriter(publisher, topic, writer_qos)
+    result.created = True
+    deadline = start + timeout
+    while time.monotonic() < deadline:
+      status = writer.publication_matched_status
+      matched = compat.get_int(status, "current_count")
+      if matched:
+        result.matched_count = max(result.matched_count, matched)
+        break
+      time.sleep(poll)
+    result.subscription_matched = writer.publication_matched_status
+    result.inconsistent_topic_count = compat.get_int(
+        compat.get(topic, "inconsistent_topic_status", None), "total_count")
+  except Exception as error:
+    detail = f"{type(error).__name__}: {error}"
+    if result.created:
+      result.error = detail
+    else:
+      result.create_error = detail
+    logging.error(f"[probe] {endpoint.topic_name}: {error}")
+  finally:
+    result.elapsed = time.monotonic() - start
+    _close_all(writer, publisher, topic, endpoint.topic_name)
+  return result
+
+
+def _snapshot_statuses(reader, topic, endpoint, result):
   """Authoritative post-window status read. Missing counters stay None."""
   result.subscription_matched = reader.subscription_matched_status
-  matched = compat.get_int(result.subscription_matched, "current_count")
-  if matched is not None:
-    result.matched_count = max(result.matched_count, matched)
+  # subscription_matched is topic-wide. Only fall back to it when the selected
+  # writer could not be identified among the matched publications.
+  target_handles = _correlate(reader, endpoint, result)
+  if target_handles is None:
+    matched = compat.get_int(result.subscription_matched, "current_count")
+    if matched is not None:
+      result.matched_count = max(result.matched_count, matched)
+  else:
+    result.matched_count = max(result.matched_count, len(target_handles))
 
   result.requested_incompatible_qos = compat.get(
       reader, "requested_incompatible_qos_status", None)

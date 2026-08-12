@@ -1,0 +1,3 @@
+# Fixture readiness-marker directories written by the vendor e2e suites.
+# They belong under test_output/, not the source tree - tracked as HAR-6.
+test/rti_doctor_*/

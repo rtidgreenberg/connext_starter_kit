@@ -1,24 +1,46 @@
-"""Report rendering: the shareable text file, JSON, and Textual-friendly text.
+"""Report rendering: the shareable text file and the Textual-friendly sections.
 
-The text file is the primary artifact. Its rules:
+The text report is the only output contract. There was a second, `--format
+json`, described in its own docstring as an unstable dump with no schema - so
+it could not be relied on, while still having to be kept working, tested, and
+free of anything the text report did not also carry. Everything a consumer
+needs is in the text: fixed section order, one line per finding id and
+severity, and labelled fields underneath.
+
+Its rules:
 
   * Only observed values. A counter unavailable on this Connext version renders
     as compat.na_text(), never as 0 and never omitted.
   * Fixed section order, so two reports diff cleanly against each other.
   * An environment header, so a recipient needs no follow-up questions.
   * A complete raw counter appendix, so a reader who doubts a finding can check.
-  * Suppressed findings listed by id, so causal ordering hides noise without
-    making anything vanish.
+  * Every finding rendered. A finding whose likely cause is also present says
+    so on a "Likely explained by" line; nothing is filtered out by that guess.
 """
 
-import json
 import time
 
-from . import compat, findings as f, probe as probe_mod, records, typewalk
+from . import compat, findings as f, probe as probe_mod, records, typewalk, wire
 
 WIDTH = 100
 RULE = "=" * WIDTH
 THIN = "-" * WIDTH
+
+#: What a field observable only in RTPS packets says when no capture has been
+#: run. Rendering the field as absent, or omitting its section, made "nobody
+#: looked" indistinguishable from "there is nothing there" - and since captures
+#: are now only ever started when an operator asks, "nobody looked" is the
+#: normal state rather than an unusual one.
+CAPTURE_PLACEHOLDER = "Run capture to ascertain"
+
+#: Label pad for the CAPTURE EVIDENCE summary. Its labels are indented two
+#: spaces and run to 21 characters, past `_kv`'s default 16, which collides the
+#: value against the label rather than wrapping it.
+CAPTURE_LABEL_PAD = 24
+
+#: How to ascertain it, stated wherever the placeholder appears.
+CAPTURE_HINT = ("Open an endpoint report and press c to capture RTPS packets for "
+                "that endpoint.")
 
 
 def _section(title):
@@ -53,6 +75,7 @@ def _wrap(text, indent=15, width=WIDTH):
 
 def _labelled(label, text, indent=15):
   """"  Label   wrapped text..." with the label on the first line."""
+  indent = max(indent, len(label) + 3)
   block = _wrap(text, indent=indent)
   if not block:
     return []
@@ -68,24 +91,115 @@ def default_filename(domain_id, scope, timestamp=None):
   return f"rti_doctor_{domain_id}_{safe}_{stamp}.txt"
 
 
+def system_filename(domain_id, timestamp=None):
+  """Ticket-friendly filename for a saved passive system scan."""
+  stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(timestamp or time.time()))
+  return f"rti_doctor_system_{domain_id}_{stamp}.txt"
+
+
+def render_system_text(snapshot, domain_id, environment=None,
+                       type_lookup_settings=None):
+  """Render an immutable system-scan snapshot without refreshing it."""
+  environment = environment or compat.environment_info()
+  stamp = time.strftime("%Y-%m-%d %H:%M:%S %z", time.localtime(snapshot.captured_at))
+  topology_data = snapshot.topology
+  counts = {severity: 0 for severity in f.Severity}
+  for issue in snapshot.issues:
+    counts[issue.severity] = counts.get(issue.severity, 0) + 1
+  lines = [RULE, "RTI DOCTOR SYSTEM REPORT", RULE,
+           _kv("Generated", stamp),
+           _kv("Tool", "rti_doctor (tools/rti_doctor)"),
+           _kv("Command", environment.get("argv", "unknown")),
+           _kv("Host", f"{environment.get('host')}  {environment.get('os')}  "
+                       f"{environment.get('machine')}"),
+           _kv("Connext", f"{environment.get('connext')}  "
+                          f"(NDDSHOME={environment.get('nddshome')})"),
+           _kv("Python", environment.get("python")),
+           _kv("Domain", str(domain_id)), ""]
+  lines += render_topology_text(topology_data)
+  # Always rendered, including when nothing was captured. A Fast DDS peer
+  # advertises its product version only in RTPS discovery packets, so no
+  # passive DDS-level scan can supply this; omitting the section when no
+  # capture had been run made an unasked question look like a settled one.
+  lines += _section("FAST DDS VERSION EVIDENCE")
+  if snapshot.fastdds_product_versions:
+    lines += [_kv("Observed", ", ".join(snapshot.fastdds_product_versions)), ""]
+  else:
+    lines += [_kv("Observed", CAPTURE_PLACEHOLDER), CAPTURE_HINT, ""]
+  lines += _section("ISSUE SUMMARY")
+  lines += [_kv("Errors", str(counts[f.Severity.ERROR])),
+            _kv("Warnings", str(counts[f.Severity.WARN])),
+            _kv("Notes", str(counts[f.Severity.INFO])), ""]
+  lines += _section("ISSUES")
+  if not snapshot.issues:
+    # "No issues" over an empty domain would read as a clean bill of health for
+    # a system that was never found. Say which of the two it is.
+    if not topology_data["participants"]:
+      lines += [f"No DDS participants were discovered on domain {domain_id}, so "
+                "there is nothing to report.",
+                "This is not a clean bill of health: nothing was observed.", ""]
+    else:
+      lines += ["No active issues in this snapshot.", ""]
+  for number, issue in enumerate(snapshot.issues, 1):
+    lines.append(f"[{number}] [{issue.severity.label}] {', '.join(issue.finding_ids)}")
+    lines += _labelled("Title", issue.title)
+    lines += _labelled("Topic", issue.topic_name or "(domain-wide)")
+    lines += _labelled("Scope", issue.scope)
+    if issue.writer_keys:
+      lines += _labelled("Writers", ", ".join(issue.writer_keys))
+    if issue.reader_keys:
+      lines += _labelled("Readers", ", ".join(issue.reader_keys))
+    if issue.participant_keys:
+      lines += _labelled("Participants", ", ".join(issue.participant_keys))
+    lines += _labelled("Observed", issue.observed)
+    lines += _labelled("Root cause", issue.root_cause)
+    lines += _labelled("Recommendation", issue.recommendation)
+    # Context, not a filter: this issue is listed and counted regardless.
+    if issue.explained_by:
+      lines += _labelled("Likely explained by",
+                         ", ".join(issue.explained_by) +
+                         " - confirm it applies here before acting on it, "
+                         "since the link is by finding id alone.")
+    lines.append("")
+  lines += _section("RTI_DOCTOR OWN CONFIGURATION")
+  lines += ["Settings rti_doctor applied to its own participant, so that any",
+            "issue above can be judged against how it was measured.", ""]
+  if type_lookup_settings:
+    for key, value in sorted(type_lookup_settings.items()):
+      lines.append(f"  {str(key).ljust(52)}{value}")
+  else:
+    lines.append("  (no type-lookup settings recorded)")
+  lines.append("")
+  lines += _section("SNAPSHOT LIMITATIONS")
+  lines += ["This report is an observed passive snapshot, not proof of complete",
+            "historical topology or end-to-end data flow. Targeted writer debug",
+            "results are intentionally not run or refreshed while saving this report.", ""]
+  return "\n".join(lines) + "\n"
+
+
 class ReportData:
   """Everything one report needs. Built by the caller, consumed by renderers."""
 
   def __init__(self, domain_id, scope, all_findings, probe_result=None,
                endpoint=None, participant=None, type_lookup_settings=None,
-               environment=None, generated_at=None, blind_spot_findings=None,
-               wire_evidence=None):
+               environment=None, generated_at=None, wire_evidence=None,
+               topology=None, discovery_evidence=None, capture_interface=None):
     self.domain_id = domain_id
     self.scope = scope
-    self.findings = f.rank(f.suppress(list(all_findings)))
+    self.findings = f.rank(f.link_causes(list(all_findings)))
     self.probe_result = probe_result
     self.endpoint = endpoint
     self.participant = participant
     self.type_lookup_settings = type_lookup_settings or {}
     self.environment = environment or compat.environment_info()
     self.generated_at = generated_at or time.time()
-    self.blind_spot_findings = blind_spot_findings or []
     self.wire_evidence = wire_evidence
+    # Discovery metadata read from the same capture as `wire_evidence`. It
+    # carries the packet-only facts - Fast DDS product versions above all -
+    # that no DDS-level observation can supply.
+    self.discovery_evidence = discovery_evidence
+    self.capture_interface = capture_interface
+    self.topology = topology
 
   @property
   def outcome(self):
@@ -102,11 +216,13 @@ class ReportData:
       outcome.skip_reason = result.create_error or "reader could not be created"
       outcome.attempted = False
       return outcome
+    outcome.incomplete_reason = result.error
     if result.walk is not None:
       outcome.payload_verdict = result.walk.verdict
       outcome.members_total = result.walk.total
       outcome.members_unreadable = len(result.walk.failed)
       outcome.unreadable_paths = result.walk.failed_paths
+      outcome.truncated = result.walk.truncated
     return outcome
 
   @property
@@ -116,12 +232,11 @@ class ReportData:
 
 # --- Text renderer -----------------------------------------------------------
 
-def render_text(data):
-  """The shareable report file."""
+def _header_lines(data):
   lines = [RULE, "RTI DOCTOR INTEROP REPORT", RULE]
   env = data.environment
   stamp = time.strftime("%Y-%m-%d %H:%M:%S %z", time.localtime(data.generated_at))
-  lines += [
+  return lines + [
       _kv("Generated", stamp),
       _kv("Tool", "rti_doctor (tools/rti_doctor)"),
       _kv("Command", env.get("argv", "unknown")),
@@ -133,16 +248,183 @@ def render_text(data):
       "",
   ]
 
+
+def render_view_sections(data):
+  """Sections for the interactive report tabs."""
+  overview = _header_lines(data)
+  overview += _section("VERDICT")
+  overview += [data.verdict, ""]
+  # Same position as in render_text. The summary was added to the saved report
+  # first and not here, so pressing `c` in the TUI put the version in the Wire
+  # tab and nothing on Overview - the operator who ran the capture was the one
+  # person who could not see what it produced.
+  overview += _render_capture_summary(data)
+  overview += _render_peer(data)
+  overview += _render_topology(data)
+  return {
+      "overview": "\n".join(overview),
+      "findings": "\n".join(_render_findings(data)),
+      "type": "\n".join(_render_type_appendix(data)),
+      "probe": "\n".join(_render_counter_appendix(data)),
+      "wire": "\n".join(_render_wire_appendix(data) or [
+          "No direct RTPS packet capture was requested.",
+          "",
+          f"Fast DDS version: {CAPTURE_PLACEHOLDER}.",
+          "Press c to capture RTPS packets for this endpoint. Nothing is "
+          "captured until you do.", ""]),
+      "config": "\n".join(_render_config_appendix(data)),
+  }
+
+
+def render_text(data):
+  """The shareable report file."""
+  lines = _header_lines(data)
   lines += _section("VERDICT")
   lines += [data.verdict, ""]
 
+  lines += _render_capture_summary(data)
   lines += _render_peer(data)
+  lines += _render_topology(data)
   lines += _render_findings(data)
   lines += _render_type_appendix(data)
   lines += _render_counter_appendix(data)
   lines += _render_wire_appendix(data)
   lines += _render_config_appendix(data)
   return "\n".join(lines) + "\n"
+
+
+def _render_capture_summary(data):
+  """What the capture added that discovery could not, near the top.
+
+  The full counts stay in Appendix C. This answers the question an engineer
+  actually has after pressing `c`: what do I know now that I did not know
+  before? Two things can only come from packets - the peer's product version,
+  which is an RTI discovery extension and therefore absent for every other
+  vendor, and the encapsulation actually used on the wire, as opposed to the
+  DataRepresentation the endpoint advertised it would use.
+
+  It renders only when a capture was run, so a report without one is unchanged.
+  """
+  wire_evidence = data.wire_evidence
+  discovery = data.discovery_evidence
+  if wire_evidence is None and discovery is None:
+    return []
+
+  lines = _section("CAPTURE EVIDENCE")
+  wire_error = (wire_evidence or {}).get("error")
+  discovery_error = (discovery or {}).get("error")
+  if wire_error and (discovery_error or discovery is None):
+    # Nothing was read at all. Say why, and do not let it read as "the wire was
+    # quiet" - those are opposite conclusions for whoever reads this next.
+    lines.append(_kv("Result", f"capture unavailable: {wire_error}",
+                     CAPTURE_LABEL_PAD))
+    lines.append("")
+    return lines
+
+  gained, unchanged = [], []
+
+  versions = (discovery or {}).get("fastdds_product_versions") or []
+  if versions and not discovery_error:
+    gained.append(("Fast DDS version", ", ".join(versions),
+                   "packets only - the discovery API cannot report a product "
+                   "version for a non-RTI vendor"))
+
+  encapsulations = (wire_evidence or {}).get("encapsulation_ids") or []
+  if encapsulations:
+    observed = wire.encapsulation_text(encapsulations)
+    gained.append(("Wire representation", observed,
+                   _representation_agreement(data.endpoint, observed)))
+
+  data_frames = ((wire_evidence or {}).get("data_packets", 0)
+                 + (wire_evidence or {}).get("data_fragments", 0))
+  if wire_evidence is not None and not wire_error and not data_frames:
+    unchanged.append(
+        "No user DATA from the selected endpoint was captured. That is what a "
+        "writer with no matched reader looks like, and it is also what an "
+        "endpoint the capture filter could not reach looks like - the counts "
+        "and the filter in Appendix C separate the two.")
+  if not gained and not unchanged:
+    unchanged.append("The capture added nothing beyond what discovery already "
+                     "reported.")
+
+  if gained:
+    lines.append("New from packets, not available from discovery")
+    for label, value, note in gained:
+      lines.append(_kv(f"  {label}", value, CAPTURE_LABEL_PAD))
+      lines.extend(_wrap(note, indent=4))
+  for note in unchanged:
+    lines.extend(_wrap(note, indent=2))
+  lines.append("")
+  lines.append("Full counts, filters and announcement details in Appendix C.")
+  lines.append("")
+  return lines
+
+
+def _representation_agreement(endpoint, observed):
+  """Whether the wire agrees with what a *writer* advertised, when that is knowable.
+
+  Deliberately narrow. The claim only holds for a writer, whose effective
+  representation is the first entry in its list; a reader's list is the set it
+  *accepts*, so a reader advertising [XCDR1, XCDR2] and receiving XCDR2 agrees
+  with the wire rather than contradicting it, and capture is supported on reader
+  reports. AUTO is excluded because its effective value is not determinable from
+  discovery at all - `qos_match` declines to compare it for the same reason, and
+  a summary claiming a disagreement it declines to claim would be the report
+  arguing with itself.
+
+  Returns a plain statement of fact when no comparison can honestly be made.
+  """
+  neutral = "what the writer actually serialized"
+  if endpoint is None or not getattr(endpoint, "is_writer", False):
+    return "observed on the wire"
+  ids = records.representation_ids(endpoint.representation)
+  if not ids or -1 in ids:
+    return neutral
+  advertised = records.REPRESENTATION_NAMES.get(ids[0])
+  if not advertised:
+    return neutral
+  if advertised.lower() in observed.lower():
+    return f"agrees with the advertised {advertised}"
+  return f"**disagrees with the advertised {advertised}**"
+
+
+def capture_headline(data):
+  """One line naming what a capture actually parsed, for the TUI status bar.
+
+  The status line used to report only a frame count, so the commonest real
+  result - "0 matching frames" - said nothing about whether the two facts a
+  capture exists to recover were recovered. A Fast DDS version can be read from
+  a capture carrying no user data at all, so the count alone is actively
+  misleading about what the operator just got.
+
+  Written for one line of status bar: no padding, no wrapping, present tense.
+  Kept beside `_render_capture_summary` so the headline and the report section
+  cannot drift into disagreeing about the same capture.
+  """
+  wire_evidence = data.wire_evidence or {}
+  discovery = data.discovery_evidence or {}
+  parts = []
+
+  versions = discovery.get("fastdds_product_versions") or []
+  if discovery.get("error"):
+    parts.append("version unreadable")
+  elif versions:
+    parts.append(f"Fast DDS version {', '.join(versions)}")
+  else:
+    parts.append("no Fast DDS version advertised")
+
+  encapsulations = wire_evidence.get("encapsulation_ids") or []
+  if encapsulations:
+    parts.append(f"representation {wire.encapsulation_text(encapsulations)}")
+  else:
+    # Name the reason rather than the absence: no user DATA and no readable
+    # representation are the same observation, and the operator needs to know
+    # which question went unanswered.
+    parts.append("no user DATA, so no wire representation")
+
+  frames = wire_evidence.get("packets", 0)
+  parts.append(f"{frames} matching frame{'' if frames == 1 else 's'}")
+  return "; ".join(parts)
 
 
 def _render_peer(data):
@@ -177,32 +459,58 @@ def _render_peer(data):
   return lines
 
 
+def _render_topology(data):
+  return render_topology_text(data.topology)
+
+
+def render_topology_text(topology):
+  """Render an observed-topology section for reports and sweep summaries."""
+  if topology is None:
+    return []
+  lines = _section("OBSERVED TOPOLOGY")
+  lines.append(_kv("Source", topology["source"]))
+  lines.append(_kv("Scope", topology["scope"]))
+  lines.append(_kv("Domain", str(topology["selected_domain_id"])))
+  lines.append(_kv("Participants", str(topology["participants"])))
+  lines.append(_kv("Readers", str(topology["readers"])))
+  lines.append(_kv("Writers", str(topology["writers"])))
+  lines.append(_kv("Topics", ", ".join(topology["topics"]) or "(none observed)"))
+  # After the counts, and labelled as a different observation: these domains
+  # were heard announcing, and nothing above describes them.
+  others = topology.get("other_domains_announcing") or ()
+  if others:
+    lines.append(_kv("Other domains", ", ".join(str(item) for item in others)
+                     + " (heard announcing; no counts above apply to them)"))
+  lines.append(_kv("Coverage", topology["completion_note"]))
+  lines.append("")
+  return lines
+
+
 def _render_findings(data):
-  active = f.active(data.findings)
-  hist = f.counts(data.findings)
+  findings = list(data.findings)
+  hist = f.counts(findings)
   summary = ", ".join(f"{hist[s]} {s.label}" for s in
                       (f.Severity.ERROR, f.Severity.WARN, f.Severity.INFO, f.Severity.OK)
                       if hist.get(s))
   lines = _section(f"FINDINGS  ({summary or 'none'})")
 
-  if not active:
+  if not findings:
     lines += ["No findings.", ""]
-  for finding in active:
+  for finding in findings:
     lines.append(f"[{finding.severity.label}] rung {finding.rung}  {finding.id}")
     lines += _labelled("", finding.title)
     lines += _labelled("Observed", finding.observed)
     lines += _labelled("Root cause", finding.root_cause)
     lines += _labelled("Remedy", finding.remedy)
+    # Context, not a filter: this finding is listed, counted and carried into
+    # the exit code whether or not something here would explain it.
+    if finding.explained_by:
+      lines += _labelled("Likely explained by",
+                         ", ".join(finding.explained_by) +
+                         " - confirm it applies to this endpoint before acting "
+                         "on it, since the link is by finding id alone.")
     for ref in finding.refs:
       lines.append(f"  {'Reference'.ljust(13)}{ref}")
-    lines.append("")
-
-  hidden = f.suppressed(data.findings)
-  if hidden:
-    lines.append(f"SUPPRESSED ({len(hidden)}) - real findings that a lower-rung "
-                 f"failure already explains:")
-    for finding in hidden:
-      lines.append(f"  {finding.id} (explained by {finding.suppressed_by})")
     lines.append("")
   return lines
 
@@ -292,33 +600,92 @@ def _render_counter_appendix(data):
   return lines
 
 
+#: Appendix C labels name the frame scope explicitly ("... in matching frames"),
+#: which puts the longest of them at 36 characters. `_kv`'s default pad of 16 is
+#: shorter than that, so it would return the value glued to the label.
+WIRE_LABEL_PAD = 38
+
+
 def _render_wire_appendix(data):
   evidence = data.wire_evidence
   if evidence is None:
     return []
   lines = _section("APPENDIX C - DIRECT RTPS PACKET OBSERVATION")
-  lines.append(_kv("Capture", evidence.get("source", "unknown")))
+  if data.capture_interface:
+    lines.append(_kv("Capture interface", data.capture_interface, WIRE_LABEL_PAD))
+  lines.append(_kv("Capture", evidence.get("source", "unknown"), WIRE_LABEL_PAD))
   if evidence.get("capture_filter"):
-    lines.append(_kv("Capture filter", evidence["capture_filter"]))
+    lines.append(_kv("Capture filter", evidence["capture_filter"], WIRE_LABEL_PAD))
   if evidence.get("target_writer_entity_id"):
-    lines.append(_kv("Writer entity filter", evidence["target_writer_entity_id"]))
+    lines.append(_kv("Writer entity filter", evidence["target_writer_entity_id"],
+                     WIRE_LABEL_PAD))
   if evidence.get("target_writer_guid_prefix"):
-    lines.append(_kv("Writer GUID prefix filter", evidence["target_writer_guid_prefix"]))
+    lines.append(_kv("Writer GUID prefix filter", evidence["target_writer_guid_prefix"],
+                     WIRE_LABEL_PAD))
+  if evidence.get("target_reader_entity_id"):
+    lines.append(_kv("Reader entity filter", evidence["target_reader_entity_id"],
+                     WIRE_LABEL_PAD))
   error = evidence.get("error")
   if error:
-    lines.append(_kv("Result", f"unavailable: {error}"))
+    lines.append(_kv("Result", f"unavailable: {error}", WIRE_LABEL_PAD))
+    lines.append("")
+    lines += _render_discovery_evidence(data)
+    return lines
+  lines.append(_kv("Frames matching filters", str(evidence.get("packets", 0)),
+                   WIRE_LABEL_PAD))
+  lines.append(_kv("DATA in matching frames", str(evidence.get("data_packets", 0)),
+                   WIRE_LABEL_PAD))
+  lines.append(_kv("DATA_FRAG in matching frames", str(evidence.get("data_fragments", 0)),
+                   WIRE_LABEL_PAD))
+  encapsulations = evidence.get("encapsulation_ids", [])
+  lines.append(_kv("Observed DDS data representation",
+                   wire.encapsulation_text(encapsulations) if encapsulations
+                   else "none observed", WIRE_LABEL_PAD))
+  lines.append(_kv("Encapsulation IDs in matching frames",
+                   ", ".join(encapsulations) if encapsulations else "none observed",
+                   WIRE_LABEL_PAD))
+  writers = evidence.get("writer_entity_ids", [])
+  lines.append(_kv("Writer IDs in matching frames",
+                   ", ".join(writers) if writers else "none observed", WIRE_LABEL_PAD))
+  lines.append(_kv("Serialized bytes in matching frames",
+                   str(evidence.get("payload_bytes", 0)), WIRE_LABEL_PAD))
+  lines.append(_kv("Reassembled bytes in matching frames",
+                   str(evidence.get("reassembled_bytes", 0)), WIRE_LABEL_PAD))
+  if evidence.get("scope_note"):
+    lines.append("Scope")
+    lines.extend(_wrap(evidence["scope_note"], indent=2))
+  lines.append("")
+  lines += _render_discovery_evidence(data)
+  return lines
+
+
+def _render_discovery_evidence(data):
+  """The packet-only discovery facts read from the same capture.
+
+  Separate from the user-data block above it because it answers a different
+  question - who announced themselves, and as what - and because the Fast DDS
+  product version is the one fact in this tool that no DDS-level observation
+  can produce at all.
+  """
+  evidence = data.discovery_evidence
+  if evidence is None:
+    return []
+  lines = ["RTPS discovery observed in the same capture"]
+  error = evidence.get("error")
+  if error:
+    lines.append(_kv("  Result", f"unavailable: {error}", WIRE_LABEL_PAD))
     lines.append("")
     return lines
-  lines.append(_kv("User-data packets", str(evidence.get("packets", 0))))
-  lines.append(_kv("DATA submessages", str(evidence.get("data_packets", 0))))
-  lines.append(_kv("DATA_FRAG submessages", str(evidence.get("data_fragments", 0))))
-  encapsulations = evidence.get("encapsulation_ids", [])
-  lines.append(_kv("Encapsulation IDs", ", ".join(encapsulations) if encapsulations
-                   else "none observed"))
-  writers = evidence.get("writer_entity_ids", [])
-  lines.append(_kv("Writer entity IDs", ", ".join(writers) if writers else "none observed"))
-  lines.append(_kv("Serialized bytes", str(evidence.get("payload_bytes", 0))))
-  lines.append(_kv("Reassembled bytes", str(evidence.get("reassembled_bytes", 0))))
+  versions = evidence.get("fastdds_product_versions") or []
+  lines.append(_kv("  Fast DDS versions advertised",
+                   ", ".join(versions) if versions
+                   else "none observed in this capture", WIRE_LABEL_PAD))
+  lines.append(_kv("  Participants announcing",
+                   str(evidence.get("participants", 0)), WIRE_LABEL_PAD))
+  topics = evidence.get("topics") or []
+  lines.append(_kv("  Topics announced",
+                   ", ".join(topics) if topics else "none observed",
+                   WIRE_LABEL_PAD))
   lines.append("")
   return lines
 
@@ -343,97 +710,3 @@ def _render_config_appendix(data):
   lines.append("")
   return lines
 
-
-# --- JSON renderer -----------------------------------------------------------
-
-def render_json(data):
-  """Unstable JSON dump.
-
-  Deliberately has no schema contract: field names and structure may change
-  between releases. The text report is the shareable artifact.
-  """
-  payload = {
-      "unstable_schema": True,
-      "generated_at": data.generated_at,
-      "environment": data.environment,
-      "domain_id": data.domain_id,
-      "scope": data.scope,
-      "verdict": data.verdict,
-      "findings": [
-          {
-              "id": finding.id,
-              "rung": finding.rung,
-              "severity": finding.severity.label,
-              "title": finding.title,
-              "observed": finding.observed,
-              "root_cause": finding.root_cause,
-              "remedy": finding.remedy,
-              "evidence": _jsonable(finding.evidence),
-              "refs": list(finding.refs),
-              "suppressed_by": finding.suppressed_by,
-          }
-          for finding in data.findings
-      ],
-  }
-  result = data.probe_result
-  if result is not None:
-    payload["probe"] = {
-        "attempted": result.attempted,
-        "created": result.created,
-        "create_error": result.create_error,
-        "matched_count": result.matched_count,
-        "samples_taken": result.samples_taken,
-        "elapsed_seconds": round(result.elapsed, 3),
-        "protocol_status": _jsonable(result.protocol),
-        "cache_status": _jsonable(result.cache),
-        "payload_verdict": result.walk.verdict if result.walk else None,
-        "unreadable_paths": result.walk.failed_paths if result.walk else [],
-    }
-  if data.wire_evidence is not None:
-    payload["wire_observation"] = _jsonable(data.wire_evidence)
-  return json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n"
-
-
-def _jsonable(value):
-  if isinstance(value, dict):
-    return {str(k): _jsonable(v) for k, v in value.items()}
-  if isinstance(value, (list, tuple, set)):
-    return [_jsonable(v) for v in value]
-  if isinstance(value, (str, int, float, bool)) or value is None:
-    return value
-  return str(value)
-
-
-# --- Sweep summary -----------------------------------------------------------
-
-def render_sweep_text(rows, domain_id, environment=None, generated_at=None):
-  """One-line-per-writer summary table for --all / the sweep screen."""
-  environment = environment or compat.environment_info()
-  generated_at = generated_at or time.time()
-  stamp = time.strftime("%Y-%m-%d %H:%M:%S %z", time.localtime(generated_at))
-
-  lines = [RULE, "RTI DOCTOR INTEROP SWEEP", RULE,
-           _kv("Generated", stamp),
-           _kv("Command", environment.get("argv", "unknown")),
-           _kv("Host", f"{environment.get('host')}  {environment.get('os')}"),
-           _kv("Connext", f"{environment.get('connext')}"),
-           _kv("Domain", str(domain_id)),
-           _kv("Writers", str(len(rows))),
-           ""]
-
-  lines += _section("SUMMARY")
-  header = f"{'SEV':6} {'TOPIC':32} {'VENDOR':26} VERDICT"
-  lines += [header, "-" * len(header)]
-  for row in rows:
-    lines.append(f"{row['severity']:6} {row['topic'][:32]:32} "
-                 f"{row['vendor'][:26]:26} {row['verdict']}")
-  lines.append("")
-
-  lines += _section("DETAIL")
-  for row in rows:
-    lines.append(f"topic '{row['topic']}' ({row['vendor']})")
-    lines.append(f"  verdict: {row['verdict']}")
-    for finding_id, severity, title in row["findings"]:
-      lines.append(f"  [{severity}] {finding_id}: {title}")
-    lines.append("")
-  return "\n".join(lines) + "\n"

@@ -18,10 +18,13 @@ from .records import EndpointRecord, ParticipantRecord
 class DiscoveryRegistry:
   """Thread-safe-enough store of what we have discovered.
 
-  Builtin listeners fire on Connext receive threads while the UI reads on the
-  asyncio thread. Python dict reads/writes are individually atomic under the
-  GIL, and every consumer takes a snapshot via the list/dict copies below, so no
-  explicit lock is needed for this access pattern.
+  Builtin listeners fire on Connext receive threads, the TUI timer polls
+  participants on the asyncio thread, and system_scan reads from a worker
+  thread. Python dict reads/writes are individually atomic under the GIL, but a
+  Python-level comprehension over `dict.values()` is not: a concurrent insert or
+  delete raises "dictionary changed size during iteration" mid-walk. So every
+  query below materializes `list(...)` first - one atomic C-level copy - and
+  filters the copy.
   """
 
   def __init__(self, type_wait=5.0):
@@ -81,30 +84,36 @@ class DiscoveryRegistry:
     return list(self.endpoints.values())
 
   def writers(self):
-    return [e for e in self.endpoints.values() if e.is_writer]
+    return [e for e in self.endpoint_list() if e.is_writer]
 
   def readers(self):
-    return [e for e in self.endpoints.values() if not e.is_writer]
+    return [e for e in self.endpoint_list() if not e.is_writer]
 
   def endpoints_for(self, participant_key):
-    return [e for e in self.endpoints.values() if e.participant_key == participant_key]
+    return [e for e in self.endpoint_list() if e.participant_key == participant_key]
 
   def endpoints_on_topic(self, topic_name):
-    return [e for e in self.endpoints.values() if e.topic_name == topic_name]
+    return [e for e in self.endpoint_list() if e.topic_name == topic_name]
 
   def participant_for(self, endpoint):
     return self.participants.get(endpoint.participant_key)
 
   def find_writer(self, topic_name):
-    """First writer on a topic, preferring one with a resolved type."""
-    candidates = [e for e in self.writers() if e.topic_name == topic_name]
+    """Lowest-keyed writer on a topic, preferring one with a resolved type.
+
+    Sorted rather than "first discovered": dict order is arrival order, so an
+    unsorted pick made `--topic` select a different writer between runs on a
+    multi-writer topic, and with it a different verdict and exit code.
+    """
+    candidates = sorted((e for e in self.writers() if e.topic_name == topic_name),
+                        key=lambda e: e.key)
     if not candidates:
       return None
     resolved = [e for e in candidates if e.type is not None]
     return (resolved or candidates)[0]
 
   def topic_names(self):
-    return sorted({e.topic_name for e in self.endpoints.values() if e.topic_name})
+    return sorted({e.topic_name for e in self.endpoint_list() if e.topic_name})
 
   def expire_type_waits(self, now=None):
     """Advance PENDING -> UNAVAILABLE for endpoints past the type-wait window."""
@@ -132,8 +141,17 @@ def _merge_participant(existing, incoming):
       "partial_configuration", "rtps_host_id", "rtps_app_id",
   ):
     value = getattr(incoming, name, None)
-    if value not in (None, "", 0):
-      setattr(existing, name, value)
+    # Only genuine absence is skipped. The old predicate was
+    # `value not in (None, "", 0)`, which compares by equality - and False == 0
+    # is True in Python. An incoming partial_configuration=False, the sample
+    # that says discovery has now completed, was therefore read as "field
+    # absent" and never applied: check_partial_configuration then fired on
+    # every later report for that peer, with a remedy ("re-run once discovery
+    # has settled") the user could never satisfy. A legitimate domain_id of 0
+    # and a genuinely-zero endpoint mask were lost the same way.
+    if value is None or value == "":
+      continue
+    setattr(existing, name, value)
   for name in ("default_unicast_locators", "transport_info"):
     value = getattr(incoming, name, None)
     if value:
@@ -155,8 +173,15 @@ def _merge_endpoint(existing, incoming):
       "representation",
   ):
     value = getattr(incoming, name, None)
-    if value not in (None, ""):
-      setattr(existing, name, value)
+    # Written the same way as _merge_participant, and for the same reason:
+    # `value not in (None, "")` compares by equality, and False == 0 is True in
+    # Python. No field above is numeric or boolean today, so this is not a live
+    # bug - but it is one added field away from being the exact defect that
+    # discarded participant_configuration=False, and the trap is not worth
+    # leaving set.
+    if value is None or value == "":
+      continue
+    setattr(existing, name, value)
   for name in ("unicast_locators", "multicast_locators"):
     value = getattr(incoming, name, None)
     if value:
@@ -167,6 +192,18 @@ def _merge_endpoint(existing, incoming):
 
 
 # --- QoS setup ---------------------------------------------------------------
+
+def configure_type_object_v1_only(qos):
+  """Advertise inline TypeObject v1 and disable the TypeLookup v2 channel."""
+  qos.resource_limits.type_code_max_serialized_length = 0
+  qos.resource_limits.type_object_max_serialized_length = 65536
+  type_lookup = getattr(dds.DiscoveryConfigBuiltinChannelKindMask,
+                        "TYPE_LOOKUP_SERVICE", None)
+  if type_lookup is not None:
+    channels = qos.discovery_config.enabled_builtin_channels
+    qos.discovery_config.enabled_builtin_channels = (
+        dds.DiscoveryConfigBuiltinChannelKindMask(int(channels) & ~int(type_lookup)))
+
 
 def configure_type_lookup_qos(qos):
   """Enable remote DynamicType discovery on Connext 7.7+ and earlier inline-type peers.
@@ -219,7 +256,8 @@ def configure_type_lookup_qos(qos):
   return applied
 
 
-def create_participant(domain_id, name="RTI DOCTOR", registry=None):
+def create_participant(domain_id, name="RTI DOCTOR", registry=None,
+                       type_object_v1_only=False):
   """Create a participant with builtin listeners attached before enabling.
 
   Listeners are installed while autoenable is off so no discovery sample is
@@ -228,8 +266,8 @@ def create_participant(domain_id, name="RTI DOCTOR", registry=None):
   """
   previous_factory_qos = dds.DomainParticipant.participant_factory_qos
   factory_qos = dds.DomainParticipantFactoryQos()
-  for name in ("entity_factory", "monitoring", "system_resource_limits"):
-    setattr(factory_qos, name, getattr(previous_factory_qos, name))
+  for policy_name in ("entity_factory", "monitoring", "system_resource_limits"):
+    setattr(factory_qos, policy_name, getattr(previous_factory_qos, policy_name))
   factory_qos.entity_factory.autoenable_created_entities = False
   dds.DomainParticipant.participant_factory_qos = factory_qos
 
@@ -238,7 +276,11 @@ def create_participant(domain_id, name="RTI DOCTOR", registry=None):
     qos.participant_name.name = name
   except Exception:
     pass
+  if type_object_v1_only:
+    configure_type_object_v1_only(qos)
   type_lookup_settings = configure_type_lookup_qos(qos)
+  type_lookup_settings["type_object_discovery"] = (
+      "v1-only" if type_object_v1_only else "default (v2 TypeLookup enabled)")
 
   participant = None
   try:
@@ -289,6 +331,31 @@ def _endpoint_from_data(data, kind):
   )
 
 
+def _drain_endpoints(reader, registry, kind, label):
+  """Apply every sample in one take(), isolating per-sample failures.
+
+  take() removes the samples from the reader's cache, so they are never
+  redelivered. A single unparseable sample - one vendor's SEDP field that will
+  not read, a locator whose str() raises - must not take the rest of the batch
+  with it: losing endpoints silently makes rti_doctor report "none of its
+  endpoints are visible", a fabricated diagnosis caused by its own dropped
+  samples.
+  """
+  try:
+    batch = list(reader.take())
+  except Exception as e:
+    logging.error(f"[{label}] take failed: {e}")
+    return
+  for index, (data, info) in enumerate(batch):
+    try:
+      if info.valid:
+        registry.upsert_endpoint(_endpoint_from_data(data, kind))
+      else:
+        registry.remove_endpoint(_sample_key(data, info, reader))
+    except Exception as e:
+      logging.error(f"[{label}] sample {index + 1}/{len(batch)} skipped: {e}")
+
+
 class PublicationListener(dds.PublicationBuiltinTopicData.DataReaderListener):
   """Discovers DataWriters via the DCPSPublication builtin topic."""
 
@@ -297,14 +364,7 @@ class PublicationListener(dds.PublicationBuiltinTopicData.DataReaderListener):
     self.registry = registry
 
   def on_data_available(self, reader):
-    try:
-      for data, info in reader.take():
-        if info.valid:
-          self.registry.upsert_endpoint(_endpoint_from_data(data, "Writer"))
-        else:
-          self.registry.remove_endpoint(_sample_key(data, info, reader))
-    except Exception as e:
-      logging.error(f"[PublicationListener] {e}")
+    _drain_endpoints(reader, self.registry, "Writer", "PublicationListener")
 
 
 class SubscriptionListener(dds.SubscriptionBuiltinTopicData.DataReaderListener):
@@ -320,25 +380,88 @@ class SubscriptionListener(dds.SubscriptionBuiltinTopicData.DataReaderListener):
     self.registry = registry
 
   def on_data_available(self, reader):
-    try:
-      for data, info in reader.take():
-        if info.valid:
-          self.registry.upsert_endpoint(_endpoint_from_data(data, "Reader"))
-        else:
-          self.registry.remove_endpoint(_sample_key(data, info, reader))
-    except Exception as e:
-      logging.error(f"[SubscriptionListener] {e}")
+    _drain_endpoints(reader, self.registry, "Reader", "SubscriptionListener")
+
+
+def _key_text(holder):
+  """`holder.key.value` rendered exactly as EndpointRecord.key stores it."""
+  value = compat.get(compat.get(holder, "key", None), "value", None)
+  if value is None:
+    return None
+  text = str(value)
+  # A BuiltinTopicKey of all zeros is the unpopulated default, not an identity.
+  # Keys with no digits at all are left alone - only an all-zero numeric key is
+  # rejected.
+  digits = [ch for ch in text if ch.isdigit()]
+  if digits and all(ch == "0" for ch in digits):
+    return None
+  return text
 
 
 def _sample_key(data, info, reader):
-  """Builtin key for either a valid or disposed discovery sample."""
-  key = compat.get(compat.get(data, "key", None), "value", None)
+  """Builtin key for either a valid or disposed discovery sample.
+
+  A disposal sample's `data` is often unpopulated - that is why the reader
+  fallback exists. key_value() returns an instance of the topic's DATA type
+  (PublicationBuiltinTopicData), not a BuiltinTopicKey, so the key is at
+  `.key.value`: the previous one-hop `.value` read always returned None, making
+  remove_endpoint("") a silent no-op and leaving departed endpoints in the
+  registry forever.
+  """
+  key = _key_text(data)
+  if key is not None:
+    return key
+  try:
+    key = _key_text(reader.key_value(info.instance_handle))
+  except Exception as e:
+    logging.warning(f"[discovery] disposal sample could not be keyed: {e}")
+    return ""
   if key is None:
+    logging.warning("[discovery] disposal sample carried no usable key; the "
+                    "departed endpoint stays in the registry")
+    return ""
+  return key
+
+
+def _participant_from_data(data):
+  """One ParticipantRecord from one ParticipantBuiltinTopicData sample.
+
+  Split out of `refresh_participants` so the whole mapping - every field read,
+  not only the sample fetch - sits inside the caller's per-handle guard, and so
+  the binding field names it depends on can be asserted by a unit test rather
+  than only by a live domain.
+  """
+  key_value = compat.get(compat.get(data, "key", None), "value", None)
+  host_id = app_id = 0
+  if key_value is not None:
     try:
-      key = compat.get(reader.key_value(info.instance_handle), "value", None)
-    except Exception:
-      key = None
-  return str(key) if key is not None else ""
+      parts = [int(v) for v in key_value]
+      if len(parts) >= 2:
+        host_id, app_id = parts[0], parts[1]
+    except (TypeError, ValueError):
+      pass
+
+  locators = list(compat.get(data, "default_unicast_locators", []) or [])
+  name_policy = compat.get(data, "participant_name", None)
+
+  return ParticipantRecord(
+      key=str(key_value),
+      name=compat.get(name_policy, "name", "") or "",
+      ip=records.first_locator_ip(locators),
+      domain_id=compat.get_int(data, "domain_id"),
+      vendor_id=compat.get(data, "rtps_vendor_id", None),
+      protocol_version=compat.get(data, "rtps_protocol_version", None),
+      product_version=compat.get(data, "product_version", None),
+      default_unicast_locators=locators,
+      transport_info=list(compat.get(data, "transport_info", []) or []),
+      dds_builtin_endpoints=compat.get_int(data, "dds_builtin_endpoints"),
+      available_builtin_endpoints_ext=compat.get_int(
+          data, "available_builtin_endpoints_ext"),
+      vendor_builtin_endpoints=compat.get_int(data, "vendor_builtin_endpoints"),
+      partial_configuration=compat.get(data, "partial_configuration", None),
+      rtps_host_id=host_id,
+      rtps_app_id=app_id,
+  )
 
 
 def refresh_participants(participant, registry):
@@ -350,46 +473,40 @@ def refresh_participants(participant, registry):
     return
 
   live_keys = set()
+  unreadable = 0
   for handle in handles:
+    # The whole per-handle body is isolated, not just the data fetch. Reading
+    # the sample is only the first of several places a binding object can raise:
+    # `transport_info` and `default_unicast_locators` invoke __bool__/__len__/
+    # __iter__ on a Connext sequence, `first_locator_ip` iterates a locator
+    # address, and `participant_name` invokes the policy's own accessors. An
+    # exception from any of them used to leave the function, so one bad peer
+    # dropped every peer after it AND skipped the departure sweep - and in the
+    # TUI it escaped the set_interval callback entirely. This is the same
+    # requirement `_drain_endpoints` documents for endpoints, and its reasoning
+    # applies verbatim: losing peers silently makes rti_doctor report an empty
+    # or shrinking domain, a fabricated diagnosis caused by its own failed read.
     try:
-      data = participant.discovered_participant_data(handle)
+      record = _participant_from_data(
+          participant.discovered_participant_data(handle))
     except Exception as e:
       logging.debug(f"[refresh_participants] unreadable participant: {e}")
+      unreadable += 1
       continue
 
-    key_value = compat.get(compat.get(data, "key", None), "value", None)
-    host_id = app_id = 0
-    if key_value is not None:
-      try:
-        parts = [int(v) for v in key_value]
-        if len(parts) >= 2:
-          host_id, app_id = parts[0], parts[1]
-      except (TypeError, ValueError):
-        pass
-
-    locators = list(compat.get(data, "default_unicast_locators", []) or [])
-    name_policy = compat.get(data, "participant_name", None)
-
-    record = ParticipantRecord(
-        key=str(key_value),
-        name=compat.get(name_policy, "name", "") or "",
-        ip=records.first_locator_ip(locators),
-        domain_id=compat.get_int(data, "domain_id"),
-        vendor_id=compat.get(data, "rtps_vendor_id", None),
-        protocol_version=compat.get(data, "rtps_protocol_version", None),
-        product_version=compat.get(data, "product_version", None),
-        default_unicast_locators=locators,
-        transport_info=list(compat.get(data, "transport_info", []) or []),
-        dds_builtin_endpoints=compat.get_int(data, "dds_builtin_endpoints"),
-        available_builtin_endpoints_ext=compat.get_int(
-            data, "available_builtin_endpoints_ext"),
-        vendor_builtin_endpoints=compat.get_int(data, "vendor_builtin_endpoints"),
-        partial_configuration=compat.get(data, "partial_configuration", None),
-        rtps_host_id=host_id,
-        rtps_app_id=app_id,
-    )
     live_keys.add(record.key)
     registry.upsert_participant(record)
+
+  # Only a complete read proves a participant departed. A handle whose data
+  # would not read is still live - it was returned by discovered_participants()
+  # on this very call - but it contributed no key, so removing everything
+  # outside live_keys would evict that peer AND every one of its endpoints,
+  # and the next scan would report endpoint.none or blind.empty_domain: a
+  # fabricated diagnosis caused by one transient binding error.
+  if unreadable:
+    logging.warning(f"[refresh_participants] {unreadable} participant(s) could not be "
+                    "read; skipping departure sweep for this cycle")
+    return
 
   for key in set(registry.participants) - live_keys:
     registry.remove_participant(key)

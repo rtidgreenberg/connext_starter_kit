@@ -10,13 +10,6 @@ For questions, design tasks, code reviews, implementations, debugging, or build 
 
 Use the RTI-specific tooling when it materially helps the task, but do not treat Connext AI queries as mandatory for DDS, Connext, or RTI infrastructure services related work.
 
-When the user asks about RTI Rapid Prototyping, use `RTI_RAPID_PROTOTYPING.md` and the supporting `docs/` content in this repository.
-
-On startup or when asked to initialize:
-1. Check if `planning/project.yaml` exists
-2. If not, start with the framework and API selection flow documented in `docs/02_phase_0_project_init.md`
-3. If it exists, check for `planning/system_config.yaml` and route accordingly
-
 ## rti_view Debug Logging
 
 When debugging `rti_view` interactive or plot issues, run with `--debug`:

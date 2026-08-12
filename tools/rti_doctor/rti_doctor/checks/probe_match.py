@@ -1,11 +1,11 @@
 """Rung 4 checks: did the reader match, and if not, which policy blocked it?"""
 
-from .. import compat, records
+from .. import compat
 from ..findings import RUNG_MATCH, Finding, Severity
 
 #: RxO rules in plain English, keyed by the substring Connext reports in
 #: last_policy. Stated as the rule the reader must satisfy, since the reader is
-#: the side that drives matching.
+#: the side that drives matching. Keys may overlap - see _policy_rule.
 RXO_RULES = {
     "RELIABILITY": ("A RELIABLE reader cannot match a BEST_EFFORT writer. The "
                     "reader may request BEST_EFFORT from a RELIABLE writer, but "
@@ -35,11 +35,44 @@ RXO_RULES = {
 
 
 def _policy_rule(policy_text):
+  """The rule for a policy name, matching the most specific key.
+
+  Connext reports last_policy with a version-dependent prefix or suffix, so this
+  matches on substring rather than equality. Longest match wins: PRESENTATION is
+  a substring of DATAREPRESENTATION, and first-match would explain a data
+  representation mismatch with the presentation rule.
+  """
   key = str(policy_text).upper().replace("_", "").replace(" ", "")
-  for name, rule in RXO_RULES.items():
-    if name in key:
-      return rule
-  return None
+  matches = [name for name in RXO_RULES if name in key]
+  if not matches:
+    return None
+  return RXO_RULES[max(matches, key=len)]
+
+
+def _scope_text(probe):
+  """What the probe's observations actually describe.
+
+  The probe's reader is created on a topic, not on an endpoint, so every status
+  it reports is topic-wide until the selected writer is identified among the
+  reader's matched publications. Stating the scope keeps a topic-wide reading
+  from being read as a fact about one writer.
+  """
+  if not probe.correlated:
+    return ("Scope: topic-wide - the selected writer could not be identified "
+            "among the reader's matched publications, so this reading covers "
+            "every writer on the topic.")
+  extra = []
+  if probe.matched_other_count:
+    extra.append(f"{probe.matched_other_count} other writer(s) on this topic "
+                 f"also matched and are excluded")
+  if probe.matched_unreadable_count:
+    extra.append(f"{probe.matched_unreadable_count} matched publication(s) "
+                 f"could not be resolved to a writer")
+  if extra:
+    return ("Scope: the selected writer, correlated by publication handle; "
+            + "; ".join(extra) + ".")
+  return ("Scope: the selected writer, correlated by publication handle; it is "
+          "the only writer this reader matched.")
 
 
 def check_probe_error(context):
@@ -59,6 +92,30 @@ def check_probe_error(context):
           "this is a local failure, not a property of the peer."),
       remedy="Resolve the error above, then re-run the probe.",
       evidence={"error": probe.create_error},
+  )]
+
+
+def check_probe_incomplete(context):
+  """The reader was created, then something failed before the probe finished."""
+  probe = context.probe
+  if probe is None or not probe.created or not getattr(probe, "error", None):
+    return []
+  return [Finding(
+      id="probe.incomplete",
+      rung=RUNG_MATCH,
+      severity=Severity.WARN,
+      title="The probe did not run to completion",
+      observed=probe.error,
+      root_cause=(
+          "The reader was created and whatever this report shows was genuinely "
+          "observed, but the probe raised before finishing - typically while "
+          "reading a status counter. Absent evidence in this report is "
+          "therefore not evidence of absence: a counter that reads as zero may "
+          "simply never have been sampled."),
+      remedy=("Re-run the probe. If it fails the same way, this is an "
+              "rti_doctor bug against this Connext version, not a property of "
+              "the peer - report it with the error above."),
+      evidence={"error": probe.error},
   )]
 
 
@@ -92,6 +149,15 @@ def check_incompatible_qos(context):
     observed.append("probe reader requested: " + ", ".join(
         f"{k}={v}" for k, v in sorted(probe.applied_reader_qos.items())))
 
+  observed.append(_scope_text(probe))
+
+  # requested_incompatible_qos is a READER status: it says some writer on this
+  # topic offered a policy the reader would not accept, never which one. It may
+  # only be reported as a fact about the selected writer when that writer is the
+  # only one this reader could have rejected.
+  attributable = (probe.correlated and not probe.matched_other_count
+                  and not probe.matched_unreadable_count)
+
   root = ("A reader and writer only communicate when every requested-offered "
           "(RxO) policy is compatible. ")
   if rule:
@@ -106,18 +172,47 @@ def check_incompatible_qos(context):
            "- it reflects a policy the writer offers that no compliant reader can "
            "accept, or one that could not be mirrored on this version.")
 
+  evidence = {"total_count": total, "last_policy": str(policy),
+              "policies": policy_detail,
+              "probe_reader_qos": probe.applied_reader_qos,
+              "writer_identified": probe.correlated,
+              "other_writers_matched": probe.matched_other_count}
+
+  if attributable:
+    return [Finding(
+        id="match.incompatible_qos",
+        rung=RUNG_MATCH,
+        severity=Severity.ERROR,
+        title=f"Incompatible QoS: {policy}",
+        observed="; ".join(observed),
+        root_cause=root,
+        remedy=(f"Align the {policy} policy between writer and reader. The reader "
+                f"is the constrained side: it must request no more than the writer "
+                f"offers."),
+        evidence=evidence,
+    )]
+
+  # Deliberately a DIFFERENT id, at WARN. It is not registered in
+  # CAUSAL_EXPLAINERS, so an unattributable rejection is never offered as the
+  # explanation for data.silent or match.none - a maybe must not be presented
+  # as the cause of a real symptom.
   return [Finding(
-      id="match.incompatible_qos",
+      id="match.incompatible_qos_topic",
       rung=RUNG_MATCH,
-      severity=Severity.ERROR,
-      title=f"Incompatible QoS: {policy}",
+      severity=Severity.WARN,
+      title=f"Incompatible QoS on this topic: {policy}",
       observed="; ".join(observed),
-      root_cause=root,
-      remedy=(f"Align the {policy} policy between writer and reader. The reader is "
-              f"the constrained side: it must request no more than the writer offers."),
-      evidence={"total_count": total, "last_policy": str(policy),
-                "policies": policy_detail,
-                "probe_reader_qos": probe.applied_reader_qos},
+      root_cause=(
+          "Some writer on this topic offered a policy the probe's reader would "
+          "not accept. requested_incompatible_qos is a reader-side status and "
+          "does not name the writer that caused it, and this reader could have "
+          "rejected a writer other than the selected one, so this is reported "
+          "as a topic-level observation rather than a fault of the selected "
+          "writer. " + root),
+      remedy=(f"Identify which writer on this topic offers {policy}, then align "
+              f"that policy. Re-running against a topic with a single writer "
+              f"attributes the rejection directly."),
+      evidence=evidence,
   )]
 
 
@@ -129,25 +224,33 @@ def check_matched(context):
 
   current = compat.get_int(probe.subscription_matched, "current_count")
   total = compat.get_int(probe.subscription_matched, "total_count")
+  scope = _scope_text(probe)
 
+  probe_kind = getattr(probe, "probe_kind", "reader")
+  subject = "Writer matched the reader" if probe_kind == "writer" else "Reader matched the writer"
+  status_name = "publication_matched" if probe_kind == "writer" else "subscription_matched"
   if probe.matched:
     return [Finding(
         id="match.ok",
         rung=RUNG_MATCH,
         severity=Severity.OK,
-        title="Reader matched the writer",
-        observed=(f"subscription_matched current_count = {current}, "
-                  f"total_count = {total} after {probe.elapsed:.1f}s"),
-        evidence={"current_count": current, "total_count": total},
+         title=(subject if probe.correlated
+               else "Reader matched a writer on this topic"),
+         observed=(f"{status_name} current_count = {current}, "
+                  f"total_count = {total} after {probe.elapsed:.1f}s. {scope}"),
+        evidence={"current_count": current, "total_count": total,
+                  "writer_identified": probe.correlated,
+                  "other_writers_matched": probe.matched_other_count},
     )]
 
   return [Finding(
       id="match.none",
       rung=RUNG_MATCH,
       severity=Severity.ERROR,
-      title="Reader never matched the writer",
-      observed=(f"subscription_matched current_count = {current}, "
-                f"total_count = {total} after {probe.elapsed:.1f}s"),
+            title=("Writer never matched the reader" if probe_kind == "writer"
+              else "Reader never matched the writer"),
+            observed=(f"{status_name} current_count = {current}, "
+                f"total_count = {total} after {probe.elapsed:.1f}s. {scope}"),
       root_cause=(
           "The reader was created on the same topic with QoS mirroring the writer, "
           "and still did not match. In order of likelihood: an RxO policy could "
@@ -158,7 +261,9 @@ def check_matched(context):
       remedy=("Work upward from the lowest-rung ERROR in this report - a rung 0-3 "
               "failure explains this one entirely."),
       evidence={"current_count": current, "total_count": total,
-                "elapsed_seconds": round(probe.elapsed, 2)},
+                "elapsed_seconds": round(probe.elapsed, 2),
+                "writer_identified": probe.correlated,
+                "other_writers_matched": probe.matched_other_count},
   )]
 
 
@@ -222,6 +327,7 @@ def check_partition_overlap(context):
 
 CHECKS = (
     check_probe_error,
+    check_probe_incomplete,
     check_incompatible_qos,
     check_matched,
     check_inconsistent_topic,

@@ -30,6 +30,25 @@ VENDOR_NAMES = {
 #: Vendors rti_doctor is validated against. Others are recognized but untested.
 VALIDATED = (CYCLONE, FASTDDS)
 
+#: Vendors for which an empty DATA_REPRESENTATION advertisement from a *writer*
+#: has been measured to mean XCDR1, rather than "said nothing".
+#:
+#: This list is the scope of the Q3 decision and must not be widened by
+#: inference. Both entries were measured against live middleware, writer by
+#: writer: a writer that never sets the policy advertises an empty sequence,
+#: that pair matches an XCDR1 reader and delivers, and an XCDR2-only reader
+#: refuses it with `requested_incompatible_qos` naming DataRepresentation.
+#: RTI in `test/test_data_representation_spike.py`, Fast DDS in
+#: `test/test_fastdds_representation_spike.py`.
+#:
+#: Cyclone is deliberately absent. Its README documents resolving an unspecified
+#: policy from the type's defaults, which can select **XCDR2** - the opposite
+#: meaning from the identical wire state - and that has not been measured here.
+#: A Cyclone writer therefore still declines the comparison rather than being
+#: assumed to match RTI's semantics. See Q3 in `docs/DESIGN_DECISIONS.md` and
+#: backlog `REP-1`.
+EMPTY_REPRESENTATION_MEANS_XCDR1 = (RTI, FASTDDS)
+
 #: Advisory notes, keyed by display name. Each entry is (severity_hint, text).
 #: severity_hint is "info" or "warn"; checks decide the final Finding severity.
 VENDOR_NOTES = {
@@ -134,6 +153,15 @@ def is_recognized(vendor_id):
 def is_validated(vendor_id):
   """True when rti_doctor's test suite actually covers this vendor."""
   return vendor_name(vendor_id) in VALIDATED
+
+
+def empty_representation_means_xcdr1(vendor_id):
+  """True when this vendor's empty writer advertisement is known to mean XCDR1.
+
+  False for an unrecognized vendor id as well as for Cyclone, so an unknown peer
+  declines the comparison rather than inheriting RTI's semantics by default.
+  """
+  return vendor_name(vendor_id) in EMPTY_REPRESENTATION_MEANS_XCDR1
 
 
 def notes_for(vendor_id):

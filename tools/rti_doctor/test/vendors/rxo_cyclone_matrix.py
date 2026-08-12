@@ -111,6 +111,16 @@ def create_endpoints(participant, args):
   return endpoints
 
 
+def write_ready_file(path):
+  if not path:
+    return
+  directory = os.path.dirname(os.path.abspath(path))
+  if directory:
+    os.makedirs(directory, exist_ok=True)
+  with open(path, "w", encoding="utf-8") as ready_file:
+    ready_file.write("ready\n")
+
+
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("--domain", type=int, required=True)
@@ -121,6 +131,8 @@ def main():
                       help="Comma-separated RxO policy scenarios")
   parser.add_argument("--duration", type=float, default=7.0)
   parser.add_argument("--period", type=float, default=0.05)
+  parser.add_argument("--ready-file",
+                      help="Write PATH after creating the requested endpoints")
   args = parser.parse_args()
 
   if args.scenarios == "data_representation" and is_strong(args):
@@ -129,6 +141,7 @@ def main():
     annotate.cdrv0(Sample)
   participant = DomainParticipant(args.domain)
   endpoints = create_endpoints(participant, args)
+  write_ready_file(args.ready_file)
   results = {scenario: {"matched": 0, "samples": 0}
              for scenario in selected_scenarios(args)}
   deadline = time.monotonic() + args.duration

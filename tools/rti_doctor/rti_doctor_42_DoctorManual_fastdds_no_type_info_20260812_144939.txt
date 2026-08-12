@@ -1,0 +1,161 @@
+====================================================================================================
+RTI DOCTOR INTEROP REPORT
+====================================================================================================
+Generated       2026-08-12 14:47:39 -0400
+Tool            rti_doctor (tools/rti_doctor)
+Command         /home/rti/CAT/connext_starter_kit/tools/rti_doctor/rti_doctor/__main__.py
+Host            dev-host  Linux 5.15.0-139-generic  x86_64
+Connext         7.7.0  (NDDSHOME=/home/rti/rti_connext_dds-7.7.0)
+Python          3.11.13
+Domain          42
+Scope           topic 'DoctorManual_fastdds_no_type_info'
+
+----------------------------------------------------------------------------------------------------
+VERDICT
+----------------------------------------------------------------------------------------------------
+not probed (no type information available, cannot create a reader); 2 ERROR
+
+----------------------------------------------------------------------------------------------------
+PEER
+----------------------------------------------------------------------------------------------------
+Participant     RTPSParticipant  @ 10.0.2.15
+Vendor          eProsima Fast DDS (01.0F)
+RTPS            2.2
+Peer domain     42
+Topic           DoctorManual_fastdds_no_type_info
+Type name       DoctorExtensibility::Sample
+Type state      unavailable
+Endpoint        Writer
+Representation  XCDR1
+Locators        10.0.2.15:17913 (kind=1)
+
+----------------------------------------------------------------------------------------------------
+OBSERVED TOPOLOGY
+----------------------------------------------------------------------------------------------------
+Source          builtin discovery
+Scope           remote entities observed while RTI Doctor was running
+Domain          42
+Participants    1
+Readers         0
+Writers         1
+Topics          DoctorManual_fastdds_no_type_info
+Coverage        A late-starting observer can miss already-announced endpoints. Use the optional 32-second passive domain scan to wait for the next default-domain announcement; it identifies active domains but cannot reconstruct endpoint announcements that were not replayed.
+
+----------------------------------------------------------------------------------------------------
+FINDINGS  (2 ERROR, 3 INFO, 2 OK)
+----------------------------------------------------------------------------------------------------
+[ERROR] rung 3  type.no_type_info
+               No type information available for this writer
+  Observed     Topic 'DoctorManual_fastdds_no_type_info' type name 'DoctorExtensibility::Sample' is
+               visible on this writer, but no DynamicType arrived within 5.0s. request_types_filter
+               = *.
+  Root cause   The topic and type NAME come from plain endpoint-discovery strings, but the schema
+               comes from a separate request/reply service. Seeing the name without the schema is
+               the single most common cross-vendor state. This is the schema of the endpoint named
+               above and of no other: an unresolved writer type says nothing about the health of the
+               endpoints on the other side of the topic. Possible causes: the peer advertises
+               TypeInformation but never answers TypeLookup requests (most common cross-vendor
+               cause); the peer serves only a MINIMAL TypeObject, so member names are unavailable;
+               the peer propagates no type representation at all (some vendors make this opt-in, and
+               it can be disabled outright); the peer's type propagation is disabled locally on its
+               side, e.g. by setting type_object_max_serialized_length to 0, which disables both
+               TypeObject v1 and v2.
+  Remedy       A TypeIdentifier alone is an identifier, not a schema, so no reader can be created
+               from it. Either enable full type propagation on the publisher that owns this writer,
+               or supply the IDL locally and use a compile-time type instead of DynamicData. For
+               Fast DDS, first upgrade that publisher to Fast DDS 3.6.2 or newer: the validated
+               3.6.2 fixture resolves a Connext DynamicType before investigating TypeLookup or
+               TypeObject compatibility further.
+  Reference    https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/users_manual/users_manual/TypeLookupService.htm
+  Reference    https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/extensible_types_guide/extensible_types/Type_Representation.htm
+
+[ERROR] rung 4  probe.not_created
+               Could not create a reader for this endpoint
+  Observed     no type information available, cannot create a reader
+  Root cause   Without a reader nothing downstream can be measured. If the cause is missing type
+               information, the rung-3 finding explains it; otherwise this is a local failure, not a
+               property of the peer.
+  Remedy       Resolve the error above, then re-run the probe.
+  Likely explained by type.no_type_info - confirm it applies to this endpoint before acting on it,
+                      since the link is by finding id alone.
+
+[INFO] rung 1  vendor.known_issues
+               eProsima Fast DDS interop note 1
+  Observed     Fast DDS type propagation is configurable. If this writer's type does not resolve,
+               check whether the publisher enables TypeObject/TypeInformation propagation - a writer
+               can be fully discoverable at the topic level while advertising no usable schema.
+
+[INFO] rung 1  vendor.known_issues
+               eProsima Fast DDS interop note 2
+  Observed     Fast DDS is the ROS 2 default RMW, so a peer identified here may be a ROS 2 node. ROS
+               2 mangles topic names (rt/, rq/, rr/ prefixes) and uses its own type naming, which is
+               expected, not a fault.
+
+[INFO] rung 4  qos.no_counterpart
+               No DataReader discovered on topic 'DoctorManual_fastdds_no_type_info'
+  Observed     This writer has no counterpart in the system to compare against.
+  Root cause   Nothing is subscribing to this topic, so no requested/offered comparison is possible.
+               rti_doctor's own probe reader is not counted, since it deliberately mirrors the
+               writer and would always match.
+  Reference    https://github.com/omg-dds/dds-rtps
+
+[OK] rung 1  vendor.identify
+               Peer implementation: eProsima Fast DDS
+  Observed     vendor = eProsima Fast DDS (id 01.0F); RTPS protocol version = 2.2; product version =
+               not reported (RTI extension; not meaningful for other vendors)
+
+[OK] rung 3  repr.offered
+               Writer data representation
+  Observed     writer offers XCDR1
+
+----------------------------------------------------------------------------------------------------
+APPENDIX A - DISCOVERED TYPE (IDL)
+----------------------------------------------------------------------------------------------------
+(no type information available for this endpoint)
+
+----------------------------------------------------------------------------------------------------
+APPENDIX B - RAW STATUS COUNTERS
+----------------------------------------------------------------------------------------------------
+(no counters: no type information available, cannot create a reader)
+
+----------------------------------------------------------------------------------------------------
+APPENDIX C - DIRECT RTPS PACKET OBSERVATION
+----------------------------------------------------------------------------------------------------
+Capture interface                     any
+Capture                               /home/rti/CAT/connext_starter_kit/tools/rti_doctor/test_output/rti_doctor_captures/rti_doctor_domain42_20260812_144734.pcapng
+Capture filter                        udp and (portrange 17900-18149)
+Writer entity filter                  00000103
+Writer GUID prefix filter             010f65910100d3f900000000
+Frames matching filters               0
+DATA in matching frames               0
+DATA_FRAG in matching frames          0
+Observed DDS data representation      none observed
+Encapsulation IDs in matching frames  none observed
+Writer IDs in matching frames         none observed
+Serialized bytes in matching frames   0
+Reassembled bytes in matching frames  0
+Scope
+  Every count, ID and byte total here describes whole RTPS frames that matched the filters, not one
+  writer within them. A frame can coalesce several DATA submessages - including submessages from
+  other writers on the same participant - and the frame-level tshark fields do not preserve which
+  bytes belonged to which submessage. The target writer is therefore a filter, not an attribution
+  claim.
+
+RTPS discovery observed in the same capture
+  Fast DDS versions advertised        3.6.2.0
+  Participants announcing             1
+  Topics announced                    none observed
+
+----------------------------------------------------------------------------------------------------
+APPENDIX D - RTI_DOCTOR OWN CONFIGURATION
+----------------------------------------------------------------------------------------------------
+Settings rti_doctor applied to its own participant, so that any
+finding above can be judged against how it was measured.
+
+  connext_log_file                                    stderr (Connext default)
+  connext_verbosity                                   silent
+  endpoint_type_object_lb_serialization_threshold     -1
+  request_types_filter                                *
+  type_object_discovery                               default (v2 TypeLookup enabled)
+  xtypes_compliance_mask                              0x9a9 (VENDOR applied)
+

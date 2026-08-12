@@ -80,7 +80,10 @@ class WalkReport:
     if not self.leaf_results:
       return PAYLOAD_FAILED
     if not self.failed:
-      return PAYLOAD_FULL
+      # FULL is a completeness claim. A walk stopped by MAX_DEPTH,
+      # MAX_MEMBERS or MAX_ELEMENTS_PER_COLLECTION never visited the rest of
+      # the sample, so it cannot make one.
+      return PAYLOAD_PARTIAL if self.truncated else PAYLOAD_FULL
     if len(self.failed) == self.total:
       return PAYLOAD_FAILED
     return PAYLOAD_PARTIAL
@@ -464,13 +467,15 @@ def _walk_collection(data, member, member_type, path, report, depth, info):
 
   element_type = resolve_alias(compat.get(member_type, "content_type", None))
   limit = min(length, MAX_ELEMENTS_PER_COLLECTION)
-  if limit < length:
-    report.truncated = True
 
   # Aggregate elements must be walked individually. Reading them in bulk is not
   # attempted at all, because loaning a complex element and then a bulk read of
   # the same member conflicts in the core (it reports an already-bound member).
+  # Only this branch can actually skip elements, so only this branch truncates -
+  # the bulk read below covers every element however long the collection is.
   if element_type is not None and is_aggregation(element_type):
+    if limit < length:
+      report.truncated = True
     for index in range(limit):
       element_path = f"{path}[{index}]"
       element = _read_element(data, name, index)

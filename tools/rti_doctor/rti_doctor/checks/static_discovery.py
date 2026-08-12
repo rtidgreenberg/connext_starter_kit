@@ -4,6 +4,7 @@ Everything here reads discovery data only - no reader is created, so these are
 cheap enough to run on every row.
 """
 
+import functools
 import ipaddress
 import socket
 
@@ -37,7 +38,11 @@ def check_vendor_identify(context):
     detail.append("product version = not reported (RTI extension; "
                   "not meaningful for other vendors)")
 
-  severity = Severity.INFO
+  # OK by default: naming a peer we recognize is the anchor every other finding
+  # hangs off, but it is not itself a condition to triage. As INFO it put one
+  # entry per participant into the system scan's issue list. It still appears in
+  # a targeted report, which renders OK findings.
+  severity = Severity.OK
   root_cause = ""
   remedy = ""
   if not vendors.is_recognized(participant.vendor_id):
@@ -46,6 +51,8 @@ def check_vendor_identify(context):
                   "vendor-specific guidance can be offered.")
     remedy = "Identify the implementation from its vendor id before interpreting other findings."
   elif not participant.is_rti and not vendors.is_validated(participant.vendor_id):
+    # A real caveat, so it stays triageable - but bounded by participants.
+    severity = Severity.INFO
     root_cause = (f"{name} is recognized but is not part of rti_doctor's "
                   f"validation matrix, so vendor notes for it are unverified.")
 
@@ -91,12 +98,19 @@ def check_vendor_notes(context):
   return out
 
 
-def _local_networks():
-  """IPv4 networks this host is on, for reachability judgement.
+@functools.lru_cache(maxsize=1)
+def _local_addresses():
+  """IPv4 addresses this host owns, for reachability judgement.
 
   Uses the addresses of local interfaces via getaddrinfo on the hostname plus a
   UDP-connect trick for the default route. Best-effort: an empty result means
   "cannot judge", and the locator check then stays silent rather than guessing.
+
+  Cached for the process lifetime, and frozen because the cache is shared. The
+  answer describes this host, not the endpoint being checked, but check_locators
+  runs once per endpoint - so an uncached call meant one getaddrinfo (a DNS
+  lookup, and a DNS timeout on a host whose own name does not resolve) per
+  endpoint per scan, and the system scan re-runs on every screen.
   """
   addresses = set()
   try:
@@ -114,13 +128,11 @@ def _local_networks():
   except Exception:
     pass
 
-  networks = set()
-  for address in addresses:
-    try:
-      networks.add(ipaddress.ip_network(f"{address}/24", strict=False))
-    except ValueError:
-      continue
-  return networks, addresses
+  # No /24 network set is built. _address_problem deliberately does not flag an
+  # address merely outside this host's subnets - the real prefix length is
+  # unknown and assuming /24 would warn on healthy routed systems - so the set
+  # this used to compute was passed to a parameter that never read it.
+  return frozenset(addresses)
 
 
 def check_locators(context):
@@ -145,9 +157,12 @@ def check_locators(context):
         root_cause=("Without a unicast locator there is no address to send "
                     "user-data or reliable-protocol traffic to."),
         remedy="Check the peer's transport configuration and enabled_transports.",
+        # Participant-scoped: this is the participant's locator set, so a peer
+        # with ten endpoints has one problem, not ten.
+        evidence={"scope": "participant"},
     )]
 
-  networks, local_addresses = _local_networks()
+  local_addresses = _local_addresses()
   problems = []
   for locator in locators:
     if not _is_ip_locator(locator):
@@ -158,7 +173,7 @@ def check_locators(context):
     ip = records.locator_ip(locator)
     if not ip:
       continue
-    reason = _address_problem(ip, networks, local_addresses)
+    reason = _address_problem(ip, local_addresses)
     if reason:
       problems.append((records.locator_text(locator), reason))
 
@@ -180,7 +195,11 @@ def check_locators(context):
       remedy=("Confirm the peer is reachable at the advertised address (ping/"
               "route). If it is containerised, publish the correct host address "
               "or restrict the peer's transport to the shared network."),
-      evidence={"source": source,
+      # When the addresses came from the participant's defaults, so does the
+      # problem; only endpoint-advertised locators are an endpoint's own.
+      evidence={"scope": "endpoint" if endpoint is not None and endpoint.unicast_locators
+                         else "participant",
+                "source": source,
                 "locators": [records.locator_text(l) for l in locators],
                 "local_addresses": sorted(local_addresses)},
   )]
@@ -199,7 +218,7 @@ def _is_ip_locator(locator):
   return kind in IP_LOCATOR_KINDS
 
 
-def _address_problem(ip, networks, local_addresses):
+def _address_problem(ip, local_addresses):
   """Why `ip` looks unreachable, or None when it looks fine."""
   try:
     address = ipaddress.ip_address(ip)
@@ -225,26 +244,6 @@ def _address_problem(ip, networks, local_addresses):
   # would produce a warning on healthy systems - the fastest way to make a
   # diagnostic tool ignorable.
   return None
-
-
-def check_no_multicast_locators(context):
-  """Peer advertises no multicast locator for user traffic."""
-  endpoint = context.endpoint
-  if endpoint is None or not endpoint.is_writer:
-    return []
-  if endpoint.multicast_locators:
-    return []
-  return [Finding(
-      id="locator.no_multicast",
-      rung=RUNG_ENDPOINT,
-      severity=Severity.INFO,
-      title="Writer advertises no multicast locator",
-      observed="endpoint multicast_locators is empty",
-      root_cause=("User data will be delivered over unicast to each matched "
-                  "reader. This is normal and usually intentional; it only "
-                  "matters for fan-out efficiency, not correctness."),
-      remedy="",
-  )]
 
 
 def check_transport(context):
@@ -380,7 +379,6 @@ CHECKS = (
     check_vendor_identify,
     check_vendor_notes,
     check_locators,
-    check_no_multicast_locators,
     check_transport,
     check_security_mismatch,
     check_partial_configuration,

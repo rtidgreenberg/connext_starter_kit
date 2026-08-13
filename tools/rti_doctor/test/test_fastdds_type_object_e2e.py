@@ -88,7 +88,15 @@ class TestFastDdsTypeObjectInterop(unittest.TestCase):
                                 stderr=subprocess.PIPE)
       with open(start_file, "w", encoding="utf-8"):
         pass
-      deadline = time.monotonic() + 10.0
+      # This budget covers `docker run` plus Fast DDS initialization, not just
+      # the endpoint creation. Measured on this host, that costs 1-3s warm and
+      # 22-25s once the tier has been churning containers for a while, so the
+      # 10s this used to allow expired on load alone and reported it as "the
+      # writer did not create its endpoint marker" - a type-metadata failure
+      # message for what was really a slow container (HAR-6, 2026-08-13). The
+      # assertions this gate protects are about TypeObject resolution, so the
+      # gate must not be the thing that fails first.
+      deadline = time.monotonic() + 90.0
       while not os.path.exists(endpoint_ready_file) and time.monotonic() < deadline:
         time.sleep(0.05)
       self.assertTrue(os.path.exists(endpoint_ready_file),

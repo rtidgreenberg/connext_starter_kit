@@ -131,12 +131,18 @@ doc it cites needs revising. That is exactly how Q3 was retired: its two spikes
 were expected failures asserting that Doctor and the middleware disagree, and
 fixing the product made both pass with their assertions untouched.
 
-`run_tests.sh` pipes the run through `tail -40`, so a red re-run reports its
-counts honestly but scrolls all but the last traceback or two out of the window
-(M15). Read the counts there, then re-run the failing module on its own before
-concluding anything about it. From the repo root, with the interpreter
-`run_tests.sh` names on its own first line — the venv one, not a bare `python`,
-which will not have `rti.connextdds`:
+`run_tests.sh` writes the whole run to `test_output/run_tests_<tier>.log` and
+prints the last 40 lines plus, on a red run, the `FAIL:`/`ERROR:` test names and
+the log path. So a failing tier now names what failed; read the log for the
+tracebacks rather than re-running to find out (this closes M15, which cost two
+full red `all` runs on 2026-08-13 that reported only `FAILED` — see HAR-6).
+
+Re-running a single module on its own is still worth doing, but as a
+*diagnostic* rather than to recover the output: several of these failures are
+order-dependent, and a module that is green alone and red in a tier is itself
+the finding. From the repo root, with the interpreter `run_tests.sh` names on
+its own first line — the venv one, not a bare `python`, which will not have
+`rti.connextdds`:
 
 ```bash
 PYTHONPATH=tools/rti_doctor <that interpreter> \

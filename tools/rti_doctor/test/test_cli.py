@@ -243,7 +243,7 @@ class TestSessionSurface(unittest.TestCase):
     instance_attributes = {"registry", "domain_id", "active_domains",
                            "domain_scan_ran", "type_lookup_settings",
                            "participant", "own_qos", "type_wait",
-                           "capture_interface"}
+                           "capture_interface", "network_capture"}
     self.assertEqual([name for name in missing if name not in instance_attributes],
                      [])
 

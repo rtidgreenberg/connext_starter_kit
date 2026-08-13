@@ -146,6 +146,17 @@ def is_rti(vendor_id):
   return vendor_octets(vendor_id) == (0x01, 0x01)
 
 
+def is_fastdds(vendor_id):
+  """True for an eProsima Fast DDS peer.
+
+  The product version read from packets is a Fast DDS vendor-specific discovery
+  PID, so this is what decides whether that evidence describes a given peer at
+  all. An unreadable vendor id returns False: attributing a version to a peer
+  whose vendor could not be determined is the misattribution this guards.
+  """
+  return vendor_octets(vendor_id) == (0x01, 0x0F)
+
+
 def is_recognized(vendor_id):
   return vendor_octets(vendor_id) in VENDOR_NAMES
 

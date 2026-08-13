@@ -8,7 +8,8 @@ import logging
 import os
 import time
 
-from . import checks, paths, probe as probe_mod, report, system_scan, topology, wire
+from . import (checks, netcapture, paths, probe as probe_mod, report,
+               system_scan, topology, wire)
 from .checks import CheckContext
 
 #: How long a capture runs when no probe is bounding it - a reader report, or a
@@ -46,7 +47,7 @@ class Session:
   def __init__(self, participant, registry, own_qos, type_lookup_settings,
                domain_id, type_wait=5.0, probe_timeout=10.0,
                active_domains=None, domain_scan_ran=False,
-               capture_interface=None):
+               capture_interface=None, network_capture=False):
     self.participant = participant
     self.registry = registry
     self.own_qos = own_qos
@@ -63,6 +64,11 @@ class Session:
     # question. A report asks on entry only while this is False, so one answer
     # covers the session and navigating between reports does not re-prompt.
     self.capture_choice_made = capture_interface is not None
+    # RTI Network Capture, enabled at startup or not at all - `enable()` has to
+    # precede every other Connext call, so unlike the tshark capture this can
+    # never be turned on from a keypress. When it is on, every probed endpoint
+    # report records the probe participant's own frames, shared memory included.
+    self.network_capture = network_capture
     # Set by the first capture that fails, which turns capture off for the rest
     # of the session: on a host without capture privileges, every later report
     # would otherwise carry tshark's refusal as its wire evidence.
@@ -168,8 +174,11 @@ class Session:
     return removed
 
   def _context(self, endpoint=None, participant_record=None, probe_result=None,
-               type_information_observed=None):
+               type_information_observed=None, wire_evidence=None,
+               participant_evidence=None):
     return CheckContext(
+        wire_evidence=wire_evidence,
+        participant_evidence=participant_evidence,
         registry=self.registry,
         own_qos=self.own_qos,
         type_lookup_settings=self.type_lookup_settings,
@@ -274,8 +283,22 @@ class Session:
         "rti_doctor_captures",
         f"rti_doctor_domain{self.domain_id}_{stamp}.pcapng")
 
+  def participant_capture_path(self, timestamp=None):
+    """Where an RTI Network Capture of our own participant would land.
+
+    A distinct name from `capture_path`, not just a distinct extension: the two
+    can run in the same pass over the same endpoint, and a report that cited one
+    path for two different files would make its own evidence unresolvable.
+    """
+    stamp = timestamp or time.strftime("%Y%m%d_%H%M%S")
+    return paths.test_output_path(
+        "rti_doctor_captures",
+        f"rti_doctor_participant_domain{self.domain_id}_{stamp}"
+        f"{netcapture.CAPTURE_SUFFIX}")
+
   def diagnose_endpoint(self, endpoint, probe=True, capture_interface=None,
-                        capture_seconds=None, capture_path=None):
+                        capture_seconds=None, capture_path=None,
+                        write_samples=False):
     """Full rungs 0-5 for one endpoint, probing unless told not to.
 
     Capturing packets is a separate request from probing, not a consequence of
@@ -284,6 +307,11 @@ class Session:
     privileged capture the operator never asked for - which is what navigating
     to any writer report used to do. `capture_interface` is therefore the only
     thing that starts tshark, and it is only ever passed when someone asked.
+
+    `write_samples` is the same principle one step further out. It reaches only
+    the reader-target probe, where verifying delivery means publishing into a
+    topic a real application consumes, and it defaults to off so that opening a
+    report can never inject data.
     """
     self.registry.expire_type_waits()
     participant_record = self.registry.participant_for(endpoint)
@@ -291,7 +319,9 @@ class Session:
     probe_result = None
     wire_evidence = None
     discovery_evidence = None
+    participant_evidence = None
     capture = None
+    participant_capture = None
     if capture_seconds is None:
       capture_seconds = self.probe_timeout if probe else DEFAULT_CAPTURE_SECONDS
     if capture_interface:
@@ -317,26 +347,65 @@ class Session:
           reader_entity_id=(wire.endpoint_entity_id(endpoint)
                             if not endpoint.is_writer else None),
           duration=capture_seconds + CAPTURE_DURATION_MARGIN)
+    # Runs whenever there is a probe to observe, without an interface, an
+    # interface prompt or capture privileges: it instruments our own
+    # participant rather than a device. A passively opened report still probes
+    # nothing, so there is nothing of ours to record.
+    if self.network_capture and probe:
+      participant_destination = self.participant_capture_path()
+      self.capture_artifacts.append(participant_destination)
+      participant_capture = netcapture.ParticipantCapture(
+          self.participant, participant_destination)
+
     if probe or capture is not None:
       try:
         if capture is not None:
           capture.start()
+        if participant_capture is not None:
+          participant_capture.start()
         if probe:
           logging.info(f"[engine] probing topic '{endpoint.topic_name}'")
           probe_result = probe_mod.probe_endpoint(
-            self.participant, endpoint, timeout=self.probe_timeout)
+            self.participant, endpoint, timeout=self.probe_timeout,
+            write_samples=write_samples)
         elif capture is not None:
           # Nothing else is holding this capture open, so it needs its own
           # window; finishing immediately would report an empty capture as the
           # endpoint's wire evidence.
           time.sleep(capture_seconds)
       finally:
+        if participant_capture is not None:
+          # Filtered by the SELECTED endpoint's ids, exactly as the tshark
+          # capture is: this file holds only our participant's frames, so the
+          # filter is what separates the conversation with this endpoint from
+          # our concurrent discovery traffic.
+          participant_evidence = participant_capture.finish(
+              writer_entity_id=(wire.endpoint_entity_id(endpoint)
+                                if endpoint.is_writer else None),
+              reader_entity_id=(wire.endpoint_entity_id(endpoint)
+                                if not endpoint.is_writer else None))
         if capture is not None:
           wire_evidence = capture.finish()
           # The same file, read for discovery metadata: Fast DDS advertises its
           # product version in SPDP and nothing else can observe it. One
           # capture answers both questions, so asking for wire evidence is not
           # also a reason to run a second tshark.
+          #
+          # Run for EVERY peer, including RTI. Skipping it on an RTI peer was
+          # tried and reverted: this pass is scoped to the capture, not to the
+          # selected endpoint, so it is also what supplies the domain-wide Fast
+          # DDS version notes in `system_scan._fastdds_version_notes` (about
+          # OTHER participants, which an RTI-peer report is as able to observe
+          # as any other), Appendix C's announcement block, and the
+          # TypeInformation evidence behind `type_information_observed`.
+          # Skipping it discarded all three to save two tshark reads.
+          #
+          # The misattribution that motivated the skip - a Connext report led
+          # with a neighbouring Fast DDS participant's version - is a RENDERING
+          # question, and it is fixed where it belongs, in
+          # `report._peer_fastdds_versions`: the vendor gate and the GUID-prefix
+          # narrowing mean an RTI peer's report shows no Fast DDS line at all,
+          # whether or not this parse ran.
           discovery_evidence = capture.finish_discovery()
           self.record_wire_discovery(discovery_evidence)
 
@@ -344,12 +413,13 @@ class Session:
                             participant_record=participant_record,
                 probe_result=probe_result,
                 type_information_observed=_type_information_observed(
-                    endpoint, discovery_evidence))
+                    endpoint, discovery_evidence),
+                wire_evidence=wire_evidence,
+                participant_evidence=participant_evidence)
     selected = checks.static_checks()
     if probe_result is not None:
       if probe_result.probe_kind == "writer":
-        from .checks import probe_match
-        selected = selected + probe_match.CHECKS
+        selected = selected + checks.writer_probe_checks()
       else:
         selected = selected + checks.probe_checks()
     findings = checks.run_checks(context, selected)
@@ -365,6 +435,7 @@ class Session:
         topology=self._topology(), wire_evidence=wire_evidence,
         discovery_evidence=discovery_evidence,
         capture_interface=capture_interface,
+        participant_evidence=participant_evidence,
     )
 
 

@@ -143,15 +143,20 @@ def main():
                       help="Write PATH after creating the requested endpoints")
   parser.add_argument("--type-object-v1-only", action="store_true",
                       help="Advertise TypeObject v1 and disable TypeLookup v2")
+  parser.add_argument("--participant-name",
+                      help="Participant name to advertise in discovery "
+                           "(default: doctor_rxo_connext_<role>)")
   args = parser.parse_args()
 
-  participant_qos = None
+  participant_qos = dds.DomainParticipantQos()
   if args.type_object_v1_only:
-    participant_qos = dds.DomainParticipantQos()
     configure_type_object_v1_only(participant_qos)
-  participant = (dds.DomainParticipant(args.domain)
-                 if participant_qos is None
-                 else dds.DomainParticipant(args.domain, qos=participant_qos))
+  # Named for the same reason as in `extensibility_connext_endpoint.py`: a
+  # Doctor report distinguishes the two endpoints of a pair by participant name,
+  # and Connext's default is empty while other vendors always supply one.
+  participant_qos.participant_name.name = (
+      args.participant_name or f"doctor_rxo_connext_{args.role}")
+  participant = dds.DomainParticipant(args.domain, qos=participant_qos)
   sample_type, endpoints = create_endpoints(participant, args)
   write_ready_file(args.ready_file)
   results = {scenario: {"matched": 0, "samples": 0}

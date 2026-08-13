@@ -165,6 +165,16 @@ class ProbeOutcome:
   #: The probe failed after its reader was created; whatever it did observe is
   #: real, but the run is not a complete observation.
   incomplete_reason: str = None
+  #: True when the probe created a WRITER, because the selected endpoint is a
+  #: reader. Delivery is then only measurable if the probe also published, which
+  #: `wrote_samples` records. Without it, "no samples" describes rti_doctor's own
+  #: restraint and must not be phrased as a symptom.
+  wrote_entity: bool = False
+  wrote_samples: bool = False
+  #: Tri-state, and the third value carries meaning: None is "no acknowledgment
+  #: was owed", which is the BEST_EFFORT case, and must never render as a reader
+  #: that failed to acknowledge.
+  acknowledged: object = None
 
 
 def verdict_line(findings, probe=None):
@@ -191,6 +201,28 @@ def _verdict_body(findings, probe):
 
   if not probe.matched:
     return f"NOT MATCHED; {_problem_summary(findings)}"
+
+  # A writer probe against a reader target. "No samples received" is meaningless
+  # here - the probe is the sending side, and unless it was asked to publish it
+  # sent nothing by design. Reporting the match, which is what was measured.
+  if probe.wrote_entity and not probe.wrote_samples:
+    tail = _problem_summary(findings)
+    base = "matched (writer probe; nothing published, so delivery not measured)"
+    return f"{base}; {tail}" if tail else base
+
+  # A writer probe that DID publish. Its evidence is acknowledgment, not a
+  # payload walk: it serialized the sample itself, so "payload FULL" would be
+  # this tool reading back its own bytes and calling that a finding. Falling
+  # through to the payload branches reported "payload NOT ATTEMPTED", which
+  # reads as a step that failed rather than one that never applied.
+  if probe.wrote_entity:
+    tail = _problem_summary(findings)
+    delivery = {True: "acknowledged by the reader",
+                False: "NOT acknowledged",
+                None: "acknowledgment not applicable (BEST_EFFORT)"}[
+                    probe.acknowledged]
+    base = f"matched, {probe.samples_received} sample(s) published, {delivery}"
+    return f"{base}; {tail}" if tail else base
 
   if probe.samples_received == 0:
     return f"matched but no samples received; {_problem_summary(findings)}"

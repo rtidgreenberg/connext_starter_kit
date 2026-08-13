@@ -112,6 +112,37 @@ class DiscoveryRegistry:
     resolved = [e for e in candidates if e.type is not None]
     return (resolved or candidates)[0]
 
+  def find_reader(self, topic_name):
+    """Lowest-keyed reader on a topic, chosen exactly as `find_writer` chooses.
+
+    Same tie-break, and for the same reason: dict order is arrival order, so an
+    unsorted pick would make `--topic` select a different endpoint - and report a
+    different verdict - between runs on a multi-reader topic.
+    """
+    candidates = sorted((e for e in self.readers() if e.topic_name == topic_name),
+                        key=lambda e: e.key)
+    if not candidates:
+      return None
+    resolved = [e for e in candidates if e.type is not None]
+    return (resolved or candidates)[0]
+
+  def find_endpoint(self, topic_name):
+    """The endpoint `--topic` should diagnose: a writer if there is one.
+
+    A writer is preferred because reading what it already publishes verifies
+    delivery without writing anything. Falling back to a reader is what makes a
+    reader-only topic diagnosable headless at all - before this, `--topic` on
+    one exited "target absent" while the system scan listed the topic, and the
+    reader-target probe was reachable only from the TUI.
+
+    Deliberately NOT targetable, for now. On a multi-endpoint topic this picks
+    one and the report does not say which, so the headless path cannot be aimed
+    at the endpoint a TUI operator would have selected. See HL-1/HL-2 in
+    `docs/IMPROVEMENT_BACKLOG.md`: the fix is a selector plus an enumeration to
+    read selectors off, and it is scheduled rather than improvised here.
+    """
+    return self.find_writer(topic_name) or self.find_reader(topic_name)
+
   def topic_names(self):
     return sorted({e.topic_name for e in self.endpoint_list() if e.topic_name})
 
@@ -256,13 +287,66 @@ def configure_type_lookup_qos(qos):
   return applied
 
 
+def configure_transport(qos, network_capture_active=False):
+  """Pick the probe's transport, and return the note the report will carry.
+
+  One decision in one place, because the two halves must not drift: forcing
+  UDP-only exists *solely* so a tshark capture can observe the probe, and RTI
+  Network Capture makes that unnecessary by instrumenting the participant
+  instead of an interface. Leaving the restriction on under network capture
+  would make the probe use a transport the application does not, buying no
+  observability at all - so the same condition has to govern both, and a caller
+  that could set one without the other would eventually set only one.
+  """
+  if network_capture_active:
+    return "UDPv4 and shared memory (RTI Network Capture observes both)"
+  return configure_udp_only_transport(qos)
+
+
+def configure_udp_only_transport(qos):
+  """Restrict rti_doctor's own participant to UDPv4, disabling shared memory.
+
+  Transport is a participant-level policy in Connext - there is no per-writer
+  setting - so this is where a UDP-only probe has to be established.
+
+  Why: two participants on one host prefer SHMEM, and shared-memory traffic
+  never reaches a network interface, so tshark cannot observe it on any
+  interface with any filter. Measured against this repo's `healthy` fixture on
+  2026-08-13: the probe took 256 samples and counted 6 heartbeats while a
+  capture of ALL UDP for the same window carried only SPDP/SEDP and not one
+  HEARTBEAT. Packet evidence was structurally unobtainable for a same-host pair.
+
+  What it costs, and it is not nothing: the probe now exercises a DIFFERENT
+  transport from the one a same-host application pair uses. A UDP-only probe
+  that succeeds does not prove the application's shared-memory path works, and a
+  UDP-only probe that fails on reachability says nothing about SHMEM either. The
+  trade is deliberate - packet evidence an operator can actually read beats an
+  unobservable path - but every report says which transport it measured, which
+  is why this returns a string for the report's own-configuration appendix.
+
+  Never raises: a binding that does not expose the policy leaves the default in
+  place and says so, rather than costing the run its participant.
+  """
+  try:
+    qos.transport_builtin.mask = dds.TransportBuiltinMask.UDPv4
+    return "UDPv4 only (shared memory disabled, so captures can observe the probe)"
+  except Exception as error:
+    return f"default (UDP-only not applied: {error})"
+
+
 def create_participant(domain_id, name="RTI DOCTOR", registry=None,
-                       type_object_v1_only=False):
+                       type_object_v1_only=False, network_capture_active=False):
   """Create a participant with builtin listeners attached before enabling.
 
   Listeners are installed while autoenable is off so no discovery sample is
   missed between construction and listener installation - the same ordering
   rti_spy uses.
+
+  `network_capture_active` decides the transport. Forcing UDP-only exists purely
+  so a tshark capture can observe the probe; RTI Network Capture instruments the
+  participant instead of the interface and records shared memory too, so when it
+  is running the restriction is not just unnecessary but harmful - it would make
+  the probe use a transport the application does not, for no observability gain.
   """
   previous_factory_qos = dds.DomainParticipant.participant_factory_qos
   factory_qos = dds.DomainParticipantFactoryQos()
@@ -279,6 +363,8 @@ def create_participant(domain_id, name="RTI DOCTOR", registry=None,
   if type_object_v1_only:
     configure_type_object_v1_only(qos)
   type_lookup_settings = configure_type_lookup_qos(qos)
+  type_lookup_settings["transport"] = configure_transport(
+      qos, network_capture_active)
   type_lookup_settings["type_object_discovery"] = (
       "v1-only" if type_object_v1_only else "default (v2 TypeLookup enabled)")
 

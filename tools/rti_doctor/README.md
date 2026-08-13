@@ -14,6 +14,44 @@ match without you supplying anything.
 It creates DataReaders and nothing else. It never writes user data, never changes
 remote configuration, and always closes what it created.
 
+## Requirements
+
+**Connext** — an RTI Connext DDS install and a license. `run_rti_doctor.sh`
+resolves `NDDSHOME` and the license file itself; set `NDDSHOME` or
+`RTI_LICENSE_FILE` only to override what it finds. See
+[Supported Connext Versions](#supported-connext-versions).
+
+**Python** — nothing to install by hand. The launcher creates a virtual
+environment named for the detected Connext and Python versions
+(`connext_dds_env_<connext>_py<python>/` at the repo root), installs
+`requirements.txt` into it on **every** launch, and installs the `rti.connext`
+matching your `NDDSHOME`.
+
+**tshark — optional, and only for wire evidence.** Doctor runs fully without it:
+`--pcap`, `--capture-interface` and the TUI's capture step are the only things
+that use it, and when it is missing they turn themselves off and say so in the
+report rather than failing the run. Install it if you want RTPS packet evidence:
+
+```bash
+sudo apt install tshark          # Debian/Ubuntu
+```
+
+Capturing also needs the privilege to open an interface — on Debian/Ubuntu that
+is `sudo dpkg-reconfigure wireshark-common` plus membership of the `wireshark`
+group, and a re-login. Without it Doctor reports "no capture privileges" and
+continues.
+
+Wire observation is developed and measured against **Wireshark/tshark 4.4.9**,
+which is what the RTPS dissector behaviour in `wire.py` is written for. Nothing
+enforces a version — the binary is resolved with `shutil.which("tshark")` — but
+a newer dissector can name fields this code reads positionally, so treat a
+version change as something to re-run the wire suites against. One such
+difference is already predicted and handled: see the `0x8000` follow-up in
+[DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md).
+
+**Docker** — not needed to run Doctor. Required only for the cross-vendor test
+fixtures and manual scenarios that start Fast DDS containers.
+
 ## Quick Start
 
 From the repository root:
@@ -72,11 +110,89 @@ On exit, captures no saved report cites are removed; saving a report with `s`
 keeps the capture it names in Appendix C. `RTI_DOCTOR_KEEP_ARTIFACTS=1` keeps
 everything, matching the fault-injection artifacts.
 
-A few facts are observable **only** in RTPS packets — a Fast DDS peer's product
-version above all — and reports render those as `Run capture to ascertain`
-rather than as absent, because "nobody looked" and "there is nothing there" are
-different answers. One capture answers both questions: the user data that
-crossed the wire, and the discovery metadata around it.
+A few facts are observable **only** in RTPS packets — the RTPS reliable
+handshake, and a Fast DDS peer's product version — and reports render those as
+`Run capture to ascertain` rather than as absent, because "nobody looked" and
+"there is nothing there" are different answers. One capture answers both
+questions: the user data that crossed the wire, and the discovery metadata
+around it.
+
+The Fast DDS product version is asked for **only when the peer might have one**.
+It comes from a Fast DDS vendor-specific discovery PID that an RTI participant
+never sends, so on a Connext peer the extra tshark passes are skipped entirely
+and no version line is rendered. A capture hears the whole domain rather than
+one endpoint, so a version that *is* found is narrowed to the GUID prefix that
+advertised it — otherwise a Connext report sharing a domain with a Fast DDS
+writer would lead with that writer's version as though it were its own.
+
+### RTI Network Capture: the shared-memory half (`--network-capture`)
+
+`tshark` reads interfaces. RTI Network Capture instruments the **participant**,
+so it records what rti_doctor's own probe actually sent and received on every
+transport it used — **including shared memory**, which no interface capture can
+observe. Verified on this host: 81 RTPS frames with 15 HEARTBEAT and 14 ACKNACK,
+carrying no IP layer at all, dissected by `tshark` as ordinary RTPS. It writes a
+standard PCAP, so the same parser and the same appendix read it.
+
+Two properties follow from how it works, and both are stated in every report:
+
+* **It is a launch flag, not a keypress.** The binding requires `enable()`
+  before *any* other Connext call, so it is decided before the participant
+  exists. `--capture-interface` can still be chosen or changed at any time.
+* **It is scoped to one participant — ours.** It shows rti_doctor's conversation
+  with the peer in both directions and nothing else. It can never show traffic
+  between two other participants, which is exactly what an interface capture is
+  good at. The two are complements; Appendix C reports them separately.
+
+With `--network-capture` the UDP-only restriction below is lifted, because the
+reason for it is gone.
+
+### rti_doctor's own participant is UDP-only
+
+Two participants on one host prefer the **shared-memory** transport, and SHMEM
+traffic never reaches a network interface — so no capture, on any interface,
+with any filter, can observe it. Measured against the `healthy` fixture on
+2026-08-13: the probe took 256 samples and counted 6 heartbeats while a capture
+of *all* UDP for the same window carried only SPDP/SEDP and not one HEARTBEAT.
+
+rti_doctor therefore restricts its own participant to UDPv4
+(`transport_builtin.mask`), which is a participant-level policy in Connext.
+With it, the same run captured 57 DATA, 6 HEARTBEAT and 2 ACKNACK frames, and
+the packet counts matched the status counters exactly.
+
+The cost is real and every report states it in Appendix D: the probe exercises a
+**different transport** from the one a same-host application pair uses. A
+UDP-only probe that succeeds does not prove the application's shared-memory path
+works. Capturing a same-host pair on `lo` — not the host's NIC — is what makes
+their UDP traffic visible, because a local destination address routes over
+loopback.
+
+Prefer `--network-capture` when the pair is on one host: it observes shared
+memory directly, so the transport never has to be changed to be measured.
+
+## Verifying Delivery to a Reader (`w`, `--write-samples`)
+
+Selecting a **writer** verifies delivery by reading what it already publishes —
+nothing is written. Selecting a **reader** is different: the only way to prove
+data reaches it is to send some. That means publishing into a topic a running
+application consumes, and it cannot tell a synthetic sample from production
+data.
+
+So it is never a default. In the TUI, `w` on a reader report opens a
+confirmation naming the topic and the sample count, with *Do not publish* under
+the cursor; Escape is a refusal, and the answer is **not** remembered — unlike
+the capture choice, which is remembered precisely because it changes nothing
+about the system it observes. Headless, `--write-samples` is the same consent,
+given on the command line, and the run says so on stderr before it publishes.
+
+Declining still reports the match and the reliable handshake from the probe
+writer's own counters (`sent_heartbeat_count`, `received_ack_count`); what it
+cannot do is prove delivery, and the verdict says exactly that rather than
+reporting rti_doctor's own restraint as a fault of the peer.
+
+When approved, the probe publishes and — for a RELIABLE reader — waits for
+acknowledgment, so the verdict reads `matched, 3 sample(s) published,
+acknowledged by the reader`.
 
 ## The Visibility Ladder
 
@@ -274,6 +390,11 @@ Findings have stable, greppable ids. The ones that matter most:
 | `qos.rxo_mismatch` | 4 | Two live endpoints whose QoS can never match, policies named |
 | `match.none` | 4 | The probe reader never matched |
 | `data.silent` | 5 | Matched but nothing arrived, with the sub-case identified |
+| `reliable.ok` | 5 | RELIABLE handshake confirmed: heartbeats out, acknowledgments back |
+| `reliable.no_heartbeat` | 5 | RELIABLE and matched, but no heartbeats — an asymmetric match |
+| `reliable.no_acknowledgment` | 5 | Heartbeats sent, nothing answering — a return-path fault |
+| `reliable.not_measured` | 5 | Neither counters nor a capture could observe the handshake |
+| `reliable.evidence_disagrees` | 5 | Capture and status counters disagree about heartbeats |
 | `data.fragmentation` | 5 | Large-data reassembly state |
 | `data.deserialize_failure` | 5 | Connext itself could not decode a sample |
 | `payload.partial` | 5 | Which field paths are unreadable |
@@ -410,12 +531,36 @@ pip install -r tools/rti_doctor/requirements.txt \
             -r tools/rti_doctor/requirements-dev.txt
 ```
 
-Unit tests — no DDS participant required, ~60 tests:
+`run_tests.sh` is the entry point. It resolves `NDDSHOME`, the venv and the
+license itself, keeps the whole run in `test_output/run_tests_<tier>.log`, and
+on a red run prints the failing test names and that path:
 
 ```bash
-PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
+./tools/rti_doctor/run_tests.sh          # unit (the default), ~372 tests
+./tools/rti_doctor/run_tests.sh live     # unit + live domain: needs a license
+./tools/rti_doctor/run_tests.sh vendor   # cross-vendor e2e: needs Docker images
+./tools/rti_doctor/run_tests.sh all      # everything
+```
+
+The tiers differ by what they need. `unit` creates no DDS entity, so it needs
+neither `NDDSHOME` nor a license — this is the tier CI runs. `live` creates real
+participants. `vendor` additionally needs Docker and the Cyclone/Fast DDS
+images, and takes over ten minutes.
+
+To run one module — worth doing as a *diagnostic*, since several vendor
+failures are order-dependent and "green alone, red in a tier" is itself a
+finding — use the venv interpreter the launcher built:
+
+```bash
+export VENV_PYTHON=$(ls -d connext_dds_env_*/bin/python | head -1)
+```
+
+Unit tests — no DDS participant required:
+
+```bash
+PYTHONPATH=tools/rti_doctor "$VENV_PYTHON" \
     -m unittest discover -s tools/rti_doctor/test -p 'test_findings.py'
-PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
+PYTHONPATH=tools/rti_doctor "$VENV_PYTHON" \
     -m unittest discover -s tools/rti_doctor/test -p 'test_checks.py'
 ```
 
@@ -423,7 +568,7 @@ Live integration tests — real participants, real probes, real fixtures, includ
 a headless drive of the whole TUI and a check that the probe leaks no entities:
 
 ```bash
-PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
+PYTHONPATH=tools/rti_doctor "$VENV_PYTHON" \
     -m unittest tools.rti_doctor.test.test_live_integration
 ```
 
@@ -437,7 +582,7 @@ the resulting evidence for follow-up. Build it once before running the suite:
 
 ```bash
 bash tools/rti_doctor/test/vendors/fastdds/build_image.sh
-PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
+PYTHONPATH=tools/rti_doctor "$VENV_PYTHON" \
   -m unittest tools.rti_doctor.test.test_vendor_wire_e2e
 ```
 
@@ -454,7 +599,7 @@ configurations: compatible readers receive samples; mismatched readers do not,
 while writers continue publishing.
 
 ```bash
-PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
+PYTHONPATH=tools/rti_doctor "$VENV_PYTHON" \
   -m unittest tools.rti_doctor.test.test_rxo_vendor_e2e
 ```
 
@@ -466,7 +611,7 @@ as the wire test and builds two generated TypeObject fixtures, one per
 extensibility kind.
 
 ```bash
-PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
+PYTHONPATH=tools/rti_doctor "$VENV_PYTHON" \
   -m unittest tools.rti_doctor.test.test_extensibility_vendor_e2e \
   tools.rti_doctor.test.test_fastdds_extensibility_vendor_e2e
 ```
@@ -508,11 +653,21 @@ The `fastdds-connext-compatible` fixture deliberately uses the custom Fast DDS
 FINAL TypeObject from the vendor suite: its endpoints exchange data, but Doctor
 may also report `type.assignability`. Run `--help` for all flags.
 
+Every Connext participant a scenario starts is named — `doctor_manual`,
+`doctor_manual_connext_writer`, `doctor_manual_connext_reader` — and the names in
+use are printed with the rest of the scenario banner, so the `PEER` line and the
+topology table say which endpoint is which. Connext supplies no default
+participant name, so without this the Connext half of a cross-vendor pair read as
+`(unnamed)` next to a peer that names itself (Fast DDS reports
+`RTPSParticipant`). Fast DDS and Cyclone participants keep whatever name their own
+vendor assigns; the fixtures do not set it. Both Connext vendor fixtures take
+`--participant-name` to override the default.
+
 The fixture publisher can also be run by hand to create a system to point the
 tool at:
 
 ```bash
-PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
+PYTHONPATH=tools/rti_doctor "$VENV_PYTHON" \
     tools/rti_doctor/test/fixture_publisher.py --mode bad_pair --domain 1
 ```
 

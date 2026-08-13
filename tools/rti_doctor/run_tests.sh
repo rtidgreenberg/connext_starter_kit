@@ -76,5 +76,27 @@ done
 
 echo "=== rti_doctor tests: $TIER (${#QUALIFIED[@]} module(s)) ==="
 cd "$REPO_ROOT"
+
+# Keep the whole run on disk. A 40-line tail is a fine terminal summary for a
+# green run and useless for a red one: the failure names and tracebacks scroll
+# past it, so a failing tier reports that it failed without saying what did.
+# The tail stays; the log is the record the tail is a view of.
+LOG_DIR="$SCRIPT_DIR/test_output"
+mkdir -p "$LOG_DIR"
+LOG="$LOG_DIR/run_tests_${TIER}.log"
+
+set +e
 PYTHONPATH="tools/rti_doctor${PYTHONPATH:+:$PYTHONPATH}" \
-    "$INTERPRETER" -m unittest "${QUALIFIED[@]}" -v 2>&1 | tail -40
+    "$INTERPRETER" -m unittest "${QUALIFIED[@]}" -v > "$LOG" 2>&1
+STATUS=$?
+set -e
+
+tail -40 "$LOG"
+if [[ $STATUS -ne 0 ]]; then
+    echo
+    echo "--- failing tests ---"
+    grep -E "^(FAIL|ERROR): " "$LOG" || true
+fi
+echo
+echo "Full output: $LOG"
+exit $STATUS

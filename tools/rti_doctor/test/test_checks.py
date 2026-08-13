@@ -12,9 +12,11 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rti_doctor import discovery, findings as f, probe, records, typewalk  # noqa: E402
+from rti_doctor import discovery, findings as f, netcapture  # noqa: E402
+from rti_doctor import probe, records, typewalk  # noqa: E402
 from rti_doctor.checks import CheckContext, blind_spots, static_discovery  # noqa: E402
 from rti_doctor.checks import probe_match, probe_payload  # noqa: E402
+from rti_doctor.checks import reliable_path  # noqa: E402
 from rti_doctor.checks import qos_match, type_compat  # noqa: E402
 
 
@@ -715,6 +717,15 @@ class FakeProbe:
     self.matched_other_count = 0
     self.matched_unreadable_count = 0
     self.samples_other = 0
+    # Writer-probe fields. Present on every fake so a check that reads them
+    # against a reader probe fails on the assertion rather than on AttributeError.
+    self.probe_kind = "reader"
+    self.writer_protocol = {}
+    self.writer_cache = {}
+    self.offered_incompatible_qos = None
+    self.wrote_samples = False
+    self.samples_written = 0
+    self.acknowledged = None
     self.__dict__.update(kwargs)
 
   @property
@@ -1971,6 +1982,342 @@ class TestOneBadParticipantDoesNotDropTheRest(unittest.TestCase):
     discovery.refresh_participants(self.FakeParticipant(None), registry)
     self.assertNotIn("stale", registry.participants)
     self.assertEqual(len(registry.participants), 3)
+
+
+class TestEndpointSelection(unittest.TestCase):
+  """`--topic` prefers a writer but must not dead-end on a reader-only topic."""
+
+  def _registry(self, *endpoints):
+    registry = discovery.DiscoveryRegistry()
+    for endpoint in endpoints:
+      registry.endpoints[endpoint.key] = endpoint
+    return registry
+
+  def test_a_writer_is_preferred_when_both_exist(self):
+    """Reading what a writer publishes verifies delivery without writing."""
+    registry = self._registry(endpoint_record(key="r1", kind="Reader", topic_name="T"),
+                              endpoint_record(key="w1", kind="Writer", topic_name="T"))
+    self.assertEqual(registry.find_endpoint("T").key, "w1")
+
+  def test_a_reader_only_topic_is_still_diagnosable(self):
+    """Before this it exited "target absent" while --system listed the topic."""
+    registry = self._registry(endpoint_record(key="r1", kind="Reader", topic_name="T"))
+    self.assertEqual(registry.find_endpoint("T").key, "r1")
+
+  def test_an_absent_topic_is_still_absent(self):
+    self.assertIsNone(self._registry().find_endpoint("T"))
+
+  def test_reader_selection_does_not_depend_on_discovery_order(self):
+    """Dict order is arrival order; an unsorted pick changed the verdict."""
+    first = self._registry(endpoint_record(key="r2", kind="Reader", topic_name="T"),
+                           endpoint_record(key="r1", kind="Reader", topic_name="T"))
+    second = self._registry(endpoint_record(key="r1", kind="Reader", topic_name="T"),
+                            endpoint_record(key="r2", kind="Reader", topic_name="T"))
+    self.assertEqual(first.find_endpoint("T").key, second.find_endpoint("T").key)
+
+
+class TestNetworkCapture(unittest.TestCase):
+  """CAP-4: participant-scoped capture, the only view of our own SHMEM traffic.
+
+  These cover the contract, not the native layer: a real capture is exercised by
+  the live tier, because it needs a participant and a peer to be worth anything.
+  """
+
+  def test_the_native_suffix_is_not_doubled(self):
+    """The native layer appends `.pcap` to whatever stem it is given.
+
+    A caller that already named the file - which the engine does, so the path
+    it records as an artifact is the path the report cites - would otherwise get
+    `foo.pcap.pcap` on disk and a report pointing at a file that does not exist.
+    """
+    capture = netcapture.ParticipantCapture(None, "/tmp/probe.pcap")
+    self.assertEqual(capture.stem, "/tmp/probe")
+    self.assertEqual(capture.output_path, "/tmp/probe.pcap")
+    bare = netcapture.ParticipantCapture(None, "/tmp/probe")
+    self.assertEqual(bare.output_path, "/tmp/probe.pcap")
+
+  def test_a_capture_that_never_started_reports_why(self):
+    capture = netcapture.ParticipantCapture(None, "/tmp/never.pcap")
+    capture.error = "network capture was not enabled at startup"
+    result = capture.finish()
+    self.assertIn("not enabled", result["error"])
+    self.assertEqual(result["kind"], "rti network capture")
+
+  def test_a_missing_file_is_an_error_not_an_empty_capture(self):
+    """"Nobody recorded" and "nothing happened" are opposite conclusions."""
+    capture = netcapture.ParticipantCapture(
+        None, "/tmp/rti_doctor_does_not_exist_9f3a.pcap")
+    result = capture.finish()
+    self.assertIn("wrote no file", result["error"])
+
+  def test_stopping_a_capture_that_never_started_is_safe(self):
+    netcapture.ParticipantCapture(None, "/tmp/x.pcap").stop()
+
+  def test_enable_reports_its_reason_rather_than_raising(self):
+    """An unavailable feature costs a line of output, never the participant."""
+    with mock.patch.object(netcapture, "_NETWORK_CAPTURE", None):
+      ok, reason = netcapture.enable()
+    self.assertFalse(ok)
+    self.assertIn("network_capture", reason)
+
+  def test_enable_returning_false_is_reported_as_a_failure(self):
+    """The native layer returns False rather than raising when called too late.
+
+    A run that believed it was capturing and was not would relax its transport
+    for nothing and report an empty appendix as evidence.
+    """
+    class Late:
+      def enable(self):
+        return False
+
+    with mock.patch.object(netcapture, "_NETWORK_CAPTURE", Late()):
+      ok, reason = netcapture.enable()
+    self.assertFalse(ok)
+    self.assertIn("before any other Connext call", reason)
+
+
+class TestUdpOnlyTransport(unittest.TestCase):
+  """rti_doctor's own participant is UDP-only so a capture can observe it.
+
+  Transport is participant-level in Connext, so this is set once on the
+  diagnostic participant rather than per probe entity.
+  """
+
+  def test_network_capture_leaves_shared_memory_enabled(self):
+    """The restriction exists only so tshark can see the probe.
+
+    RTI Network Capture instruments the participant instead of the interface and
+    records shared memory too, so forcing UDP there would make the probe use a
+    transport the application does not, for no observability gain at all.
+    """
+    import rti.connextdds as dds
+    qos = dds.DomainParticipantQos()
+    default = dds.DomainParticipantQos().transport_builtin.mask
+    note = discovery.configure_transport(qos, network_capture_active=True)
+    self.assertEqual(qos.transport_builtin.mask, default,
+                     "network capture must leave the transport untouched")
+    self.assertIn("shared memory", note)
+
+  def test_without_network_capture_the_transport_is_narrowed(self):
+    import rti.connextdds as dds
+    qos = dds.DomainParticipantQos()
+    note = discovery.configure_transport(qos, network_capture_active=False)
+    self.assertEqual(qos.transport_builtin.mask,
+                     dds.TransportBuiltinMask.UDPv4)
+    self.assertIn("UDPv4 only", note)
+
+  def test_the_mask_is_narrowed_to_udpv4(self):
+    """The default is UDPv4|SHMEM (0b11); SHMEM is what has to come off.
+
+    Compared by equality rather than by `test`/`test_any`: on this binding
+    `TransportBuiltinMask.test` takes a bit position and `test_any` takes no
+    argument at all, so both read as False against a mask value and would pass
+    this test for the wrong reason.
+    """
+    import rti.connextdds as dds
+    qos = dds.DomainParticipantQos()
+    self.assertNotEqual(qos.transport_builtin.mask,
+                        dds.TransportBuiltinMask.UDPv4)
+    note = discovery.configure_udp_only_transport(qos)
+    self.assertEqual(qos.transport_builtin.mask,
+                     dds.TransportBuiltinMask.UDPv4)
+    self.assertIn("UDPv4 only", note)
+
+  def test_an_unsettable_policy_costs_the_run_nothing(self):
+    """A binding without the policy must leave the default, not raise."""
+    class Frozen:
+      @property
+      def transport_builtin(self):
+        raise RuntimeError("not available on this binding")
+
+    note = discovery.configure_udp_only_transport(Frozen())
+    self.assertIn("not applied", note)
+
+  def test_the_transport_choice_reaches_the_report(self):
+    """Every report must say which transport it measured over.
+
+    A UDP-only probe does not exercise the shared-memory path a same-host
+    application pair uses, so the report cannot leave the reader to assume.
+    """
+    import rti.connextdds as dds
+    from rti_doctor import report as report_module
+    settings = {"transport": discovery.configure_udp_only_transport(
+        dds.DomainParticipantQos())}
+    text = report_module.render_text(report_module.ReportData(
+        domain_id=7, scope="topic 'T'", all_findings=[],
+        type_lookup_settings=settings))
+    self.assertIn("transport", text)
+    self.assertIn("UDPv4 only", text)
+
+
+class TestReliablePath(unittest.TestCase):
+  """The reliable handshake, from status counters and from packets.
+
+  A match is an agreement about QoS. These cover the question a match does not
+  answer: is the RTPS protocol between the two actually running.
+  """
+
+  class Reliability:
+    class Kind:
+      name = "RELIABLE"
+    kind = Kind()
+
+  class BestEffort:
+    class Kind:
+      name = "BEST_EFFORT"
+    kind = Kind()
+
+  def _reliable_writer(self):
+    return endpoint_record(kind="Writer", reliability=self.Reliability())
+
+  def _context(self, probe, endpoint=None, wire_evidence=None):
+    return CheckContext(probe=probe, endpoint=endpoint or self._reliable_writer(),
+                        wire_evidence=wire_evidence)
+
+  def test_a_best_effort_pair_is_not_judged_on_a_handshake(self):
+    """BEST_EFFORT owes no heartbeats, so their absence is not a fault."""
+    probe = FakeProbe(protocol={"received_heartbeat_count": 0})
+    result = reliable_path.check_reliable_handshake(self._context(
+        probe, endpoint=endpoint_record(reliability=self.BestEffort())))
+    self.assertEqual(result, [])
+
+  def test_an_unmatched_pair_is_left_to_rung_four(self):
+    """`match.none` already owns this; a second finding would double-report it."""
+    probe = FakeProbe(matched_count=0)
+    self.assertEqual(
+        reliable_path.check_reliable_handshake(self._context(probe)), [])
+
+  def test_heartbeats_and_nacks_confirm_the_path(self):
+    probe = FakeProbe(protocol={"received_heartbeat_count": 4,
+                                "sent_nack_count": 2})
+    result = reliable_path.check_reliable_handshake(self._context(probe))
+    self.assertEqual(result[0].id, "reliable.ok")
+    self.assertEqual(result[0].severity, f.Severity.OK)
+
+  def test_an_arriving_sample_counts_as_the_readers_half(self):
+    """A positive acknowledgment leaves no reader-side counter of its own."""
+    probe = FakeProbe(samples_taken=3,
+                      protocol={"received_heartbeat_count": 4,
+                                "sent_nack_count": 0})
+    result = reliable_path.check_reliable_handshake(self._context(probe))
+    self.assertEqual(result[0].id, "reliable.ok")
+
+  def test_no_heartbeat_from_a_reliable_writer_is_an_asymmetric_match(self):
+    probe = FakeProbe(samples_taken=0,
+                      protocol={"received_heartbeat_count": 0,
+                                "sent_nack_count": 0})
+    result = reliable_path.check_reliable_handshake(self._context(probe))
+    self.assertEqual(result[0].id, "reliable.no_heartbeat")
+    self.assertEqual(result[0].severity, f.Severity.ERROR)
+    self.assertIn("ASYMMETRIC MATCH", result[0].root_cause)
+
+  def test_heartbeats_with_no_answer_is_a_return_path_fault(self):
+    probe = FakeProbe(samples_taken=0,
+                      protocol={"received_heartbeat_count": 5,
+                                "sent_nack_count": 0})
+    result = reliable_path.check_reliable_handshake(self._context(probe))
+    self.assertEqual(result[0].id, "reliable.no_acknowledgment")
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_packets_answer_what_the_counters_could_not(self):
+    """The whole point of reading the capture: counters unavailable, wire is not.
+
+    This is the shape a non-RTI peer always has, and the shape any binding that
+    does not expose datareader_protocol_status has.
+    """
+    probe = FakeProbe(samples_taken=0, protocol={})
+    result = reliable_path.check_reliable_handshake(self._context(
+        probe, wire_evidence={"heartbeats": 6, "acknacks": 3}))
+    self.assertEqual(result[0].id, "reliable.ok")
+
+  def test_neither_source_measured_is_not_a_broken_handshake(self):
+    """No counters and no capture is an unasked question, not a failed one."""
+    probe = FakeProbe(samples_taken=0, protocol={})
+    result = reliable_path.check_reliable_handshake(self._context(probe))
+    self.assertEqual(result[0].id, "reliable.not_measured")
+    self.assertEqual(result[0].severity, f.Severity.INFO)
+    self.assertIn("Press c", result[0].remedy)
+
+  def test_a_failed_capture_is_not_read_as_a_quiet_wire(self):
+    probe = FakeProbe(samples_taken=0, protocol={})
+    result = reliable_path.check_reliable_handshake(self._context(
+        probe, wire_evidence={"error": "tshark not found"}))
+    self.assertEqual(result[0].id, "reliable.not_measured")
+
+  def test_the_writer_probe_reads_its_own_counters(self):
+    """A reader target: the probe is the sending side."""
+    probe = FakeProbe(probe_kind="writer", samples_taken=0, wrote_samples=True,
+                      writer_protocol={"sent_heartbeat_count": 4,
+                                       "received_ack_count": 4,
+                                       "received_nack_count": 0})
+    result = reliable_path.check_reliable_handshake(self._context(
+        probe, endpoint=endpoint_record(kind="Reader",
+                                        reliability=self.Reliability())))
+    self.assertEqual(result[0].id, "reliable.ok")
+    self.assertIn("datawriter_protocol_status", result[0].observed)
+
+  def test_a_reader_that_never_acknowledges_is_reported(self):
+    probe = FakeProbe(probe_kind="writer", samples_taken=0, wrote_samples=True,
+                      writer_protocol={"sent_heartbeat_count": 4,
+                                       "received_ack_count": 0,
+                                       "received_nack_count": 0})
+    result = reliable_path.check_reliable_handshake(self._context(
+        probe, endpoint=endpoint_record(kind="Reader",
+                                        reliability=self.Reliability())))
+    self.assertEqual(result[0].id, "reliable.no_acknowledgment")
+
+  def test_a_probe_that_published_nothing_does_not_blame_the_reader(self):
+    """Reproduced live against an ordinary healthy RELIABLE reader.
+
+    The probe publishes nothing by default and snapshots its counters the
+    instant the match appears, so `received_ack_count` is 0 - there is nothing
+    for the reader to acknowledge yet. That was reported as
+    `reliable.no_acknowledgment`, a WARN whose root cause blamed firewalls, NAT
+    and one-way routing for rti_doctor's own restraint. The same endpoint with
+    `--write-samples` reported `reliable.ok`.
+    """
+    probe = FakeProbe(probe_kind="writer", samples_taken=0, wrote_samples=False,
+                      writer_protocol={"sent_heartbeat_count": 1,
+                                       "received_ack_count": 0,
+                                       "received_nack_count": 0})
+    result = reliable_path.check_reliable_handshake(self._context(
+        probe, endpoint=endpoint_record(kind="Reader",
+                                        reliability=self.Reliability())))
+    self.assertEqual(result[0].id, "reliable.not_measured")
+    self.assertEqual(result[0].severity, f.Severity.INFO)
+    self.assertIn("nothing to acknowledge", result[0].root_cause)
+    self.assertIn("--write-samples", result[0].remedy)
+
+  def test_an_unpublished_probe_still_reports_a_missing_heartbeat(self):
+    """The forward half is measurable without publishing, and still an ERROR.
+
+    A RELIABLE writer that believes it is matched heartbeats regardless of
+    whether it has data, so zero heartbeats remains the asymmetric-match
+    signature - the restraint guard must not swallow it.
+    """
+    probe = FakeProbe(probe_kind="writer", samples_taken=0, wrote_samples=False,
+                      writer_protocol={"sent_heartbeat_count": 0,
+                                       "received_ack_count": 0,
+                                       "received_nack_count": 0})
+    result = reliable_path.check_reliable_handshake(self._context(
+        probe, endpoint=endpoint_record(kind="Reader",
+                                        reliability=self.Reliability())))
+    self.assertEqual(result[0].id, "reliable.no_heartbeat")
+    self.assertEqual(result[0].severity, f.Severity.ERROR)
+
+  def test_disagreement_between_capture_and_counters_is_disclosed(self):
+    probe = FakeProbe(protocol={"received_heartbeat_count": 0})
+    result = reliable_path.check_wire_disagrees(self._context(
+        probe, wire_evidence={"heartbeats": 9}))
+    self.assertEqual(result[0].id, "reliable.evidence_disagrees")
+    self.assertEqual(result[0].severity, f.Severity.INFO)
+
+  def test_unequal_positive_counts_are_not_a_disagreement(self):
+    """Different windows and frame coalescing make exact equality meaningless."""
+    probe = FakeProbe(protocol={"received_heartbeat_count": 4})
+    self.assertEqual(
+        reliable_path.check_wire_disagrees(
+            self._context(probe, wire_evidence={"heartbeats": 9})), [])
 
 
 if __name__ == "__main__":

@@ -163,6 +163,7 @@ class TestFastDdsRepresentationEvidence(unittest.TestCase):
         cls.domain, name="RTI DOCTOR FASTDDS REPR SPIKE", registry=registry)
     writer = subprocess.Popen(cls._writer_command(topic, mode), text=True,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    drained = False
     try:
       deadline = time.monotonic() + WRITER_DISCOVERY_WAIT
       discovered_writer = None
@@ -182,6 +183,7 @@ class TestFastDdsRepresentationEvidence(unittest.TestCase):
         if writer.poll() is None:
           writer.terminate()
         stdout, stderr = writer.communicate(timeout=15)
+        drained = True
         if "required: --domain" in stderr:
           # The image predates `--representation default`; say so rather than
           # reporting "not discovered", which reads as an interop result.
@@ -197,10 +199,18 @@ class TestFastDdsRepresentationEvidence(unittest.TestCase):
     finally:
       if writer.poll() is None:
         writer.terminate()
+      if not drained:
+        # Drain, do not just wait. Both streams are pipes, so a writer that
+        # filled the 64 KB buffer is blocked in write() and never reaches exit:
+        # wait() would burn its timeout and fall through to kill(), and either
+        # way the two pipes stay open for the rest of the session. The failure
+        # path above already drained via communicate(); this is the path that
+        # discovered a writer and left it running.
         try:
-          writer.wait(timeout=10)
+          writer.communicate(timeout=10)
         except subprocess.TimeoutExpired:  # pragma: no cover
           writer.kill()
+          writer.communicate()
       observer.close()
 
   @classmethod

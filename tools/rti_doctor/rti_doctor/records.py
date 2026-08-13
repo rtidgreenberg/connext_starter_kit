@@ -157,6 +157,31 @@ def locator_ip(locator):
   return ".".join(str(b) for b in octets[-4:])
 
 
+#: RTPS locator kinds this tool distinguishes. UDPv4 is the only one a UDP
+#: packet capture can observe at all, which is why SHMEM has to be nameable:
+#: two participants on one host prefer shared memory, and their user data then
+#: never reaches a network interface. A capture of that pair is empty for a
+#: reason that has nothing to do with the endpoints being broken.
+LOCATOR_KIND_UDPV4 = 1
+LOCATOR_KIND_SHMEM = 0x01000000
+
+
+def advertises_shared_memory(*owners):
+  """Whether any of these records advertises a SHMEM locator.
+
+  Takes several records because an endpoint may advertise no locators of its own
+  and inherit its participant's, which is where SHMEM usually appears.
+  """
+  for owner in owners:
+    if owner is None:
+      continue
+    for attribute in ("unicast_locators", "default_unicast_locators"):
+      for locator in (compat.get(owner, attribute, None) or ()):
+        if compat.get_int(locator, "kind") == LOCATOR_KIND_SHMEM:
+          return True
+  return False
+
+
 def locator_text(locator):
   """"ip:port (kind=N)" for reports, degrading gracefully on odd locators."""
   ip = locator_ip(locator) or "unknown"

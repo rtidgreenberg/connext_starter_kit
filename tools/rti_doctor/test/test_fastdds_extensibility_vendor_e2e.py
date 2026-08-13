@@ -46,7 +46,12 @@ class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
         "--duration", str(duration),
     ]
     if start_file is not None:
-      command.extend(("--wait-for-file", start_file, "--wait-timeout", "30"))
+      # Must exceed the ready wait above: the in-process side is now released
+      # only after the container reports ready, so it sits on this gate for the
+      # whole of container startup. `wait_for_file` returns silently when it
+      # expires rather than failing, so a short timeout here does not error -
+      # it starts the countdown early, which is the bug this ordering fixes.
+      command.extend(("--wait-for-file", start_file, "--wait-timeout", "120"))
     if ready_file is not None:
       command.extend(("--endpoint-ready-file", ready_file))
     return command
@@ -67,13 +72,16 @@ class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
     ))
     if start_file is not None:
       command.extend(("--wait-for-file", f"/control/{os.path.basename(start_file)}",
-                      "--wait-timeout", "30"))
+                      "--wait-timeout", "120"))
     if ready_file is not None:
       command.extend(("--endpoint-ready-file",
                       f"/control/{os.path.basename(ready_file)}"))
     return command
 
-  def _wait_for_file(self, path, description, timeout=30.0):
+  # 30s was under the observed worst case: a `docker run` on a loaded host has
+  # taken 25s here, and the wait has to cover container startup plus Fast DDS
+  # initialization, not just one of them.
+  def _wait_for_file(self, path, description, timeout=90.0):
     deadline = time.monotonic() + timeout
     while not os.path.exists(path) and time.monotonic() < deadline:
       time.sleep(0.05)
@@ -109,19 +117,31 @@ class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
                      {"start_file": reader_start_file, "ready_file": reader_ready_file})
     reader_command = command_for(domain, topic, "reader", reader_extensibility,
                                  reader_representation, 10, **reader_kwargs)
+    # Launch both before releasing either. Each fixture creates its participant,
+    # then blocks on its start file, and only begins its --duration countdown
+    # once released - so a process launched here costs nobody anything yet.
     reader = subprocess.Popen(reader_command, text=True, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
-    writer = None
+    writer = subprocess.Popen(writer_command, text=True, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE)
     reader_stdout = reader_stderr = writer_stdout = writer_stderr = ""
     try:
-      with open(reader_start_file, "w", encoding="utf-8"):
-        pass
-      self._wait_for_file(reader_ready_file, "reader")
-      writer = subprocess.Popen(writer_command, text=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
-      with open(writer_start_file, "w", encoding="utf-8"):
-        pass
-      self._wait_for_file(writer_ready_file, "writer")
+      # Release the containerized side FIRST and wait for it to be ready before
+      # releasing the in-process one. `docker run` costs 1s on a warm host and
+      # 25s on a loaded one, and whichever side is released first pays that wait
+      # out of its own budget. Releasing the Connext side first - which is what
+      # this did - spent the container's entire startup against a 10s duration,
+      # so under load the Connext endpoint had already exited before the
+      # container existed: `matched: 0`, no remote participant ever seen, and
+      # the writer publishing 100+ samples to nobody. That is HAR-6, and it is
+      # why only the direction with the container second ever failed.
+      sides = [("reader", reader_vendor, reader_start_file, reader_ready_file),
+               ("writer", writer_vendor, writer_start_file, writer_ready_file)]
+      sides.sort(key=lambda side: 0 if side[1] == "fastdds" else 1)
+      for name, _vendor, start_file, ready_file in sides:
+        with open(start_file, "w", encoding="utf-8"):
+          pass
+        self._wait_for_file(ready_file, name)
       writer_stdout, writer_stderr = writer.communicate(timeout=20)
       self.assertEqual(writer.returncode, 0,
                        f"writer failed: {writer_stderr}\n{writer_stdout}")
@@ -129,10 +149,9 @@ class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
       self.assertEqual(reader.returncode, 0,
                        f"reader failed: {reader_stderr}\n{reader_stdout}")
     except Exception:
-      if writer is not None and writer.poll() is None:
+      if writer.poll() is None:
         writer.kill()
-      if writer is not None:
-        writer_stdout, writer_stderr = writer.communicate()
+      writer_stdout, writer_stderr = writer.communicate()
       if reader.poll() is None:
         reader.kill()
       reader_stdout, reader_stderr = reader.communicate()
@@ -162,6 +181,69 @@ class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
     self.assertGreater(reader["results"]["matched"], 0, reader)
     self.assertGreater(reader["results"]["samples"], 0, reader)
 
+  def _assert_made_contact(self, writer, reader):
+    """Evidence the two endpoints actually found each other.
+
+    A negative expectation - no match, or no data - is vacuous on its own: it
+    is equally satisfied by a correct refusal and by a run in which nothing
+    discovered anything, so these subtests reported `ok` through exactly the
+    failure the compatible subtests were failing on (HAR-6, 2026-08-13). The
+    Connext half of the pair reports how many remote participants SPDP turned
+    up; requiring that to be non-zero makes the subtest mean "refused after
+    contact" rather than "silent". Only the Connext side carries the field -
+    the Fast DDS fixture lives in the image and is not rebuilt for this - so
+    whichever side is Connext is the one that has to show contact.
+    """
+    connext_side = self._connext_side(writer, reader)
+    self.assertGreater(
+        connext_side["results"].get("remote_participants", 0), 0,
+        "no remote participant was ever discovered: this pair proves nothing "
+        f"about incompatibility, only that nothing talked. {connext_side}")
+
+  def _connext_side(self, writer, reader):
+    """Whichever half of the pair is Connext, and so reports RTI statuses."""
+    side = next(
+        (end for end in (writer, reader) if end["vendor"] == "connext"), None)
+    self.assertIsNotNone(side, (writer, reader))
+    return side
+
+  def _assert_representation_blocks_the_match(self, writer, reader):
+    """Mismatched DATA_REPRESENTATION: no match, and the middleware says why.
+
+    The policy name comes from RequestedIncompatibleQosStatus.policies (or the
+    offered equivalent), which reports every policy that blocked the match with
+    a count each. Asserting on it turns this from "nothing matched" into "the
+    middleware rejected this pair on DATA_REPRESENTATION specifically", which
+    is the claim the subtest is actually making.
+    """
+    self._assert_made_contact(writer, reader)
+    self.assertGreater(writer["results"]["samples"], 0, writer)
+    self.assertEqual(writer["results"]["matched"], 0, writer)
+    self.assertEqual(reader["results"]["matched"], 0, reader)
+    self.assertEqual(reader["results"]["samples"], 0, reader)
+    connext_side = self._connext_side(writer, reader)
+    policies = connext_side["results"].get("incompatible_policies", {})
+    self.assertIn(
+        "DataRepresentation", policies,
+        "the endpoints did not match, but the middleware never named "
+        "DATA_REPRESENTATION as the reason - so this is not evidence that the "
+        f"representation mismatch is what blocked it. reported: {policies}")
+
+  def _assert_extensibility_blocks_the_data(self, writer, reader):
+    """Mismatched extensibility: data must not cross, but a match may form.
+
+    Deliberately weaker than the representation case, and not merged with it.
+    DATA_REPRESENTATION is a QoS policy, so a mismatch is refused during
+    matching and `matched` stays 0. Extensibility is a property of the type,
+    and Connext and Fast DDS are observed to match `final` against
+    `appendable` endpoints and then fail to deliver - so asserting `matched
+    == 0` here fails against correct behaviour. What the pair must show is
+    that no sample crossed.
+    """
+    self._assert_made_contact(writer, reader)
+    self.assertGreater(writer["results"]["samples"], 0, writer)
+    self.assertEqual(reader["results"]["samples"], 0, reader)
+
   def _run_matrix(self, writer_vendor, reader_vendor):
     for writer_extensibility, reader_extensibility in (
         ("final", "final"),
@@ -175,8 +257,7 @@ class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
         if writer_extensibility == reader_extensibility:
           self._assert_data_flows(writer, reader)
         else:
-          self.assertGreater(writer["results"]["samples"], 0, writer)
-          self.assertEqual(reader["results"]["samples"], 0, reader)
+          self._assert_extensibility_blocks_the_data(writer, reader)
 
   def test_connext_writer_to_fastdds_reader_matrix(self):
     self._run_matrix("connext", "fastdds")
@@ -202,10 +283,7 @@ class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
           if writer_representation == reader_representation:
             self._assert_data_flows(writer, reader)
           else:
-            self.assertGreater(writer["results"]["samples"], 0, writer)
-            self.assertEqual(writer["results"]["matched"], 0, writer)
-            self.assertEqual(reader["results"]["matched"], 0, reader)
-            self.assertEqual(reader["results"]["samples"], 0, reader)
+            self._assert_representation_blocks_the_match(writer, reader)
 
 
 if __name__ == "__main__":

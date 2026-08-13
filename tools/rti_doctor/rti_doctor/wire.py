@@ -54,6 +54,22 @@ def encapsulation_text(encapsulation_ids):
     for value in encapsulation_ids)
 
 
+#: RTPS submessage kinds this module counts, by their `rtps.sm.id` value.
+#:
+#: DATA and DATA_FRAG answer "did user data cross the wire". The other three are
+#: the reliable protocol itself: a RELIABLE writer must heartbeat a reader it has
+#: matched, that reader must ACKNACK, and GAP is how the writer says a sequence
+#: number will never arrive. Without them a reliable path could only be reported
+#: as "no data", which does not distinguish a writer nobody is asking from a
+#: writer whose reader never answers.
+SUBMESSAGE_DATA = "0x15"
+SUBMESSAGE_DATA_FRAG = "0x16"
+SUBMESSAGE_HEARTBEAT = "0x07"
+SUBMESSAGE_ACKNACK = "0x06"
+SUBMESSAGE_GAP = "0x08"
+SUBMESSAGE_NACK_FRAG = "0x12"
+
+
 @dataclass
 class WireObservation:
   """One RTPS user-data observation emitted by tshark's fields formatter."""
@@ -500,9 +516,6 @@ def summarize(observations, writer_entity_id=None, writer_guid_prefix=None,
   consumer reads the keys alone and would otherwise attribute them to the
   selected writer.
   """
-  if writer_guid_prefix is not None:
-    observations = [item for item in observations
-                    if _same_guid_prefix(item.writer_guid_prefix, writer_guid_prefix)]
   if writer_entity_id is not None:
     observations = [item for item in observations
                     if _same_entity_id(item.writer_entity_id, writer_entity_id)]
@@ -512,14 +525,42 @@ def summarize(observations, writer_entity_id=None, writer_guid_prefix=None,
   else:
     observations = [item for item in observations if not _is_builtin_writer(item)]
 
+  # The GUID prefix filter applies only to what the target writer SENT.
+  #
+  # `WireObservation.writer_guid_prefix` is `rtps.guidPrefix.src` - the
+  # participant that sent the frame, not the participant that owns the writer
+  # named in the submessage. Applying it to every observation therefore dropped
+  # exactly the half of a reliable conversation that proves it is working: an
+  # ACKNACK travels from the READER's participant back to the writer, so its
+  # source prefix is the reader's and it never survived this filter. Entity ID
+  # is the conversation key in both directions; the prefix only disambiguates
+  # the outbound leg.
+  if writer_guid_prefix is not None:
+    observations = [
+        item for item in observations
+        if not _is_writer_sent(item)
+        or _same_guid_prefix(item.writer_guid_prefix, writer_guid_prefix)]
+
   encapsulations, writers = set(), set()
   for item in observations:
     encapsulations.update(_values(item.encapsulation_id))
     writers.update(_values(item.writer_entity_id))
+  data_packets = sum(_has_submessage(item, SUBMESSAGE_DATA) for item in observations)
+  data_fragments = sum(_has_submessage(item, SUBMESSAGE_DATA_FRAG)
+                       for item in observations)
+  heartbeats = sum(_has_submessage(item, SUBMESSAGE_HEARTBEAT) for item in observations)
+  acknacks = sum(_has_submessage(item, SUBMESSAGE_ACKNACK) for item in observations)
+  gaps = sum(_has_submessage(item, SUBMESSAGE_GAP) for item in observations)
+  nack_fragments = sum(_has_submessage(item, SUBMESSAGE_NACK_FRAG)
+                       for item in observations)
   return {
       "packets": len(observations),
-      "data_packets": sum(_has_submessage(item, "0x15") for item in observations),
-      "data_fragments": sum(_has_submessage(item, "0x16") for item in observations),
+      "data_packets": data_packets,
+      "data_fragments": data_fragments,
+      "heartbeats": heartbeats,
+      "acknacks": acknacks,
+      "gaps": gaps,
+      "nack_fragments": nack_fragments,
       "encapsulation_ids": sorted(encapsulations),
       "writer_entity_ids": sorted(writers),
       "payload_bytes": sum(item.payload_bytes for item in observations),
@@ -535,6 +576,26 @@ def summarize(observations, writer_entity_id=None, writer_guid_prefix=None,
           "The target writer is therefore a filter, not an attribution claim."
       ),
   }
+
+
+#: Submessage kinds a writer emits. Used to decide whether a frame's source GUID
+#: prefix should be expected to be the target writer's own.
+_WRITER_SENT_SUBMESSAGES = (SUBMESSAGE_DATA, SUBMESSAGE_DATA_FRAG,
+                            SUBMESSAGE_HEARTBEAT, SUBMESSAGE_GAP)
+
+
+def _is_writer_sent(observation):
+  """Whether this frame carries a submessage a writer sends, rather than receives.
+
+  A frame coalescing both directions cannot happen - RTPS frames travel one way -
+  but a frame carrying no recognised kind (an INFO_* only frame that matched on
+  entity ID) is treated as writer-sent, which keeps the prefix filter as strict
+  as it was for everything it used to admit.
+  """
+  return any(_has_submessage(observation, kind)
+             for kind in _WRITER_SENT_SUBMESSAGES) or not any(
+                 _has_submessage(observation, kind)
+                 for kind in (SUBMESSAGE_ACKNACK, SUBMESSAGE_NACK_FRAG))
 
 
 def endpoint_entity_id(endpoint):
@@ -583,10 +644,36 @@ def _has_submessage(observation, identifier):
   return identifier.lower() in _values(observation.submessage_id)
 
 
+#: Trailing entity-KIND bytes that mark a builtin writer rather than a user one.
+#:
+#: `c2`/`c3` are the standard builtin writer kinds - SPDP, SEDP and the
+#: participant-message channel. `82` is RTI's vendor-specific ServiceRequest
+#: writer (`0x00020082`), which is builtin too but does not use those kinds.
+#:
+#: Matching the last two hex characters matches the entity kind byte exactly,
+#: which is what makes this safe: a USER writer's kind is 0x02 or 0x03, so its
+#: id ends "02"/"03" and can never end "c2", "c3" or "82".
+#:
+#: ServiceRequest only started mattering when this module began counting
+#: HEARTBEAT/ACKNACK. Those carry no serialized payload, so the old
+#: encapsulation-only display filter had excluded them from the read entirely.
+#: Measured against a live participant capture: the ServiceRequest channel alone
+#: contributed 7 HEARTBEAT and 7 ACKNACK, which the reliable-path check would
+#: have read as a verified handshake on a topic carrying no user traffic at all.
+#:
+#: Only the writer id is tested, and that is sufficient rather than a shortcut:
+#: both HEARTBEAT and ACKNACK name the WRITER of the conversation in
+#: `rtps.sm.wrEntityId`, so one test catches both directions. Verified on the
+#: same capture - every builtin frame paired `000003c2`/`000003c7`,
+#: `000004c2`/`000004c7`, `000100c2` or `00020082`/`00020087`.
+_BUILTIN_WRITER_KINDS = ("c2", "c3", "82")
+
+
 def _is_builtin_writer(observation):
-  """Discovery and participant-message writers end in the RTPS C2/C3 kinds."""
-  return any(value.endswith("c2") or value.endswith("c3")
-             for value in _values(observation.writer_entity_id))
+  """Whether this frame belongs to a builtin channel rather than to user data."""
+  return any(value.endswith(kind)
+             for value in _values(observation.writer_entity_id)
+             for kind in _BUILTIN_WRITER_KINDS)
 
 
 def capture_filter(domain_id, endpoint, participant_qos, owner=None):
@@ -708,10 +795,32 @@ def inspect_pcap(path, tshark_path=None, writer_entity_id=None, writer_guid_pref
 
   command = [
       tshark_path, "-n", "-r", path,
-      # The serialization encapsulation kind is direct evidence of a DDS sample.
-      # Generic RTPS DATA also carries discovery parameter lists, so filtering
-      # by submessage ID alone would count SEDP as user payload.
-      "-Y", "rtps.param.serialize.encap_kind",
+      # Two kinds of frame are user-data evidence, and only one carries a
+      # payload.
+      #
+      # The encapsulation kind is direct evidence of a DDS sample, and it stays
+      # the test for DATA: generic RTPS DATA also carries discovery parameter
+      # lists, so admitting DATA by submessage ID alone would count SEDP as user
+      # payload. But it was the WHOLE filter, and HEARTBEAT, ACKNACK, GAP and
+      # NACK_FRAG carry no serialized payload at all - so every frame of the
+      # reliable protocol was discarded here, before `summarize` ever saw it.
+      # That made "is the reliable handshake working" unanswerable from a
+      # capture, which is the one place it can be answered when the peer is not
+      # RTI and its own counters are unreachable.
+      #
+      # The protocol kinds are admitted by submessage ID, which is safe for them
+      # in a way it is not for DATA: none of the four appears in SPDP or SEDP
+      # except between builtin endpoints, and `summarize` drops builtin writers
+      # when no entity filter narrows the read.
+      #
+      # Written as an `==` chain rather than `rtps.sm.id in {...}`: the set
+      # operator's separator changed from spaces to commas between Wireshark 3
+      # and 4, and a display filter that fails to compile costs the entire
+      # capture rather than one field.
+      "-Y", " or ".join(["rtps.param.serialize.encap_kind"] + [
+          f"rtps.sm.id == {kind}" for kind in (
+              SUBMESSAGE_HEARTBEAT, SUBMESSAGE_ACKNACK,
+              SUBMESSAGE_GAP, SUBMESSAGE_NACK_FRAG)]),
       # occurrence=a, not =f. Every field here is per-submessage and RTPS
       # coalesces submessages into one frame, typically behind an INFO_TS. With
       # only the first occurrence, rtps.sm.id read 0x09 (INFO_TS) on almost

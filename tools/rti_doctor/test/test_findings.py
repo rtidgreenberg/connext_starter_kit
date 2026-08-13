@@ -100,6 +100,26 @@ class TestVerdict(unittest.TestCase):
     outcome = f.ProbeOutcome(attempted=True, matched=True, samples_received=0)
     self.assertIn("no samples received", f.verdict_line([], outcome))
 
+  def test_a_writer_probe_that_published_nothing_is_not_called_silent(self):
+    """A reader target: the probe IS the sending side.
+
+    "matched but no samples received" described the probe's own restraint as a
+    symptom of the peer. Verified against a saved report on a Connext reader,
+    where the writer probe never published by design and the verdict read as
+    though the system were broken.
+    """
+    outcome = f.ProbeOutcome(attempted=True, matched=True, samples_received=0,
+                             wrote_entity=True, wrote_samples=False)
+    line = f.verdict_line([], outcome)
+    self.assertIn("nothing published", line)
+    self.assertNotIn("no samples received", line)
+
+  def test_a_writer_probe_that_did_publish_is_judged_on_delivery(self):
+    outcome = f.ProbeOutcome(attempted=True, matched=True, samples_received=3,
+                             wrote_entity=True, wrote_samples=True,
+                             payload_verdict=f.PAYLOAD_FULL)
+    self.assertIn("3 sample(s)", f.verdict_line([], outcome))
+
   def test_full_payload(self):
     outcome = f.ProbeOutcome(attempted=True, matched=True, samples_received=5,
                              payload_verdict=f.PAYLOAD_FULL)

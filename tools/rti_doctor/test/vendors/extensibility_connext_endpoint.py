@@ -119,8 +119,45 @@ def main():
   wait_for_file(args.wait_for_file, args.wait_timeout)
   sample_type = build_type(args.extensibility, args.schema)
   topic = dds.DynamicData.Topic(participant, args.topic, sample_type)
-  results = {"matched": 0, "samples": 0}
+  # `remote_participants` is the positive control for a deliberately
+  # incompatible pair. `matched: 0` on its own cannot tell "the endpoints found
+  # each other and correctly refused to match" from "nothing on this host talked
+  # to anything", so a test asserting only `matched == 0` passes just as
+  # happily when the whole harness is dead. Counting the remote participants
+  # SPDP turned up separates the two: incompatibility is a decision made *after*
+  # contact. It is counted for both roles because either can be the Connext half
+  # of a cross-vendor pair, and it is a participant-level count so it does not
+  # depend on the remote vendor reporting anything.
+  results = {"matched": 0, "samples": 0, "remote_participants": 0,
+             "incompatible_qos": 0, "incompatible_policies": {}}
   deadline = time.monotonic() + args.duration
+
+  def observe_contact(endpoint, status_name):
+    results["remote_participants"] = max(
+        results["remote_participants"], len(participant.discovered_participants()))
+    # The two status types are not symmetrical in this binding: `total_count`
+    # is a method on RequestedIncompatibleQosStatus and a plain int on
+    # OfferedIncompatibleQosStatus. Read it defensively rather than assuming
+    # either shape - guessing wrong here crashes the fixture before it prints
+    # its JSON, which surfaces as every subtest failing at once instead of as
+    # the one thing that broke.
+    status = getattr(endpoint, status_name)
+    total = status.total_count
+    total = total() if callable(total) else total
+    results["incompatible_qos"] = max(results["incompatible_qos"], total)
+    # `policies` is the whole story; `last_policy` is one line of it. A pair
+    # that mismatches on reliability, durability and deadline at once reports
+    # all three here with a count each, while `last_policy` names only
+    # whichever was evaluated last - so reading last_policy alone would hide
+    # two real incompatibilities behind the third. Keep the per-policy counts:
+    # they are what lets a test assert *which* policy blocked the match rather
+    # than only that something did.
+    for entry in status.policies:
+      if entry.count <= 0:
+        continue
+      name = getattr(entry.policy, "__name__", None) or str(entry.policy)
+      results["incompatible_policies"][name] = max(
+          results["incompatible_policies"].get(name, 0), entry.count)
 
   if args.role == "writer":
     writer_qos = dds.DataWriterQos()
@@ -151,6 +188,7 @@ def main():
       writer.write(sample)
       results["matched"] = max(results["matched"], writer.publication_matched_status.current_count)
       results["samples"] += 1
+      observe_contact(writer, "offered_incompatible_qos_status")
       time.sleep(0.05)
   else:
     reader_qos = dds.DataReaderQos()
@@ -172,9 +210,18 @@ def main():
     while time.monotonic() < deadline:
       results["matched"] = max(results["matched"], reader.subscription_matched_status.current_count)
       results["samples"] += sum(1 for sample in reader.take() if sample.info.valid)
+      observe_contact(reader, "requested_incompatible_qos_status")
       time.sleep(0.05)
 
   participant.close()
+  if results["incompatible_policies"]:
+    # Say what the middleware refused on, in the process output, so a run that
+    # reports "no match" also says why on the spot rather than only in a JSON
+    # field somebody has to go and read.
+    named = ", ".join(f"{name} (x{count})" for name, count
+                      in sorted(results["incompatible_policies"].items()))
+    print(f"incompatible QoS on this {args.role}: {named}", file=sys.stderr,
+          flush=True)
   print(json.dumps({"vendor": "connext", "role": args.role,
                     "extensibility": args.extensibility,
                     "reliability": args.reliability, "durability": args.durability,

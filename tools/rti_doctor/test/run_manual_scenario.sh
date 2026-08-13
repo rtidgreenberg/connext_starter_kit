@@ -54,6 +54,12 @@ topic="DoctorManual"
 topic_prefix="ManualRxO"
 duration=300
 fastdds_image="${RTI_DOCTOR_FASTDDS_IMAGE:-rti-doctor-fastdds-e2e:3.6.2}"
+# Every Connext participant these scenarios start is named from this prefix, so
+# the Doctor report and the topology table say which endpoint is which instead
+# of showing "(unnamed)" beside a peer that named itself. The vendor and role are
+# appended per endpoint. Fast DDS and Cyclone participants keep whatever name
+# their own vendor assigns - the fixtures do not set it.
+MANUAL_PARTICIPANT_PREFIX="doctor_manual"
 scenarios=(
     healthy
     no-type-info
@@ -230,6 +236,18 @@ trap_scenario_cleanup() {
     trap 'exit 130' INT TERM
 }
 
+# What the participant of VENDOR in ROLE will be called in discovery, for the
+# banner. Only the Connext fixtures accept a name; the others announce whatever
+# their vendor picked, so say so rather than printing a name that will not appear.
+participant_label() {
+    local vendor="$1" role="$2"
+    if [[ "$vendor" == "connext" ]]; then
+        printf '%s_connext_%s' "$MANUAL_PARTICIPANT_PREFIX" "$role"
+    else
+        printf '%s default name' "$vendor"
+    fi
+}
+
 run_fixture() {
     local mode="$1"
     local scenario_topic="$topic"
@@ -238,6 +256,7 @@ run_fixture() {
     fi
     cat <<EOF
 Fixture started: mode=${mode}, domain=${domain}, topic=${scenario_topic}
+Participant: ${MANUAL_PARTICIPANT_PREFIX}
 In another terminal, run:
     ./tools/rti_doctor/run_rti_doctor.sh --domain ${domain}
 In the GUI, select topic ${scenario_topic}.
@@ -245,7 +264,8 @@ Expected result: ${2}
 EOF
     PYTHONPATH="$TOOL_DIR${PYTHONPATH:+:$PYTHONPATH}" \
         python "$SCRIPT_DIR/fixture_publisher.py" --mode "$mode" \
-        --domain "$domain" --topic "$scenario_topic" --duration "$duration"
+        --domain "$domain" --topic "$scenario_topic" --duration "$duration" \
+        --participant-name "$MANUAL_PARTICIPANT_PREFIX"
 }
 
 start_rxo_endpoint() {
@@ -259,7 +279,8 @@ start_rxo_endpoint() {
         PYTHONPATH="$TOOL_DIR${PYTHONPATH:+:$PYTHONPATH}" \
             python "$endpoint" --domain "$domain" --topic-prefix "$topic_prefix" \
             --role "$role" --mode "$mode" --scenarios reliability \
-            --duration "$duration" --type-object-v1-only
+            --duration "$duration" --type-object-v1-only \
+            --participant-name "${MANUAL_PARTICIPANT_PREFIX}_connext_${role}"
     else
         endpoint="$SCRIPT_DIR/vendors/rxo_cyclone_matrix.py"
         PYTHONPATH="$TOOL_DIR${PYTHONPATH:+:$PYTHONPATH}" \
@@ -279,6 +300,7 @@ run_rxo_pair() {
 
     cat <<EOF
 ${title} endpoints started: mode=${mode}, domain=${domain}, topic=${topic_prefix}_reliability
+Participants: writer=$(participant_label "$writer_vendor" writer), reader=$(participant_label "$reader_vendor" reader)
 In another terminal, run:
     ./tools/rti_doctor/run_rti_doctor.sh --domain ${domain}
 In the GUI, select topic ${topic_prefix}_reliability.
@@ -314,7 +336,8 @@ start_connext_fastdds_endpoint() {
         --domain "$domain" --topic "$topic" --role "$role" \
         --extensibility final --schema fastdds --reliability "$reliability" \
         --durability volatile --deadline-seconds 1 --ownership shared \
-        --representation xcdr1 --duration "$duration"
+        --representation xcdr1 --duration "$duration" \
+        --participant-name "${MANUAL_PARTICIPANT_PREFIX}_connext_${role}"
 }
 
 start_fastdds_endpoint() {
@@ -354,6 +377,7 @@ run_fastdds_pair() {
 
     cat <<EOF
 Connext/Fast DDS endpoints started: mode=${mode}, domain=${domain}, topic=${topic}
+Participants: writer=$(participant_label "$writer_vendor" writer), reader=$(participant_label "$reader_vendor" reader)
 In another terminal, run:
     ./tools/rti_doctor/run_rti_doctor.sh --domain ${domain}
 In the GUI, select topic ${topic}.

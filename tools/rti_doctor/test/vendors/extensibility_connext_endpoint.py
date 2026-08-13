@@ -97,6 +97,9 @@ def main():
   parser.add_argument("--representation", choices=("xcdr1", "xcdr2"),
                       default="xcdr1")
   parser.add_argument("--duration", type=float, default=6.0)
+  parser.add_argument("--participant-name",
+                      help="Participant name to advertise in discovery "
+                           "(default: doctor_connext_<role>)")
   parser.add_argument("--wait-for-file",
                       help="Wait for PATH after participant creation")
   parser.add_argument("--wait-timeout", type=float, default=15.0)
@@ -111,6 +114,13 @@ def main():
     parser.error("--deadline-seconds must be positive")
 
   participant_qos = dds.DomainParticipantQos()
+  # Name the participant, because the name is how a Doctor report identifies
+  # which half of a pair it is describing. Connext leaves the name empty by
+  # default, and every other vendor supplies one of its own (Fast DDS reports
+  # "RTPSParticipant"), so an unnamed Connext side reads as "(unnamed)" next to
+  # a named peer - exactly the two rows a reader needs to tell apart.
+  participant_qos.participant_name.name = (
+      args.participant_name or f"doctor_connext_{args.role}")
   if args.type_object_v1_only:
     # Must precede participant creation: the propagation settings are read
     # when the participant is built, not when an endpoint is added to it.

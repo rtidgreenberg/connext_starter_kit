@@ -570,6 +570,16 @@ The `fastdds-connext-compatible` fixture deliberately uses the custom Fast DDS
 FINAL TypeObject from the vendor suite: its endpoints exchange data, but Doctor
 may also report `type.assignability`. Run `--help` for all flags.
 
+Every Connext participant a scenario starts is named — `doctor_manual`,
+`doctor_manual_connext_writer`, `doctor_manual_connext_reader` — and the names in
+use are printed with the rest of the scenario banner, so the `PEER` line and the
+topology table say which endpoint is which. Connext supplies no default
+participant name, so without this the Connext half of a cross-vendor pair read as
+`(unnamed)` next to a peer that names itself (Fast DDS reports
+`RTPSParticipant`). Fast DDS and Cyclone participants keep whatever name their own
+vendor assigns; the fixtures do not set it. Both Connext vendor fixtures take
+`--participant-name` to override the default.
+
 The fixture publisher can also be run by hand to create a system to point the
 tool at:
 

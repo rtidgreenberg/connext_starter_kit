@@ -20,7 +20,8 @@ Its rules:
 
 import time
 
-from . import compat, findings as f, probe as probe_mod, records, typewalk, wire
+from . import (compat, findings as f, probe as probe_mod, records, typewalk,
+               vendors, wire)
 
 WIDTH = 100
 RULE = "=" * WIDTH
@@ -186,7 +187,8 @@ class ReportData:
   def __init__(self, domain_id, scope, all_findings, probe_result=None,
                endpoint=None, participant=None, type_lookup_settings=None,
                environment=None, generated_at=None, wire_evidence=None,
-               topology=None, discovery_evidence=None, capture_interface=None):
+               topology=None, discovery_evidence=None, capture_interface=None,
+               participant_evidence=None):
     self.domain_id = domain_id
     self.scope = scope
     self.findings = f.rank(f.link_causes(list(all_findings)))
@@ -202,6 +204,12 @@ class ReportData:
     # that no DDS-level observation can supply.
     self.discovery_evidence = discovery_evidence
     self.capture_interface = capture_interface
+    # RTI Network Capture of rti_doctor's OWN participant. Kept separate from
+    # `wire_evidence` rather than merged into it because the two have different
+    # scopes and a merged number would belong to neither: an interface capture
+    # sees every participant on the wire and no shared memory at all, while this
+    # sees one participant on every transport.
+    self.participant_evidence = participant_evidence
     self.topology = topology
 
   @property
@@ -215,6 +223,13 @@ class ReportData:
     outcome.attempted = result.attempted
     outcome.matched = result.matched
     outcome.samples_received = result.samples_taken
+    outcome.wrote_entity = getattr(result, "probe_kind", "reader") == "writer"
+    outcome.wrote_samples = getattr(result, "wrote_samples", False)
+    outcome.acknowledged = getattr(result, "acknowledged", None)
+    if outcome.wrote_entity and outcome.wrote_samples:
+      # The writer probe's delivery evidence is what it published and got
+      # acknowledged, not what it read back.
+      outcome.samples_received = result.samples_written
     if not result.created:
       outcome.skip_reason = result.create_error or "reader could not be created"
       outcome.attempted = False
@@ -269,14 +284,25 @@ def render_view_sections(data):
       "findings": "\n".join(_render_findings(data)),
       "type": "\n".join(_render_type_appendix(data)),
       "probe": "\n".join(_render_counter_appendix(data)),
-      "wire": "\n".join(_render_wire_appendix(data) or [
-          "No direct RTPS packet capture was requested.",
-          "",
-          f"Fast DDS version: {CAPTURE_PLACEHOLDER}.",
-          "Press c to capture RTPS packets for this endpoint, C to choose the "
-          "interface.", ""]),
+      "wire": "\n".join(_render_wire_appendix(data) or _wire_placeholder(data)),
       "config": "\n".join(_render_config_appendix(data)),
   }
+
+
+def _wire_placeholder(data):
+  """What an uncaptured Wire tab offers, named for what THIS peer would gain.
+
+  The old text advertised a Fast DDS version on every endpoint, so on a Connext
+  peer it offered the one thing a capture there cannot produce.
+  """
+  lines = ["No direct RTPS packet capture was requested.", ""]
+  if _peer_may_have_fastdds_version(data):
+    lines.append(f"Fast DDS version: {CAPTURE_PLACEHOLDER}.")
+  lines += [
+      f"RTPS reliable handshake (HEARTBEAT/ACKNACK/GAP): {CAPTURE_PLACEHOLDER}.",
+      "Press c to capture RTPS packets for this endpoint, C to choose the "
+      "interface.", ""]
+  return lines
 
 
 def render_text(data):
@@ -326,7 +352,7 @@ def _render_capture_summary(data):
 
   gained, unchanged = [], []
 
-  versions = (discovery or {}).get("fastdds_product_versions") or []
+  versions = _peer_fastdds_versions(data)
   if versions and not discovery_error:
     gained.append(("Fast DDS version", ", ".join(versions),
                    "packets only - the discovery API cannot report a product "
@@ -361,6 +387,57 @@ def _render_capture_summary(data):
   lines.append("Full counts, filters and announcement details in Appendix C.")
   lines.append("")
   return lines
+
+
+def _peer_may_have_fastdds_version(data):
+  """Whether a Fast DDS product version could describe THIS report's peer.
+
+  The test is deliberately "not known to be RTI" rather than "known to be Fast
+  DDS". Suppressing on a positive Fast DDS identification only would also
+  suppress every report that carries no participant record at all - a headless
+  single-topic run, or a peer whose vendor id could not be read - and those are
+  cases where the packet-read version is the only version evidence there is.
+
+  An RTI peer is the one case that is certain: the product version comes from a
+  Fast DDS vendor-specific discovery PID that an RTI participant never sends, so
+  any version in the capture belongs to somebody else on the domain.
+  """
+  participant = data.participant
+  return participant is None or not vendors.is_rti(participant.vendor_id)
+
+
+def _peer_fastdds_versions(data):
+  """Fast DDS versions attributable to THIS report's peer.
+
+  A capture is scoped to a domain, not to an endpoint, so it hears every
+  participant on the wire. `fastdds_product_versions` is that whole set, and
+  rendering it on an endpoint report attributed another participant's version to
+  the selected peer - a Connext reader report led with "Fast DDS version 3.6.2.0"
+  read off the unrelated Fast DDS writer sharing its domain.
+
+  Narrowed in two steps, each only as far as the evidence allows:
+
+    * A peer known to be RTI gets nothing; see `_peer_may_have_fastdds_version`.
+    * When the peer's GUID prefix is known AND the evidence carries the
+      per-participant pairing, keep only versions that prefix advertised. A
+      prefix that appears in a populated pairing and owns no version really did
+      not advertise one, so that yields `[]` rather than falling back - falling
+      back is what re-attributes a neighbour's version.
+
+  Anything less determined than that returns the unpaired set, which is what
+  every caller rendered before there was a pairing to narrow by.
+  """
+  discovery = data.discovery_evidence or {}
+  everything = sorted(discovery.get("fastdds_product_versions") or [])
+  if not _peer_may_have_fastdds_version(data):
+    return []
+  pairs = [pair for pair in (discovery.get("fastdds_participant_versions") or [])
+           if isinstance(pair, (list, tuple)) and len(pair) == 2]
+  prefix = wire.record_guid_prefix(data.participant) if data.participant else None
+  if not prefix or not pairs:
+    return everything
+  return sorted({str(pair[1]) for pair in pairs
+                 if str(pair[0]).replace(":", "").lower() == prefix})
 
 
 def _representation_agreement(endpoint, observed):
@@ -408,13 +485,17 @@ def capture_headline(data):
   discovery = data.discovery_evidence or {}
   parts = []
 
-  versions = discovery.get("fastdds_product_versions") or []
-  if discovery.get("error"):
-    parts.append("version unreadable")
-  elif versions:
-    parts.append(f"Fast DDS version {', '.join(versions)}")
-  else:
-    parts.append("no Fast DDS version advertised")
+  # Never for a peer known to be RTI. There the headline led with "no Fast DDS
+  # version advertised", which is true of every RTI endpoint that ever existed
+  # and told the operator nothing about the capture they just ran.
+  if _peer_may_have_fastdds_version(data):
+    versions = _peer_fastdds_versions(data)
+    if discovery.get("error"):
+      parts.append("version unreadable")
+    elif versions:
+      parts.append(f"Fast DDS version {', '.join(versions)}")
+    else:
+      parts.append("no Fast DDS version advertised")
 
   encapsulations = wire_evidence.get("encapsulation_ids") or []
   if encapsulations:
@@ -424,6 +505,14 @@ def capture_headline(data):
     # representation are the same observation, and the operator needs to know
     # which question went unanswered.
     parts.append("no user DATA, so no wire representation")
+
+  # The reliable handshake, when there was any of it. This is what the version
+  # line used to occupy on a Connext peer, and it is the fact an operator is
+  # actually after: heartbeats answered by ACKNACKs is a working reliable path.
+  heartbeats = wire_evidence.get("heartbeats", 0)
+  acknacks = wire_evidence.get("acknacks", 0)
+  if heartbeats or acknacks:
+    parts.append(f"{heartbeats} HEARTBEAT / {acknacks} ACKNACK")
 
   frames = wire_evidence.get("packets", 0)
   parts.append(f"{frames} matching frame{'' if frames == 1 else 's'}")
@@ -545,60 +634,120 @@ def _render_counter_appendix(data):
     lines += [f"(no counters: {reason})", ""]
     return lines
 
-  lines.append(f"probe window: {result.elapsed:.2f}s; valid samples taken: "
-               f"{result.samples_taken}")
+  wrote = getattr(result, "probe_kind", "reader") == "writer"
+  if wrote:
+    lines.append(f"probe window: {result.elapsed:.2f}s; samples written: "
+                 f"{result.samples_written}"
+                 + ("" if result.wrote_samples
+                    else " (the probe published nothing - see the note below)"))
+  else:
+    lines.append(f"probe window: {result.elapsed:.2f}s; valid samples taken: "
+                 f"{result.samples_taken}")
   lines.append("")
 
-  lines.append("subscription_matched")
+  lines.append("publication_matched" if wrote else "subscription_matched")
   for name in ("current_count", "current_count_change", "total_count",
                "total_count_change"):
     lines.append(f"  {name.ljust(52)}{compat.counter_text(result.subscription_matched, name)}")
 
-  lines.append("requested_incompatible_qos")
-  for name in ("total_count", "total_count_change"):
-    lines.append(f"  {name.ljust(52)}"
-                 f"{compat.counter_text(result.requested_incompatible_qos, name)}")
-  policy = compat.get(result.requested_incompatible_qos, "last_policy", None)
-  lines.append(f"  {'last_policy'.ljust(52)}{policy if policy is not None else compat.na_text()}")
-  # `last_policy` names one policy; `policies` names all of them. Kept side by
-  # side rather than replacing it, because a reader comparing this report
-  # against the middleware's own status output should find both fields.
-  policies = compat.incompatible_policies(result.requested_incompatible_qos)
-  if policies:
-    policy_text = ", ".join(f"{name} (x{count})" for name, count in policies)
-  elif result.requested_incompatible_qos is None:
-    policy_text = compat.na_text()
+  # Which incompatible-QoS status exists at all depends on which entity the
+  # probe created. Printing the reader's on a writer probe reported a status
+  # that was never read as one the middleware could not supply.
+  if wrote:
+    lines.append("offered_incompatible_qos")
+    for name in ("total_count", "total_count_change"):
+      lines.append(f"  {name.ljust(52)}"
+                   f"{compat.counter_text(result.offered_incompatible_qos, name)}")
+    policy = compat.get(result.offered_incompatible_qos, "last_policy", None)
+    lines.append(f"  {'last_policy'.ljust(52)}"
+                 f"{policy if policy is not None else compat.na_text()}")
+    policies = compat.incompatible_policies(result.offered_incompatible_qos)
+    if policies:
+      policy_text = ", ".join(f"{name} (x{count})" for name, count in policies)
+    elif result.offered_incompatible_qos is None:
+      policy_text = compat.na_text()
+    else:
+      policy_text = "none"
+    lines.append(f"  {'policies'.ljust(52)}{policy_text}")
   else:
-    policy_text = "none"
-  lines.append(f"  {'policies'.ljust(52)}{policy_text}")
+    lines.append("requested_incompatible_qos")
+    for name in ("total_count", "total_count_change"):
+      lines.append(f"  {name.ljust(52)}"
+                   f"{compat.counter_text(result.requested_incompatible_qos, name)}")
+    policy = compat.get(result.requested_incompatible_qos, "last_policy", None)
+    lines.append(f"  {'last_policy'.ljust(52)}{policy if policy is not None else compat.na_text()}")
+    # `last_policy` names one policy; `policies` names all of them. Kept side by
+    # side rather than replacing it, because a reader comparing this report
+    # against the middleware's own status output should find both fields.
+    policies = compat.incompatible_policies(result.requested_incompatible_qos)
+    if policies:
+      policy_text = ", ".join(f"{name} (x{count})" for name, count in policies)
+    elif result.requested_incompatible_qos is None:
+      policy_text = compat.na_text()
+    else:
+      policy_text = "none"
+    lines.append(f"  {'policies'.ljust(52)}{policy_text}")
 
-  lines.append("sample_lost")
-  for name in ("total_count", "total_count_change"):
-    lines.append(f"  {name.ljust(52)}{compat.counter_text(result.sample_lost, name)}")
-  lines.append(f"  {'last_reason'.ljust(52)}"
-               f"{compat.reason_text(compat.get(result.sample_lost, 'last_reason', None))}")
+  if wrote:
+    # The whole reader block is omitted rather than printed as unavailable.
+    # `n/a (not available on Connext X)` is a claim about the middleware, and
+    # every reader status read that way on this path was really "no reader was
+    # ever created" - the probe made a writer, because the selected endpoint is
+    # a reader. Those statuses exist on this Connext version; nothing asked for
+    # them.
+    lines.append("datawriter_protocol_status")
+    for name in probe_mod.WRITER_PROTOCOL_COUNTERS:
+      value = result.writer_protocol.get(name)
+      lines.append(f"  {name.ljust(52)}{compat.na_text() if value is None else value}")
 
-  lines.append("sample_rejected")
-  for name in ("total_count", "total_count_change"):
-    lines.append(f"  {name.ljust(52)}{compat.counter_text(result.sample_rejected, name)}")
-  lines.append(f"  {'last_reason'.ljust(52)}"
-               f"{compat.reason_text(compat.get(result.sample_rejected, 'last_reason', None))}")
+    lines.append("reliable_writer_cache_changed_status")
+    for name in probe_mod.WRITER_CACHE_COUNTERS:
+      value = result.writer_cache.get(name)
+      lines.append(f"  {name.ljust(52)}{compat.na_text() if value is None else value}")
+  else:
+    lines.append("sample_lost")
+    for name in ("total_count", "total_count_change"):
+      lines.append(f"  {name.ljust(52)}{compat.counter_text(result.sample_lost, name)}")
+    lines.append(f"  {'last_reason'.ljust(52)}"
+                 f"{compat.reason_text(compat.get(result.sample_lost, 'last_reason', None))}")
 
-  lines.append("datareader_protocol_status")
-  for name in probe_mod.PROTOCOL_COUNTERS:
-    value = result.protocol.get(name)
-    lines.append(f"  {name.ljust(52)}{compat.na_text() if value is None else value}")
+    lines.append("sample_rejected")
+    for name in ("total_count", "total_count_change"):
+      lines.append(f"  {name.ljust(52)}{compat.counter_text(result.sample_rejected, name)}")
+    lines.append(f"  {'last_reason'.ljust(52)}"
+                 f"{compat.reason_text(compat.get(result.sample_rejected, 'last_reason', None))}")
 
-  lines.append("datareader_cache_status")
-  for name in probe_mod.CACHE_COUNTERS:
-    value = result.cache.get(name)
-    lines.append(f"  {name.ljust(52)}{compat.na_text() if value is None else value}")
+    lines.append("datareader_protocol_status")
+    for name in probe_mod.PROTOCOL_COUNTERS:
+      value = result.protocol.get(name)
+      lines.append(f"  {name.ljust(52)}{compat.na_text() if value is None else value}")
+
+    lines.append("datareader_cache_status")
+    for name in probe_mod.CACHE_COUNTERS:
+      value = result.cache.get(name)
+      lines.append(f"  {name.ljust(52)}{compat.na_text() if value is None else value}")
 
   lines.append("topic")
   count = result.inconsistent_topic_count
   lines.append(f"  {'inconsistent_topic_status.total_count'.ljust(52)}"
                f"{compat.na_text() if count is None else count}")
   lines.append("")
+
+  if wrote and not result.wrote_samples:
+    lines.extend(_wrap(
+        "The probe created a matching writer but published nothing, so the "
+        "counters above describe discovery and the reliable handshake only - "
+        "not delivery. rti_doctor does not write into a system it is "
+        "diagnosing unless asked: publishing synthetic samples would deliver "
+        "them to the real subscriber, which cannot distinguish them from "
+        "production data. Zero pushed samples here is rti_doctor's own "
+        "restraint, never a fault of the peer."))
+    lines.append("")
+  elif wrote and result.acknowledged is not None:
+    lines.append(_kv("acknowledged by the selected reader",
+                     "yes" if result.acknowledged else
+                     "no - wait_for_acknowledgments timed out", 52))
+    lines.append("")
 
   if result.listener_events:
     lines.append("listener events (in order observed)")
@@ -622,8 +771,15 @@ WIRE_LABEL_PAD = 38
 
 def _render_wire_appendix(data):
   evidence = data.wire_evidence
+  # Either mechanism alone earns the appendix. RTI Network Capture needs no
+  # interface and no capture privileges, so a run can produce participant
+  # evidence and no interface evidence at all - and gating the whole appendix on
+  # `wire_evidence` would then discard the only packet evidence there was.
   if evidence is None:
-    return []
+    if data.participant_evidence is None:
+      return []
+    return (_section("APPENDIX C - DIRECT RTPS PACKET OBSERVATION")
+            + _render_participant_evidence(data))
   lines = _section("APPENDIX C - DIRECT RTPS PACKET OBSERVATION")
   if data.capture_interface:
     lines.append(_kv("Capture interface", data.capture_interface, WIRE_LABEL_PAD))
@@ -643,6 +799,7 @@ def _render_wire_appendix(data):
   if error:
     lines.append(_kv("Result", f"unavailable: {error}", WIRE_LABEL_PAD))
     lines.append("")
+    lines += _render_participant_evidence(data)
     lines += _render_discovery_evidence(data)
     return lines
   lines.append(_kv("Frames matching filters", str(evidence.get("packets", 0)),
@@ -651,6 +808,18 @@ def _render_wire_appendix(data):
                    WIRE_LABEL_PAD))
   lines.append(_kv("DATA_FRAG in matching frames", str(evidence.get("data_fragments", 0)),
                    WIRE_LABEL_PAD))
+  # The reliable protocol, counted separately from user data. These four are
+  # what makes "matched but silent" diagnosable from packets alone: heartbeats
+  # with no ACKNACK is a reader that is not answering, and no heartbeats at all
+  # from a RELIABLE writer is a match that only one side believes in.
+  lines.append(_kv("HEARTBEAT in matching frames", str(evidence.get("heartbeats", 0)),
+                   WIRE_LABEL_PAD))
+  lines.append(_kv("ACKNACK in matching frames", str(evidence.get("acknacks", 0)),
+                   WIRE_LABEL_PAD))
+  lines.append(_kv("GAP in matching frames", str(evidence.get("gaps", 0)),
+                   WIRE_LABEL_PAD))
+  lines.append(_kv("NACK_FRAG in matching frames",
+                   str(evidence.get("nack_fragments", 0)), WIRE_LABEL_PAD))
   encapsulations = evidence.get("encapsulation_ids", [])
   lines.append(_kv("Observed DDS data representation",
                    wire.encapsulation_text(encapsulations) if encapsulations
@@ -669,7 +838,47 @@ def _render_wire_appendix(data):
     lines.append("Scope")
     lines.extend(_wrap(evidence["scope_note"], indent=2))
   lines.append("")
+  lines += _render_participant_evidence(data)
   lines += _render_discovery_evidence(data)
+  return lines
+
+
+def _render_participant_evidence(data):
+  """RTI Network Capture of our own participant: the shared-memory half.
+
+  Rendered inside Appendix C rather than as its own appendix, because it answers
+  the same question as the section above it - what crossed between these two
+  endpoints - and an operator comparing the two needs them adjacent. What
+  differs is the scope, and every line here says so.
+  """
+  evidence = data.participant_evidence
+  if evidence is None:
+    return []
+  lines = ["RTI Network Capture of rti_doctor's own participant"]
+  lines.extend(_wrap(
+      "Recorded by instrumenting the participant rather than an interface, so "
+      "it includes SHARED MEMORY traffic that no interface capture can see - "
+      "and only rti_doctor's own frames, never traffic between two other "
+      "participants.", indent=2))
+  error = evidence.get("error")
+  if error:
+    lines.append(_kv("  Result", f"unavailable: {error}", WIRE_LABEL_PAD))
+    lines.append("")
+    return lines
+  lines.append(_kv("  Capture", evidence.get("source", "unknown"), WIRE_LABEL_PAD))
+  for label, key in (("Frames from this participant", "packets"),
+                     ("DATA", "data_packets"),
+                     ("DATA_FRAG", "data_fragments"),
+                     ("HEARTBEAT", "heartbeats"),
+                     ("ACKNACK", "acknacks"),
+                     ("GAP", "gaps"),
+                     ("NACK_FRAG", "nack_fragments")):
+    lines.append(_kv(f"  {label}", str(evidence.get(key, 0)), WIRE_LABEL_PAD))
+  encapsulations = evidence.get("encapsulation_ids") or []
+  lines.append(_kv("  Observed DDS data representation",
+                   wire.encapsulation_text(encapsulations) if encapsulations
+                   else "none observed", WIRE_LABEL_PAD))
+  lines.append("")
   return lines
 
 
@@ -690,10 +899,15 @@ def _render_discovery_evidence(data):
     lines.append(_kv("  Result", f"unavailable: {error}", WIRE_LABEL_PAD))
     lines.append("")
     return lines
-  versions = evidence.get("fastdds_product_versions") or []
-  lines.append(_kv("  Fast DDS versions advertised",
-                   ", ".join(versions) if versions
-                   else "none observed in this capture", WIRE_LABEL_PAD))
+  # Skipped for a peer known to be RTI, and narrowed to this peer's own GUID
+  # prefix where the evidence supports it. See `_peer_fastdds_versions`: the
+  # capture hears the whole domain, so the unfiltered set belongs to no endpoint
+  # in particular.
+  if _peer_may_have_fastdds_version(data):
+    versions = _peer_fastdds_versions(data)
+    lines.append(_kv("  Fast DDS versions advertised",
+                     ", ".join(versions) if versions
+                     else "none observed in this capture", WIRE_LABEL_PAD))
   type_information = evidence.get("type_information_participants") or []
   lines.append(_kv("  TypeInformation participants",
                    ", ".join(type_information) if type_information
@@ -709,7 +923,14 @@ def _render_discovery_evidence(data):
 
 
 def _render_config_appendix(data):
-  label = "APPENDIX D" if data.wire_evidence is not None else "APPENDIX C"
+  # Keyed on whether Appendix C rendered AT ALL, not on `wire_evidence` alone.
+  # RTI Network Capture produces an Appendix C with no interface capture behind
+  # it, and testing only `wire_evidence` then emitted a second "APPENDIX C" -
+  # two sections with one letter, in a report whose whole contract is a fixed,
+  # citable section order.
+  has_packet_appendix = (data.wire_evidence is not None
+                         or data.participant_evidence is not None)
+  label = "APPENDIX D" if has_packet_appendix else "APPENDIX C"
   lines = _section(f"{label} - RTI_DOCTOR OWN CONFIGURATION")
   lines.append("Settings rti_doctor applied to its own participant, so that any")
   lines.append("finding above can be judged against how it was measured.")
@@ -722,7 +943,13 @@ def _render_config_appendix(data):
   result = data.probe_result
   if result is not None and result.applied_reader_qos:
     lines.append("")
-    lines.append("  probe reader/subscriber QoS mirrored from the writer:")
+    # Named for the entity the probe actually created. On a reader target the
+    # probe builds a writer mirroring the reader, and calling that "reader QoS
+    # mirrored from the writer" described neither side of what ran.
+    if getattr(result, "probe_kind", "reader") == "writer":
+      lines.append("  probe writer/publisher QoS, offering what the reader requests:")
+    else:
+      lines.append("  probe reader/subscriber QoS mirrored from the writer:")
     for key, value in sorted(result.applied_reader_qos.items()):
       lines.append(f"    {key.ljust(50)}{value}")
   lines.append("")

@@ -6,7 +6,8 @@ import os
 import sys
 import time
 
-from . import compat, discovery, domain_scan, engine, paths, records, report, wire
+from . import (compat, discovery, domain_scan, engine, netcapture, paths,
+               records, report, wire)
 
 DEFAULT_SCAN_TIMEOUT = 32.0
 DEFAULT_PROBE_TIMEOUT = 10.0
@@ -146,6 +147,19 @@ def parse_args(argv=None):
                                  "question up front, so every endpoint report captures "
                                  "on entry without asking (no default: the TUI asks, "
                                  "and Skip is an answer)")
+  parser.add_argument("--network-capture", action="store_true",
+                      help="Record rti_doctor's own participant with RTI Network "
+                           "Capture while probing. Unlike --capture-interface this "
+                           "needs no interface and no capture privileges, and it "
+                           "observes SHARED MEMORY traffic that no interface capture "
+                           "can see. It must be enabled before any DDS entity exists, "
+                           "so it is a launch flag and cannot be turned on later")
+  parser.add_argument("--write-samples", action="store_true",
+                      help="Let the probe PUBLISH synthetic samples when the selected "
+                           "endpoint is a reader, to verify delivery end to end. The "
+                           "real subscriber receives them and cannot distinguish them "
+                           "from production data, so this is off unless asked for. In "
+                           "the TUI, press w and confirm instead")
   parser.add_argument("-i", "--interval", type=float, default=2.0,
                       help="UI refresh interval in seconds (default: 2.0)")
   parser.add_argument("--debug-log", default=os.environ.get("RTI_DOCTOR_DEBUG_LOG"),
@@ -301,7 +315,8 @@ def build_session(domain_id, args, active_domains=None, domain_scan_ran=False,
   registry = discovery.DiscoveryRegistry(type_wait=args.type_wait)
   participant, type_lookup_settings = discovery.create_participant(
       domain_id, name="RTI DOCTOR", registry=registry,
-      type_object_v1_only=args.type_object_v1_only)
+      type_object_v1_only=args.type_object_v1_only,
+      network_capture_active=getattr(args, "network_capture_active", False))
 
   # Record the QoS we actually used, so the blind-spot audit inspects reality
   # rather than a freshly-defaulted object.
@@ -325,6 +340,7 @@ def build_session(domain_id, args, active_domains=None, domain_scan_ran=False,
       active_domains=active_domains or set(),
       domain_scan_ran=domain_scan_ran,
       capture_interface=args.capture_interface,
+      network_capture=getattr(args, "network_capture_active", False),
   ), participant
 
 
@@ -388,7 +404,7 @@ def run_headless_topic(session, args):
   # unavailable, making the headless verdict depend on timing.
   deadline = time.monotonic() + args.type_wait + args.settle
   while time.monotonic() < deadline:
-    endpoint = session.registry.find_writer(args.topic)
+    endpoint = session.registry.find_endpoint(args.topic)
     if endpoint is not None and endpoint.type is not None:
       break
     session.registry.expire_type_waits()
@@ -397,11 +413,11 @@ def run_headless_topic(session, args):
     time.sleep(0.2)
 
   session.registry.expire_type_waits()
-  endpoint = session.registry.find_writer(args.topic)
+  endpoint = session.registry.find_endpoint(args.topic)
   if endpoint is None:
     topics = session.registry.topic_names()
-    print(f"No writer found on topic '{args.topic}' in domain {session.domain_id}.",
-          file=sys.stderr)
+    print(f"No reader or writer found on topic '{args.topic}' in domain "
+          f"{session.domain_id}.", file=sys.stderr)
     if topics:
       print("Discovered topics: " + ", ".join(topics), file=sys.stderr)
     else:
@@ -415,12 +431,34 @@ def run_headless_topic(session, args):
   if args.capture_interface:
     print(f"Capturing RTPS packets on interface '{args.capture_interface}' while "
           f"diagnosing '{args.topic}'.", file=sys.stderr)
+  if session.network_capture:
+    print("Recording rti_doctor's own participant with RTI Network Capture "
+          "(includes shared memory).", file=sys.stderr)
+  # Said before it happens, and named as an injection rather than as a probe
+  # setting: this is the only rti_doctor path that writes into the system under
+  # test, and a headless operator reading a log has to see that it did.
+  if args.write_samples and not endpoint.is_writer:
+    print(f"--write-samples: PUBLISHING synthetic samples to '{args.topic}'. The "
+          f"subscribed application will receive them as ordinary data.",
+          file=sys.stderr)
   data = session.diagnose_endpoint(endpoint, probe=not args.no_probe,
-                                   capture_interface=args.capture_interface)
+                                   capture_interface=args.capture_interface,
+                                   write_samples=args.write_samples)
   if args.pcap:
+    # Filtered by the endpoint's ACTUAL kind, the same way
+    # `engine.diagnose_endpoint` filters a live capture. `--topic` can select a
+    # reader now that `find_endpoint` falls back to one, and passing a reader's
+    # id as `writer_entity_id` yields a filter nothing can match - so every
+    # reader-target `--pcap` run reported "No user DATA from the selected
+    # endpoint was captured" no matter what the file held.
     data.wire_evidence = wire.inspect_pcap(
-        args.pcap, writer_entity_id=wire.endpoint_entity_id(endpoint),
-        writer_guid_prefix=wire.endpoint_guid_prefix(endpoint))
+        args.pcap,
+        writer_entity_id=(wire.endpoint_entity_id(endpoint)
+                          if endpoint.is_writer else None),
+        writer_guid_prefix=(wire.endpoint_guid_prefix(endpoint)
+                            if endpoint.is_writer else None),
+        reader_entity_id=(wire.endpoint_entity_id(endpoint)
+                          if not endpoint.is_writer else None))
   path = _emit(report.render_text(data), args.output)
   if path:
     print(f"Report written to {path}")
@@ -499,6 +537,18 @@ def main(argv=None):
     # mask. A diagnostic must not fail to decode a peer because of its own encoding
     # defaults. What was actually applied is recorded in every report.
     compliance = compat.set_vendor_xtypes_mask()
+
+    # Before the mask and before the participant, because the binding requires
+    # it before every other Connext call. The resolved answer is stashed on
+    # `args` rather than re-derived later: a run that asked for network capture
+    # and did not get it must not go on to relax its transport as though it had.
+    args.network_capture_active = False
+    if args.network_capture:
+      started, reason = netcapture.enable()
+      args.network_capture_active = started
+      if not started:
+        print(f"RTI Network Capture could not be enabled: {reason}",
+              file=sys.stderr)
 
     domain_id, active_domains, scanned = resolve_domain_id(
         args.domain,

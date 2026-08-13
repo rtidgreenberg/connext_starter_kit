@@ -10,8 +10,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
 
 from rti_doctor import paths, wire  # noqa: E402
+from rti_doctor import probe as probe_module  # noqa: E402
 from rti_doctor import records, report  # noqa: E402
 import doctor_e2e  # noqa: E402
+
+
+class FakeVendorId:
+  """Vendor ids are read through `.value`; a bare list is not one."""
+
+  def __init__(self, octets):
+    self.value = list(octets)
 
 
 class TestOutputPaths(unittest.TestCase):
@@ -107,6 +115,94 @@ class TestTsharkFields(unittest.TestCase):
         wire.parse_tshark_fields("2\t0x15\t80000002\t011000000000000000000002\t1\t0x0007\t00:01\t"),
     ]
     summary = wire.summarize(observations, writer_guid_prefix="011000000000000000000001")
+    self.assertEqual(summary["encapsulation_ids"], ["0x0001"])
+
+  def test_the_builtin_servicerequest_channel_is_not_a_handshake(self):
+    """RTI's ServiceRequest channel is builtin but does not use the c2/c3 kinds.
+
+    Measured on a live participant capture: `0x00020082` -> `0x00020087`
+    contributed 7 HEARTBEAT and 7 ACKNACK on a participant with no user
+    endpoints at all. It only became reachable when this module started counting
+    protocol submessages - they carry no payload, so the old encapsulation-only
+    display filter had excluded them - and the reliable check would have read it
+    as a verified handshake on a topic with no traffic.
+    """
+    observations = [
+        wire.parse_tshark_fields("1\t0x0e,0x07\t0x00020082\t\t\t\t\t0x00020087"),
+        wire.parse_tshark_fields("2\t0x0e,0x06\t0x00020082\t\t\t\t\t0x00020087"),
+    ]
+    summary = wire.summarize(observations)
+    self.assertEqual(summary["heartbeats"], 0)
+    self.assertEqual(summary["acknacks"], 0)
+    self.assertEqual(summary["packets"], 0)
+
+  def test_a_user_writer_whose_id_ends_in_the_kind_digits_is_kept(self):
+    """The suffix test matches the entity KIND byte, which users never share.
+
+    A user writer's kind is 0x02/0x03, so its id ends "02"/"03" and can never
+    collide with "c2", "c3" or "82" - this guards the suffix match from being
+    loosened into one that would silently drop real user traffic.
+    """
+    observations = [
+        wire.parse_tshark_fields("1\t0x07\t0x80000082\t\t\t\t\t"),
+        wire.parse_tshark_fields("2\t0x07\t0x800000c2\t\t\t\t\t"),
+        wire.parse_tshark_fields("3\t0x07\t0x80000002\t\t\t\t\t"),
+    ]
+    # The first two carry builtin KIND bytes (0x82, 0xc2) and are excluded; only
+    # the third is a user writer.
+    self.assertEqual(wire.summarize(observations)["heartbeats"], 1)
+
+  def test_summarize_counts_the_reliable_protocol_submessages(self):
+    """HEARTBEAT/ACKNACK/GAP/NACK_FRAG are the evidence a reliable path works."""
+    observations = [
+        wire.parse_tshark_fields("1\t0x15\t80000002\t\t1\t0x0001\t00:01\t"),
+        wire.parse_tshark_fields("2\t0x07\t80000002\t\t\t\t\t"),
+        wire.parse_tshark_fields("3\t0x06\t80000002\t\t\t\t\t"),
+        wire.parse_tshark_fields("4\t0x08\t80000002\t\t\t\t\t"),
+        wire.parse_tshark_fields("5\t0x12\t80000002\t\t\t\t\t"),
+    ]
+    summary = wire.summarize(observations, writer_entity_id="80000002")
+    self.assertEqual(summary["heartbeats"], 1)
+    self.assertEqual(summary["acknacks"], 1)
+    self.assertEqual(summary["gaps"], 1)
+    self.assertEqual(summary["nack_fragments"], 1)
+    # The protocol frames carry no payload and must not inflate the data counts.
+    self.assertEqual(summary["data_packets"], 1)
+
+  def test_summarize_keeps_an_acknack_sent_from_the_readers_participant(self):
+    """The half of the handshake that proves the reliable path works both ways.
+
+    `writer_guid_prefix` is matched against `rtps.guidPrefix.src`, the sender.
+    An ACKNACK travels from the READER's participant back to the writer, so its
+    source prefix is the reader's - and applying the prefix filter to it dropped
+    every acknowledgment before it could be counted, leaving a working reliable
+    path indistinguishable from a writer nobody was answering.
+    """
+    writer_prefix = "011000000000000000000001"
+    reader_prefix = "011000000000000000000002"
+    observations = [
+        # The writer's own DATA and HEARTBEAT.
+        wire.parse_tshark_fields(f"1\t0x15\t80000002\t{writer_prefix}\t1\t0x0001\t00:01\t"),
+        wire.parse_tshark_fields(f"2\t0x07\t80000002\t{writer_prefix}\t\t\t\t"),
+        # The reader answering, from its own participant.
+        wire.parse_tshark_fields(f"3\t0x06\t80000002\t{reader_prefix}\t\t\t\t"),
+    ]
+    summary = wire.summarize(observations, writer_entity_id="80000002",
+                             writer_guid_prefix=writer_prefix)
+    self.assertEqual(summary["heartbeats"], 1)
+    self.assertEqual(summary["acknacks"], 1)
+
+  def test_summarize_still_excludes_another_participants_data(self):
+    """Relaxing the prefix filter for ACKNACK must not relax it for DATA."""
+    writer_prefix = "011000000000000000000001"
+    other_prefix = "011000000000000000000002"
+    observations = [
+        wire.parse_tshark_fields(f"1\t0x15\t80000002\t{writer_prefix}\t1\t0x0001\t00:01\t"),
+        wire.parse_tshark_fields(f"2\t0x15\t80000002\t{other_prefix}\t1\t0x0007\t00:01\t"),
+    ]
+    summary = wire.summarize(observations, writer_entity_id="80000002",
+                             writer_guid_prefix=writer_prefix)
+    self.assertEqual(summary["data_packets"], 1)
     self.assertEqual(summary["encapsulation_ids"], ["0x0001"])
 
   def test_summarize_applies_every_filter_that_was_given(self):
@@ -214,10 +310,224 @@ class TestTsharkFields(unittest.TestCase):
     self.assertIn("Encapsulation IDs in matching frames  0x0007", text)
 
   def _capture_report(self, wire_evidence=None, discovery_evidence=None,
-                      endpoint=None):
+                      endpoint=None, participant=None,
+                      participant_evidence=None):
     return report.render_text(report.ReportData(
         domain_id=7, scope="topic 'Sample'", all_findings=[], endpoint=endpoint,
-        wire_evidence=wire_evidence, discovery_evidence=discovery_evidence))
+        participant=participant,
+        wire_evidence=wire_evidence, discovery_evidence=discovery_evidence,
+        participant_evidence=participant_evidence))
+
+  def test_a_connext_peer_report_carries_no_fastdds_version(self):
+    """A capture hears the whole domain; the report is about one endpoint.
+
+    Measured on a live domain 42: selecting a Connext reader that shared its
+    domain with a Fast DDS writer produced a report whose CAPTURE EVIDENCE
+    section led with "Fast DDS version 3.6.2.0" - a fact about the other
+    participant entirely. The product version is a Fast DDS vendor-specific
+    discovery PID, so an RTI peer can never be the one that advertised it.
+    """
+    text = self._capture_report(
+        participant=records.ParticipantRecord(key="p1", vendor_id=FakeVendorId((0x01, 0x01))),
+        wire_evidence={"source": "c.pcapng", "packets": 0, "data_packets": 0},
+        discovery_evidence={"fastdds_product_versions": ["3.6.2.0"],
+                            "participants": 2})
+    self.assertNotIn("3.6.2.0", text)
+    self.assertNotIn("Fast DDS version", text)
+
+  def test_a_fastdds_peer_report_still_carries_its_version(self):
+    text = self._capture_report(
+        participant=records.ParticipantRecord(key="p1", vendor_id=FakeVendorId((0x01, 0x0F))),
+        wire_evidence={"source": "c.pcapng", "packets": 0, "data_packets": 0},
+        discovery_evidence={"fastdds_product_versions": ["3.6.2.0"],
+                            "participants": 2})
+    self.assertIn("3.6.2.0", text)
+
+  def test_a_version_is_narrowed_to_the_peer_that_advertised_it(self):
+    """Two Fast DDS participants on one domain, only one of them this peer."""
+    peer = records.ParticipantRecord(
+        key="Uint32Seq[16880768, 2662020784, 500195927, 1]",
+        vendor_id=FakeVendorId((0x01, 0x0F)))
+    prefix = report.wire.record_guid_prefix(peer)
+    text = self._capture_report(
+        participant=peer,
+        wire_evidence={"source": "c.pcapng", "packets": 0, "data_packets": 0},
+        discovery_evidence={
+            "fastdds_product_versions": ["3.6.2.0", "2.14.0.0"],
+            "fastdds_participant_versions": [[prefix, "3.6.2.0"],
+                                             ["ffffffffffffffffffffffff",
+                                              "2.14.0.0"]],
+            "participants": 2})
+    self.assertIn("3.6.2.0", text)
+    self.assertNotIn("2.14.0.0", text)
+
+  def test_an_unidentified_peer_keeps_the_version_evidence(self):
+    """No participant record is a headless run, not a Connext peer.
+
+    Suppressing on anything short of a positive RTI identification would drop
+    the only version evidence a `--topic` run ever has.
+    """
+    text = self._capture_report(
+        wire_evidence={"source": "c.pcapng", "packets": 0, "data_packets": 0},
+        discovery_evidence={"fastdds_product_versions": ["3.6.2.0"]})
+    self.assertIn("3.6.2.0", text)
+
+  def test_a_writer_probe_does_not_blame_connext_for_reader_counters(self):
+    """The false claim in a saved report: "not available on Connext 7.7.0".
+
+    Selecting a READER makes the probe create a WRITER, so no reader status was
+    ever sampled - `datareader_protocol_status` and `datareader_cache_status`
+    stayed empty and every line rendered as unavailable on this Connext version.
+    Those statuses do exist on 7.7; nothing asked for them. The appendix must
+    report the writer's own counters instead of a version limitation that is not
+    real.
+    """
+    result = probe_module.ProbeResult()
+    result.attempted = True
+    result.created = True
+    result.probe_kind = "writer"
+    result.writer_protocol = {"sent_heartbeat_count": 4, "received_ack_count": 4}
+    result.writer_cache = {"unacknowledged_sample_count": 0}
+    text = report.render_text(report.ReportData(
+        domain_id=7, scope="topic 'Sample'", all_findings=[],
+        probe_result=result))
+    self.assertIn("datawriter_protocol_status", text)
+    self.assertIn("reliable_writer_cache_changed_status", text)
+    self.assertNotIn("datareader_protocol_status", text)
+    self.assertNotIn("datareader_cache_status", text)
+    # The reader's incompatible-QoS status does not exist on a writer either.
+    self.assertIn("offered_incompatible_qos", text)
+    self.assertNotIn("requested_incompatible_qos", text)
+
+  def test_a_non_writing_probe_says_so_instead_of_implying_a_fault(self):
+    result = probe_module.ProbeResult()
+    result.attempted = True
+    result.created = True
+    result.probe_kind = "writer"
+    text = report.render_text(report.ReportData(
+        domain_id=7, scope="topic 'Sample'", all_findings=[],
+        probe_result=result))
+    self.assertIn("published nothing", text)
+    self.assertIn("rti_doctor's own restraint", text)
+
+  def test_a_reader_probe_still_reports_the_reader_counters(self):
+    result = probe_module.ProbeResult()
+    result.attempted = True
+    result.created = True
+    result.protocol = {"received_heartbeat_count": 3}
+    text = report.render_text(report.ReportData(
+        domain_id=7, scope="topic 'Sample'", all_findings=[],
+        probe_result=result))
+    self.assertIn("datareader_protocol_status", text)
+    self.assertNotIn("datawriter_protocol_status", text)
+
+  def test_the_applied_qos_renders_values_not_object_reprs(self):
+    """A saved report showed `<rti.connextdds.Deadline object at 0x...>`.
+
+    This block exists so an operator can check the probe requested what it says
+    it did, and an object repr is exactly where that check fails.
+    """
+    result = probe_module.ProbeResult()
+    result.attempted = True
+    result.created = True
+    result.probe_kind = "writer"
+    result.applied_reader_qos = {"reliability": "ReliabilityKind.RELIABLE"}
+    text = report.render_text(report.ReportData(
+        domain_id=7, scope="topic 'Sample'", all_findings=[],
+        probe_result=result))
+    self.assertIn("probe writer/publisher QoS", text)
+    self.assertNotIn("object at 0x", text)
+
+  def test_participant_evidence_renders_its_own_scope(self):
+    """CAP-4. The shared-memory half, and what it can and cannot claim."""
+    text = self._capture_report(
+        wire_evidence={"source": "c.pcapng", "packets": 0, "data_packets": 0},
+        participant_evidence={
+            "source": "p.pcap", "kind": "rti network capture",
+            "packets": 81, "data_packets": 53, "data_fragments": 0,
+            "heartbeats": 15, "acknacks": 14, "gaps": 0, "nack_fragments": 0})
+    self.assertIn("RTI Network Capture", text)
+    self.assertIn("SHARED MEMORY", text)
+    # The scope caveat is the point: it sees one participant, ours, and no
+    # traffic between two others.
+    self.assertIn("only rti_doctor's own frames", text)
+    self.assertIn("81", text)
+    self.assertIn("15", text)
+
+  def test_participant_evidence_alone_still_earns_the_appendix(self):
+    """RTI Network Capture needs no interface and no capture privileges.
+
+    A run can therefore produce participant evidence and no interface evidence
+    at all, and gating Appendix C on `wire_evidence` would discard the only
+    packet evidence such a run has.
+    """
+    text = self._capture_report(participant_evidence={
+        "source": "p.pcap", "packets": 12, "heartbeats": 4, "acknacks": 4})
+    self.assertIn("APPENDIX C", text)
+    self.assertIn("RTI Network Capture", text)
+
+  def test_a_reader_target_is_filtered_as_a_reader(self):
+    """`--topic` can select a reader, so `--pcap` must filter like one.
+
+    `inspect_pcap` matches `writer_entity_id` against `rtps.sm.wrEntityId`.
+    Passing a READER's id there yields a filter nothing can match, so every
+    reader-target `--pcap` run reported "No user DATA from the selected endpoint
+    was captured" regardless of what the file held. `engine.diagnose_endpoint`
+    branches on `is_writer` correctly; the `--pcap` call site did not.
+    """
+    # Nine tab-separated columns; the reader entity id is the last.
+    observations = [
+        # A writer sending to the selected reader: matched by reader id.
+        wire.parse_tshark_fields("1\t0x15\t0x80000002\t\t1\t0x0001\t00:01\t\t0x80000004"),
+        # Another reader's traffic on the same topic.
+        wire.parse_tshark_fields("2\t0x15\t0x80000002\t\t1\t0x0001\t00:01\t\t0x80000104"),
+    ]
+    as_reader = wire.summarize(observations, reader_entity_id="80000004")
+    self.assertEqual(as_reader["data_packets"], 1)
+    # The bug: the same id passed as a writer filter matches nothing.
+    as_writer = wire.summarize(observations, writer_entity_id="80000004")
+    self.assertEqual(as_writer["data_packets"], 0)
+
+  def test_appendix_letters_are_never_reused(self):
+    """Found live: participant evidence alone produced two "APPENDIX C"s.
+
+    The config appendix chose its letter from `wire_evidence` alone, so an RTI
+    Network Capture run - which needs no interface and therefore has no
+    `wire_evidence` - emitted a packet Appendix C and then a configuration
+    Appendix C. The report's whole contract is a fixed, citable section order.
+    """
+    for kwargs in (
+        {"participant_evidence": {"source": "p.pcap", "packets": 1}},
+        {"wire_evidence": {"source": "c.pcapng", "packets": 1, "data_packets": 1}},
+        {"participant_evidence": {"source": "p.pcap", "packets": 1},
+         "wire_evidence": {"source": "c.pcapng", "packets": 1, "data_packets": 1}},
+        {},
+    ):
+      text = self._capture_report(**kwargs)
+      letters = [line.split()[1] for line in text.splitlines()
+                 if line.startswith("APPENDIX ")]
+      self.assertEqual(letters, sorted(set(letters)),
+                       f"appendix letters repeat or are out of order: {letters} "
+                       f"for {sorted(kwargs)}")
+
+  def test_a_failed_participant_capture_says_why(self):
+    text = self._capture_report(participant_evidence={
+        "source": "p.pcap", "error": "network capture was not enabled at startup"})
+    self.assertIn("unavailable: network capture was not enabled", text)
+
+  def test_no_participant_capture_leaves_the_report_unchanged(self):
+    text = self._capture_report(
+        wire_evidence={"source": "c.pcapng", "packets": 0, "data_packets": 0})
+    self.assertNotIn("RTI Network Capture", text)
+
+  def test_the_wire_appendix_reports_the_reliable_handshake(self):
+    text = self._capture_report(
+        wire_evidence={"source": "c.pcapng", "packets": 9, "data_packets": 4,
+                       "data_fragments": 0, "heartbeats": 3, "acknacks": 2,
+                       "gaps": 1, "nack_fragments": 0})
+    self.assertIn("HEARTBEAT in matching frames", text)
+    self.assertIn("ACKNACK in matching frames", text)
+    self.assertIn("GAP in matching frames", text)
 
   def test_capture_summary_puts_the_packet_only_version_near_the_top(self):
     """The version is the one fact no DDS-level observation can produce.

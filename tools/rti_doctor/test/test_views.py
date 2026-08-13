@@ -575,12 +575,15 @@ class CaptureStubSession(StubSession):
   leaving it None is the unanswered case, where a report opening will ask.
   """
 
-  def __init__(self, capture_interface=None):
+  def __init__(self, capture_interface=None, network_capture=False):
     super().__init__()
     self.probe_timeout = 10.0
     self.capture_interface = capture_interface
     self.capture_choice_made = capture_interface is not None
     self.capture_off_reason = None
+    # RTI Network Capture is a launch-time answer, so a stub models it as a
+    # constructor argument rather than something a screen can change.
+    self.network_capture = network_capture
     self.pass_deadline = 0.0
     self.capture_artifacts = []
     self.retained_artifacts = set()
@@ -615,11 +618,13 @@ class CaptureStubSession(StubSession):
     return "/tmp/rti_doctor_captures/one.pcapng"
 
   def diagnose_endpoint(self, endpoint, probe=True, capture_interface=None,
-                        capture_seconds=None, capture_path=None):
+                        capture_seconds=None, capture_path=None,
+                        write_samples=False):
     self.calls.append({"endpoint": endpoint.key, "probe": probe,
                        "capture_interface": capture_interface,
                        "capture_seconds": capture_seconds,
-                       "capture_path": capture_path})
+                       "capture_path": capture_path,
+                       "write_samples": write_samples})
     if capture_interface:
       self.capture_artifacts.append(capture_path)
     return report.ReportData(
@@ -706,11 +711,12 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
 
     result = self.drive(session, FakeEndpoint("w1", "Writer"), steps)
     self.assertIsInstance(result["screen"], report_screen.CaptureInterfaceScreen)
-    # Only the static pass ran while the question is still open.
+    # Only the static pass ran while the question is still open - and it wrote
+    # nothing, which the static pass could never do anyway.
     self.assertEqual(session.calls,
                      [{"endpoint": "w1", "probe": False,
                        "capture_interface": None, "capture_seconds": None,
-                       "capture_path": None}])
+                       "capture_path": None, "write_samples": False}])
 
   def test_an_answered_report_captures_on_entry_in_one_pass(self):
     """The point of the change: one pass, and it carries both halves.
@@ -1095,6 +1101,103 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
         domain_id=7, scope="topic 'Telemetry'", all_findings=[],
         endpoint=FakeEndpoint("w1", "Writer")))
     self.assertNotIn("CAPTURE EVIDENCE", sections["overview"])
+
+
+class TestPublishingNeedsApproval(unittest.TestCase):
+  """rti_doctor writes to the system under test only when told to, per endpoint.
+
+  Everything else this tool does is read-only, so the consent path is the one
+  place a defaulted answer would be a real fault rather than an inconvenience.
+  """
+
+  def drive(self, session, endpoint, steps, probe=True):
+    collected = {}
+
+    async def run():
+      screen = report_screen.ReportScreen(session, endpoint=endpoint, probe=probe)
+      app = Harness(screen)
+      with mock.patch.object(report_screen.wire, "capture_interfaces",
+                             return_value=((("1", "lo"),), None)):
+        async with app.run_test() as pilot:
+          await pilot.pause()
+          await app.workers.wait_for_complete()
+          await steps(pilot, screen, collected)
+
+    asyncio.run(run())
+    return collected
+
+  async def _press_w(self, pilot, screen, out):
+    await pilot.press("w")
+    await pilot.pause()
+    out["screen"] = pilot.app.screen
+    out["said"] = status_text(screen)
+
+  async def _answer(self, pilot, screen, out, label_contains):
+    await pilot.press("w")
+    await pilot.pause()
+    consent = pilot.app.screen
+    row = [index for index, choice in enumerate(consent.choices)
+           if label_contains in choice[0]]
+    consent.table.move_cursor(row=row[0])
+    await pilot.press("enter")
+    await pilot.app.workers.wait_for_complete()
+    await pilot.pause()
+    out["said"] = status_text(screen)
+
+  def test_w_on_a_reader_asks_before_publishing_anything(self):
+    session = CaptureStubSession(capture_interface="lo")
+    result = self.drive(session, FakeEndpoint("r1", "Reader"), self._press_w)
+    self.assertIsInstance(result["screen"], report_screen.PublishConsentScreen)
+    self.assertTrue(all(not call["write_samples"] for call in session.calls),
+                    "nothing may be published while the question is open")
+
+  def test_declining_publishes_nothing(self):
+    session = CaptureStubSession(capture_interface="lo")
+    result = self.drive(
+        session, FakeEndpoint("r1", "Reader"),
+        lambda p, s, o: self._answer(p, s, o, "Do not publish"))
+    self.assertTrue(all(not call["write_samples"] for call in session.calls))
+    self.assertIn("Declined", result["said"])
+
+  def test_escape_is_a_refusal_not_an_open_question(self):
+    """An operator who backed out of a prompt about their production system
+    did not consent to writing to it."""
+    session = CaptureStubSession(capture_interface="lo")
+
+    async def steps(pilot, screen, out):
+      await pilot.press("w")
+      await pilot.pause()
+      await pilot.press("escape")
+      await pilot.app.workers.wait_for_complete()
+      await pilot.pause()
+      out["said"] = status_text(screen)
+
+    result = self.drive(session, FakeEndpoint("r1", "Reader"), steps)
+    self.assertTrue(all(not call["write_samples"] for call in session.calls))
+    self.assertIn("Declined", result["said"])
+
+  def test_approving_publishes_and_says_so_first(self):
+    session = CaptureStubSession(capture_interface="lo")
+    self.drive(session, FakeEndpoint("r1", "Reader"),
+               lambda p, s, o: self._answer(p, s, o, "Publish"))
+    self.assertTrue(any(call["write_samples"] for call in session.calls),
+                    "the approved pass must actually publish")
+
+  def test_a_writer_target_is_never_offered_publishing(self):
+    """It is already publishing; injecting data would answer nothing."""
+    session = CaptureStubSession(capture_interface="lo")
+    result = self.drive(session, FakeEndpoint("w1", "Writer"), self._press_w)
+    self.assertNotIsInstance(result["screen"],
+                             report_screen.PublishConsentScreen)
+    self.assertIn("already verified", result["said"])
+
+  def test_a_passive_report_has_no_writer_to_publish_from(self):
+    session = CaptureStubSession(capture_interface="lo")
+    result = self.drive(session, FakeEndpoint("r1", "Reader"), self._press_w,
+                        probe=False)
+    self.assertNotIsInstance(result["screen"],
+                             report_screen.PublishConsentScreen)
+    self.assertIn("without probing", result["said"])
 
 
 if __name__ == "__main__":

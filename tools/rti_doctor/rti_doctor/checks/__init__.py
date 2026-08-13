@@ -40,6 +40,15 @@ class CheckContext:
   #: on it needs no change.
   type_information_observed: object = None
   type_wait: float = 5.0
+  #: Packet counts from an operator-requested capture, or None when none ran.
+  #: The reliable-path check reads it because the RTPS handshake is observable
+  #: from packets even when the peer's own counters are not reachable - which is
+  #: every non-RTI peer, and any Connext build whose bindings do not expose them.
+  wire_evidence: object = None
+  #: Packet counts from RTI Network Capture of rti_doctor's own participant.
+  #: Scoped to us rather than to an interface, and therefore the only packet
+  #: evidence that exists when the pair is talking over shared memory.
+  participant_evidence: object = None
 
 
 def run_checks(context, checks):
@@ -92,8 +101,19 @@ def static_checks():
 
 def probe_checks():
   """Checks that read live probe results."""
-  from . import probe_match, probe_payload
-  return probe_match.CHECKS + probe_payload.CHECKS
+  from . import probe_match, probe_payload, reliable_path
+  return probe_match.CHECKS + probe_payload.CHECKS + reliable_path.CHECKS
+
+
+def writer_probe_checks():
+  """Checks for a READER target, where the probe created a writer.
+
+  The payload checks are deliberately absent: they read reader-side statuses and
+  a delivered sample walk, neither of which exists when the probe is the sending
+  side. The reliable-path check handles both directions itself.
+  """
+  from . import probe_match, reliable_path
+  return probe_match.CHECKS + reliable_path.CHECKS
 
 
 def all_checks():

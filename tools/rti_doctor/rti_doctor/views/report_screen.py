@@ -30,7 +30,7 @@ from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static, TabbedContent, TabPane
 
-from .. import engine as engine_mod, report as report_mod, wire
+from .. import engine as engine_mod, probe as probe_mod, report as report_mod, wire
 
 #: Shown for the Skip row. Skip is an answer - "probe, but capture nothing" -
 #: and is remembered like any other, so it is worth naming rather than leaving
@@ -160,6 +160,83 @@ class CaptureInterfaceScreen(Screen):
     self.app.exit()
 
 
+class PublishConsentScreen(Screen):
+  """Explicit approval before rti_doctor publishes into the system under test.
+
+  Every other thing this tool does is read-only. Publishing is not: the selected
+  reader belongs to a running application, and a synthetic sample delivered to it
+  is indistinguishable from production data. That is not a preference to be
+  defaulted, so it is asked here, per endpoint, and never remembered - unlike the
+  capture choice, which is remembered precisely because it changes nothing about
+  the system it observes.
+
+  Declining is the row under the cursor, for the same reason `Skip` is in
+  `CaptureInterfaceScreen`: a reflexive Enter must land on the choice that
+  changes nothing.
+  """
+
+  BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
+              ("q", "quit_app", "Quit")]
+
+  def __init__(self, endpoint, on_answer):
+    super().__init__()
+    self.endpoint = endpoint
+    self.on_answer = on_answer
+    self.table = DataTable()
+    self.choices = []
+
+  def compose(self):
+    yield Header()
+    yield Static("[bold]Publish synthetic samples?[/bold]")
+    topic = getattr(self.endpoint, "topic_name", "(unknown topic)")
+    yield Static(
+        f"To verify that data actually reaches the selected reader on "
+        f"'{escape(str(topic))}', rti_doctor must PUBLISH to that topic. "
+        f"The subscribed application will receive up to "
+        f"{probe_mod.PROBE_SAMPLE_COUNT} synthetic sample(s) and cannot tell "
+        f"them from production data. Nothing else rti_doctor does writes to the "
+        f"system under test.")
+    yield Static(
+        "Declining still reports the match and the reliable handshake from the "
+        "probe writer's own counters - it just cannot prove delivery.")
+    with Container(id="publish_consent_choice"):
+      yield self.table
+    yield Footer()
+
+  async def on_mount(self):
+    self.title = "rti_doctor - publish synthetic samples?"
+    self.table.add_columns("Answer", "What happens")
+    self.table.cursor_type = "row"
+    self.choices = [
+        ("Do not publish", "observe only - nothing is written to the topic",
+         False),
+        (f"Publish {probe_mod.PROBE_SAMPLE_COUNT} sample(s)",
+         "the subscribed application receives them as ordinary data", True),
+    ]
+    for index, (label, description, _) in enumerate(self.choices):
+      self.table.add_row(label, description, key=str(index))
+    self.table.focus()
+
+  async def on_data_table_row_selected(self, event):
+    if event.row_key is None:
+      return
+    _, _, approved = self.choices[int(event.row_key.value)]
+    self.app.pop_screen()
+    self.on_answer(approved)
+
+  def action_back(self):
+    """Escape is a refusal, not an unanswered question.
+
+    The safe reading is the only defensible one: an operator who backed out of a
+    prompt about writing to their production system did not consent to it.
+    """
+    self.app.pop_screen()
+    self.on_answer(False)
+
+  def action_quit_app(self):
+    self.app.exit()
+
+
 class ReportScreen(Screen):
   """Findings for one endpoint or participant."""
 
@@ -168,6 +245,7 @@ class ReportScreen(Screen):
       ("escape", "back", "Back"),
       ("c", "capture", "Capture packets"),
       ("C", "choose_interface", "Capture interface"),
+      ("w", "verify_delivery", "Publish to verify delivery"),
       ("s", "save", "Save report"),
       ("q", "quit_app", "Quit"),
   ]
@@ -286,7 +364,7 @@ class ReportScreen(Screen):
     # An answer already exists, which may be a remembered Skip (None).
     self._begin_pass(self.session.capture_interface)
 
-  def _begin_pass(self, interface, dismissed=False):
+  def _begin_pass(self, interface, dismissed=False, write_samples=False):
     """Start one combined probe+capture pass. The only path that runs either."""
     # The picker is a screen, so it can outlive the report that pushed it, and
     # a pass can have started elsewhere while it was open. `is_current` rather
@@ -309,7 +387,7 @@ class ReportScreen(Screen):
     # collected, from where, for how long, and what it leaves on disk.
     self.status.update(
         self._pass_announcement(interface, probing, seconds, destination,
-                                dismissed))
+                                dismissed, write_samples))
     self.probing, self.capturing = probing, bool(interface)
     # Claimed for the window tshark itself is bounded by, so a claim nobody
     # releases expires no later than the capture it was protecting.
@@ -318,11 +396,12 @@ class ReportScreen(Screen):
     # referenced by the loop and nothing cancels it when the screen is popped,
     # so a pass left running would write into unmounted widgets seconds after
     # the operator navigated away.
-    self.run_worker(self._run_pass(probing, seconds, destination, interface),
+    self.run_worker(self._run_pass(probing, seconds, destination, interface,
+                                   write_samples),
                     exit_on_error=False)
 
   def _pass_announcement(self, interface, probing, seconds, destination,
-                         dismissed=False):
+                         dismissed=False, write_samples=False):
     """What is about to run, said before it runs. Pure, so it can be tested.
 
     The result text can be intercepted on the status widget, but the entry
@@ -330,13 +409,21 @@ class ReportScreen(Screen):
     install a recorder.
     """
     topic = self.endpoint.topic_name
-    # A reader probe creates a DataWriter that never publishes, so it puts no
-    # user data on the wire. Promising frames there would be a lie the Wire tab
-    # then contradicts.
+    # A reader probe creates a DataWriter that publishes only when the operator
+    # approved it. Promising frames otherwise would be a lie the Wire tab then
+    # contradicts, and claiming an injection that was declined would be worse.
     probe_text = (
         f"probing for up to {seconds:.0f}s, creating a "
         f"{'reader' if self.endpoint.is_writer else 'writer'} and sampling "
         f"statuses")
+    if write_samples:
+      probe_text += (f", then PUBLISHING up to "
+                     f"{probe_mod.PROBE_SAMPLE_COUNT} synthetic sample(s) to "
+                     f"'{topic}' as approved - the subscribed application will "
+                     f"receive them")
+    if self.session.network_capture:
+      probe_text += (", with RTI Network Capture recording this participant's "
+                     "own frames including shared memory")
     if interface:
       return (f"Full diagnostic on '{topic}': capturing RTPS packets on "
               f"'{interface}' for {seconds:.0f}s, writing {destination} (and a "
@@ -357,7 +444,8 @@ class ReportScreen(Screen):
             f"({SKIP_CAPTURE} is remembered for this session): {probe_text}. "
             f"Press C to choose a capture interface and run it again.")
 
-  async def _run_pass(self, probing, seconds, destination, interface):
+  async def _run_pass(self, probing, seconds, destination, interface,
+                      write_samples=False):
     """One `diagnose_endpoint` call for both halves.
 
     The engine already starts the capture before the probe, which is the whole
@@ -368,7 +456,8 @@ class ReportScreen(Screen):
       try:
         return self.session.diagnose_endpoint(
             self.endpoint, probe=probing, capture_interface=interface,
-            capture_seconds=seconds, capture_path=destination)
+            capture_seconds=seconds, capture_path=destination,
+            write_samples=write_samples)
       finally:
         # Released from the thread, not only the coroutine: `asyncio.to_thread`
         # cannot be cancelled, so a worker killed by navigation would otherwise
@@ -443,6 +532,46 @@ class ReportScreen(Screen):
           CaptureInterfaceScreen(self.session, self._begin_pass))
       return
     self._begin_pass(self.session.capture_interface)
+
+  def action_verify_delivery(self):
+    """Prove delivery to a discovered reader, with consent, by publishing to it.
+
+    Only offered for a READER target. A writer target needs nothing of the sort:
+    it is already publishing, and the probe verifies delivery by reading what it
+    sends. Writing to a writer's topic would inject data to answer a question
+    that was already answered without it.
+    """
+    if self.endpoint is None:
+      self.status.update("Publishing needs an endpoint; this is a participant "
+                         "report.")
+      return
+    if self.endpoint.is_writer:
+      self.status.update(
+          "This endpoint is a writer, so delivery is already verified by reading "
+          "what it publishes - nothing needs to be written. Press c for packet "
+          "evidence.")
+      return
+    if not self.probe:
+      self.status.update(
+          "This report was opened without probing, so there is no probe writer "
+          "to publish from. Open it for diagnosis to verify delivery.")
+      return
+    if self.session.pass_in_flight():
+      self.status.update("A diagnostic pass is still finishing; try again when "
+                         "it is done.")
+      return
+    self.app.push_screen(PublishConsentScreen(self.endpoint, self._begin_write_pass))
+
+  def _begin_write_pass(self, approved):
+    """Re-run the pass, publishing only if the operator said to."""
+    if not self.is_current:
+      return
+    if not approved:
+      self.status.update(
+          "Declined - nothing was published. The report still shows the match "
+          "and the reliable handshake from the probe writer's own counters.")
+      return
+    self._begin_pass(self.session.capture_interface, write_samples=True)
 
   def action_choose_interface(self):
     """Re-open the picker, so one choice does not bind the whole session.

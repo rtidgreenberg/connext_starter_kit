@@ -14,6 +14,44 @@ match without you supplying anything.
 It creates DataReaders and nothing else. It never writes user data, never changes
 remote configuration, and always closes what it created.
 
+## Requirements
+
+**Connext** — an RTI Connext DDS install and a license. `run_rti_doctor.sh`
+resolves `NDDSHOME` and the license file itself; set `NDDSHOME` or
+`RTI_LICENSE_FILE` only to override what it finds. See
+[Supported Connext Versions](#supported-connext-versions).
+
+**Python** — nothing to install by hand. The launcher creates a virtual
+environment named for the detected Connext and Python versions
+(`connext_dds_env_<connext>_py<python>/` at the repo root), installs
+`requirements.txt` into it on **every** launch, and installs the `rti.connext`
+matching your `NDDSHOME`.
+
+**tshark — optional, and only for wire evidence.** Doctor runs fully without it:
+`--pcap`, `--capture-interface` and the TUI's capture step are the only things
+that use it, and when it is missing they turn themselves off and say so in the
+report rather than failing the run. Install it if you want RTPS packet evidence:
+
+```bash
+sudo apt install tshark          # Debian/Ubuntu
+```
+
+Capturing also needs the privilege to open an interface — on Debian/Ubuntu that
+is `sudo dpkg-reconfigure wireshark-common` plus membership of the `wireshark`
+group, and a re-login. Without it Doctor reports "no capture privileges" and
+continues.
+
+Wire observation is developed and measured against **Wireshark/tshark 4.4.9**,
+which is what the RTPS dissector behaviour in `wire.py` is written for. Nothing
+enforces a version — the binary is resolved with `shutil.which("tshark")` — but
+a newer dissector can name fields this code reads positionally, so treat a
+version change as something to re-run the wire suites against. One such
+difference is already predicted and handled: see the `0x8000` follow-up in
+[DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md).
+
+**Docker** — not needed to run Doctor. Required only for the cross-vendor test
+fixtures and manual scenarios that start Fast DDS containers.
+
 ## Quick Start
 
 From the repository root:
@@ -410,12 +448,36 @@ pip install -r tools/rti_doctor/requirements.txt \
             -r tools/rti_doctor/requirements-dev.txt
 ```
 
-Unit tests — no DDS participant required, ~60 tests:
+`run_tests.sh` is the entry point. It resolves `NDDSHOME`, the venv and the
+license itself, keeps the whole run in `test_output/run_tests_<tier>.log`, and
+on a red run prints the failing test names and that path:
 
 ```bash
-PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
+./tools/rti_doctor/run_tests.sh          # unit (the default), ~372 tests
+./tools/rti_doctor/run_tests.sh live     # unit + live domain: needs a license
+./tools/rti_doctor/run_tests.sh vendor   # cross-vendor e2e: needs Docker images
+./tools/rti_doctor/run_tests.sh all      # everything
+```
+
+The tiers differ by what they need. `unit` creates no DDS entity, so it needs
+neither `NDDSHOME` nor a license — this is the tier CI runs. `live` creates real
+participants. `vendor` additionally needs Docker and the Cyclone/Fast DDS
+images, and takes over ten minutes.
+
+To run one module — worth doing as a *diagnostic*, since several vendor
+failures are order-dependent and "green alone, red in a tier" is itself a
+finding — use the venv interpreter the launcher built:
+
+```bash
+export VENV_PYTHON=$(ls -d connext_dds_env_*/bin/python | head -1)
+```
+
+Unit tests — no DDS participant required:
+
+```bash
+PYTHONPATH=tools/rti_doctor "$VENV_PYTHON" \
     -m unittest discover -s tools/rti_doctor/test -p 'test_findings.py'
-PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
+PYTHONPATH=tools/rti_doctor "$VENV_PYTHON" \
     -m unittest discover -s tools/rti_doctor/test -p 'test_checks.py'
 ```
 
@@ -423,7 +485,7 @@ Live integration tests — real participants, real probes, real fixtures, includ
 a headless drive of the whole TUI and a check that the probe leaks no entities:
 
 ```bash
-PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
+PYTHONPATH=tools/rti_doctor "$VENV_PYTHON" \
     -m unittest tools.rti_doctor.test.test_live_integration
 ```
 
@@ -437,7 +499,7 @@ the resulting evidence for follow-up. Build it once before running the suite:
 
 ```bash
 bash tools/rti_doctor/test/vendors/fastdds/build_image.sh
-PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
+PYTHONPATH=tools/rti_doctor "$VENV_PYTHON" \
   -m unittest tools.rti_doctor.test.test_vendor_wire_e2e
 ```
 
@@ -454,7 +516,7 @@ configurations: compatible readers receive samples; mismatched readers do not,
 while writers continue publishing.
 
 ```bash
-PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
+PYTHONPATH=tools/rti_doctor "$VENV_PYTHON" \
   -m unittest tools.rti_doctor.test.test_rxo_vendor_e2e
 ```
 
@@ -466,7 +528,7 @@ as the wire test and builds two generated TypeObject fixtures, one per
 extensibility kind.
 
 ```bash
-PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
+PYTHONPATH=tools/rti_doctor "$VENV_PYTHON" \
   -m unittest tools.rti_doctor.test.test_extensibility_vendor_e2e \
   tools.rti_doctor.test.test_fastdds_extensibility_vendor_e2e
 ```
@@ -512,7 +574,7 @@ The fixture publisher can also be run by hand to create a system to point the
 tool at:
 
 ```bash
-PYTHONPATH=tools/rti_doctor ./connext_dds_env/bin/python \
+PYTHONPATH=tools/rti_doctor "$VENV_PYTHON" \
     tools/rti_doctor/test/fixture_publisher.py --mode bad_pair --domain 1
 ```
 

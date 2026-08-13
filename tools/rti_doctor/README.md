@@ -110,11 +110,89 @@ On exit, captures no saved report cites are removed; saving a report with `s`
 keeps the capture it names in Appendix C. `RTI_DOCTOR_KEEP_ARTIFACTS=1` keeps
 everything, matching the fault-injection artifacts.
 
-A few facts are observable **only** in RTPS packets — a Fast DDS peer's product
-version above all — and reports render those as `Run capture to ascertain`
-rather than as absent, because "nobody looked" and "there is nothing there" are
-different answers. One capture answers both questions: the user data that
-crossed the wire, and the discovery metadata around it.
+A few facts are observable **only** in RTPS packets — the RTPS reliable
+handshake, and a Fast DDS peer's product version — and reports render those as
+`Run capture to ascertain` rather than as absent, because "nobody looked" and
+"there is nothing there" are different answers. One capture answers both
+questions: the user data that crossed the wire, and the discovery metadata
+around it.
+
+The Fast DDS product version is asked for **only when the peer might have one**.
+It comes from a Fast DDS vendor-specific discovery PID that an RTI participant
+never sends, so on a Connext peer the extra tshark passes are skipped entirely
+and no version line is rendered. A capture hears the whole domain rather than
+one endpoint, so a version that *is* found is narrowed to the GUID prefix that
+advertised it — otherwise a Connext report sharing a domain with a Fast DDS
+writer would lead with that writer's version as though it were its own.
+
+### RTI Network Capture: the shared-memory half (`--network-capture`)
+
+`tshark` reads interfaces. RTI Network Capture instruments the **participant**,
+so it records what rti_doctor's own probe actually sent and received on every
+transport it used — **including shared memory**, which no interface capture can
+observe. Verified on this host: 81 RTPS frames with 15 HEARTBEAT and 14 ACKNACK,
+carrying no IP layer at all, dissected by `tshark` as ordinary RTPS. It writes a
+standard PCAP, so the same parser and the same appendix read it.
+
+Two properties follow from how it works, and both are stated in every report:
+
+* **It is a launch flag, not a keypress.** The binding requires `enable()`
+  before *any* other Connext call, so it is decided before the participant
+  exists. `--capture-interface` can still be chosen or changed at any time.
+* **It is scoped to one participant — ours.** It shows rti_doctor's conversation
+  with the peer in both directions and nothing else. It can never show traffic
+  between two other participants, which is exactly what an interface capture is
+  good at. The two are complements; Appendix C reports them separately.
+
+With `--network-capture` the UDP-only restriction below is lifted, because the
+reason for it is gone.
+
+### rti_doctor's own participant is UDP-only
+
+Two participants on one host prefer the **shared-memory** transport, and SHMEM
+traffic never reaches a network interface — so no capture, on any interface,
+with any filter, can observe it. Measured against the `healthy` fixture on
+2026-08-13: the probe took 256 samples and counted 6 heartbeats while a capture
+of *all* UDP for the same window carried only SPDP/SEDP and not one HEARTBEAT.
+
+rti_doctor therefore restricts its own participant to UDPv4
+(`transport_builtin.mask`), which is a participant-level policy in Connext.
+With it, the same run captured 57 DATA, 6 HEARTBEAT and 2 ACKNACK frames, and
+the packet counts matched the status counters exactly.
+
+The cost is real and every report states it in Appendix D: the probe exercises a
+**different transport** from the one a same-host application pair uses. A
+UDP-only probe that succeeds does not prove the application's shared-memory path
+works. Capturing a same-host pair on `lo` — not the host's NIC — is what makes
+their UDP traffic visible, because a local destination address routes over
+loopback.
+
+Prefer `--network-capture` when the pair is on one host: it observes shared
+memory directly, so the transport never has to be changed to be measured.
+
+## Verifying Delivery to a Reader (`w`, `--write-samples`)
+
+Selecting a **writer** verifies delivery by reading what it already publishes —
+nothing is written. Selecting a **reader** is different: the only way to prove
+data reaches it is to send some. That means publishing into a topic a running
+application consumes, and it cannot tell a synthetic sample from production
+data.
+
+So it is never a default. In the TUI, `w` on a reader report opens a
+confirmation naming the topic and the sample count, with *Do not publish* under
+the cursor; Escape is a refusal, and the answer is **not** remembered — unlike
+the capture choice, which is remembered precisely because it changes nothing
+about the system it observes. Headless, `--write-samples` is the same consent,
+given on the command line, and the run says so on stderr before it publishes.
+
+Declining still reports the match and the reliable handshake from the probe
+writer's own counters (`sent_heartbeat_count`, `received_ack_count`); what it
+cannot do is prove delivery, and the verdict says exactly that rather than
+reporting rti_doctor's own restraint as a fault of the peer.
+
+When approved, the probe publishes and — for a RELIABLE reader — waits for
+acknowledgment, so the verdict reads `matched, 3 sample(s) published,
+acknowledged by the reader`.
 
 ## The Visibility Ladder
 
@@ -312,6 +390,11 @@ Findings have stable, greppable ids. The ones that matter most:
 | `qos.rxo_mismatch` | 4 | Two live endpoints whose QoS can never match, policies named |
 | `match.none` | 4 | The probe reader never matched |
 | `data.silent` | 5 | Matched but nothing arrived, with the sub-case identified |
+| `reliable.ok` | 5 | RELIABLE handshake confirmed: heartbeats out, acknowledgments back |
+| `reliable.no_heartbeat` | 5 | RELIABLE and matched, but no heartbeats — an asymmetric match |
+| `reliable.no_acknowledgment` | 5 | Heartbeats sent, nothing answering — a return-path fault |
+| `reliable.not_measured` | 5 | Neither counters nor a capture could observe the handshake |
+| `reliable.evidence_disagrees` | 5 | Capture and status counters disagree about heartbeats |
 | `data.fragmentation` | 5 | Large-data reassembly state |
 | `data.deserialize_failure` | 5 | Connext itself could not decode a sample |
 | `payload.partial` | 5 | Which field paths are unreadable |

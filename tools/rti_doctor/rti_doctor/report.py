@@ -560,6 +560,17 @@ def _render_counter_appendix(data):
                  f"{compat.counter_text(result.requested_incompatible_qos, name)}")
   policy = compat.get(result.requested_incompatible_qos, "last_policy", None)
   lines.append(f"  {'last_policy'.ljust(52)}{policy if policy is not None else compat.na_text()}")
+  # `last_policy` names one policy; `policies` names all of them. Kept side by
+  # side rather than replacing it, because a reader comparing this report
+  # against the middleware's own status output should find both fields.
+  policies = compat.incompatible_policies(result.requested_incompatible_qos)
+  if policies:
+    policy_text = ", ".join(f"{name} (x{count})" for name, count in policies)
+  elif result.requested_incompatible_qos is None:
+    policy_text = compat.na_text()
+  else:
+    policy_text = "none"
+  lines.append(f"  {'policies'.ljust(52)}{policy_text}")
 
   lines.append("sample_lost")
   for name in ("total_count", "total_count_change"):

@@ -114,7 +114,12 @@ class _DiagnosticListener(dds.DynamicData.NoOpDataReaderListener):
 
   def on_requested_incompatible_qos(self, reader, status):
     policy = compat.get(status, "last_policy", "unknown")
-    self._log(f"REQUESTED_INCOMPATIBLE_QOS last_policy={policy}")
+    # Log every refusing policy, not only the last one evaluated: this line is
+    # often the only record of why a probe never matched.
+    policies = compat.incompatible_policies(status)
+    named = ", ".join(f"{name} (x{count})" for name, count in policies)
+    self._log(f"REQUESTED_INCOMPATIBLE_QOS last_policy={policy}"
+              + (f" policies={named}" if named else ""))
 
   def on_sample_lost(self, reader, status):
     reason = compat.reason_text(compat.get(status, "last_reason", None))

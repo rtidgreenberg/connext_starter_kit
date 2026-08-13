@@ -189,6 +189,39 @@ def counter_text(obj, name):
   return na_text() if value is None else str(value)
 
 
+def incompatible_policies(status):
+  """Every QoS policy that refused a match, as ``[(name, count)]``.
+
+  ``RequestedIncompatibleQosStatus`` and its offered counterpart carry a
+  ``policies`` sequence with one entry per policy that blocked the match, and a
+  ``last_policy`` naming only whichever was evaluated last. Those are not
+  equivalent: a pair that mismatches on reliability, durability and deadline at
+  once reports all three in ``policies`` with a count each, and exactly one of
+  them in ``last_policy`` - so reading ``last_policy`` alone reports one real
+  incompatibility and hides the others, which is the opposite of what a
+  diagnostic should do.
+
+  Entries with a zero count are dropped: the sequence is indexed by policy, so
+  it can carry rows for policies that never refused anything. Returns ``[]``
+  when the sequence is unavailable, which the caller must distinguish from an
+  empty one - see `report`.
+  """
+  entries = get(status, "policies", None)
+  if not entries:
+    return []
+  named = []
+  for entry in entries:
+    count = get_int(entry, "count")
+    if not count or count <= 0:
+      continue
+    policy = get(entry, "policy", None)
+    # `policy` is the policy CLASS, so __name__ is the readable label and
+    # str() would render it as "<class 'rti.connextdds.Reliability'>".
+    name = getattr(policy, "__name__", None) or str(policy)
+    named.append((name, count))
+  return named
+
+
 def snapshot(obj, names):
   """Read many counters at once into {name: int-or-None}.
 

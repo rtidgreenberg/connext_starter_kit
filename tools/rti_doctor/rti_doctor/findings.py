@@ -63,11 +63,21 @@ RUNG_NAMES = {
 # the report must never let it be read as such.
 SCOPE_OBSERVED = "observed"
 SCOPE_PROBE = "probe"
+#: A third body of evidence, and the reason the two above can come back empty:
+#: the QoS rti_doctor's OWN participant is running under, which it inherits from
+#: whatever QoS profiles this environment supplies. A domain tag, SPDP2, DDS
+#: Security, accept_unknown_peers - each makes rti_doctor unable to discover
+#: peers that are running perfectly well, so each has to be reported, and none of
+#: it is read from discovery data about the system's endpoints. Filed under
+#: SCOPE_OBSERVED it was rendered beneath a note promising the opposite, and the
+#: verdict said "system: 1 ERROR" about a setting on this tool's own participant.
+SCOPE_OWN_CONFIG = "own_config"
 #: Neither: a bug in rti_doctor, about no one's system.
 SCOPE_TOOL = "tool"
 
 SCOPE_TITLES = {
     SCOPE_OBSERVED: "OBSERVED IN THE SYSTEM",
+    SCOPE_OWN_CONFIG: "RTI DOCTOR'S OWN CONFIGURATION",
     SCOPE_PROBE: "MEASURED BY RTI DOCTOR'S OWN PROBE",
     SCOPE_TOOL: "RTI DOCTOR ITSELF",
 }
@@ -77,6 +87,13 @@ SCOPE_NOTES = {
         "Read from discovery data about endpoints that were already running. "
         "Nothing here depends on rti_doctor having created anything, and "
         "nothing here is affected by the probe's own QoS."),
+    SCOPE_OWN_CONFIG: (
+        "Read from the QoS rti_doctor's own participant is running under, "
+        "inherited from this environment's QoS profiles. It says what rti_doctor "
+        "itself may be unable to discover, so an empty result above may be this "
+        "and not the system. Whether the applications under test share these "
+        "settings depends on whether they load the same profiles - that is worth "
+        "checking, but it is not something rti_doctor observed."),
     SCOPE_PROBE: (
         "Measured with a reader or writer rti_doctor created for this "
         "diagnosis, whose applied QoS is listed in the own-configuration "
@@ -245,6 +262,15 @@ def verdict_line(findings, probe=None):
   observed = _problem_summary(findings, scope=SCOPE_OBSERVED)
   if observed:
     line += f"; system: {observed}"
+  # Its own clause, never folded into "system": a domain tag on this tool's
+  # participant is an ERROR worth the verdict line - it is why the system may
+  # look empty - but it is not something wrong with the system. Abbreviated
+  # because this line is one line by contract (the report's parser reads the
+  # verdict as `body[0]`, so it cannot be wrapped) and already runs past the
+  # report width on a run with findings in two scopes.
+  own = _problem_summary(findings, scope=SCOPE_OWN_CONFIG)
+  if own:
+    line += f"; rti_doctor's own config: {own}"
   return line
 
 

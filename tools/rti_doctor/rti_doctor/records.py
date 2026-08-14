@@ -150,9 +150,20 @@ def locator_ip(locator):
   that exists nowhere, reported with no hint it was manufactured, and then
   judged for reachability by `static_discovery.check_locators`. A v6 locator now
   renders as v6.
+
+  A kind in `NON_IP_LOCATOR_KINDS` has no IP address at all and returns None. The
+  set existed for `locator_text`, which consulted it and printed the port alone,
+  while this function - the one that reads the octets - did not: SHMEM's sixteen
+  zeroes still came back as "0.0.0.0" and UDPv4_WAN's transport-specific
+  structure as a dotted quad off the tail of a UUID. Both reached
+  `ParticipantRecord.ip` through `first_locator_ip` and were printed in the PEER
+  block as the peer's address. The IP-address checks were never affected: they
+  gate on `_is_ip_locator` first.
   """
   address = compat.get(locator, "address", None)
   if address is None:
+    return None
+  if compat.get_int(locator, "kind") in NON_IP_LOCATOR_KINDS:
     return None
   try:
     octets = [int(b) for b in address]
@@ -252,6 +263,11 @@ def locator_text(locator):
 
   A non-IP locator prints its port and no address, for the reason in
   `NON_IP_LOCATOR_KINDS`.
+
+  A v6 address is bracketed, per RFC 3986. Unbracketed, "2001:db8::1" with port
+  7411 rendered as "2001:db8::1:7411" - itself a valid IPv6 address, and one an
+  operator could copy into a ping or a peers list as the peer's address with no
+  sign that the last group is a port.
   """
   kind = compat.get_int(locator, "kind")
   port = compat.get_int(locator, "port")
@@ -259,7 +275,10 @@ def locator_text(locator):
     text = f"port {port}" if port is not None else "no address"
   else:
     ip = locator_ip(locator) or "unknown"
-    text = f"{ip}:{port}" if port is not None else ip
+    # On the address, not on the kind: a v6 address can reach here under a kind
+    # this table does not name, and it is the colons that make it ambiguous.
+    host = f"[{ip}]" if ":" in ip else ip
+    text = f"{host}:{port}" if port is not None else ip
   name = locator_kind_text(kind)
   return f"{text} ({name})" if name else text
 

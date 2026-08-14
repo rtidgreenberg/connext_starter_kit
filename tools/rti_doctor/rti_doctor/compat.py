@@ -285,10 +285,18 @@ def rejected_reason_flag(name):
   return get(state, name, None)
 
 
+#: What `reason_text` returns when there is no status object to read a reason
+#: from - nothing was sampled, as opposed to a status that was read and reported
+#: a quiet default. Named so `report._notable_reason` can recognize it exactly
+#: instead of matching "UNKNOWN" as a substring, which would also silence
+#: LOST_BY_UNKNOWN_INSTANCE - a real loss, and the opposite of quiet.
+REASON_UNSAMPLED = "unknown"
+
+
 def reason_text(reason):
   """Human-readable reason, falling back to repr rather than inventing a name."""
   if reason is None:
-    return "unknown"
+    return REASON_UNSAMPLED
   for attr in ("name", "value"):
     value = get(reason, attr, MISSING)
     if value is not MISSING and value is not None:

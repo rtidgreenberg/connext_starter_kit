@@ -129,13 +129,18 @@ def _table_row(name, value, gutter="  ", pad=TABLE_PAD):
 # A value that overflows is a cosmetic problem; one the parser cannot find is
 # not. See `test_a_long_value_stays_parseable_on_its_label_line`.
 #
-# So WIDTH binds every line the report writes EXCEPT a `_kv` field whose value
-# is too long for its column. Besides paths and URLs, that is Appendix C's
-# list-valued fields - "Writer IDs in matching frames" passes WIDTH at five
-# writers, and a capture on a busy topic sees more. Folding those means teaching
-# every consumer of the report, not just this repo's parser, to join
-# continuation lines; the fixed-column tables fold instead because nothing
-# parses them (`_table_row`).
+# So WIDTH binds every line the report writes EXCEPT the ones a consumer parses
+# as a single line. Besides paths and URLs, those are:
+#
+#   * Appendix C's list-valued fields. "Writer IDs in matching frames" passes
+#     WIDTH at five writers, and a capture on a busy topic sees more.
+#   * The VERDICT line, which the parser reads as `body[0]` of the section - so
+#     wrapping it would not widen the verdict, it would truncate it. A run with
+#     findings in two scopes passes WIDTH on its own.
+#
+# Folding any of these means teaching every consumer of the report, not just this
+# repo's parser, to join continuation lines. The fixed-column tables fold instead
+# because nothing parses them (`_table_row`).
 
 
 def _is_live(name, text):
@@ -180,8 +185,16 @@ def _notable_reason(text):
   quiet values are matched anywhere in the string, not as a prefix. They are
   listed exactly; a bare "UNKNOWN" was tried and silenced
   LOST_BY_UNKNOWN_INSTANCE, which is a real loss and the opposite of quiet.
+
+  `compat.REASON_UNSAMPLED` is that same trap from the other side: it is what
+  `reason_text` returns when there was no status to read, so it was marked as
+  something that happened - `* last_reason  unknown`, on a probe that sampled
+  nothing, under a legend saying the mark means a counter moved. Matched by
+  equality, which LOST_BY_UNKNOWN_INSTANCE does not satisfy.
   """
   upper = str(text or "").upper()
+  if upper == compat.REASON_UNSAMPLED.upper():
+    return False
   return bool(upper) and not any(
       quiet in upper for quiet in ("NOT_LOST", "NOT_REJECTED", "N/A"))
 
@@ -680,21 +693,33 @@ def _counterpart_lines(data):
   first about who the counterparts are.
   """
   labels, key = [], "reader" if getattr(data.endpoint, "is_writer", False) else "writer"
+  discovered = 0
   for finding in data.findings:
     # Every per-pair verdict qos_match can produce. A counterpart that will not
     # match for a non-RxO reason is still a counterpart, and leaving it out
     # would make PEER disagree with the findings below it.
     if finding.id in ("qos.compatible", "qos.rxo_mismatch",
-                      "qos.partition_disjoint"):
+                      "qos.partition_disjoint", "qos.mismatch_undescribed"):
+      # The count comes from the pairing itself, not from the names below it.
+      # `_label` is "Reader in 'app' (Connext)" - participant, not endpoint - so
+      # two readers in one participant are one label and PEER printed "1
+      # discovered" directly above findings reading "Counterpart 1 of 2".
+      discovered = max(discovered,
+                       finding.evidence.get("counterparts_discovered") or 0)
       label = finding.evidence.get(key)
       if label and label not in labels:
         labels.append(label)
   if not labels:
     return []
-  return _kv_block(
-      "Counterparts",
-      f"{len(labels)} discovered on this topic: {', '.join(labels)}. "
-      "rti_doctor's own probe is not among them.")
+  count = max(discovered, len(labels))
+  text = f"{count} discovered on this topic: {', '.join(labels)}."
+  if count > len(labels):
+    # Said rather than silently listing fewer names than the count promises.
+    text += (f" That is {len(labels)} distinct name(s): a participant with more "
+             "than one endpoint on this topic is named once here, and numbered "
+             "once per pair in the findings below.")
+  return _kv_block("Counterparts",
+                   f"{text} rti_doctor's own probe is not among them.")
 
 
 def _render_topology(data):
@@ -769,7 +794,11 @@ def _render_findings(data):
     lines += ["No findings.", ""]
     return lines
 
-  for scope in (f.SCOPE_OBSERVED, f.SCOPE_PROBE, f.SCOPE_TOOL):
+  # The system first, since that is what the operator came to find out, then what
+  # rti_doctor's own configuration may be hiding from it - which is the first
+  # thing to read when the section above is thin or empty.
+  for scope in (f.SCOPE_OBSERVED, f.SCOPE_OWN_CONFIG, f.SCOPE_PROBE,
+                f.SCOPE_TOOL):
     group = f.in_scope(findings, scope)
     if not group:
       continue

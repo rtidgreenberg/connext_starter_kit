@@ -284,12 +284,25 @@ def check_empty_domain(context):
   )]
 
 
-CHECKS = (
+#: The checks that read `context.own_qos` - rti_doctor's own participant QoS,
+#: inherited from this environment's profiles. Separated from the two below
+#: because the report stamps a finding's scope from the catalog it came from, and
+#: these belong to `SCOPE_OWN_CONFIG`: they are read off this tool's own
+#: participant, not from discovery data about the system's endpoints.
+OWN_CONFIG_CHECKS = (
     check_domain_tag,
     check_spdp2,
     check_security_enabled,
     check_accept_unknown_peers,
     check_nonstandard_ports,
+)
+
+#: The rest of rung 0-1, which read the registry and the domain scan. These are
+#: observations of the system: what was discovered, and on which domains anything
+#: was announcing at all.
+DOMAIN_CHECKS = (
     check_other_domain_active,
     check_empty_domain,
 )
+
+CHECKS = OWN_CONFIG_CHECKS + DOMAIN_CHECKS

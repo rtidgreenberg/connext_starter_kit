@@ -263,6 +263,18 @@ def _joined_a_running_stream(probe, lost=0):
       announcement; a shallow-history writer shedding samples continuously loses
       them faster than the reader takes them, and that is a real fault wearing
       the same reason code.
+
+  What none of the three can do is separate this from a writer shedding samples
+  continuously at about the rate the reader takes them. The real benign case
+  measured against Fast DDS is one loss against one sample taken, so no ratio
+  distinguishes it from fifty against fifty; Connext coalesces SAMPLE_LOST
+  callbacks, so continuous shedding can reach `listener_events` as one event at
+  the match with a large total_count; and the writer's history depth, which is
+  what actually bounds a benign join loss, is not observable from this side. A
+  tighter bound was tried and reverted - it turned the documented real case into
+  a warning. The finding this gates therefore says what it did not rule out and
+  names the one measurement that settles it, rather than reporting "Nothing to
+  fix" as though the question had been closed.
     * The loss must not recur, and must sit at the match. RTI's guidance is that
       this reason is benign only when it "occurs immediately around the first
       match" and "does not continue after the match stabilizes" - which also
@@ -462,8 +474,15 @@ def check_deserialize_failure(context):
             "rti_doctor's reader is VOLATILE, so samples published before it "
             "existed were never going to be delivered, and the writer says so "
             "rather than sending them. Samples arrived afterwards, so this "
-            "describes the join, not the data path."),
-        remedy=("Nothing to fix. To see the earlier samples, both sides would "
+            "describes the join, not the data path. What the probe cannot rule "
+            "out from one run is a writer shedding samples continuously at about "
+            "the rate they are taken: the counts and the recorded events look "
+            "the same, because SAMPLE_LOST callbacks coalesce and the writer's "
+            "history depth is not visible from the reader side."),
+        remedy=("Nothing to fix if this was the join. To tell the two apart, "
+                "re-run with a longer --probe-timeout: a join loses its backlog "
+                "once, so sample_lost stays where it is, while a shedding writer "
+                "keeps adding to it. To see the earlier samples, both sides would "
                 "have to be TRANSIENT_LOCAL or stronger."),
         evidence={"sample_lost_reason": compat.reason_text(lost_reason),
                   "sample_lost_total": lost_total,

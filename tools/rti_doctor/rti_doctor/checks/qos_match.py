@@ -607,8 +607,25 @@ NON_RXO_FINDINGS = {
 
 def _non_rxo_finding(mismatch, writer_label, reader_label, evidence,
                      unevaluated, census):
-  """One finding for a non-RxO reason a pair will not match."""
-  spec = NON_RXO_FINDINGS[mismatch["policy"]]
+  """One finding for a non-RxO reason a pair will not match.
+
+  Falls back rather than raising on a policy the table does not describe. The
+  lookup was unguarded, and the cost of a KeyError here is not a crash: it is
+  caught by `run_checks`, which replaces EVERY finding this check produced with
+  one INFO - including the `qos.rxo_mismatch` ERRORs already built for other
+  pairs on the topic. A run against a genuinely broken system would then report
+  one INFO about a bug in rti_doctor and exit 0.
+
+  Keyed on the leading token, as `is_rxo` matches: a policy name may carry the
+  field that differed ("PARTITION name"), and the whole-string lookup that was
+  here would have missed the table for it.
+  """
+  policy = str(mismatch.get("policy") or "")
+  spec = NON_RXO_FINDINGS.get(policy.split(" ")[0])
+  if spec is None:
+    return _undescribed_non_rxo_finding(mismatch, policy, writer_label,
+                                        reader_label, evidence, unevaluated,
+                                        census)
   writer_key, reader_key = spec["sides"]
   return Finding(
       id=spec["id"],
@@ -620,6 +637,41 @@ def _non_rxo_finding(mismatch, writer_label, reader_label, evidence,
                 + _unevaluated_text(unevaluated) + census),
       root_cause=spec["root_cause"] + " " + mismatch["rule"],
       remedy=spec["remedy"],
+      evidence={**evidence, "mismatch": mismatch},
+      refs=[DOC_OMG_DDS_RTPS],
+  )
+
+
+def _undescribed_non_rxo_finding(mismatch, policy, writer_label, reader_label,
+                                 evidence, unevaluated, census):
+  """A non-RxO mismatch this catalog has no description for, reported anyway.
+
+  `compare_endpoints` found a reason the pair will not match, so the severity is
+  the same ERROR a described one gets - what is missing is the explanation, which
+  is rti_doctor's gap and not a reason to withhold the observation. Every side of
+  the mismatch is rendered from the record itself rather than from a table, so a
+  policy added to `compare_endpoints` and not to `NON_RXO_FINDINGS` still reports
+  what differed.
+  """
+  sides = "; ".join(f"{key}: {value}" for key, value in sorted(mismatch.items())
+                    if key not in ("policy", "rule"))
+  return Finding(
+      id="qos.mismatch_undescribed",
+      rung=RUNG_MATCH,
+      severity=Severity.ERROR,
+      title=f"{policy or 'A policy'} will not match: {writer_label} -> {reader_label}",
+      observed=((sides or "no per-side values were recorded") + "."
+                + _unevaluated_text(unevaluated) + census),
+      root_cause=(
+          f"These two endpoints will never communicate, on {policy or 'a policy'}, "
+          "and by a mechanism that is not requested/offered - so there may be no "
+          "QoS value to relax. rti_doctor has no description for this policy: it "
+          "is reported here as observed, with the rule that produced it, rather "
+          "than filed under a mechanism it may not belong to. "
+          + str(mismatch.get("rule") or "")).strip(),
+      remedy=("Read the rule below against the two values above. Please report "
+              "this finding id with the surrounding output - the policy is "
+              "detected but undescribed, which is a gap in rti_doctor."),
       evidence={**evidence, "mismatch": mismatch},
       refs=[DOC_OMG_DDS_RTPS],
   )

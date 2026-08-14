@@ -100,14 +100,29 @@ def static_checks():
   Includes the RxO comparison between discovered writers and discovered readers:
   rti_doctor observes a running system, so both sides' QoS come from discovery
   and no reader has to be created to compare them.
+
+  Excludes `blind_spots.OWN_CONFIG_CHECKS`, which read rti_doctor's own QoS - see
+  `own_config_checks`. Everything left here reads the system.
   """
   from . import blind_spots, qos_match, static_discovery, type_compat
   return (
-      blind_spots.CHECKS
+      blind_spots.DOMAIN_CHECKS
       + static_discovery.CHECKS
       + type_compat.CHECKS
       + qos_match.CHECKS
   )
+
+
+def own_config_checks():
+  """Checks that read rti_doctor's own participant QoS, not the system.
+
+  Their own catalog because `run_checks` stamps scope per catalog: run with the
+  static checks they were stamped SCOPE_OBSERVED, which put "a domain tag is set
+  on this participant" under a heading promising nothing there depends on
+  rti_doctor's own configuration.
+  """
+  from . import blind_spots
+  return blind_spots.OWN_CONFIG_CHECKS
 
 
 def probe_checks():
@@ -128,4 +143,4 @@ def writer_probe_checks():
 
 
 def all_checks():
-  return static_checks() + probe_checks()
+  return own_config_checks() + static_checks() + probe_checks()

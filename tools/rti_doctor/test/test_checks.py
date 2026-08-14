@@ -345,11 +345,35 @@ class TestLocatorRendering(unittest.TestCase):
     Printed as a dotted quad they name a host that exists nowhere, and
     `static_discovery.check_locators` then judged that invention for
     reachability.
+
+    The address is bracketed: "2001:db8::1:7411" is itself a valid IPv6 address,
+    so the unbracketed form gave the operator no way to see that the last group
+    was the port - and it read as a different host, not as a malformed one.
     """
     address = bytes.fromhex("20010db8000000000000000000000001")
     locator = FakeLocator("0.0.0.0", 7411, kind=records.LOCATOR_KIND_UDPV6)
     locator.address = list(address)
-    self.assertEqual(records.locator_text(locator), "2001:db8::1:7411 (UDPv6)")
+    self.assertEqual(records.locator_ip(locator), "2001:db8::1")
+    self.assertEqual(records.locator_text(locator), "[2001:db8::1]:7411 (UDPv6)")
+
+  def test_a_non_ip_locator_yields_no_ip_address_at_all(self):
+    """`locator_ip` is what reads the octets, so it is what has to refuse them.
+
+    `NON_IP_LOCATOR_KINDS` was consulted only by `locator_text`, so SHMEM's
+    sixteen zeroes still came back as "0.0.0.0" here and UDPv4_WAN's transport
+    structure as a dotted quad - and `first_locator_ip` put whichever came first
+    into `ParticipantRecord.ip`, which the PEER block prints as the peer's
+    address.
+    """
+    shmem = FakeLocator("0.0.0.0", 7410, kind=records.LOCATOR_KIND_SHMEM)
+    wan = FakeLocator("10.0.2.15", 7411, kind=records.LOCATOR_KIND_UDPV4_WAN)
+    self.assertIsNone(records.locator_ip(shmem))
+    self.assertIsNone(records.locator_ip(wan))
+    # A real address later in the list is still found; PEER shows an IP when one
+    # was advertised, and nothing when none was.
+    udp = FakeLocator("10.0.2.15", 7411, kind=records.LOCATOR_KIND_UDPV4)
+    self.assertEqual(records.first_locator_ip([shmem, udp]), "10.0.2.15")
+    self.assertEqual(records.first_locator_ip([shmem, wan]), "")
 
   def test_kind_name_is_available_on_its_own(self):
     self.assertEqual(records.locator_kind_text(records.LOCATOR_KIND_SHMEM), "SHMEM")
@@ -944,6 +968,22 @@ class TestLateJoinIsNotAFault(unittest.TestCase):
     self.assertEqual(ids(result), ["data.loss"])
     self.assertEqual(result[0].severity, f.Severity.INFO)
     self.assertTrue(result[0].evidence["late_join"])
+
+  def test_the_informational_verdict_says_what_it_did_not_rule_out(self):
+    """INFO here means "this looks like the join", not "the question is closed".
+
+    A writer shedding samples continuously at about the rate they are taken
+    presents identically: same reason code, same ratio (the real benign case is
+    one loss against one sample taken, so no ratio separates them), and one
+    coalesced SAMPLE_LOST callback at the match. The finding used to answer
+    "Nothing to fix" flatly, and this is the one place a real fault could be lost.
+    """
+    result = probe_payload.check_deserialize_failure(
+        CheckContext(probe=self._lost_by_writer(samples_taken=1)))
+    self.assertEqual(result[0].severity, f.Severity.INFO)
+    self.assertIn("cannot rule out", result[0].root_cause)
+    # And it names the one measurement that separates the two.
+    self.assertIn("--probe-timeout", result[0].remedy)
 
   def test_the_same_loss_with_no_data_stays_a_warning(self):
     """'The backlog was dropped' and 'nothing is arriving' are not one event."""
@@ -1559,6 +1599,61 @@ class TestRxO(unittest.TestCase):
     self.assertNotIn("offers", finding.observed)
     self.assertNotIn("requests", finding.observed)
     self.assertIn("not an RxO policy", finding.root_cause)
+
+  def test_an_undescribed_non_rxo_policy_does_not_delete_the_real_errors(self):
+    """The lookup was unguarded, and `run_checks` turns a raise into one INFO.
+
+    A KeyError here is not a crash the operator sees: it is caught, and every
+    finding this check produced is replaced by one INFO about a bug in rti_doctor
+    - the `qos.rxo_mismatch` ERRORs for the other pairs on the topic included. A
+    genuinely broken system would report nothing wrong and exit 0.
+    """
+    from rti_doctor.checks import qos_match as qos_module
+    writer, reader, registry = self._pair(
+        {"reliability": self._policy("BEST_EFFORT")},
+        {"reliability": self._policy("RELIABLE")})
+    # A non-RxO mismatch of a policy the description table does not know.
+    extra = {"policy": "TYPE_CONSISTENCY_ENFORCEMENT kind",
+             "writer_kind": "ALLOW_TYPE_COERCION",
+             "reader_kind": "DISALLOW_TYPE_COERCION",
+             "rule": "Coercion must be allowed by the reader."}
+    with mock.patch.object(
+        qos_module, "compare_endpoints",
+        return_value=([{"policy": "RELIABILITY", "offered": "BEST_EFFORT",
+                        "requested": "RELIABLE", "rule": "r"}, extra], [])):
+      result = qos_module.check_rxo_pairs(
+          CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(sorted(ids(result)),
+                     ["qos.mismatch_undescribed", "qos.rxo_mismatch"])
+    undescribed = next(item for item in result
+                       if item.id == "qos.mismatch_undescribed")
+    self.assertEqual(undescribed.severity, f.Severity.ERROR)
+    # It reports what differed, read off the record rather than a table.
+    self.assertIn("ALLOW_TYPE_COERCION", undescribed.observed)
+    self.assertIn("DISALLOW_TYPE_COERCION", undescribed.observed)
+    self.assertIn("TYPE_CONSISTENCY_ENFORCEMENT", undescribed.title)
+    self.assertIn("Coercion must be allowed", undescribed.root_cause)
+
+  def test_a_policy_naming_its_field_still_finds_its_description(self):
+    """`is_rxo` matches the leading token, so this lookup has to as well.
+
+    "PARTITION name" would otherwise miss the table and be reported as
+    undescribed, with the wrong root cause for a mechanism rti_doctor documents.
+    """
+    from rti_doctor.checks import qos_match as qos_module
+    writer, reader, registry = self._pair(
+        {"partition": self._partition(["telemetry"])},
+        {"partition": self._partition(["control"])})
+    mismatch = {"policy": "PARTITION name",
+                "writer_partitions": ["telemetry"],
+                "reader_partitions": ["control"],
+                "rule": "Matched by name intersection."}
+    with mock.patch.object(qos_module, "compare_endpoints",
+                           return_value=([mismatch], [])):
+      result = qos_module.check_rxo_pairs(
+          CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.partition_disjoint"])
+    self.assertIn("not an RxO policy", result[0].root_cause)
 
   def test_a_partition_and_an_rxo_mismatch_are_reported_separately(self):
     """Two mechanisms, two findings - an operator acts on each differently."""
@@ -2737,6 +2832,23 @@ class TestReportReadability(unittest.TestCase):
     self.assertTrue(report_module._notable_reason(
         "SampleLostState.LOST_BY_UNKNOWN_INSTANCE"))
 
+  def test_a_status_that_was_never_sampled_is_not_marked(self):
+    """The trap's other side: `reason_text(None)` is "unknown", not an event.
+
+    A probe that read no sample_lost status rendered `* last_reason  unknown`,
+    under a legend saying the mark means a counter moved or a reason left its
+    quiet default. Nothing had happened; nothing had been looked at.
+    """
+    from rti_doctor import report as report_module
+    self.assertFalse(report_module._notable_reason(compat.REASON_UNSAMPLED))
+    self.assertFalse(report_module._notable_reason(
+        compat.reason_text(None)))
+    result = probe.ProbeResult()
+    result.attempted = result.created = True
+    text = self._report(probe_result=result)
+    self.assertNotIn("* last_reason", text)
+    self.assertIn("last_reason", text)
+
   def test_the_verdict_names_the_finding_to_open_first(self):
     """A bare "1 ERROR, 1 WARN" says how much is wrong, never where to start."""
     findings = [self._finding("data.window", f.Severity.WARN, 5),
@@ -2793,6 +2905,53 @@ class TestFindingScope(unittest.TestCase):
     self.assertTrue(all(item.scope == f.SCOPE_OBSERVED for item in observed))
     self.assertTrue(all(item.scope == f.SCOPE_PROBE for item in measured))
 
+  def test_our_own_qos_is_never_reported_as_the_system(self):
+    """Regression: `blind.domain_tag` rendered under "OBSERVED IN THE SYSTEM".
+
+    Every `blind_spots.OWN_CONFIG_CHECKS` check reads `context.own_qos` - the QoS
+    of the participant rti_doctor created - so running them in the static catalog
+    stamped them SCOPE_OBSERVED, and the verdict read "system: 1 ERROR; start at
+    blind.domain_tag" about a property of this tool's own participant, under a
+    heading promising nothing there depends on rti_doctor's configuration.
+    """
+    from rti_doctor import checks as checks_module
+    from rti_doctor import report as report_module
+    qos = FakeQos(properties={"dds.domain_participant.domain_tag": "prod"})
+    context = CheckContext(own_qos=qos, participant_record=participant_record())
+    own = checks_module.run_checks(context, checks_module.own_config_checks(),
+                                  scope=f.SCOPE_OWN_CONFIG)
+    self.assertEqual(ids(own), ["blind.domain_tag"])
+    self.assertTrue(all(item.scope == f.SCOPE_OWN_CONFIG for item in own))
+    # And no own-QoS check is left in the catalog that gets stamped as observed.
+    observed = checks_module.run_checks(context, checks_module.static_checks(),
+                                        scope=f.SCOPE_OBSERVED)
+    self.assertNotIn("blind.domain_tag", ids(observed))
+
+    text = report_module.render_text(report_module.ReportData(
+        domain_id=7, scope="topic 'T'", all_findings=own))
+    self.assertIn("RTI DOCTOR'S OWN CONFIGURATION", text)
+    # An ERROR that blocks all discovery must stay on the verdict line - just not
+    # as a claim about the system.
+    verdict = next(line for line in text.splitlines()
+                   if line.startswith("probe:"))
+    self.assertIn("rti_doctor's own config:", verdict)
+    self.assertIn("blind.domain_tag", verdict)
+    self.assertNotIn("system:", verdict)
+
+  def test_an_empty_domain_is_still_an_observation_of_the_system(self):
+    """The other half of the split: these read the registry, not our QoS.
+
+    Moving all of rung 0-1 out of the observed scope would have been the opposite
+    error - "nothing was discovered on this domain" is exactly an observation.
+    """
+    from rti_doctor import checks as checks_module
+    from rti_doctor import discovery as discovery_module
+    context = CheckContext(
+        registry=discovery_module.DiscoveryRegistry(type_wait=0.0), domain_id=7)
+    observed = checks_module.run_checks(context, checks_module.static_checks(),
+                                        scope=f.SCOPE_OBSERVED)
+    self.assertIn("blind.empty_domain", ids(observed))
+
   def test_a_broken_check_is_blamed_on_the_tool_not_the_system(self):
     from rti_doctor import checks as checks_module
 
@@ -2843,6 +3002,30 @@ class TestFindingScope(unittest.TestCase):
     self.assertIn("Counterparts", flat)
     self.assertIn("Reader in 'app_reader' (RTI Connext)", flat)
     self.assertIn("own probe is not among them", flat)
+
+  def test_peer_counts_counterparts_and_not_distinct_names(self):
+    """Regression: PEER said "1 discovered" over "Counterpart 1 of 2".
+
+    `_label` names the PARTICIPANT, so two readers in one application are one
+    label. Counting the de-duplicated labels contradicted the findings directly
+    beneath, which number each pair - and understated how much of the system a
+    mismatch affects, which is the reason the census exists.
+    """
+    from rti_doctor import report as report_module
+    pair = [f.Finding(
+        id="qos.rxo_mismatch", rung=4, severity=f.Severity.ERROR,
+        title="QoS incompatible", scope=f.SCOPE_OBSERVED,
+        observed=f"Counterpart {index} of 2 discovered on this topic.",
+        evidence={"writer": "Writer in 'app_writer' (RTI Connext)",
+                  # One participant, two readers: the same label twice.
+                  "reader": "Reader in 'app_reader' (RTI Connext)",
+                  "counterparts_discovered": 2}) for index in (1, 2)]
+    flat = " ".join(report_module.render_text(report_module.ReportData(
+        domain_id=7, scope="topic 'T'", all_findings=pair,
+        endpoint=endpoint_record(kind="Writer"))).split())
+    self.assertIn("2 discovered on this topic", flat)
+    self.assertIn("1 distinct name(s)", flat)
+    self.assertNotIn("1 discovered on this topic", flat)
 
   def test_a_topic_with_no_counterpart_says_nothing_about_counterparts(self):
     from rti_doctor import report as report_module

@@ -259,6 +259,8 @@ class Session:
     self.registry.expire_type_waits()
     context = self._context(participant_record=participant_record)
     findings = checks.run_checks(context, checks.static_checks())
+    findings += checks.run_checks(context, checks.own_config_checks(),
+                                  scope=f.SCOPE_OWN_CONFIG)
 
     # Roll up the type state of this participant's writers, which is the single
     # most useful per-participant signal cross-vendor.
@@ -423,6 +425,11 @@ class Session:
     # single list presents those two facts as one contradictory body of evidence.
     findings = checks.run_checks(context, checks.static_checks(),
                                  scope=f.SCOPE_OBSERVED)
+    # The third pass, and not part of either above: these read this tool's own
+    # participant QoS, which is why an empty observed section can be rti_doctor
+    # rather than the system.
+    findings += checks.run_checks(context, checks.own_config_checks(),
+                                  scope=f.SCOPE_OWN_CONFIG)
     if probe_result is not None:
       probe_selected = (checks.writer_probe_checks()
                         if probe_result.probe_kind == "writer"

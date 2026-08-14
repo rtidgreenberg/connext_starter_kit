@@ -77,6 +77,74 @@ def _wrap(text, indent=15, width=WIDTH):
   return [pad + line for line in lines]
 
 
+def _kv_block(label, value, pad=16):
+  """`_kv` for a value long enough to need wrapping, with a hanging indent.
+
+  Prose in a header column has to wrap like prose everywhere else. The topology
+  coverage note ran to 274 characters on one line - the only unwrapped paragraph
+  in the report, sitting in a block of short labelled counts, and wide enough to
+  break any terminal it was read in.
+  """
+  block = _wrap(value, indent=pad)
+  if not block:
+    return []
+  return [_kv(label, block[0][pad:], pad=pad)] + block[1:]
+
+
+def _kv_atomic(label, value, pad=16):
+  """`_kv` for a value that must NOT be wrapped: a path, a URL, a command line.
+
+  Wrapping these breaks selecting and pasting them, which is the only thing they
+  are for. So when one would overflow the report width it moves to its own line
+  under the label instead, leaving the label column intact and the value in one
+  piece.
+  """
+  value = str(value)
+  if len(label.ljust(pad)) + len(value) <= WIDTH:
+    return [_kv(label, value, pad=pad)]
+  return [label, " " * pad + value]
+
+
+def _is_positive(text):
+  """Whether a rendered counter is a number above zero.
+
+  Above zero, not merely non-zero: sequence-number fields report -1 for "none",
+  and marking three of those on every healthy report would spend the mark on
+  exactly the lines it exists to make findable.
+  """
+  try:
+    return float(text) > 0
+  except (TypeError, ValueError):
+    return False
+
+
+def _counter(name, value, notable=None):
+  """One Appendix B counter, marked in the gutter when it is not zero.
+
+  About 45 of that appendix's 55 lines read zero on a healthy run, and the one
+  or two carrying the whole story - a sample_lost total, an out-of-range
+  rejection - are typographically identical to them. The mark makes the appendix
+  skimmable without dropping the zeros, which are evidence in their own right: a
+  counter that exists and reads zero is a different claim from one this Connext
+  version cannot supply at all.
+  """
+  text = str(value)
+  if notable is None:
+    notable = _is_positive(text)
+  return f"{'*' if notable else ' '} {name.ljust(52)}{text}"
+
+
+def _notable_reason(text):
+  """Whether a last_reason line says anything happened.
+
+  The rendered form carries its enum name - "SampleLostState.NOT_LOST" - so the
+  quiet values are matched anywhere in the string, not as a prefix.
+  """
+  upper = str(text or "").upper()
+  return bool(upper) and not any(
+      quiet in upper for quiet in ("NOT_LOST", "NOT_REJECTED", "N/A", "UNKNOWN"))
+
+
 def _labelled(label, text, indent=15):
   """"  Label   wrapped text..." with the label on the first line."""
   indent = max(indent, len(label) + 3)
@@ -113,7 +181,7 @@ def render_system_text(snapshot, domain_id, environment=None,
   lines = [RULE, "RTI DOCTOR SYSTEM REPORT", RULE,
            _kv("Generated", stamp),
            _kv("Tool", "rti_doctor (tools/rti_doctor)"),
-           _kv("Command", environment.get("argv", "unknown")),
+           *_kv_atomic("Command", environment.get("argv", "unknown")),
            _kv("Host", f"{environment.get('host')}  {environment.get('os')}  "
                        f"{environment.get('machine')}"),
            _kv("Connext", f"{environment.get('connext')}  "
@@ -257,7 +325,7 @@ def _header_lines(data):
   return lines + [
       _kv("Generated", stamp),
       _kv("Tool", "rti_doctor (tools/rti_doctor)"),
-      _kv("Command", env.get("argv", "unknown")),
+      *_kv_atomic("Command", env.get("argv", "unknown")),
       _kv("Host", f"{env.get('host')}  {env.get('os')}  {env.get('machine')}"),
       _kv("Connext", f"{env.get('connext')}  (NDDSHOME={env.get('nddshome')})"),
       _kv("Python", env.get("python")),
@@ -573,7 +641,7 @@ def render_topology_text(topology):
   if others:
     lines.append(_kv("Other domains", ", ".join(str(item) for item in others)
                      + " (heard announcing; no counts above apply to them)"))
-  lines.append(_kv("Coverage", topology["completion_note"]))
+  lines.extend(_kv_block("Coverage", topology["completion_note"]))
   lines.append("")
   return lines
 
@@ -602,7 +670,9 @@ def _render_findings(data):
                          " - confirm it applies to this endpoint before acting "
                          "on it, since the link is by finding id alone.")
     for ref in finding.refs:
-      lines.append(f"  {'Reference'.ljust(13)}{ref}")
+      # A reference is a URL: never wrapped, moved below its label when it
+      # would overflow, so it stays one selectable string.
+      lines.extend(_kv_atomic("  Reference", ref, 15))
     lines.append("")
   return lines
 
@@ -643,12 +713,13 @@ def _render_counter_appendix(data):
   else:
     lines.append(f"probe window: {result.elapsed:.2f}s; valid samples taken: "
                  f"{result.samples_taken}")
+  lines.append("* marks a counter above zero, or a reason that is not the quiet default.")
   lines.append("")
 
   lines.append("publication_matched" if wrote else "subscription_matched")
   for name in ("current_count", "current_count_change", "total_count",
                "total_count_change"):
-    lines.append(f"  {name.ljust(52)}{compat.counter_text(result.subscription_matched, name)}")
+    lines.append(_counter(name, compat.counter_text(result.subscription_matched, name)))
 
   # Which incompatible-QoS status exists at all depends on which entity the
   # probe created. Printing the reader's on a writer probe reported a status
@@ -656,11 +727,12 @@ def _render_counter_appendix(data):
   if wrote:
     lines.append("offered_incompatible_qos")
     for name in ("total_count", "total_count_change"):
-      lines.append(f"  {name.ljust(52)}"
-                   f"{compat.counter_text(result.offered_incompatible_qos, name)}")
+      lines.append(_counter(
+          name, compat.counter_text(result.offered_incompatible_qos, name)))
     policy = compat.get(result.offered_incompatible_qos, "last_policy", None)
-    lines.append(f"  {'last_policy'.ljust(52)}"
-                 f"{policy if policy is not None else compat.na_text()}")
+    lines.append(_counter("last_policy",
+                          policy if policy is not None else compat.na_text(),
+                          notable=policy is not None))
     policies = compat.incompatible_policies(result.offered_incompatible_qos)
     if policies:
       policy_text = ", ".join(f"{name} (x{count})" for name, count in policies)
@@ -668,14 +740,16 @@ def _render_counter_appendix(data):
       policy_text = compat.na_text()
     else:
       policy_text = "none"
-    lines.append(f"  {'policies'.ljust(52)}{policy_text}")
+    lines.append(_counter("policies", policy_text, notable=bool(policies)))
   else:
     lines.append("requested_incompatible_qos")
     for name in ("total_count", "total_count_change"):
-      lines.append(f"  {name.ljust(52)}"
-                   f"{compat.counter_text(result.requested_incompatible_qos, name)}")
+      lines.append(_counter(
+          name, compat.counter_text(result.requested_incompatible_qos, name)))
     policy = compat.get(result.requested_incompatible_qos, "last_policy", None)
-    lines.append(f"  {'last_policy'.ljust(52)}{policy if policy is not None else compat.na_text()}")
+    lines.append(_counter("last_policy",
+                          policy if policy is not None else compat.na_text(),
+                          notable=policy is not None))
     # `last_policy` names one policy; `policies` names all of them. Kept side by
     # side rather than replacing it, because a reader comparing this report
     # against the middleware's own status output should find both fields.
@@ -686,7 +760,7 @@ def _render_counter_appendix(data):
       policy_text = compat.na_text()
     else:
       policy_text = "none"
-    lines.append(f"  {'policies'.ljust(52)}{policy_text}")
+    lines.append(_counter("policies", policy_text, notable=bool(policies)))
 
   if wrote:
     # The whole reader block is omitted rather than printed as unavailable.
@@ -698,39 +772,39 @@ def _render_counter_appendix(data):
     lines.append("datawriter_protocol_status")
     for name in probe_mod.WRITER_PROTOCOL_COUNTERS:
       value = result.writer_protocol.get(name)
-      lines.append(f"  {name.ljust(52)}{compat.na_text() if value is None else value}")
+      lines.append(_counter(name, compat.na_text() if value is None else value))
 
     lines.append("reliable_writer_cache_changed_status")
     for name in probe_mod.WRITER_CACHE_COUNTERS:
       value = result.writer_cache.get(name)
-      lines.append(f"  {name.ljust(52)}{compat.na_text() if value is None else value}")
+      lines.append(_counter(name, compat.na_text() if value is None else value))
   else:
     lines.append("sample_lost")
     for name in ("total_count", "total_count_change"):
-      lines.append(f"  {name.ljust(52)}{compat.counter_text(result.sample_lost, name)}")
-    lines.append(f"  {'last_reason'.ljust(52)}"
-                 f"{compat.reason_text(compat.get(result.sample_lost, 'last_reason', None))}")
+      lines.append(_counter(name, compat.counter_text(result.sample_lost, name)))
+    reason = compat.reason_text(compat.get(result.sample_lost, "last_reason", None))
+    lines.append(_counter("last_reason", reason, notable=_notable_reason(reason)))
 
     lines.append("sample_rejected")
     for name in ("total_count", "total_count_change"):
-      lines.append(f"  {name.ljust(52)}{compat.counter_text(result.sample_rejected, name)}")
-    lines.append(f"  {'last_reason'.ljust(52)}"
-                 f"{compat.reason_text(compat.get(result.sample_rejected, 'last_reason', None))}")
+      lines.append(_counter(name, compat.counter_text(result.sample_rejected, name)))
+    reason = compat.reason_text(compat.get(result.sample_rejected, "last_reason", None))
+    lines.append(_counter("last_reason", reason, notable=_notable_reason(reason)))
 
     lines.append("datareader_protocol_status")
     for name in probe_mod.PROTOCOL_COUNTERS:
       value = result.protocol.get(name)
-      lines.append(f"  {name.ljust(52)}{compat.na_text() if value is None else value}")
+      lines.append(_counter(name, compat.na_text() if value is None else value))
 
     lines.append("datareader_cache_status")
     for name in probe_mod.CACHE_COUNTERS:
       value = result.cache.get(name)
-      lines.append(f"  {name.ljust(52)}{compat.na_text() if value is None else value}")
+      lines.append(_counter(name, compat.na_text() if value is None else value))
 
   lines.append("topic")
   count = result.inconsistent_topic_count
-  lines.append(f"  {'inconsistent_topic_status.total_count'.ljust(52)}"
-               f"{compat.na_text() if count is None else count}")
+  lines.append(_counter("inconsistent_topic_status.total_count",
+                        compat.na_text() if count is None else count))
   lines.append("")
 
   if wrote and not result.wrote_samples:
@@ -783,7 +857,8 @@ def _render_wire_appendix(data):
   lines = _section("APPENDIX C - DIRECT RTPS PACKET OBSERVATION")
   if data.capture_interface:
     lines.append(_kv("Capture interface", data.capture_interface, WIRE_LABEL_PAD))
-  lines.append(_kv("Capture", evidence.get("source", "unknown"), WIRE_LABEL_PAD))
+  lines.extend(_kv_atomic("Capture", evidence.get("source", "unknown"),
+                          WIRE_LABEL_PAD))
   if evidence.get("capture_filter"):
     lines.append(_kv("Capture filter", evidence["capture_filter"], WIRE_LABEL_PAD))
   if evidence.get("target_writer_entity_id"):
@@ -865,15 +940,26 @@ def _render_participant_evidence(data):
     lines.append(_kv("  Result", f"unavailable: {error}", WIRE_LABEL_PAD))
     lines.append("")
     return lines
-  lines.append(_kv("  Capture", evidence.get("source", "unknown"), WIRE_LABEL_PAD))
-  for label, key in (("Frames from this participant", "packets"),
-                     ("DATA", "data_packets"),
-                     ("DATA_FRAG", "data_fragments"),
-                     ("HEARTBEAT", "heartbeats"),
-                     ("ACKNACK", "acknacks"),
-                     ("GAP", "gaps"),
-                     ("NACK_FRAG", "nack_fragments")):
+  lines.extend(_kv_atomic("  Capture", evidence.get("source", "unknown"),
+                          WIRE_LABEL_PAD))
+  # Every count below is FRAMES CONTAINING that submessage, which is what
+  # `wire.summarize` measures - not submessages. One RTPS frame routinely
+  # carries several kinds at once, so these sum to more than the frame count,
+  # and labelled "DATA 3 / HEARTBEAT 5" beside "Frames 6" the appendix read like
+  # a tool that cannot add up. The interface-capture block above already says
+  # "in matching frames" for the same numbers; this now says it too.
+  lines.append(_kv("  Frames from this participant",
+                   str(evidence.get("packets", 0)), WIRE_LABEL_PAD))
+  for label, key in (("DATA in these frames", "data_packets"),
+                     ("DATA_FRAG in these frames", "data_fragments"),
+                     ("HEARTBEAT in these frames", "heartbeats"),
+                     ("ACKNACK in these frames", "acknacks"),
+                     ("GAP in these frames", "gaps"),
+                     ("NACK_FRAG in these frames", "nack_fragments")):
     lines.append(_kv(f"  {label}", str(evidence.get(key, 0)), WIRE_LABEL_PAD))
+  lines.extend(_wrap("A frame may carry several submessage kinds, so these "
+                     "count frames and not submessages, and they sum to more "
+                     "than the frame count above.", indent=2))
   encapsulations = evidence.get("encapsulation_ids") or []
   lines.append(_kv("  Observed DDS data representation",
                    wire.encapsulation_text(encapsulations) if encapsulations

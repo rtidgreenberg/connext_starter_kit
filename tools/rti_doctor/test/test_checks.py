@@ -2381,6 +2381,129 @@ class TestUdpOnlyTransport(unittest.TestCase):
     self.assertIn("UDPv4 only", text)
 
 
+class TestReportReadability(unittest.TestCase):
+  """How the report reads, as opposed to what it concludes.
+
+  These are not cosmetic: a line too wide to fit a terminal, a counter that
+  cannot be found among forty zeros, and a verdict that says how much is wrong
+  without saying where to start all cost the reader the evidence the tool went
+  to some trouble to collect.
+  """
+
+  #: A fixed environment, so width assertions do not depend on how the suite
+  #: was invoked. Under the tier runner the real argv is a 400-character
+  #: unittest command line, which `_kv_atomic` correctly refuses to wrap - it is
+  #: atomic by intent, not by token - and which would otherwise make this test
+  #: pass alone and fail in a tier.
+  ENVIRONMENT = {"argv": "rti_doctor --domain 7 --topic T", "host": "test-host",
+                 "os": "Linux", "machine": "x86_64", "connext": "7.7.0",
+                 "nddshome": "/opt/rti", "python": "3.11.13"}
+
+  def _report(self, **kwargs):
+    from rti_doctor import report as report_module
+    kwargs.setdefault("domain_id", 7)
+    kwargs.setdefault("scope", "topic 'T'")
+    kwargs.setdefault("all_findings", [])
+    kwargs.setdefault("environment", self.ENVIRONMENT)
+    return report_module.render_text(report_module.ReportData(**kwargs))
+
+  def _finding(self, id, severity, rung, **kwargs):
+    return f.Finding(id=id, rung=rung, severity=severity,
+                     title=kwargs.pop("title", id), **kwargs)
+
+  def test_no_prose_line_exceeds_the_report_width(self):
+    """Regression: the topology coverage note ran to 274 characters.
+
+    Long paths, URLs and command lines are exempt - they are single unbreakable
+    tokens, and wrapping them would destroy the only thing they are for.
+    """
+    from rti_doctor import report as report_module
+    text = self._report(topology={
+        "source": "builtin discovery", "scope": "remote entities observed",
+        "selected_domain_id": 7, "participants": 2, "readers": 1, "writers": 1,
+        "topics": ["T"],
+        "completion_note": (
+            "A late-starting observer can miss already-announced endpoints. Use "
+            "the optional 32-second passive domain scan to wait for the next "
+            "default-domain announcement; it identifies active domains but "
+            "cannot reconstruct endpoint announcements that were not replayed.")})
+    too_wide = [line for line in text.splitlines()
+                if len(line) > report_module.WIDTH
+                and max((len(word) for word in line.split()), default=0)
+                < report_module.WIDTH // 2]
+    self.assertEqual(too_wide, [], "wrappable prose ran past the report width")
+
+  def test_an_unwrappable_value_moves_below_its_label_intact(self):
+    from rti_doctor import report as report_module
+    path = "/" + "/".join(f"very_long_directory_component_{n}" for n in range(6))
+    lines = report_module._kv_atomic("Capture", path)
+    self.assertEqual(len(lines), 2)
+    self.assertEqual(lines[0], "Capture")
+    self.assertIn(path, lines[1], "the path was broken up and is no longer copyable")
+
+  def test_a_short_value_stays_on_its_label_line(self):
+    from rti_doctor import report as report_module
+    self.assertEqual(report_module._kv_atomic("Capture", "/tmp/a.pcap"),
+                     [report_module._kv("Capture", "/tmp/a.pcap")])
+
+  def test_a_live_counter_is_marked_and_a_zero_is_not(self):
+    from rti_doctor import report as report_module
+    self.assertTrue(report_module._counter("sample_lost", 1).startswith("*"))
+    self.assertFalse(report_module._counter("sample_lost", 0).startswith("*"))
+
+  def test_a_sentinel_sequence_number_is_not_marked(self):
+    """-1 means "none"; marking it would spend the mark on every healthy run."""
+    from rti_doctor import report as report_module
+    self.assertFalse(
+        report_module._counter("last_committed_sample_sequence_number", -1)
+        .startswith("*"))
+
+  def test_an_unavailable_counter_is_not_marked(self):
+    from rti_doctor import report as report_module
+    self.assertFalse(
+        report_module._counter("total_count", compat.na_text()).startswith("*"))
+
+  def test_a_reason_is_marked_only_when_something_happened(self):
+    from rti_doctor import report as report_module
+    self.assertTrue(report_module._notable_reason("SampleLostState.LOST_BY_WRITER"))
+    self.assertFalse(report_module._notable_reason("SampleLostState.NOT_LOST"))
+    self.assertFalse(
+        report_module._notable_reason("SampleRejectedState.NOT_REJECTED"))
+
+  def test_the_verdict_names_the_finding_to_open_first(self):
+    """A bare "1 ERROR, 1 WARN" says how much is wrong, never where to start."""
+    findings = [self._finding("data.window", f.Severity.WARN, 5),
+                self._finding("type.no_type_info", f.Severity.ERROR, 3)]
+    self.assertIn("start at type.no_type_info", f._problem_summary(findings))
+
+  def test_the_worst_finding_breaks_ties_towards_the_earlier_rung(self):
+    """Two ERRORs: the lower rung is the one that explains the other."""
+    findings = [self._finding("data.deserialize_failure", f.Severity.ERROR, 5),
+                self._finding("locator.unroutable", f.Severity.ERROR, 2)]
+    self.assertEqual(f.worst_finding(findings).id, "locator.unroutable")
+
+  def test_a_clean_run_names_nothing_to_start_at(self):
+    self.assertEqual(f._problem_summary(
+        [self._finding("match.ok", f.Severity.OK, 4)]), "")
+
+  def test_ok_findings_are_never_offered_as_a_starting_point(self):
+    self.assertIsNone(f.worst_finding([
+        self._finding("match.ok", f.Severity.OK, 4),
+        self._finding("repr.offered", f.Severity.INFO, 3)]))
+
+  def test_the_participant_capture_says_its_counts_are_frames(self):
+    """Regression: "Frames 6" over "DATA 3 / HEARTBEAT 5" read as bad addition.
+
+    They are frames CONTAINING each submessage kind, and one frame carries
+    several, so they legitimately sum past the frame count.
+    """
+    text = self._report(participant_evidence={
+        "source": "/tmp/p.pcap", "packets": 6, "data_packets": 3,
+        "heartbeats": 5, "acknacks": 1, "gaps": 1})
+    self.assertIn("HEARTBEAT in these frames", text)
+    self.assertIn("count frames and not submessages", text)
+
+
 class TestReliablePath(unittest.TestCase):
   """The reliable handshake, from status counters and from packets.
 

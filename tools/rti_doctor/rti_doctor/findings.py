@@ -250,10 +250,34 @@ def _verdict_body(findings, probe):
   return f"matched, samples arriving, payload {probe.payload_verdict}"
 
 
+def worst_finding(findings):
+  """The finding a reader should open first, or None when nothing is wrong.
+
+  Most severe wins; ties break to the LOWEST rung, because the rungs run from
+  discovery upward and the earlier failure is the one that explains the later
+  ones. A tie inside one rung keeps catalog order.
+  """
+  problems = [item for item in findings if item.is_problem]
+  if not problems:
+    return None
+  return min(problems, key=lambda item: (-int(item.severity), item.rung))
+
+
 def _problem_summary(findings):
+  """The counts, plus the one id worth opening first.
+
+  A bare tally - "1 ERROR, 1 WARN" - tells a reader how much is wrong and
+  nothing about where to start, so the verdict line, which is the only line many
+  people read, sent everyone scrolling through the findings section to work out
+  what it was referring to. Naming the id costs a few characters and answers it.
+  """
   hist = counts(findings)
   parts = []
   for sev in (Severity.ERROR, Severity.WARN):
     if hist.get(sev):
       parts.append(f"{hist[sev]} {sev.label}")
-  return ", ".join(parts)
+  if not parts:
+    return ""
+  summary = ", ".join(parts)
+  worst = worst_finding(findings)
+  return f"{summary}; start at {worst.id}" if worst else summary

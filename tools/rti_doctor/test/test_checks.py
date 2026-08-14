@@ -1051,12 +1051,43 @@ class TestLateJoinIsNotAFault(unittest.TestCase):
 class TestPayloadChecks(unittest.TestCase):
 
   def test_dropped_fragments_alone_are_not_an_error(self):
-    """Regression: healthy large data showed fragments=6/reassembled=6/dropped=6."""
+    """Regression: healthy large data showed fragments=6/reassembled=6/dropped=6.
+
+    Confirmed against a fragment-level capture: 3 samples, 9 DATA_FRAG, each
+    appearing exactly once, every sample delivered. dropped_fragment_count
+    tracking received_fragment_count is what a WORKING path looks like here.
+    """
     probe = FakeProbe(samples_taken=1, protocol={
+        "received_sample_count": 2,
         "received_fragment_count": 6, "reassembled_sample_count": 6,
         "dropped_fragment_count": 6, "sent_nack_fragment_count": 0})
     result = probe_payload.check_fragmentation(CheckContext(probe=probe))
     self.assertEqual(result[0].severity, f.Severity.INFO)
+
+  def test_the_fragment_counters_are_explained_in_their_own_units(self):
+    """The counters invite three wrong readings; the text has to head them off.
+
+    dropped == received looks like total loss, reassembled_sample_count looks
+    like samples, and neither matches "valid samples taken".
+    """
+    probe = FakeProbe(samples_taken=1, protocol={
+        "received_sample_count": 3,
+        "received_fragment_count": 9, "reassembled_sample_count": 9,
+        "dropped_fragment_count": 9, "sent_nack_fragment_count": 0})
+    finding = probe_payload.check_fragmentation(CheckContext(probe=probe))[0]
+    self.assertIn("received_sample_count = 3", finding.observed)
+    self.assertIn("FRAGMENTS rather than samples", finding.root_cause)
+    self.assertIn("Neither is evidence of loss", finding.root_cause)
+    self.assertEqual(finding.evidence["received_sample_count"], 3)
+
+  def test_fragments_with_nothing_delivered_is_still_an_error(self):
+    """The one reading the counters do support: nothing was ever rebuilt."""
+    probe = FakeProbe(samples_taken=0, protocol={
+        "received_sample_count": 0,
+        "received_fragment_count": 9, "reassembled_sample_count": 0,
+        "dropped_fragment_count": 9, "sent_nack_fragment_count": 4})
+    result = probe_payload.check_fragmentation(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.ERROR)
 
   def test_no_sample_and_no_reassembly_is_an_error(self):
     probe = FakeProbe(samples_taken=0, protocol={

@@ -147,17 +147,37 @@ def check_fragmentation(context):
   if not fragments:
     return []
 
-  # Ground truth is whether samples actually arrived. Two false positives were
-  # observed against a healthy local large-data writer and must not come back:
+  # Ground truth is whether samples actually arrived, because on a HEALTHY
+  # fragmented path these three counters are all equal and none of them counts
+  # samples. Measured on 2026-08-14 against the `large-data` fixture, with the
+  # participant capture dissected fragment by fragment:
   #
-  #   1. dropped_fragment_count is NOT by itself evidence of a fault. A healthy
-  #      TRANSIENT_LOCAL writer produced fragments=6, reassembled=6, dropped=6:
-  #      the "dropped" fragments were redundant copies from ordinary repair
-  #      traffic, and every sample still arrived intact.
-  #   2. reassembled_sample_count can lag, because the probe stops as soon as it
-  #      has walked one sample.
+  #   received_sample_count      3          <- three samples, 450444 bytes
+  #   received_fragment_count    9          <- 3 samples x 3 fragments
+  #   reassembled_sample_count   9          <- FRAGMENTS, despite the name
+  #   dropped_fragment_count     9
+  #   sent_nack_fragment_count   0
   #
-  # So reassembly is only called broken when nothing was delivered at all.
+  # and the capture carried exactly nine DATA_FRAG submessages: sequence numbers
+  # 241, 1 and 242, fragments 1-3 of each, every one appearing ONCE. The same
+  # shape appears at 6/6/6 with two samples on a UDP-only probe.
+  #
+  # Two conclusions the earlier comment here got wrong, and they matter because
+  # this text is what reassures an operator:
+  #
+  #   1. The drops are NOT redundant copies from repair traffic. Nothing arrived
+  #      twice, and sent_nack_fragment_count is 0, so no repair was requested.
+  #      dropped_fragment_count tracking received_fragment_count exactly, while
+  #      every sample is delivered intact, is what a working path looks like
+  #      here - so this counter is not readable as loss on its own.
+  #   2. reassembled_sample_count is not a count of samples. It equals the
+  #      fragment count, not received_sample_count, so comparing it against
+  #      "valid samples taken" compares two different units.
+  #
+  # RTI's own guidance says a clean path shows dropped_fragment_count = 0, which
+  # is not what this build does. Rather than argue with the measurement or the
+  # documentation, the check leans on neither: reassembly is called broken only
+  # when nothing was delivered at all.
   problem = probe.samples_taken == 0 and not reassembled
   if not problem:
     return [Finding(
@@ -165,7 +185,8 @@ def check_fragmentation(context):
         rung=RUNG_PAYLOAD,
         severity=Severity.INFO,
         title="Samples are fragmented and arriving intact",
-        observed=(f"received_fragment_count = {fragments}, "
+        observed=(f"received_sample_count = {_c(probe, 'received_sample_count')}, "
+                  f"received_fragment_count = {fragments}, "
                   f"reassembled_sample_count = {reassembled}, "
                   f"dropped_fragment_count = {dropped}, "
                   f"sent_nack_fragment_count = {nack_fragments}, "
@@ -174,9 +195,18 @@ def check_fragmentation(context):
                     "fragments it, and samples are being delivered. Large data is "
                     "worth knowing about because it is sensitive to message-size "
                     "and receive-buffer differences between vendors even when it "
-                    "currently works."),
-        evidence={"received_fragment_count": fragments,
-                  "reassembled_sample_count": reassembled},
+                    "currently works. Read the counters carefully: on a working "
+                    "fragmented path dropped_fragment_count equals "
+                    "received_fragment_count, and reassembled_sample_count counts "
+                    "FRAGMENTS rather than samples despite its name - measured "
+                    "here, and confirmed against a packet capture in which every "
+                    "fragment appeared exactly once. Neither is evidence of loss. "
+                    "The number that answers that question is "
+                    "received_sample_count, alongside the payload findings."),
+        evidence={"received_sample_count": _c(probe, "received_sample_count"),
+                  "received_fragment_count": fragments,
+                  "reassembled_sample_count": reassembled,
+                  "dropped_fragment_count": dropped},
     )]
 
   return [Finding(

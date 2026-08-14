@@ -215,7 +215,7 @@ def _mirrored_qos_names(probe, policy, kind):
   return value is not None and kind in str(value).upper()
 
 
-def _joined_a_running_stream(probe):
+def _joined_a_running_stream(probe, lost=0):
   """Whether a loss here is the ordinary cost of joining a system already running.
 
   A VOLATILE writer keeps nothing for a reader that was not there yet, so a
@@ -224,13 +224,21 @@ def _joined_a_running_stream(probe):
   for this tool it is the normal case rather than the anomaly - reporting it as a
   fault trains operators to ignore the section it appears in.
 
-  It is only benign if data then flowed. Nothing arriving at all is a different
-  report and keeps its warning: "the backlog was dropped" and "nothing is being
-  delivered" must not be rendered as the same event.
+  Three things keep that from excusing real loss:
+
+    * Data must then have flowed. Nothing arriving at all is a different report
+      and keeps its warning: "the backlog was dropped" and "nothing is being
+      delivered" must not render as the same event.
+    * The loss must not outweigh the delivery. Joining costs one gap
+      announcement; a shallow-history writer shedding samples continuously loses
+      them faster than the reader takes them, and that is a real fault wearing
+      the same reason code.
   """
+  taken = getattr(probe, "samples_taken", 0) or 0
   return (_mirrored_qos_names(probe, "durability", "VOLATILE")
           and _mirrored_qos_names(probe, "reliability", "RELIABLE")
-          and (getattr(probe, "samples_taken", 0) or 0) > 0)
+          and taken > 0
+          and (lost or 0) <= taken)
 
 
 def check_window(context):
@@ -274,7 +282,7 @@ def check_window(context):
   # volatile stream and then received data, is the backlog it was never entitled
   # to - not a window that filled. The remedy below would send an operator to
   # raise resource limits and slow a writer that is behaving correctly.
-  if not uncommitted and _joined_a_running_stream(probe):
+  if uncommitted == 0 and _joined_a_running_stream(probe):
     return [Finding(
         id="data.window",
         rung=RUNG_PAYLOAD,
@@ -390,7 +398,8 @@ def check_deserialize_failure(context):
   # actually flowed.
   writer_loss = compat.reason_is(
       lost_reason, compat.lost_reason_flag("LOST_BY_WRITER"))
-  if writer_loss and not rejected_total and _joined_a_running_stream(probe):
+  if (writer_loss and not rejected_total
+      and _joined_a_running_stream(probe, lost=lost_total)):
     return [Finding(
         id="data.loss",
         rung=RUNG_PAYLOAD,

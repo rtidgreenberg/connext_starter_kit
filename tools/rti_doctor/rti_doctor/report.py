@@ -91,31 +91,33 @@ def _kv_block(label, value, pad=16):
   return [_kv(label, block[0][pad:], pad=pad)] + block[1:]
 
 
-def _kv_atomic(label, value, pad=16):
-  """`_kv` for a value that must NOT be wrapped: a path, a URL, a command line.
-
-  Wrapping these breaks selecting and pasting them, which is the only thing they
-  are for. So when one would overflow the report width it moves to its own line
-  under the label instead, leaving the label column intact and the value in one
-  piece.
-  """
-  value = str(value)
-  if len(label.ljust(pad)) + len(value) <= WIDTH:
-    return [_kv(label, value, pad=pad)]
-  return [label, " " * pad + value]
+# A path, a URL or a command line stays on its label's line however far it runs
+# past WIDTH. Moving it to its own line under the label was tried and reverted:
+# the text report is this tool's only output contract, its parser reads a field
+# as "label, then value on the same line", and the split silently emptied every
+# `refs` list - every reference URL here is longer than WIDTH - and dropped
+# `source` from the wire appendix, which the vendor tier asserts is a real file.
+# A value that overflows is a cosmetic problem; one the parser cannot find is
+# not. See `test_a_long_value_stays_parseable_on_its_label_line`.
 
 
-def _is_positive(text):
-  """Whether a rendered counter is a number above zero.
+def _is_live(name, text):
+  """Whether a rendered counter says something happened.
 
-  Above zero, not merely non-zero: sequence-number fields report -1 for "none",
-  and marking three of those on every healthy report would spend the mark on
-  exactly the lines it exists to make findable.
+  Any non-zero number counts, including a negative one: `current_count_change`
+  of -1 is a peer that unmatched during the probe, which is exactly the kind of
+  line this mark exists to surface. The one exception is the -1 that sequence
+  number fields use for "none" - a sentinel, not a measurement, and marking
+  three of those on every healthy report would spend the mark on the lines it is
+  meant to make findable.
   """
   try:
-    return float(text) > 0
+    value = float(text)
   except (TypeError, ValueError):
     return False
+  if value == -1 and str(name).endswith("sequence_number"):
+    return False
+  return value != 0
 
 
 def _counter(name, value, notable=None):
@@ -130,7 +132,7 @@ def _counter(name, value, notable=None):
   """
   text = str(value)
   if notable is None:
-    notable = _is_positive(text)
+    notable = _is_live(name, text)
   return f"{'*' if notable else ' '} {name.ljust(52)}{text}"
 
 
@@ -138,11 +140,13 @@ def _notable_reason(text):
   """Whether a last_reason line says anything happened.
 
   The rendered form carries its enum name - "SampleLostState.NOT_LOST" - so the
-  quiet values are matched anywhere in the string, not as a prefix.
+  quiet values are matched anywhere in the string, not as a prefix. They are
+  listed exactly; a bare "UNKNOWN" was tried and silenced
+  LOST_BY_UNKNOWN_INSTANCE, which is a real loss and the opposite of quiet.
   """
   upper = str(text or "").upper()
   return bool(upper) and not any(
-      quiet in upper for quiet in ("NOT_LOST", "NOT_REJECTED", "N/A", "UNKNOWN"))
+      quiet in upper for quiet in ("NOT_LOST", "NOT_REJECTED", "N/A"))
 
 
 def _labelled(label, text, indent=15):
@@ -181,7 +185,7 @@ def render_system_text(snapshot, domain_id, environment=None,
   lines = [RULE, "RTI DOCTOR SYSTEM REPORT", RULE,
            _kv("Generated", stamp),
            _kv("Tool", "rti_doctor (tools/rti_doctor)"),
-           *_kv_atomic("Command", environment.get("argv", "unknown")),
+           _kv("Command", environment.get("argv", "unknown")),
            _kv("Host", f"{environment.get('host')}  {environment.get('os')}  "
                        f"{environment.get('machine')}"),
            _kv("Connext", f"{environment.get('connext')}  "
@@ -325,7 +329,7 @@ def _header_lines(data):
   return lines + [
       _kv("Generated", stamp),
       _kv("Tool", "rti_doctor (tools/rti_doctor)"),
-      *_kv_atomic("Command", env.get("argv", "unknown")),
+      _kv("Command", env.get("argv", "unknown")),
       _kv("Host", f"{env.get('host')}  {env.get('os')}  {env.get('machine')}"),
       _kv("Connext", f"{env.get('connext')}  (NDDSHOME={env.get('nddshome')})"),
       _kv("Python", env.get("python")),
@@ -670,9 +674,7 @@ def _render_findings(data):
                          " - confirm it applies to this endpoint before acting "
                          "on it, since the link is by finding id alone.")
     for ref in finding.refs:
-      # A reference is a URL: never wrapped, moved below its label when it
-      # would overflow, so it stays one selectable string.
-      lines.extend(_kv_atomic("  Reference", ref, 15))
+      lines.append(f"  {'Reference'.ljust(13)}{ref}")
     lines.append("")
   return lines
 
@@ -857,8 +859,7 @@ def _render_wire_appendix(data):
   lines = _section("APPENDIX C - DIRECT RTPS PACKET OBSERVATION")
   if data.capture_interface:
     lines.append(_kv("Capture interface", data.capture_interface, WIRE_LABEL_PAD))
-  lines.extend(_kv_atomic("Capture", evidence.get("source", "unknown"),
-                          WIRE_LABEL_PAD))
+  lines.append(_kv("Capture", evidence.get("source", "unknown"), WIRE_LABEL_PAD))
   if evidence.get("capture_filter"):
     lines.append(_kv("Capture filter", evidence["capture_filter"], WIRE_LABEL_PAD))
   if evidence.get("target_writer_entity_id"):
@@ -940,8 +941,7 @@ def _render_participant_evidence(data):
     lines.append(_kv("  Result", f"unavailable: {error}", WIRE_LABEL_PAD))
     lines.append("")
     return lines
-  lines.extend(_kv_atomic("  Capture", evidence.get("source", "unknown"),
-                          WIRE_LABEL_PAD))
+  lines.append(_kv("  Capture", evidence.get("source", "unknown"), WIRE_LABEL_PAD))
   # Every count below is FRAMES CONTAINING that submessage, which is what
   # `wire.summarize` measures - not submessages. One RTPS frame routinely
   # carries several kinds at once, so these sum to more than the frame count,

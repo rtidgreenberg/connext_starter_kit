@@ -4,6 +4,7 @@ These are plain data objects built from builtin topic samples, deliberately
 decoupled from the DDS objects so every check can be unit-tested with fakes.
 """
 
+import ipaddress
 import time
 from dataclasses import dataclass, field
 
@@ -141,9 +142,14 @@ class EndpointRecord:
 
 
 def locator_ip(locator):
-  """IPv4 dotted-quad from a Locator's address bytes, or None.
+  """The address a Locator carries, read according to its kind, or None.
 
-  Connext stores the address as 16 bytes; for UDPv4 the address is the last 4.
+  Connext stores every address as 16 bytes. For UDPv4 the address is the last 4
+  of them, which is why this read the last four unconditionally - and on a UDPv6
+  locator that printed the tail of a v6 address as a dotted quad: an address
+  that exists nowhere, reported with no hint it was manufactured, and then
+  judged for reachability by `static_discovery.check_locators`. A v6 locator now
+  renders as v6.
   """
   address = compat.get(locator, "address", None)
   if address is None:
@@ -152,6 +158,11 @@ def locator_ip(locator):
     octets = [int(b) for b in address]
   except (TypeError, ValueError):
     return None
+  if compat.get_int(locator, "kind") == LOCATOR_KIND_UDPV6 and len(octets) >= 16:
+    try:
+      return str(ipaddress.IPv6Address(bytes(octets[-16:])))
+    except (ValueError, TypeError):
+      return None
   if len(octets) < 4:
     return None
   return ".".join(str(b) for b in octets[-4:])
@@ -163,6 +174,7 @@ def locator_ip(locator):
 #: never reaches a network interface. A capture of that pair is empty for a
 #: reason that has nothing to do with the endpoints being broken.
 LOCATOR_KIND_UDPV4 = 1
+LOCATOR_KIND_UDPV6 = 2
 LOCATOR_KIND_SHMEM = 0x01000000
 
 #: Every locator kind by the name `rti.connextdds.LocatorKind` gives it. Written
@@ -177,7 +189,7 @@ LOCATOR_KIND_NAMES = {
     -1: "INVALID",
     0: "ANY",
     LOCATOR_KIND_UDPV4: "UDPv4",
-    2: "UDPv6",
+    LOCATOR_KIND_UDPV6: "UDPv6",
     3: "INTRA",
     8: "TCPV4_LAN",
     9: "TCPV4_WAN",

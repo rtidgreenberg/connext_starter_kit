@@ -312,6 +312,18 @@ class TestLocatorRendering(unittest.TestCase):
     del locator.kind
     self.assertEqual(records.locator_text(locator), "10.0.2.15:7411")
 
+  def test_a_udpv6_locator_is_not_rendered_as_a_fabricated_ipv4(self):
+    """The last four of sixteen v6 octets are not an address.
+
+    Printed as a dotted quad they name a host that exists nowhere, and
+    `static_discovery.check_locators` then judged that invention for
+    reachability.
+    """
+    address = bytes.fromhex("20010db8000000000000000000000001")
+    locator = FakeLocator("0.0.0.0", 7411, kind=records.LOCATOR_KIND_UDPV6)
+    locator.address = list(address)
+    self.assertEqual(records.locator_text(locator), "2001:db8::1:7411 (UDPv6)")
+
   def test_kind_name_is_available_on_its_own(self):
     self.assertEqual(records.locator_kind_text(records.LOCATOR_KIND_SHMEM), "SHMEM")
     self.assertEqual(records.locator_kind_text(None), "")
@@ -926,6 +938,25 @@ class TestLateJoinIsNotAFault(unittest.TestCase):
     probe.sample_lost = FakeStatus(
         total_count=1, last_reason=dds.SampleLostState.LOST_BY_SAMPLES_LIMIT)
     result = probe_payload.check_deserialize_failure(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_losing_more_than_arrived_stays_a_warning(self):
+    """Joining costs one gap. A writer shedding samples continuously does not.
+
+    A shallow-history VOLATILE writer outrunning its reader reports the same
+    LOST_BY_WRITER, and an unbounded downgrade would file it as "nothing to fix".
+    """
+    probe = self._lost_by_writer(samples_taken=2)
+    probe.sample_lost = FakeStatus(
+        total_count=5000, last_reason=dds.SampleLostState.LOST_BY_WRITER)
+    result = probe_payload.check_deserialize_failure(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_an_unreadable_uncommitted_counter_keeps_the_warning(self):
+    """A counter this Connext version cannot supply is not evidence of zero."""
+    probe = FakeProbe(samples_taken=1, applied_reader_qos=LATE_JOIN_QOS,
+                      protocol={"out_of_range_rejected_sample_count": 1})
+    result = probe_payload.check_window(CheckContext(probe=probe))
     self.assertEqual(result[0].severity, f.Severity.WARN)
 
   def test_a_rejection_alongside_keeps_the_warning(self):
@@ -2433,26 +2464,33 @@ class TestReportReadability(unittest.TestCase):
                 < report_module.WIDTH // 2]
     self.assertEqual(too_wide, [], "wrappable prose ran past the report width")
 
-  def test_an_unwrappable_value_moves_below_its_label_intact(self):
+  def test_a_long_value_stays_on_its_label_line(self):
+    """A path or URL past the width overflows rather than moving below its label.
+
+    Moving it was tried and reverted. The report's own parser reads a field as
+    "label, then value on the same line", so the split emptied every `refs` list
+    and dropped `source` from the wire appendix. `test_doctor_e2e` holds the
+    parse-level regression; this is the rendering half.
+    """
     from rti_doctor import report as report_module
     path = "/" + "/".join(f"very_long_directory_component_{n}" for n in range(6))
-    lines = report_module._kv_atomic("Capture", path)
-    self.assertEqual(len(lines), 2)
-    self.assertEqual(lines[0], "Capture")
-    self.assertIn(path, lines[1], "the path was broken up and is no longer copyable")
-
-  def test_a_short_value_stays_on_its_label_line(self):
-    from rti_doctor import report as report_module
-    self.assertEqual(report_module._kv_atomic("Capture", "/tmp/a.pcap"),
-                     [report_module._kv("Capture", "/tmp/a.pcap")])
+    text = self._report(wire_evidence={"source": path, "packets": 1})
+    line = next(line for line in text.splitlines() if line.startswith("Capture "))
+    self.assertIn(path, line)
 
   def test_a_live_counter_is_marked_and_a_zero_is_not(self):
     from rti_doctor import report as report_module
     self.assertTrue(report_module._counter("sample_lost", 1).startswith("*"))
     self.assertFalse(report_module._counter("sample_lost", 0).startswith("*"))
 
+  def test_a_negative_change_is_marked(self):
+    """current_count_change of -1 is a peer that unmatched mid-probe."""
+    from rti_doctor import report as report_module
+    self.assertTrue(
+        report_module._counter("current_count_change", -1).startswith("*"))
+
   def test_a_sentinel_sequence_number_is_not_marked(self):
-    """-1 means "none"; marking it would spend the mark on every healthy run."""
+    """-1 there means "none"; it is a sentinel, not a measurement."""
     from rti_doctor import report as report_module
     self.assertFalse(
         report_module._counter("last_committed_sample_sequence_number", -1)
@@ -2469,6 +2507,12 @@ class TestReportReadability(unittest.TestCase):
     self.assertFalse(report_module._notable_reason("SampleLostState.NOT_LOST"))
     self.assertFalse(
         report_module._notable_reason("SampleRejectedState.NOT_REJECTED"))
+
+  def test_an_unknown_instance_loss_is_still_marked(self):
+    """Regression: a "UNKNOWN" quiet-word silenced LOST_BY_UNKNOWN_INSTANCE."""
+    from rti_doctor import report as report_module
+    self.assertTrue(report_module._notable_reason(
+        "SampleLostState.LOST_BY_UNKNOWN_INSTANCE"))
 
   def test_the_verdict_names_the_finding_to_open_first(self):
     """A bare "1 ERROR, 1 WARN" says how much is wrong, never where to start."""

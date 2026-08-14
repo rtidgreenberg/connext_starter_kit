@@ -122,6 +122,39 @@ class TestParseTextReport(unittest.TestCase):
     for key, value in evidence.items():
       self.assertEqual(observed[key], value, key)
 
+  #: A real reference URL and a real capture path, at the lengths the tool
+  #: actually produces. Every fixture above uses short stand-ins, which is why
+  #: a renderer change that moved any value past WIDTH onto its own line passed
+  #: the whole unit tier while emptying `refs` and dropping `source` - the
+  #: former on EVERY finding that carries a reference, since all three of the
+  #: tool's documentation URLs are longer than the report is wide.
+  LONG_REF = ("https://community.rti.com/static/documentation/connext-dds/7.7.0/"
+              "doc/manuals/connext_dds_professional/extensible_types_guide/"
+              "extensible_types/Type_Representation.htm")
+  LONG_CAPTURE = ("/home/rti/CAT/connext_starter_kit/tools/rti_doctor/test_output"
+                  "/rti_doctor_captures/rti_doctor_domain42_20260814_122515.pcapng")
+
+  def test_a_long_value_stays_parseable_on_its_label_line(self):
+    """Regression: values past the report width must not move below their label.
+
+    The text report is this tool's only output contract and its parser reads a
+    field as "label, then value on the same line". A value that overflows is
+    cosmetic; one the parser cannot find is a silently empty field.
+    """
+    self.assertGreater(len(self.LONG_REF), report.WIDTH)
+    self.assertGreater(len(self.LONG_CAPTURE) + 38, report.WIDTH)
+    finding = findings.Finding(
+        id="type.extensibility", rung=3, severity=findings.Severity.INFO,
+        title="Type extensibility limits how this type can evolve",
+        observed="Sample = FINAL", remedy="Prefer APPENDABLE over FINAL.",
+        refs=[self.LONG_REF])
+    parsed = doctor_e2e.parse_report(self._completed(
+        [finding], wire_evidence={"source": self.LONG_CAPTURE, "packets": 3}))
+    self.assertEqual(parsed["findings"][0]["refs"], [self.LONG_REF])
+    self.assertEqual(parsed["findings"][0]["remedy"],
+                     "Prefer APPENDABLE over FINAL.")
+    self.assertEqual(parsed["wire_observation"]["source"], self.LONG_CAPTURE)
+
   def test_an_unavailable_capture_reports_its_reason(self):
     parsed = doctor_e2e.parse_report(self._completed(
         [self.RESOLVED],

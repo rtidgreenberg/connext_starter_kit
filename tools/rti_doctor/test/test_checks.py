@@ -1438,8 +1438,8 @@ class TestRxO(unittest.TestCase):
          {"ownership": Policy(Kind("EXCLUSIVE"))}),
         ("DATA_REPRESENTATION", {"representation": Representation([0])},
          {"representation": Representation([2])}),
-        ("PARTITION", {"partition": Partition(["writer"])},
-         {"partition": Partition(["reader"])}),
+        # PARTITION is deliberately absent: it decides matching but is not an
+        # RxO contract, so it has its own finding. See TestNonRxOMismatches.
     )
     for expected, writer_kwargs, reader_kwargs in cases:
       with self.subTest(policy=expected):
@@ -1489,6 +1489,77 @@ class TestRxO(unittest.TestCase):
     result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
     self.assertEqual(ids(result), ["qos.compatible"])
 
+  def test_disjoint_partitions_are_not_called_a_qos_incompatibility(self):
+    """PARTITION decides matching and is NOT an RxO policy.
+
+    RTI is explicit that it matches by name intersection with wildcards, so
+    there is no offered side and no requested side. Filed under "QoS
+    incompatible" it named the wrong mechanism for a correct conclusion, and
+    sent the operator to diff QoS values when the thing that differs is a
+    string.
+    """
+    writer, reader, registry = self._pair(
+        {"partition": self._partition(["telemetry"])},
+        {"partition": self._partition(["control"])})
+    result = qos_match.check_rxo_pairs(
+        CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.partition_disjoint"])
+    finding = result[0]
+    self.assertEqual(finding.severity, f.Severity.ERROR)
+    self.assertIn("telemetry", finding.observed)
+    self.assertIn("control", finding.observed)
+    self.assertNotIn("offers", finding.observed)
+    self.assertNotIn("requests", finding.observed)
+    self.assertIn("not an RxO policy", finding.root_cause)
+
+  def test_a_partition_and_an_rxo_mismatch_are_reported_separately(self):
+    """Two mechanisms, two findings - an operator acts on each differently."""
+    writer, reader, registry = self._pair(
+        {"partition": self._partition(["telemetry"]),
+         "reliability": self._policy("BEST_EFFORT")},
+        {"partition": self._partition(["control"]),
+         "reliability": self._policy("RELIABLE")})
+    result = qos_match.check_rxo_pairs(
+        CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(sorted(ids(result)),
+                     ["qos.partition_disjoint", "qos.rxo_mismatch"])
+    rxo = next(item for item in result if item.id == "qos.rxo_mismatch")
+    self.assertEqual([m["policy"] for m in rxo.evidence["mismatches"]],
+                     ["RELIABILITY"], "PARTITION leaked into the RxO finding")
+
+  def test_the_rxo_finding_says_which_policies_are_not_rxo_contracts(self):
+    """Stops an operator hunting HISTORY or RESOURCE_LIMITS differences."""
+    writer, reader, registry = self._pair(
+        {"reliability": self._policy("BEST_EFFORT")},
+        {"reliability": self._policy("RELIABLE")})
+    result = qos_match.check_rxo_pairs(
+        CheckContext(endpoint=writer, registry=registry))
+    self.assertIn("APPLICABLE", result[0].root_cause)
+    for policy in ("HISTORY", "RESOURCE_LIMITS", "OWNERSHIP_STRENGTH"):
+      self.assertIn(policy, result[0].root_cause)
+
+  def test_a_qualified_policy_name_is_still_an_rxo_policy(self):
+    """Regression: exact-match `is_rxo` crashed on these.
+
+    A mismatch may name the field that differed - "PRESENTATION access_scope",
+    "LIVELINESS lease_duration" - and an exact-equality test read those as
+    non-RxO, sending them to a table with no entry for them.
+    """
+    for policy in ("PRESENTATION access_scope", "LIVELINESS lease_duration",
+                   "PRESENTATION coherent_access", "DATA_REPRESENTATION"):
+      with self.subTest(policy=policy):
+        self.assertTrue(qos_match.is_rxo({"policy": policy}))
+    self.assertFalse(qos_match.is_rxo({"policy": "PARTITION"}))
+
+  def test_every_policy_compared_as_rxo_is_actually_an_rxo_policy(self):
+    """The guard that keeps a non-RxO policy from rejoining the RxO bucket."""
+    self.assertEqual(
+        qos_match.RXO_POLICIES,
+        frozenset(("RELIABILITY", "DURABILITY", "LIVELINESS",
+                   "DESTINATION_ORDER", "PRESENTATION", "DEADLINE",
+                   "LATENCY_BUDGET", "OWNERSHIP", "DATA_REPRESENTATION")))
+    self.assertNotIn("PARTITION", qos_match.RXO_POLICIES)
+
   def test_readable_partitions_are_reported_as_evaluated(self):
     """A policy that was compared must not appear in the incomplete list."""
     writer, reader, registry = self._pair(
@@ -1502,10 +1573,12 @@ class TestRxO(unittest.TestCase):
   def test_named_partitions_still_match_and_mismatch(self):
     for writer_names, reader_names, expected in (
         (["telemetry"], ["telemetry"], "qos.compatible"),
-        (["telemetry"], ["control"], "qos.rxo_mismatch"),
+        # Disjoint partitions stop the pair matching, but not as an RxO
+        # incompatibility - PARTITION is matched by name intersection.
+        (["telemetry"], ["control"], "qos.partition_disjoint"),
         (["telem*"], ["telemetry"], "qos.compatible"),
         ([], [], "qos.compatible"),          # both explicitly default
-        ([], ["telemetry"], "qos.rxo_mismatch"),
+        ([], ["telemetry"], "qos.partition_disjoint"),
     ):
       with self.subTest(writer=writer_names, reader=reader_names):
         writer, reader, registry = self._pair(

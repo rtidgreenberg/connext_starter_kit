@@ -638,7 +638,11 @@ def _counterpart_lines(data):
   """
   labels, key = [], "reader" if getattr(data.endpoint, "is_writer", False) else "writer"
   for finding in data.findings:
-    if finding.id in ("qos.compatible", "qos.rxo_mismatch"):
+    # Every per-pair verdict qos_match can produce. A counterpart that will not
+    # match for a non-RxO reason is still a counterpart, and leaving it out
+    # would make PEER disagree with the findings below it.
+    if finding.id in ("qos.compatible", "qos.rxo_mismatch",
+                      "qos.partition_disjoint"):
       label = finding.evidence.get(key)
       if label and label not in labels:
         labels.append(label)

@@ -395,7 +395,7 @@ Findings have stable, greppable ids. The ones that matter most:
 | `reliable.no_acknowledgment` | 5 | Heartbeats sent, nothing answering — a return-path fault |
 | `reliable.not_measured` | 5 | Neither counters nor a capture could observe the handshake |
 | `reliable.evidence_disagrees` | 5 | Capture and status counters disagree about heartbeats |
-| `data.fragmentation` | 5 | Large-data reassembly state |
+| `data.fragmentation` | 5 | Large-data reassembly state — read its counters with [FRAGMENT_COUNT_OBSERVATIONS.md](docs/FRAGMENT_COUNT_OBSERVATIONS.md), since two of them do not count what they are named for |
 | `data.deserialize_failure` | 5 | Connext itself could not decode a sample |
 | `payload.partial` | 5 | Which field paths are unreadable |
 

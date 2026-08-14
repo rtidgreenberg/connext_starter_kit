@@ -233,12 +233,43 @@ def _joined_a_running_stream(probe, lost=0):
       announcement; a shallow-history writer shedding samples continuously loses
       them faster than the reader takes them, and that is a real fault wearing
       the same reason code.
+    * The loss must not recur, and must sit at the match. RTI's guidance is that
+      this reason is benign only when it "occurs immediately around the first
+      match" and "does not continue after the match stabilizes" - which also
+      separates it from the other producers of LOST_BY_WRITER that magnitude
+      alone does not catch: writer resource-limit replacement, a reader marked
+      inactive, and writer-side LIFESPAN expiry.
   """
   taken = getattr(probe, "samples_taken", 0) or 0
   return (_mirrored_qos_names(probe, "durability", "VOLATILE")
           and _mirrored_qos_names(probe, "reliability", "RELIABLE")
           and taken > 0
-          and (lost or 0) <= taken)
+          and (lost or 0) <= taken
+          and _loss_sat_at_the_match(probe))
+
+
+def _loss_sat_at_the_match(probe):
+  """Whether the recorded losses look like one event at the match, not a trend.
+
+  Reads the listener timeline, which is a list of formatted strings: their ORDER
+  and MULTIPLICITY are what carry the evidence, and neither needs the timestamps
+  parsed back out of the text.
+
+  An empty timeline does not disqualify. Absence of the record is not evidence
+  of recurrence, and treating it as such would put every run whose events went
+  unrecorded back to a warning - the noise this rule exists to remove. Only
+  positive contrary evidence disqualifies: more than one loss event, or a single
+  one detached from the match by other activity.
+  """
+  events = list(getattr(probe, "listener_events", None) or ())
+  lost = [index for index, event in enumerate(events) if "SAMPLE_LOST" in event]
+  matched = [index for index, event in enumerate(events)
+             if "SUBSCRIPTION_MATCHED" in event]
+  if len(lost) > 1:
+    return False
+  if lost and matched and lost[0] - matched[0] > 1:
+    return False
+  return True
 
 
 def check_window(context):
@@ -278,30 +309,20 @@ def check_window(context):
                   "uncommitted_sample_count": uncommitted},
     )]
 
-  # A rejection with nothing uncommitted, on a reliable reader that joined a
-  # volatile stream and then received data, is the backlog it was never entitled
-  # to - not a window that filled. The remedy below would send an operator to
-  # raise resource limits and slow a writer that is behaving correctly.
-  if uncommitted == 0 and _joined_a_running_stream(probe):
-    return [Finding(
-        id="data.window",
-        rung=RUNG_PAYLOAD,
-        severity=Severity.INFO,
-        title="Sequence numbers from before the probe joined were declined",
-        observed=observed,
-        root_cause=(
-            "rti_doctor's reader is RELIABLE and VOLATILE, so on attaching to a "
-            "writer that was already publishing it is offered nothing from before "
-            "it existed and declines those sequence numbers. Samples arrived "
-            "afterwards, so the path is working; this is the cost of joining "
-            "late, which is what a diagnostic tool always does."),
-        remedy=("Nothing to fix. If this appears with no samples received, or "
-                "with uncommitted samples alongside, read it as loss instead."),
-        evidence={"out_of_range_rejected_sample_count": out_of_range,
-                  "uncommitted_sample_count": uncommitted,
-                  "late_join": True},
-    )]
-
+  # A late-join downgrade was tried here and reverted. It read a rejection with
+  # nothing uncommitted as the volatile backlog rather than a full window, which
+  # RTI's own guidance contradicts on both halves: this counter is bounded by
+  # `rtps_reliable_reader.receive_window_size` and counts ONLY out-of-order
+  # samples dropped because that window was full - the backlog a volatile writer
+  # declines is signalled by GAP and is not counted here at all - and
+  # `uncommitted_sample_count` "cannot, alone, distinguish a repairable loss
+  # from unavailable pre-reader history".
+  #
+  # A rising count is affirmative evidence of window exhaustion, so the two
+  # mistakes are not equally priced: a noisy WARN on a benign join costs
+  # attention, and an INFO reading "nothing to fix" over a real overflow costs
+  # the diagnosis. Doing this properly needs `received_gap_count` and
+  # `first_available_sample_sequence_number`, which is a separate change.
   return [Finding(
       id="data.window",
       rung=RUNG_PAYLOAD,

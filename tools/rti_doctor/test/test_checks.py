@@ -312,6 +312,16 @@ class TestLocatorRendering(unittest.TestCase):
     del locator.kind
     self.assertEqual(records.locator_text(locator), "10.0.2.15:7411")
 
+  def test_a_real_time_wan_locator_is_named_and_shows_no_address(self):
+    """A 7.x peer can advertise kind 0x01000001; the binding has no constant.
+
+    Its sixteen octets are a transport structure - flags, a UUID, a public port
+    and address - so the last four are no more an address than SHMEM's zeroes.
+    """
+    locator = FakeLocator("10.0.2.15", 7411,
+                          kind=records.LOCATOR_KIND_UDPV4_WAN)
+    self.assertEqual(records.locator_text(locator), "port 7411 (UDPv4_WAN)")
+
   def test_a_udpv6_locator_is_not_rendered_as_a_fabricated_ipv4(self):
     """The last four of sixteen v6 octets are not an address.
 
@@ -959,6 +969,46 @@ class TestLateJoinIsNotAFault(unittest.TestCase):
     result = probe_payload.check_window(CheckContext(probe=probe))
     self.assertEqual(result[0].severity, f.Severity.WARN)
 
+  def test_a_recurring_loss_is_not_a_join_artifact(self):
+    """RTI: benign only when the loss "does not continue after the match
+    stabilizes". Repeated SAMPLE_LOST events are a trend, not a join - which is
+    how writer LIFESPAN expiry and resource-limit replacement show up, and
+    neither is caught by magnitude alone."""
+    probe = self._lost_by_writer(samples_taken=9)
+    probe.listener_events = ["12:00:00 SUBSCRIPTION_MATCHED current_count=1",
+                             "12:00:00 SAMPLE_LOST reason=LOST_BY_WRITER",
+                             "12:00:03 SAMPLE_LOST reason=LOST_BY_WRITER"]
+    result = probe_payload.check_deserialize_failure(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_a_loss_detached_from_the_match_is_not_a_join_artifact(self):
+    """RTI: benign only when it "occurs immediately around the first match"."""
+    probe = self._lost_by_writer(samples_taken=9)
+    probe.listener_events = ["12:00:00 SUBSCRIPTION_MATCHED current_count=1",
+                             "12:00:01 SAMPLE_REJECTED reason=REJECTED_BY_X",
+                             "12:00:02 SAMPLE_LOST reason=LOST_BY_WRITER"]
+    result = probe_payload.check_deserialize_failure(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_one_loss_at_the_match_is_still_informational(self):
+    """The real timeline from a Fast DDS -> Connext run, in order."""
+    probe = self._lost_by_writer(samples_taken=1)
+    probe.listener_events = ["11:15:13 SUBSCRIPTION_MATCHED current_count=1",
+                             "11:15:13 SAMPLE_LOST reason=LOST_BY_WRITER"]
+    result = probe_payload.check_deserialize_failure(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.INFO)
+
+  def test_an_unrecorded_timeline_does_not_disqualify(self):
+    """Absence of the record is not evidence of recurrence.
+
+    Disqualifying on an empty timeline would return every run whose events went
+    unrecorded to a warning - the noise this rule exists to remove.
+    """
+    probe = self._lost_by_writer(samples_taken=1)
+    probe.listener_events = []
+    result = probe_payload.check_deserialize_failure(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.INFO)
+
   def test_a_rejection_alongside_keeps_the_warning(self):
     probe = self._lost_by_writer(samples_taken=1)
     probe.sample_rejected = FakeStatus(
@@ -967,16 +1017,19 @@ class TestLateJoinIsNotAFault(unittest.TestCase):
     result = probe_payload.check_deserialize_failure(CheckContext(probe=probe))
     self.assertEqual(result[0].severity, f.Severity.WARN)
 
-  def test_declined_backlog_sequence_numbers_are_informational(self):
-    """Regression: this advised raising resource limits and slowing a writer
-    that was behaving correctly."""
+  def test_a_rejection_is_a_warning_even_on_a_late_join(self):
+    """out_of_range_rejected counts ONLY a full receive window, per RTI.
+
+    A late-join downgrade was tried here and reverted: the backlog a volatile
+    writer declines is signalled by GAP and never reaches this counter, so an
+    INFO reading "nothing to fix" would sit over real window exhaustion.
+    """
     probe = FakeProbe(samples_taken=1, applied_reader_qos=LATE_JOIN_QOS,
                       protocol={"out_of_range_rejected_sample_count": 1,
                                 "uncommitted_sample_count": 0})
     result = probe_payload.check_window(CheckContext(probe=probe))
     self.assertEqual(ids(result), ["data.window"])
-    self.assertEqual(result[0].severity, f.Severity.INFO)
-    self.assertNotIn("reduce the writer's send rate", result[0].remedy)
+    self.assertEqual(result[0].severity, f.Severity.WARN)
 
   def test_a_full_receive_window_is_still_a_warning(self):
     """Uncommitted samples alongside mean an earlier sequence number is missing."""

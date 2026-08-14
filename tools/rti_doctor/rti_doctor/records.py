@@ -176,6 +176,12 @@ def locator_ip(locator):
 LOCATOR_KIND_UDPV4 = 1
 LOCATOR_KIND_UDPV6 = 2
 LOCATOR_KIND_SHMEM = 0x01000000
+#: RTI Real-Time WAN Transport. The Python binding exposes no constant for it,
+#: so it can only ever arrive from a peer on the wire - which is exactly the
+#: traffic this tool reads. Its sixteen address octets are a transport-specific
+#: structure carrying flags, a UUID, a public port and a public address, so the
+#: last four of them are not an address any more than SHMEM's zeroes are.
+LOCATOR_KIND_UDPV4_WAN = 0x01000001
 
 #: Every locator kind by the name `rti.connextdds.LocatorKind` gives it. Written
 #: out rather than read from the binding because these records are deliberately
@@ -197,6 +203,7 @@ LOCATOR_KIND_NAMES = {
     11: "TLSV4_WAN",
     1000: "RESERVED",
     LOCATOR_KIND_SHMEM: "SHMEM",
+    LOCATOR_KIND_UDPV4_WAN: "UDPv4_WAN",
 }
 
 #: Kinds whose sixteen address octets are not an IP address, and so must not be
@@ -204,7 +211,8 @@ LOCATOR_KIND_NAMES = {
 #: is exactly the unspecified-address fault `static_discovery._address_problem`
 #: reports, so a SHMEM locator read as broken for having no IP address, which is
 #: its ordinary condition.
-NON_IP_LOCATOR_KINDS = frozenset((-1, 0, 3, 1000, LOCATOR_KIND_SHMEM))
+NON_IP_LOCATOR_KINDS = frozenset(
+    (-1, 0, 3, 1000, LOCATOR_KIND_SHMEM, LOCATOR_KIND_UDPV4_WAN))
 
 
 def advertises_shared_memory(*owners):

@@ -16,6 +16,15 @@ frames, which is precisely the traffic no interface capture could see. It writes
 a standard PCAP, so `wire.inspect_pcap` reads it unchanged and the report
 appendix needs no second parser.
 
+What RTI documents is only that Network Capture produces a pcap-based file for a
+packet analyzer to open. The specifics this tool relies on - link type 252,
+`LINKTYPE_WIRESHARK_UPPER_PDU`, an EXPORTED_PDU header naming the `rtpsvt`
+dissector - are observed, not contracted, and RTI confirms no utility of its own
+reads or summarizes these files. So tshark is not a convenience here, it is the
+only reader, and a release that changed the encapsulation would break this path
+without breaking any promise. If `inspect_pcap` ever returns frames it cannot
+dissect, look here first.
+
 Two constraints shape every decision here, and neither is negotiable:
 
   * **`enable()` must precede every other Connext call.** The binding's own

@@ -12,7 +12,9 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rti_doctor import discovery, findings as f, netcapture  # noqa: E402
+import rti.connextdds as dds  # noqa: E402
+
+from rti_doctor import compat, discovery, findings as f, netcapture  # noqa: E402
 from rti_doctor import probe, records, typewalk  # noqa: E402
 from rti_doctor.checks import CheckContext, blind_spots, static_discovery  # noqa: E402
 from rti_doctor.checks import probe_match, probe_payload  # noqa: E402
@@ -727,6 +729,20 @@ class TestDiscoveryLifecycle(unittest.TestCase):
 
 # --- Payload -----------------------------------------------------------------
 
+class FakeStatus:
+  """A status object with a count and a reason, as the payload checks read them.
+
+  The reason itself is a REAL `SampleLostState` / `SampleRejectedState` in these
+  tests, never a stand-in: the comparison under test is a property of the
+  binding's enum, so faking the enum would fake the answer.
+  """
+
+  def __init__(self, total_count=0, last_reason=None):
+    self.total_count = total_count
+    self.total_count_change = 0
+    self.last_reason = last_reason
+
+
 class FakeProbe:
   def __init__(self, **kwargs):
     self.attempted = True
@@ -765,6 +781,100 @@ class FakeProbe:
   @property
   def matched(self):
     return self.matched_count > 0
+
+
+class TestSampleStateReasonsAreOrdinals(unittest.TestCase):
+  """The shape of the real enums, asserted against the real binding.
+
+  Everything here is what `compat.reason_is` depends on being true. It is
+  checked against `rti.connextdds` rather than a fake precisely because the bug
+  it guards was a wrong belief ABOUT the binding - a fake built from the same
+  belief would have agreed with the bug and passed.
+  """
+
+  def test_sample_lost_states_are_not_one_hot(self):
+    """The whole reason a bitmask test is invalid."""
+    values = [int(getattr(dds.SampleLostState, name))
+              for name in dir(dds.SampleLostState) if name.isupper()]
+    self.assertTrue(any(bin(value).count("1") > 1 for value in values),
+                    "SampleLostState looks one-hot; re-check whether `&` is now "
+                    "a valid membership test before trusting this module")
+
+  def test_the_colliding_ordinals_are_still_what_they_were(self):
+    """LOST_BY_WRITER shares a bit with LOST_BY_DESERIALIZATION_FAILURE."""
+    writer = int(dds.SampleLostState.LOST_BY_WRITER)
+    deserialization = int(dds.SampleLostState.LOST_BY_DESERIALIZATION_FAILURE)
+    self.assertEqual((writer, deserialization), (1, 13))
+    self.assertTrue(writer & deserialization,
+                    "the exact collision the ordinal comparison exists to survive")
+
+  def test_a_writer_loss_is_not_a_deserialization_failure(self):
+    self.assertFalse(compat.reason_is(
+        dds.SampleLostState.LOST_BY_WRITER,
+        dds.SampleLostState.LOST_BY_DESERIALIZATION_FAILURE))
+
+  def test_a_deserialization_failure_is_itself(self):
+    self.assertTrue(compat.reason_is(
+        dds.SampleLostState.LOST_BY_DESERIALIZATION_FAILURE,
+        dds.SampleLostState.LOST_BY_DESERIALIZATION_FAILURE))
+
+  def test_rejected_states_compare_the_same_way(self):
+    self.assertFalse(compat.reason_is(
+        dds.SampleRejectedState.REJECTED_BY_INSTANCES_LIMIT,
+        dds.SampleRejectedState.REJECTED_BY_DECODE_FAILURE))
+    self.assertTrue(compat.reason_is(
+        dds.SampleRejectedState.REJECTED_BY_DECODE_FAILURE,
+        dds.SampleRejectedState.REJECTED_BY_DECODE_FAILURE))
+
+  def test_an_absent_reason_matches_nothing(self):
+    """A version without the flag must not read as a match."""
+    self.assertFalse(compat.reason_is(dds.SampleLostState.LOST_BY_WRITER, None))
+    self.assertFalse(compat.reason_is(None, dds.SampleLostState.LOST_BY_WRITER))
+
+
+class TestDeserializeFailureCheck(unittest.TestCase):
+  """A decode ERROR is the strongest claim this tool makes; it must be exact."""
+
+  def _probe(self, lost=None, rejected=None):
+    return FakeProbe(
+        sample_lost=FakeStatus(total_count=1 if lost is not None else 0,
+                               last_reason=lost or dds.SampleLostState.NOT_LOST),
+        sample_rejected=FakeStatus(
+            total_count=1 if rejected is not None else 0,
+            last_reason=rejected or dds.SampleRejectedState.NOT_REJECTED))
+
+  def test_a_writer_loss_is_reported_as_loss_not_as_a_decode_failure(self):
+    """Regression: a Fast DDS/Connext report showed a decode ERROR beside
+    'payload fully deserialized'. A reliable reader joining a volatile stream
+    always loses one sample this way, so this fired on ordinary late joins."""
+    result = probe_payload.check_deserialize_failure(
+        CheckContext(probe=self._probe(lost=dds.SampleLostState.LOST_BY_WRITER)))
+    self.assertEqual(ids(result), ["data.loss"])
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_a_real_deserialization_failure_is_still_an_error(self):
+    result = probe_payload.check_deserialize_failure(CheckContext(
+        probe=self._probe(lost=dds.SampleLostState.LOST_BY_DESERIALIZATION_FAILURE)))
+    self.assertEqual(ids(result), ["data.deserialize_failure"])
+    self.assertEqual(result[0].severity, f.Severity.ERROR)
+    self.assertIn("LOST_BY_DESERIALIZATION_FAILURE", result[0].observed)
+
+  def test_a_decode_rejection_is_an_error(self):
+    result = probe_payload.check_deserialize_failure(CheckContext(
+        probe=self._probe(
+            rejected=dds.SampleRejectedState.REJECTED_BY_DECODE_FAILURE)))
+    self.assertEqual(ids(result), ["data.deserialize_failure"])
+
+  def test_an_unrelated_rejection_is_not_a_decode_failure(self):
+    result = probe_payload.check_deserialize_failure(CheckContext(
+        probe=self._probe(
+            rejected=dds.SampleRejectedState.REJECTED_BY_SAMPLES_LIMIT)))
+    self.assertEqual(ids(result), ["data.loss"])
+
+  def test_nothing_lost_or_rejected_is_silent(self):
+    self.assertEqual(
+        probe_payload.check_deserialize_failure(CheckContext(probe=self._probe())),
+        [])
 
 
 class TestPayloadChecks(unittest.TestCase):

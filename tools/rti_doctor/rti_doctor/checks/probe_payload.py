@@ -275,11 +275,14 @@ def check_deserialize_failure(context):
   lost_reason = compat.get(lost, "last_reason", None)
   rejected_reason = compat.get(rejected, "last_reason", None)
 
-  deserialization = compat.reason_matches(
+  # Exact reason, never a bitmask test - see the note above `compat.reason_is`.
+  # These states are ordinals, and testing them with `&` claimed a decode
+  # failure for every sample lost by the writer.
+  deserialization = compat.reason_is(
       lost_reason, compat.lost_reason_flag("LOST_BY_DESERIALIZATION_FAILURE"))
-  decode_lost = compat.reason_matches(
+  decode_lost = compat.reason_is(
       lost_reason, compat.lost_reason_flag("LOST_BY_DECODE_FAILURE"))
-  decode_rejected = compat.reason_matches(
+  decode_rejected = compat.reason_is(
       rejected_reason, compat.rejected_reason_flag("REJECTED_BY_DECODE_FAILURE"))
 
   observed = [

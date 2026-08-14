@@ -877,6 +877,93 @@ class TestDeserializeFailureCheck(unittest.TestCase):
         [])
 
 
+#: The probe's own applied QoS for a reliable reader mirroring a volatile
+#: writer - what rti_doctor applies on nearly every run against a live system.
+LATE_JOIN_QOS = {"durability": dds.DurabilityKind.VOLATILE,
+                 "reliability": dds.ReliabilityKind.RELIABLE}
+
+
+class TestLateJoinIsNotAFault(unittest.TestCase):
+  """Joining a running system costs one backlog gap. That is not a warning.
+
+  rti_doctor attaches to systems that are already publishing - that is the whole
+  job - so this path runs on nearly every report. A WARN here is the finding
+  operators learn to scroll past, which is what makes the next real one invisible.
+  """
+
+  def _lost_by_writer(self, **kwargs):
+    return FakeProbe(
+        sample_lost=FakeStatus(total_count=1,
+                               last_reason=dds.SampleLostState.LOST_BY_WRITER),
+        sample_rejected=FakeStatus(
+            total_count=0, last_reason=dds.SampleRejectedState.NOT_REJECTED),
+        applied_reader_qos=LATE_JOIN_QOS, **kwargs)
+
+  def test_a_backlog_gap_after_data_flowed_is_informational(self):
+    result = probe_payload.check_deserialize_failure(
+        CheckContext(probe=self._lost_by_writer(samples_taken=1)))
+    self.assertEqual(ids(result), ["data.loss"])
+    self.assertEqual(result[0].severity, f.Severity.INFO)
+    self.assertTrue(result[0].evidence["late_join"])
+
+  def test_the_same_loss_with_no_data_stays_a_warning(self):
+    """'The backlog was dropped' and 'nothing is arriving' are not one event."""
+    result = probe_payload.check_deserialize_failure(
+        CheckContext(probe=self._lost_by_writer(samples_taken=0)))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_a_transient_local_reader_losing_samples_stays_a_warning(self):
+    """Durability that should have replayed the backlog makes the loss real."""
+    probe = self._lost_by_writer(samples_taken=1)
+    probe.applied_reader_qos = {**LATE_JOIN_QOS,
+                                "durability": dds.DurabilityKind.TRANSIENT_LOCAL}
+    result = probe_payload.check_deserialize_failure(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_a_loss_for_another_reason_stays_a_warning(self):
+    """Only LOST_BY_WRITER is explained by joining late."""
+    probe = self._lost_by_writer(samples_taken=1)
+    probe.sample_lost = FakeStatus(
+        total_count=1, last_reason=dds.SampleLostState.LOST_BY_SAMPLES_LIMIT)
+    result = probe_payload.check_deserialize_failure(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_a_rejection_alongside_keeps_the_warning(self):
+    probe = self._lost_by_writer(samples_taken=1)
+    probe.sample_rejected = FakeStatus(
+        total_count=1,
+        last_reason=dds.SampleRejectedState.REJECTED_BY_SAMPLES_LIMIT)
+    result = probe_payload.check_deserialize_failure(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_declined_backlog_sequence_numbers_are_informational(self):
+    """Regression: this advised raising resource limits and slowing a writer
+    that was behaving correctly."""
+    probe = FakeProbe(samples_taken=1, applied_reader_qos=LATE_JOIN_QOS,
+                      protocol={"out_of_range_rejected_sample_count": 1,
+                                "uncommitted_sample_count": 0})
+    result = probe_payload.check_window(CheckContext(probe=probe))
+    self.assertEqual(ids(result), ["data.window"])
+    self.assertEqual(result[0].severity, f.Severity.INFO)
+    self.assertNotIn("reduce the writer's send rate", result[0].remedy)
+
+  def test_a_full_receive_window_is_still_a_warning(self):
+    """Uncommitted samples alongside mean an earlier sequence number is missing."""
+    probe = FakeProbe(samples_taken=1, applied_reader_qos=LATE_JOIN_QOS,
+                      protocol={"out_of_range_rejected_sample_count": 9,
+                                "uncommitted_sample_count": 4})
+    result = probe_payload.check_window(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+    self.assertIn("reduce the writer's send rate", result[0].remedy)
+
+  def test_rejections_without_the_late_join_signature_stay_a_warning(self):
+    probe = FakeProbe(samples_taken=1, applied_reader_qos={},
+                      protocol={"out_of_range_rejected_sample_count": 1,
+                                "uncommitted_sample_count": 0})
+    result = probe_payload.check_window(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+
 class TestPayloadChecks(unittest.TestCase):
 
   def test_dropped_fragments_alone_are_not_an_error(self):

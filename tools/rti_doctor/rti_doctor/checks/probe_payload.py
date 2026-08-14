@@ -204,6 +204,35 @@ def check_fragmentation(context):
   )]
 
 
+def _mirrored_qos_names(probe, policy, kind):
+  """Whether the probe's own applied QoS names `kind`, e.g. durability VOLATILE.
+
+  Read from what the probe APPLIED rather than from what the peer advertised:
+  it is rti_doctor's own reader that lost the sample, so its own policy is what
+  decides whether the loss was inevitable.
+  """
+  value = (getattr(probe, "applied_reader_qos", None) or {}).get(policy)
+  return value is not None and kind in str(value).upper()
+
+
+def _joined_a_running_stream(probe):
+  """Whether a loss here is the ordinary cost of joining a system already running.
+
+  A VOLATILE writer keeps nothing for a reader that was not there yet, so a
+  reliable reader attaching mid-stream is told the backlog is gone and counts it
+  as lost. rti_doctor does precisely that on every run against a live system, so
+  for this tool it is the normal case rather than the anomaly - reporting it as a
+  fault trains operators to ignore the section it appears in.
+
+  It is only benign if data then flowed. Nothing arriving at all is a different
+  report and keeps its warning: "the backlog was dropped" and "nothing is being
+  delivered" must not be rendered as the same event.
+  """
+  return (_mirrored_qos_names(probe, "durability", "VOLATILE")
+          and _mirrored_qos_names(probe, "reliability", "RELIABLE")
+          and (getattr(probe, "samples_taken", 0) or 0) > 0)
+
+
 def check_window(context):
   """Receive-window and ordering problems."""
   probe = context.probe
@@ -239,6 +268,30 @@ def check_window(context):
                 "missing sequence numbers as loss rather than as a decode problem."),
         evidence={"out_of_range_rejected_sample_count": out_of_range,
                   "uncommitted_sample_count": uncommitted},
+    )]
+
+  # A rejection with nothing uncommitted, on a reliable reader that joined a
+  # volatile stream and then received data, is the backlog it was never entitled
+  # to - not a window that filled. The remedy below would send an operator to
+  # raise resource limits and slow a writer that is behaving correctly.
+  if not uncommitted and _joined_a_running_stream(probe):
+    return [Finding(
+        id="data.window",
+        rung=RUNG_PAYLOAD,
+        severity=Severity.INFO,
+        title="Sequence numbers from before the probe joined were declined",
+        observed=observed,
+        root_cause=(
+            "rti_doctor's reader is RELIABLE and VOLATILE, so on attaching to a "
+            "writer that was already publishing it is offered nothing from before "
+            "it existed and declines those sequence numbers. Samples arrived "
+            "afterwards, so the path is working; this is the cost of joining "
+            "late, which is what a diagnostic tool always does."),
+        remedy=("Nothing to fix. If this appears with no samples received, or "
+                "with uncommitted samples alongside, read it as loss instead."),
+        evidence={"out_of_range_rejected_sample_count": out_of_range,
+                  "uncommitted_sample_count": uncommitted,
+                  "late_join": True},
     )]
 
   return [Finding(
@@ -310,7 +363,10 @@ def check_deserialize_failure(context):
         observed="; ".join(observed) + f"; matched reason(s): {', '.join(which)}",
         root_cause=(
             "Connext received bytes on the wire and could not turn them into a "
-            "sample of this type. The reader's idea of the type does not match "
+            "sample of this type. This concerns samples that never reached the "
+            "application at all, so a payload finding about a sample that did "
+            "arrive is not in conflict with it - both can be true of one run. "
+            "The reader's idea of the type does not match "
             "the bytes the writer produced. Cross-vendor, the usual causes are an "
             "XCDR1/XCDR2 mismatch, an extensibility disagreement (FINAL vs "
             "APPENDABLE vs MUTABLE), differing member bounds, or a differing enum "
@@ -324,6 +380,34 @@ def check_deserialize_failure(context):
                   "sample_rejected_total": rejected_total,
                   "sample_rejected_reason": compat.reason_text(rejected_reason),
                   "matched_reasons": which},
+    )]
+
+  # LOST_BY_WRITER on a reliable reader that joined a volatile stream and then
+  # received data is the backlog gap, and it happens on essentially every run
+  # against a live system. Left at WARN it is the finding operators learn to
+  # scroll past, which costs the real warnings their attention. Narrow on
+  # purpose: only a writer loss, only with nothing rejected, only once data has
+  # actually flowed.
+  writer_loss = compat.reason_is(
+      lost_reason, compat.lost_reason_flag("LOST_BY_WRITER"))
+  if writer_loss and not rejected_total and _joined_a_running_stream(probe):
+    return [Finding(
+        id="data.loss",
+        rung=RUNG_PAYLOAD,
+        severity=Severity.INFO,
+        title="The writer's backlog from before the probe joined was not delivered",
+        observed="; ".join(observed),
+        root_cause=(
+            "LOST_BY_WRITER means the writer no longer held the sample. "
+            "rti_doctor's reader is VOLATILE, so samples published before it "
+            "existed were never going to be delivered, and the writer says so "
+            "rather than sending them. Samples arrived afterwards, so this "
+            "describes the join, not the data path."),
+        remedy=("Nothing to fix. To see the earlier samples, both sides would "
+                "have to be TRANSIENT_LOCAL or stronger."),
+        evidence={"sample_lost_reason": compat.reason_text(lost_reason),
+                  "sample_lost_total": lost_total,
+                  "late_join": True},
     )]
 
   return [Finding(
@@ -410,7 +494,14 @@ def check_payload_walk(context):
   failed = walk.failed
   absent = walk.absent
 
-  detail = [f"{total - len(failed)} of {total} member(s) read successfully"]
+  # Scoped to the sample that was taken, always. This finding and
+  # `data.deserialize_failure` describe different populations - one a sample that
+  # arrived and was walked, the other samples that never became samples - and
+  # both can be true in the same run. Stated flatly as "payload fully
+  # deserialized" beside a decode ERROR, the two read as a contradiction the
+  # report never resolves, and the reader cannot tell which to believe.
+  detail = [f"{total - len(failed)} of {total} member(s) read successfully in "
+            f"the sample taken"]
   if absent:
     detail.append(f"{len(absent)} optional member(s) legitimately absent")
   if walk.truncated:

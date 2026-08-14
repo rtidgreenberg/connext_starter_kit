@@ -18,8 +18,8 @@ rather than resolved.
 | Python | 3.11.13, venv `connext_dds_env_7.7_py311` |
 | Fixture | `large-data` scenario, [fixture_publisher.py](../test/fixture_publisher.py) |
 | Type | `struct DoctorRich { @key long id; sequence<octet,200000> blob; }` |
-| Sample size | 150 148 bytes serialized |
-| Fragment size | 65 315 bytes, so 3 fragments per sample |
+| Sample size | 150 148 bytes serialized (runs A–C); 70 112 (run D) |
+| Fragment size | 65 315 bytes, so 3 fragments per sample (runs A–C); 2 (run D) |
 | Probe reader | created by rti_doctor, QoS mirrored from the writer |
 
 Reproduce with:
@@ -99,6 +99,23 @@ tshark -n -r <capture>.pcap -Y 'rtps.sm.id==0x16' -T fields \
     -e rtps.data_frag.num_fragments -e rtps.data_frag.size
 ```
 
+Run D's capture was dissected the same way and confirms the 2:1 ratio: every
+sequence number in it carried exactly fragments 1 and 2, same 65 315-byte
+fragment size.
+
+Two cautions about reading a capture against these counters, both visible in run
+D and neither a contradiction:
+
+- **The windows differ.** Run D's capture holds 16 `DATA_FRAG` while the probe
+  reported `received_fragment_count = 2`. The participant capture spans the
+  whole diagnosis; the counters cover only the probe reader's lifetime, which is
+  a fraction of a second. Run A's 9-against-9 agreement is the two windows
+  happening to coincide, not a rule. Compare ratios, not totals.
+- **Run D's capture carried sequence numbers the probe never counted**, in two
+  ranges. Not chased, and not needed for the ratio question this run existed to
+  settle — recorded so the next person seeing it knows it was noticed rather
+  than missed.
+
 ## Conclusions
 
 **`received_fragment_count` counts fragments, and is accurate.** It matched the
@@ -124,22 +141,29 @@ twice, and `sent_nack_fragment_count` was 0, so no repair was requested. The
 explanation was not merely unsupported — it was wrong, and it was the text
 reassuring the operator.
 
-**The reading that the field counts samples.** RTI's own answer to this question
-was that `reassembled_sample_count` increments only when a complete sample has
-been reassembled, so 9 would mean nine samples. Run A already contradicted that
-(3 samples received) and run C makes it unambiguous (1 sample, count of 3).
+**The reading that the field counts samples.** Asked directly, RTI's Connext AI
+assistant answered that `reassembled_sample_count` increments only once a
+complete sample has been reassembled, so 9 would mean nine samples. Run A
+already contradicted that (3 samples received) and runs C and D make it
+unambiguous (1 sample, count of 3; then 1 sample, count of 2).
 
 ## Open disagreement
 
-RTI's guidance is that a clean fragmented path shows `dropped_fragment_count =
-0`, citing the `fragmented_data_statistics` example. This build does not behave
-that way: the counter reliably equals the fragment count on a path where every
-fragment arrives once and every sample is delivered.
+The same assistant stated that a clean fragmented path shows
+`dropped_fragment_count = 0`, citing RTI's `fragmented_data_statistics` example.
+This build does not behave that way: the counter reliably equals the fragment
+count on a path where every fragment arrives once and every sample is delivered.
 
-Both cannot describe the same thing. Unresolved, and deliberately so — the
-mechanism behind the increment is not visible from outside the middleware, and
-guessing at it is what produced the wrong comment in the first place. Worth
-raising with RTI support if it ever matters more than it currently does.
+**That citation is second-hand and has not been checked.** Nobody here has
+opened the referenced example or the C API page; the claim is repeated as it was
+given. Since the same source got `reassembled_sample_count` wrong in the same
+conversation, it should not be treated as settled fact — read the primary source
+before concluding that RTI and this build genuinely disagree.
+
+Unresolved, and deliberately so — the mechanism behind the increment is not
+visible from outside the middleware, and guessing at it is what produced the
+wrong comment in the first place. Worth raising with RTI support if it ever
+matters more than it currently does.
 
 ## What the code does about it
 
@@ -167,9 +191,16 @@ any per-sample multiple: runs C and D between them exclude both. On this build,
 on a path where every sample is delivered, all three fragment counters equal the
 fragment count.
 
-**Verified once, not four times.** Only runs A and D had their captures
-dissected. "Every fragment arrives exactly once" is measured on those two; runs
-B and C rest on counters alone.
+**Verified twice, not four times.** Only runs A and D had their captures
+dissected. "Every fragment arrives exactly once" is measured on run A only; run
+D's capture confirms the fragments-per-sample ratio but was not audited for
+duplicates. Runs B and C rest on counters alone.
+
+**One source, partly unverified.** Both statements of RTI's position here came
+from one Connext AI conversation, and one of them - that
+`reassembled_sample_count` counts complete samples - is demonstrably wrong. The
+other, that a clean path shows `dropped_fragment_count = 0`, has not been
+checked against the primary source.
 
 **Not established.**
 

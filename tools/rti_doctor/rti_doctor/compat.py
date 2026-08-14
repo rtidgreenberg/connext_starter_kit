@@ -77,8 +77,16 @@ def at_least(major, minor):
 
 
 def na_text():
-  """The exact string used wherever a counter is unavailable."""
-  return f"n/a (not available on Connext {connext_version()})"
+  """The exact string used wherever a counter is unavailable.
+
+  Terse on purpose. An old Connext renders this on some 45 of Appendix B's 55
+  lines, and the longer form it replaced - "n/a (not available on Connext X)" -
+  was 38 characters against a value column with 26 left of the report's width,
+  so every one of those lines either overran the width or folded in two. The
+  version is stated once in the report header; "n/a" already says the value is
+  not available, and the appendix legend says what that means about the version.
+  """
+  return f"n/a on Connext {connext_version()}"
 
 
 # --- Safe access -------------------------------------------------------------

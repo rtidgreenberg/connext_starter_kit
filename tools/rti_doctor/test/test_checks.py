@@ -28,6 +28,23 @@ class FakeProperty(dict):
   """Stands in for a PropertyQosPolicy, which behaves like a mapping."""
 
 
+class FakeRejectedStatus:
+  """A SampleRejectedStatus whose reason carries a name, as the real one does.
+
+  `compat.reason_text` reads `.name` off the enum, and those names run to 43
+  characters - wider than the value column any fixed-width table can give them.
+  """
+
+  class _Reason:
+    def __init__(self, name):
+      self.name = name
+
+  def __init__(self, reason_name, total_count=1):
+    self.last_reason = self._Reason(reason_name)
+    self.total_count = total_count
+    self.total_count_change = total_count
+
+
 class FakeDiscovery:
   def __init__(self, initial_peers=(), accept_unknown_peers=True,
                multicast_receive_addresses=("239.255.0.1",)):
@@ -2599,13 +2616,24 @@ class TestReportReadability(unittest.TestCase):
     return f.Finding(id=id, rung=rung, severity=severity,
                      title=kwargs.pop("title", id), **kwargs)
 
+  def _lines_past_the_width(self, text):
+    """Rendered lines wider than WIDTH, excluding unbreakable single tokens.
+
+    A path, a URL or a command line is one token; the renderer cannot break it
+    without destroying the only thing it is for, and does not try.
+    """
+    from rti_doctor import report as report_module
+    return [line for line in text.splitlines()
+            if len(line) > report_module.WIDTH
+            and max((len(word) for word in line.split()), default=0)
+            < report_module.WIDTH // 2]
+
   def test_no_prose_line_exceeds_the_report_width(self):
     """Regression: the topology coverage note ran to 274 characters.
 
     Long paths, URLs and command lines are exempt - they are single unbreakable
     tokens, and wrapping them would destroy the only thing they are for.
     """
-    from rti_doctor import report as report_module
     text = self._report(topology={
         "source": "builtin discovery", "scope": "remote entities observed",
         "selected_domain_id": 7, "participants": 2, "readers": 1, "writers": 1,
@@ -2615,11 +2643,50 @@ class TestReportReadability(unittest.TestCase):
             "the optional 32-second passive domain scan to wait for the next "
             "default-domain announcement; it identifies active domains but "
             "cannot reconstruct endpoint announcements that were not replayed.")})
-    too_wide = [line for line in text.splitlines()
-                if len(line) > report_module.WIDTH
-                and max((len(word) for word in line.split()), default=0)
-                < report_module.WIDTH // 2]
-    self.assertEqual(too_wide, [], "wrappable prose ran past the report width")
+    self.assertEqual(self._lines_past_the_width(text), [],
+                     "wrappable prose ran past the report width")
+
+  def test_no_table_row_in_a_populated_report_exceeds_the_width(self):
+    """Regression: the whole of Appendix B, with no prose at fault.
+
+    The prose test above renders a report with no probe, no own configuration
+    and no capture - which is every fixed-column table the report has. On a
+    Connext that supplies none of the counters, each of those ~45 rows put its
+    name in a 52-character column and the unavailability marker after it, and
+    the appendix ran 12 characters past the width from end to end.
+    """
+    result = probe.ProbeResult()
+    result.attempted = result.created = True
+    result.elapsed = 2.0
+    # Every status left None, which is exactly how an old Connext renders: each
+    # counter reads as unavailable rather than as a number.
+    result.sample_rejected = FakeRejectedStatus(
+        "REJECTED_BY_SAMPLES_PER_REMOTE_WRITER_LIMIT")
+    result.applied_reader_qos = {
+        "reader_resource_limits.max_remote_writers_per_instance": "1",
+        "resource_limits.max_samples_per_instance": "LENGTH_UNLIMITED"}
+    text = self._report(
+        probe_result=result,
+        type_lookup_settings={"type_object_max_serialized_length": "8192"},
+        participant_evidence={"source": "p.pcap", "kind": "rti network capture",
+                              "packets": 81, "data_packets": 53})
+    self.assertIn("n/a on Connext", text)
+    self.assertEqual(self._lines_past_the_width(text), [],
+                     "a fixed-column table row ran past the report width")
+
+  def test_an_unavailable_counter_is_still_distinct_from_a_zero(self):
+    """The marker got shorter to fit the width; it must not get vaguer.
+
+    A reader who takes the unavailability marker for a zero draws the opposite
+    conclusion from the one the line supports, so the appendix says outright
+    what it means - and the counter still renders, rather than being omitted.
+    """
+    result = probe.ProbeResult()
+    result.attempted = result.created = True
+    text = self._report(probe_result=result)
+    self.assertIn("cannot supply", text)
+    self.assertIn("It is not a zero.", text)
+    self.assertIn(compat.na_text(), text)
 
   def test_a_long_value_stays_on_its_label_line(self):
     """A path or URL past the width overflows rather than moving below its label.
@@ -2629,7 +2696,6 @@ class TestReportReadability(unittest.TestCase):
     and dropped `source` from the wire appendix. `test_doctor_e2e` holds the
     parse-level regression; this is the rendering half.
     """
-    from rti_doctor import report as report_module
     path = "/" + "/".join(f"very_long_directory_component_{n}" for n in range(6))
     text = self._report(wire_evidence={"source": path, "packets": 1})
     line = next(line for line in text.splitlines() if line.startswith("Capture "))
@@ -2702,7 +2768,8 @@ class TestReportReadability(unittest.TestCase):
         "source": "/tmp/p.pcap", "packets": 6, "data_packets": 3,
         "heartbeats": 5, "acknacks": 1, "gaps": 1})
     self.assertIn("HEARTBEAT in these frames", text)
-    self.assertIn("count frames and not submessages", text)
+    # The caveat is wrapped to the report width, so compare against one line.
+    self.assertIn("count frames and not submessages", " ".join(text.split()))
 
 
 class TestFindingScope(unittest.TestCase):
@@ -2747,7 +2814,9 @@ class TestFindingScope(unittest.TestCase):
         domain_id=7, scope="topic 'T'", all_findings=[system, probe]))
     self.assertIn("OBSERVED IN THE SYSTEM", text)
     self.assertIn("MEASURED BY RTI DOCTOR'S OWN PROBE", text)
-    self.assertIn("NOT the application's endpoint", text)
+    # The scope caveat is wrapped to the report width, so compare against one
+    # line; the two headings above are their own lines and are not.
+    self.assertIn("NOT the application's endpoint", " ".join(text.split()))
     self.assertLess(text.index("OBSERVED IN THE SYSTEM"),
                     text.index("MEASURED BY RTI DOCTOR'S OWN PROBE"),
                     "the system is what the operator came to find out")

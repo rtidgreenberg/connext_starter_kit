@@ -23,7 +23,11 @@ import time
 from . import (compat, findings as f, probe as probe_mod, records, typewalk,
                vendors, wire)
 
-WIDTH = 100
+#: Every wrappable line in both reports is laid out against this. 80 is the
+#: width a report survives being pasted into: a terminal at its default size, a
+#: mail client, a bug comment. Prose, rules and section bars all follow it; the
+#: single-token exemption below (a path, a URL, a command line) does not.
+WIDTH = 80
 RULE = "=" * WIDTH
 THIN = "-" * WIDTH
 
@@ -91,6 +95,31 @@ def _kv_block(label, value, pad=16):
   return [_kv(label, block[0][pad:], pad=pad)] + block[1:]
 
 
+#: Where the fixed-column tables - Appendix B's counters, the own-configuration
+#: blocks - put their value. The widest counter name Connext supplies is 48
+#: characters, so a pad of 52 leaves a visible gap after even that one. It also
+#: leaves only WIDTH - 54 columns for the value, which `_table_row` folds past.
+TABLE_PAD = 52
+
+
+def _table_row(name, value, gutter="  ", pad=TABLE_PAD):
+  """One `name value` row of a fixed-column table.
+
+  A value too long for its column moves below its name rather than running past
+  WIDTH, with the gutter mark staying on the name's line. That is safe here and
+  is not safe for `_kv` (see below): nothing parses these tables - the report's
+  own parser reads the header, the verdict, the findings and Appendix C - and
+  the value gets the width of the page instead of the 26 columns left beside a
+  48-character name, which is narrower than a single DDS enum name like
+  REJECTED_BY_SAMPLES_PER_REMOTE_WRITER_LIMIT.
+  """
+  text = str(value)
+  row = f"{gutter}{str(name).ljust(pad)}{text}"
+  if len(row) <= WIDTH:
+    return row
+  return "\n".join([f"{gutter}{name}"] + _wrap(text, indent=len(gutter) + 2))
+
+
 # A path, a URL or a command line stays on its label's line however far it runs
 # past WIDTH. Moving it to its own line under the label was tried and reverted:
 # the text report is this tool's only output contract, its parser reads a field
@@ -99,6 +128,14 @@ def _kv_block(label, value, pad=16):
 # `source` from the wire appendix, which the vendor tier asserts is a real file.
 # A value that overflows is a cosmetic problem; one the parser cannot find is
 # not. See `test_a_long_value_stays_parseable_on_its_label_line`.
+#
+# So WIDTH binds every line the report writes EXCEPT a `_kv` field whose value
+# is too long for its column. Besides paths and URLs, that is Appendix C's
+# list-valued fields - "Writer IDs in matching frames" passes WIDTH at five
+# writers, and a capture on a busy topic sees more. Folding those means teaching
+# every consumer of the report, not just this repo's parser, to join
+# continuation lines; the fixed-column tables fold instead because nothing
+# parses them (`_table_row`).
 
 
 def _is_live(name, text):
@@ -133,7 +170,7 @@ def _counter(name, value, notable=None):
   text = str(value)
   if notable is None:
     notable = _is_live(name, text)
-  return f"{'*' if notable else ' '} {name.ljust(52)}{text}"
+  return _table_row(name, text, gutter=f"{'*' if notable else ' '} ")
 
 
 def _notable_reason(text):
@@ -201,7 +238,10 @@ def render_system_text(snapshot, domain_id, environment=None,
   if snapshot.fastdds_product_versions:
     lines += [_kv("Observed", ", ".join(snapshot.fastdds_product_versions)), ""]
   else:
-    lines += [_kv("Observed", CAPTURE_PLACEHOLDER), CAPTURE_HINT, ""]
+    # The hint is a paragraph, so it wraps like one. Appended whole it was the
+    # system report's only line past WIDTH, at 131 characters.
+    lines += ([_kv("Observed", CAPTURE_PLACEHOLDER)]
+              + _wrap(CAPTURE_HINT, indent=0) + [""])
   lines += _section("ISSUE SUMMARY")
   lines += [_kv("Errors", str(counts[f.Severity.ERROR])),
             _kv("Warnings", str(counts[f.Severity.WARN])),
@@ -242,7 +282,7 @@ def render_system_text(snapshot, domain_id, environment=None,
             "issue above can be judged against how it was measured.", ""]
   if type_lookup_settings:
     for key, value in sorted(type_lookup_settings.items()):
-      lines.append(f"  {str(key).ljust(52)}{value}")
+      lines.append(_table_row(key, value))
   else:
     lines.append("  (no type-lookup settings recorded)")
   lines.append("")
@@ -451,7 +491,10 @@ def _render_capture_summary(data):
   if gained:
     lines.append("New from packets, not available from discovery")
     for label, value, note in gained:
-      lines.append(_kv(f"  {label}", value, CAPTURE_LABEL_PAD))
+      # These labels are this summary's own, not the parsed Appendix C field
+      # names, so a value too wide for the column folds under it rather than
+      # running past WIDTH - a wire representation naming several encodings does.
+      lines.append(_table_row(label, value, pad=CAPTURE_LABEL_PAD - 2))
       lines.extend(_wrap(note, indent=4))
   for note in unchanged:
     lines.extend(_wrap(note, indent=2))
@@ -775,6 +818,9 @@ def _render_counter_appendix(data):
     lines.append(f"probe window: {result.elapsed:.2f}s; valid samples taken: "
                  f"{result.samples_taken}")
   lines.append("* marks a counter above zero, or a reason that is not the quiet default.")
+  # Paired with the marker's terse form. A reader who takes "n/a" for zero draws
+  # the opposite conclusion from the one the line supports.
+  lines.append("n/a marks a counter this Connext version cannot supply. It is not a zero.")
   lines.append("")
 
   lines.append("publication_matched" if wrote else "subscription_matched")
@@ -825,7 +871,7 @@ def _render_counter_appendix(data):
 
   if wrote:
     # The whole reader block is omitted rather than printed as unavailable.
-    # `n/a (not available on Connext X)` is a claim about the middleware, and
+    # `n/a on Connext X` is a claim about the middleware, and
     # every reader status read that way on this path was really "no reader was
     # ever created" - the probe made a writer, because the selected endpoint is
     # a reader. Those statuses exist on this Connext version; nothing asked for
@@ -1082,7 +1128,7 @@ def _render_config_appendix(data):
   lines.append("")
   if data.type_lookup_settings:
     for key, value in sorted(data.type_lookup_settings.items()):
-      lines.append(f"  {key.ljust(52)}{value}")
+      lines.append(_table_row(key, value))
   else:
     lines.append("  (no type-lookup settings recorded)")
   result = data.probe_result
@@ -1096,7 +1142,9 @@ def _render_config_appendix(data):
     else:
       lines.append("  probe reader/subscriber QoS mirrored from the writer:")
     for key, value in sorted(result.applied_reader_qos.items()):
-      lines.append(f"    {key.ljust(50)}{value}")
+      # Nested a level under its heading, so the value column matches the rows
+      # above it: two more of indent against two less of pad.
+      lines.append(_table_row(key, value, gutter="    ", pad=TABLE_PAD - 2))
   lines.append("")
   return lines
 

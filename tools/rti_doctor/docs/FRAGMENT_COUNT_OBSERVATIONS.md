@@ -32,19 +32,33 @@ Reproduce with:
 
 ## What was measured
 
-Three runs, two transports, three different sample counts. Every column moves
-together except `received_sample_count`.
+Four runs, two transports, two sample sizes. Every column moves together except
+`received_sample_count`.
 
-| Run | Transport | `received_sample_count` | `received_fragment_count` | `reassembled_sample_count` | `dropped_fragment_count` | `sent_nack_fragment_count` |
-|---|---|---|---|---|---|---|
-| A | UDPv4 + SHMEM | 3 | 9 | 9 | 9 | 0 |
-| B | UDPv4 only | 2 | 6 | 6 | 6 | 0 |
-| C | UDPv4 + SHMEM | 1 | 3 | 3 | 3 | 0 |
+| Run | Transport | Sample size | Frags/sample | `received_sample_count` | `received_fragment_count` | `reassembled_sample_count` | `dropped_fragment_count` | `sent_nack_fragment_count` |
+|---|---|---|---|---|---|---|---|---|
+| A | UDPv4 + SHMEM | 150 148 | 3 | 3 | 9 | 9 | 9 | 0 |
+| B | UDPv4 only | 150 148 | 3 | 2 | 6 | 6 | 6 | 0 |
+| C | UDPv4 + SHMEM | 150 148 | 3 | 1 | 3 | 3 | 3 | 0 |
+| D | UDPv4 + SHMEM | 70 112 | 2 | 1 | 2 | 2 | 2 | 0 |
 
 In every run `duplicate_sample_count` was 0, the payload walked clean, and the
 probe reported `payload FULL`. Run B forced UDP-only by omitting
 `--network-capture`, which restores the shared-memory restriction — the ratio
 is identical on both transports, so nothing here is a shared-memory artifact.
+
+**Run D exists to break a confound, and it is the reason the conclusion below
+can be stated at all.** Runs A–C all used the stock fixture, whose 150 148-byte
+sample is exactly 3 fragments. At a fixed 3:1 ratio "counts fragments" and
+"counts three times the samples" predict the same number in every row, so those
+three runs cannot distinguish them. Run D shrinks the blob to 70 000 octets, two
+fragments per sample: `reassembled_sample_count` reported **2**, where a
+per-sample multiple would have reported 3. Reproduce it by copying
+`fixture_publisher.py` and changing the one literal:
+
+```python
+sample["blob"] = [counter % 256] * 70000   # was 150000
+```
 
 ## The capture, fragment by fragment
 
@@ -90,11 +104,12 @@ tshark -n -r <capture>.pcap -Y 'rtps.sm.id==0x16' -T fields \
 **`received_fragment_count` counts fragments, and is accurate.** It matched the
 wire exactly in every run.
 
-**`reassembled_sample_count` counts fragments, not samples.** Run C settles it
-with no room for interpretation: one delivered sample, `reassembled_sample_count
-= 3`. It tracks `received_fragment_count` in all three runs and never tracks
-`received_sample_count`. Comparing it against "valid samples taken" compares two
-different units.
+**`reassembled_sample_count` counts fragments, not samples.** Run C rules out
+"samples" on its own — one delivered sample, `reassembled_sample_count = 3` —
+and run D rules out any per-sample multiple, reporting 2 for a two-fragment
+sample where 3× would have given 3. It tracks `received_fragment_count` in all
+four runs and never tracks `received_sample_count`. Comparing it against "valid
+samples taken" compares two different units.
 
 **`dropped_fragment_count` equalling `received_fragment_count` is what a working
 path looks like here.** Every fragment arrived once, every sample was
@@ -142,10 +157,30 @@ documentation nor a theory of the mechanism:
   broken only when nothing was delivered at all, which is the one reading these
   counters do support.
 
-## Open questions
+## Confidence, and what is not established
 
-- What does `dropped_fragment_count` increment on? A per-fragment buffer release
-  after reassembly would fit every observation, but that is inference.
-- Does the ratio hold for samples needing many more fragments, or for a lossy
-  path where repair actually runs? Every run here was local and clean.
-- Does 6.1.2 or 7.3.x behave the same? Only 7.7.0 was measured.
+Stated precisely, because the first two explanations of these counters were both
+confident and both wrong.
+
+**Settled.** `reassembled_sample_count` is not a count of samples, and is not
+any per-sample multiple: runs C and D between them exclude both. On this build,
+on a path where every sample is delivered, all three fragment counters equal the
+fragment count.
+
+**Verified once, not four times.** Only runs A and D had their captures
+dissected. "Every fragment arrives exactly once" is measured on those two; runs
+B and C rest on counters alone.
+
+**Not established.**
+
+- What `dropped_fragment_count` increments on. A per-fragment buffer release
+  after reassembly fits every observation, but nothing here measures the
+  mechanism, and inventing one is what produced the wrong comment originally.
+- Whether the equality holds at higher fragment counts. Only 2:1 and 3:1 were
+  measured; the fixture's 200 000-octet bound caps how far this can be pushed
+  without a new type.
+- Whether it holds on a lossy path where repair actually runs. Every run was
+  local and clean, and `sent_nack_fragment_count` was 0 throughout — so nothing
+  here says what these counters do when fragments genuinely go missing, which is
+  the case an operator most needs them for.
+- Whether 6.1.2 or 7.3.x behave the same. Only 7.7.0 was measured.

@@ -466,8 +466,14 @@ def check_rxo_pairs(context):
       )]
     return []
 
+  # Which counterpart this is, and of how many. A single "QoS incompatible"
+  # finding says nothing about whether it is the only reader on the topic or
+  # one of six, and the difference decides how much of the system is affected.
+  # The probe is excluded and says so: it mirrors the writer and would always
+  # match, so counting it would inflate every one of these numbers with an
+  # endpoint the operator does not have.
   out = []
-  for peer in peers:
+  for index, peer in enumerate(peers, start=1):
     writer = endpoint if endpoint.is_writer else peer
     reader = peer if endpoint.is_writer else endpoint
     mismatches, unevaluated = compare_endpoints(writer, reader)
@@ -476,7 +482,10 @@ def check_rxo_pairs(context):
     reader_participant = context.registry.participant_for(reader)
     writer_label = _label(writer, writer_participant)
     reader_label = _label(reader, reader_participant)
+    census = (f" Counterpart {index} of {len(peers)} discovered on this topic; "
+              f"rti_doctor's own probe is not counted.")
     evidence = {"writer": writer_label, "reader": reader_label,
+                "counterparts_discovered": len(peers),
                 "writer_key": writer.key, "reader_key": reader.key,
                 "writer_participant_key": writer.participant_key,
                 "reader_participant_key": reader.participant_key,
@@ -492,7 +501,7 @@ def check_rxo_pairs(context):
           title=f"No observable QoS mismatch: {writer_label} -> {reader_label}",
           observed=("No requested/offered incompatibility was observed in the "
                     "discovery QoS available for this pair." +
-                    _unevaluated_text(unevaluated)),
+                    _unevaluated_text(unevaluated) + census),
           evidence=evidence,
             refs=[DOC_OMG_DDS_RTPS],
       ))
@@ -510,7 +519,7 @@ def check_rxo_pairs(context):
         rung=RUNG_MATCH,
         severity=Severity.ERROR,
         title=f"QoS incompatible ({policies}): {writer_label} -> {reader_label}",
-        observed=detail + "." + _unevaluated_text(unevaluated),
+        observed=detail + "." + _unevaluated_text(unevaluated) + census,
         root_cause=(
             "These two endpoints are both live in the system and will never "
             "communicate: DDS only matches a reader to a writer when every "

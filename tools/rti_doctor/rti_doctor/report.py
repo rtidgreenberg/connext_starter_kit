@@ -619,8 +619,35 @@ def _render_peer(data):
         participant.default_unicast_locators if participant else [])
     if locators:
       lines.append(_kv("Locators", ", ".join(records.locator_text(l) for l in locators)))
+  lines += _counterpart_lines(data)
   lines.append("")
   return lines
+
+
+def _counterpart_lines(data):
+  """The application endpoints on the other side of this topic, named here.
+
+  The RxO findings state the pair properly - "Writer in 'X' (Fast DDS) -> Reader
+  in 'Y' (Connext)" - but that is buried in the findings list, and PEER, which
+  is where a reader looks first, described only one end. Naming both here is
+  most of what stops the probe's own match reading as the system's.
+
+  Read from the RxO findings' evidence rather than recomputed: they already did
+  the pairing, and a second implementation would be free to disagree with the
+  first about who the counterparts are.
+  """
+  labels, key = [], "reader" if getattr(data.endpoint, "is_writer", False) else "writer"
+  for finding in data.findings:
+    if finding.id in ("qos.compatible", "qos.rxo_mismatch"):
+      label = finding.evidence.get(key)
+      if label and label not in labels:
+        labels.append(label)
+  if not labels:
+    return []
+  return _kv_block(
+      "Counterparts",
+      f"{len(labels)} discovered on this topic: {', '.join(labels)}. "
+      "rti_doctor's own probe is not among them.")
 
 
 def _render_topology(data):

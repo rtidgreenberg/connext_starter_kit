@@ -2648,6 +2648,36 @@ class TestFindingScope(unittest.TestCase):
                     text.index("MEASURED BY RTI DOCTOR'S OWN PROBE"),
                     "the system is what the operator came to find out")
 
+  def test_peer_names_the_counterparts_and_excludes_the_probe(self):
+    """PEER is where a reader looks first and described only one end.
+
+    The pair identity was stated properly, but only inside an RxO finding well
+    down the list - which is most of why the probe's own match read as the
+    system's.
+    """
+    from rti_doctor import report as report_module
+    mismatch = f.Finding(
+        id="qos.rxo_mismatch", rung=4, severity=f.Severity.ERROR,
+        title="QoS incompatible", scope=f.SCOPE_OBSERVED,
+        evidence={"writer": "Writer in 'app_writer' (RTI Connext)",
+                  "reader": "Reader in 'app_reader' (RTI Connext)"})
+    text = report_module.render_text(report_module.ReportData(
+        domain_id=7, scope="topic 'T'", all_findings=[mismatch],
+        endpoint=endpoint_record(kind="Writer")))
+    # Rejoined, because the line wraps: asserting on the rendered text would be
+    # asserting on where the wrap happened to fall.
+    flat = " ".join(text.split())
+    self.assertIn("Counterparts", flat)
+    self.assertIn("Reader in 'app_reader' (RTI Connext)", flat)
+    self.assertIn("own probe is not among them", flat)
+
+  def test_a_topic_with_no_counterpart_says_nothing_about_counterparts(self):
+    from rti_doctor import report as report_module
+    text = report_module.render_text(report_module.ReportData(
+        domain_id=7, scope="topic 'T'", all_findings=[],
+        endpoint=endpoint_record(kind="Writer")))
+    self.assertNotIn("Counterparts", text)
+
   def test_the_scope_headers_do_not_truncate_the_findings_section(self):
     """A sub-header that were a rule line would end the section for the parser.
 

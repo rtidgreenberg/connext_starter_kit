@@ -281,6 +281,40 @@ class TestStaticDiscovery(unittest.TestCase):
     self.assertEqual(static_discovery.check_no_endpoints(context), [])
 
 
+class TestLocatorRendering(unittest.TestCase):
+  """A locator kind is a name in every report, never a bare integer."""
+
+  def test_udpv4_locator_is_named(self):
+    self.assertEqual(records.locator_text(FakeLocator("10.0.2.15", 7411, kind=1)),
+                     "10.0.2.15:7411 (UDPv4)")
+
+  def test_shared_memory_is_named_and_shows_no_address(self):
+    """`kind=16777216` and a bogus 0.0.0.0 were the whole complaint."""
+    text = records.locator_text(FakeLocator("0.0.0.0", 7410, kind=16777216))
+    self.assertEqual(text, "port 7410 (SHMEM)")
+    self.assertNotIn("0.0.0.0", text)
+    self.assertNotIn("16777216", text)
+
+  def test_tcp_locator_keeps_its_address(self):
+    """TCP is not IP-less; only the kinds in NON_IP_LOCATOR_KINDS drop it."""
+    self.assertEqual(records.locator_text(FakeLocator("10.0.2.15", 7400, kind=9)),
+                     "10.0.2.15:7400 (TCPV4_WAN)")
+
+  def test_unknown_kind_keeps_its_integer(self):
+    """A number beats a wrong name: no rounding to the nearest known kind."""
+    self.assertEqual(records.locator_text(FakeLocator("10.0.2.15", 7411, kind=4242)),
+                     "10.0.2.15:7411 (kind=4242)")
+
+  def test_unreadable_kind_renders_the_address_alone(self):
+    locator = FakeLocator("10.0.2.15", 7411)
+    del locator.kind
+    self.assertEqual(records.locator_text(locator), "10.0.2.15:7411")
+
+  def test_kind_name_is_available_on_its_own(self):
+    self.assertEqual(records.locator_kind_text(records.LOCATOR_KIND_SHMEM), "SHMEM")
+    self.assertEqual(records.locator_kind_text(None), "")
+
+
 # --- Type resolution ---------------------------------------------------------
 
 class FakeDynamicType:

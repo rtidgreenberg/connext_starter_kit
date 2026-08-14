@@ -2601,6 +2601,76 @@ class TestReportReadability(unittest.TestCase):
     self.assertIn("count frames and not submessages", text)
 
 
+class TestFindingScope(unittest.TestCase):
+  """Probe evidence and system evidence must never be pooled.
+
+  The two can disagree and both be right - rti_doctor mirrors the peer's QoS, so
+  its own reader matches writers an application reader provably cannot - and a
+  report that mixes them tells the operator the tool is confused.
+  """
+
+  def test_the_catalog_a_check_came_from_decides_its_scope(self):
+    from rti_doctor import checks as checks_module
+    probe = FakeProbe(samples_taken=1, protocol={"received_heartbeat_count": 1})
+    observed = checks_module.run_checks(
+        CheckContext(participant_record=participant_record()),
+        static_discovery.CHECKS, scope=f.SCOPE_OBSERVED)
+    measured = checks_module.run_checks(
+        CheckContext(probe=probe, endpoint=endpoint_record()),
+        probe_payload.CHECKS, scope=f.SCOPE_PROBE)
+    self.assertTrue(observed, "expected at least one observed finding")
+    self.assertTrue(all(item.scope == f.SCOPE_OBSERVED for item in observed))
+    self.assertTrue(all(item.scope == f.SCOPE_PROBE for item in measured))
+
+  def test_a_broken_check_is_blamed_on_the_tool_not_the_system(self):
+    from rti_doctor import checks as checks_module
+
+    def exploding(context):
+      raise RuntimeError("boom")
+
+    result = checks_module.run_checks(CheckContext(), (exploding,),
+                                      scope=f.SCOPE_OBSERVED)
+    self.assertEqual(ids(result), ["internal.check_failed"])
+    self.assertEqual(result[0].scope, f.SCOPE_TOOL)
+
+  def test_the_report_separates_the_two_bodies_of_evidence(self):
+    from rti_doctor import report as report_module
+    system = f.Finding(id="qos.rxo_mismatch", rung=4, severity=f.Severity.ERROR,
+                       title="QoS incompatible", scope=f.SCOPE_OBSERVED)
+    probe = f.Finding(id="match.ok", rung=4, severity=f.Severity.OK,
+                      title="Reader matched the writer", scope=f.SCOPE_PROBE)
+    text = report_module.render_text(report_module.ReportData(
+        domain_id=7, scope="topic 'T'", all_findings=[system, probe]))
+    self.assertIn("OBSERVED IN THE SYSTEM", text)
+    self.assertIn("MEASURED BY RTI DOCTOR'S OWN PROBE", text)
+    self.assertIn("NOT the application's endpoint", text)
+    self.assertLess(text.index("OBSERVED IN THE SYSTEM"),
+                    text.index("MEASURED BY RTI DOCTOR'S OWN PROBE"),
+                    "the system is what the operator came to find out")
+
+  def test_the_scope_headers_do_not_truncate_the_findings_section(self):
+    """A sub-header that were a rule line would end the section for the parser.
+
+    Everything below it - every probe finding - would then be silently dropped
+    from anything that reads the report back.
+    """
+    import subprocess
+    import doctor_e2e
+    from rti_doctor import report as report_module
+    findings = [
+        f.Finding(id="qos.rxo_mismatch", rung=4, severity=f.Severity.ERROR,
+                  title="QoS incompatible", scope=f.SCOPE_OBSERVED),
+        f.Finding(id="match.ok", rung=4, severity=f.Severity.OK,
+                  title="Reader matched the writer", scope=f.SCOPE_PROBE),
+    ]
+    text = report_module.render_text(report_module.ReportData(
+        domain_id=7, scope="topic 'T'", all_findings=findings))
+    parsed = doctor_e2e.parse_report(
+        subprocess.CompletedProcess(["doctor"], 0, text, ""))
+    self.assertEqual(sorted(item["id"] for item in parsed["findings"]),
+                     ["match.ok", "qos.rxo_mismatch"])
+
+
 class TestReliablePath(unittest.TestCase):
   """The reliable handshake, from status counters and from packets.
 

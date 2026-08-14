@@ -51,11 +51,20 @@ class CheckContext:
   participant_evidence: object = None
 
 
-def run_checks(context, checks):
-  """Run `checks` in order, collecting findings.
+def run_checks(context, checks, scope=f.SCOPE_OBSERVED):
+  """Run `checks` in order, collecting findings, every one stamped with `scope`.
+
+  Stamped here rather than at each `Finding(...)` because scope is a property of
+  the CATALOG a check belongs to, not of the condition it found: everything in
+  `probe_checks()` reads `context.probe` and everything in `static_checks()`
+  reads discovery data, so a check has no way to be wrong about this and no
+  reason to repeat it fifty times. The default is the observed system, which is
+  what every caller but the probe pass produces.
 
   A check that raises is reported as an INFO finding rather than aborting the
-  run: a broken check must not cost the user every other diagnosis.
+  run: a broken check must not cost the user every other diagnosis. That one is
+  scoped to the tool, not to whichever catalog it came from - it is a bug here,
+  and filing it under the system under test would be a claim about the system.
   """
   out = []
   for check in checks:
@@ -70,10 +79,12 @@ def run_checks(context, checks):
           observed=f"{type(e).__name__}: {e}",
           root_cause="Bug in rti_doctor, not a finding about the system under test.",
           remedy="Report this with the surrounding report output.",
+          scope=f.SCOPE_TOOL,
       ))
       continue
-    if result:
-      out.extend(result)
+    for finding in result or ():
+      finding.scope = scope
+      out.append(finding)
   return out
 
 

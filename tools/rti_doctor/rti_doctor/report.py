@@ -650,32 +650,60 @@ def render_topology_text(topology):
   return lines
 
 
-def _render_findings(data):
-  findings = list(data.findings)
+def _severity_summary(findings):
   hist = f.counts(findings)
   summary = ", ".join(f"{hist[s]} {s.label}" for s in
                       (f.Severity.ERROR, f.Severity.WARN, f.Severity.INFO, f.Severity.OK)
                       if hist.get(s))
-  lines = _section(f"FINDINGS  ({summary or 'none'})")
+  return summary or "none"
+
+
+def _render_one_finding(finding):
+  lines = [f"[{finding.severity.label}] rung {finding.rung}  {finding.id}"]
+  lines += _labelled("", finding.title)
+  lines += _labelled("Observed", finding.observed)
+  lines += _labelled("Root cause", finding.root_cause)
+  lines += _labelled("Remedy", finding.remedy)
+  # Context, not a filter: this finding is listed, counted and carried into
+  # the exit code whether or not something here would explain it.
+  if finding.explained_by:
+    lines += _labelled("Likely explained by",
+                       ", ".join(finding.explained_by) +
+                       " - confirm it applies to this endpoint before acting "
+                       "on it, since the link is by finding id alone.")
+  for ref in finding.refs:
+    lines.append(f"  {'Reference'.ljust(13)}{ref}")
+  lines.append("")
+  return lines
+
+
+def _render_findings(data):
+  """Findings in scoped blocks: the observed system first, the probe after.
+
+  The system comes first deliberately. It is what the operator came to find out,
+  and it is true whether or not rti_doctor ran; the probe is this tool's own
+  experiment, and putting it second stops its success being read as the headline.
+
+  Sub-headers are plain left-aligned lines. They must NOT be rule lines - the
+  report's parser ends a section at the next `---`, so an underlined sub-header
+  here would truncate the findings section and silently drop everything below it.
+  """
+  findings = list(data.findings)
+  lines = _section(f"FINDINGS  ({_severity_summary(findings)})")
 
   if not findings:
     lines += ["No findings.", ""]
-  for finding in findings:
-    lines.append(f"[{finding.severity.label}] rung {finding.rung}  {finding.id}")
-    lines += _labelled("", finding.title)
-    lines += _labelled("Observed", finding.observed)
-    lines += _labelled("Root cause", finding.root_cause)
-    lines += _labelled("Remedy", finding.remedy)
-    # Context, not a filter: this finding is listed, counted and carried into
-    # the exit code whether or not something here would explain it.
-    if finding.explained_by:
-      lines += _labelled("Likely explained by",
-                         ", ".join(finding.explained_by) +
-                         " - confirm it applies to this endpoint before acting "
-                         "on it, since the link is by finding id alone.")
-    for ref in finding.refs:
-      lines.append(f"  {'Reference'.ljust(13)}{ref}")
+    return lines
+
+  for scope in (f.SCOPE_OBSERVED, f.SCOPE_PROBE, f.SCOPE_TOOL):
+    group = f.in_scope(findings, scope)
+    if not group:
+      continue
+    lines.append(f"{f.SCOPE_TITLES[scope]}  ({_severity_summary(group)})")
+    lines.extend(_wrap(f.SCOPE_NOTES[scope], indent=2))
     lines.append("")
+    for finding in group:
+      lines.extend(_render_one_finding(finding))
   return lines
 
 

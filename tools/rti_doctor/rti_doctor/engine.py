@@ -8,8 +8,8 @@ import logging
 import os
 import time
 
-from . import (checks, netcapture, paths, probe as probe_mod, report,
-               system_scan, topology, wire)
+from . import (checks, findings as f, netcapture, paths, probe as probe_mod,
+               report, system_scan, topology, wire)
 from .checks import CheckContext
 
 #: How long a capture runs when no probe is bounding it - a reader report, or a
@@ -416,13 +416,19 @@ class Session:
                     endpoint, discovery_evidence),
                 wire_evidence=wire_evidence,
                 participant_evidence=participant_evidence)
-    selected = checks.static_checks()
+    # Two passes, not one concatenated list, so each finding is stamped with
+    # whose reader it is about. They must stay separable all the way to the
+    # report: the probe's own reader mirrors the peer it is testing, so it can
+    # match and receive data where an application reader provably cannot, and a
+    # single list presents those two facts as one contradictory body of evidence.
+    findings = checks.run_checks(context, checks.static_checks(),
+                                 scope=f.SCOPE_OBSERVED)
     if probe_result is not None:
-      if probe_result.probe_kind == "writer":
-        selected = selected + checks.writer_probe_checks()
-      else:
-        selected = selected + checks.probe_checks()
-    findings = checks.run_checks(context, selected)
+      probe_selected = (checks.writer_probe_checks()
+                        if probe_result.probe_kind == "writer"
+                        else checks.probe_checks())
+      findings += checks.run_checks(context, probe_selected,
+                                    scope=f.SCOPE_PROBE)
 
     return report.ReportData(
         domain_id=self.domain_id,

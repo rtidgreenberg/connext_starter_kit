@@ -47,6 +47,49 @@ RUNG_NAMES = {
     RUNG_PAYLOAD: "payload decode",
 }
 
+# Whose reader a finding is about. These two must never be presented as one
+# body of evidence, because they can disagree and both be right.
+#
+# rti_doctor diagnoses a writer by creating its OWN reader, whose QoS is
+# mirrored from that writer - so against a BEST_EFFORT writer the probe requests
+# BEST_EFFORT, matches, and receives data. An application's reader requesting
+# RELIABLE never will. Rendered in one list, "matched, payload FULL" sits beside
+# "these two will never communicate" and reads as the tool contradicting itself;
+# an operator cannot tell which to believe, and the natural reading - that the
+# tool is confused and the error is spurious - is the wrong one.
+#
+# The probe result is evidence about the PATH: transport, discovery, type
+# resolution, decode. It is not evidence that any application reader works, and
+# the report must never let it be read as such.
+SCOPE_OBSERVED = "observed"
+SCOPE_PROBE = "probe"
+#: Neither: a bug in rti_doctor, about no one's system.
+SCOPE_TOOL = "tool"
+
+SCOPE_TITLES = {
+    SCOPE_OBSERVED: "OBSERVED IN THE SYSTEM",
+    SCOPE_PROBE: "MEASURED BY RTI DOCTOR'S OWN PROBE",
+    SCOPE_TOOL: "RTI DOCTOR ITSELF",
+}
+
+SCOPE_NOTES = {
+    SCOPE_OBSERVED: (
+        "Read from discovery data about endpoints that were already running. "
+        "Nothing here depends on rti_doctor having created anything, and "
+        "nothing here is affected by the probe's own QoS."),
+    SCOPE_PROBE: (
+        "Measured with a reader or writer rti_doctor created for this "
+        "diagnosis, whose applied QoS is listed in the own-configuration "
+        "appendix. It is NOT the application's endpoint: the probe mirrors the "
+        "peer it is testing, so it can match and exchange data where a real "
+        "endpoint cannot, and the reverse. Read it as evidence about the path - "
+        "transport, discovery, type resolution, decode - never as evidence that "
+        "an application endpoint works."),
+    SCOPE_TOOL: (
+        "A failure inside rti_doctor. Not a finding about the system under "
+        "test."),
+}
+
 
 @dataclass
 class Finding:
@@ -70,6 +113,11 @@ class Finding:
   # would explain this one. Context for the reader, never a filter - this
   # finding stays in every list, count and exit-code calculation regardless.
   explained_by: tuple = ()
+  #: Whose reader this is about - see SCOPE_OBSERVED / SCOPE_PROBE above.
+  #: Stamped by `run_checks` from the catalog the check came from, so a check
+  #: cannot get it wrong, and defaulted to the observed system because that is
+  #: what every caller other than the probe pass produces.
+  scope: str = SCOPE_OBSERVED
 
   @property
   def is_problem(self):
@@ -180,33 +228,43 @@ class ProbeOutcome:
 def verdict_line(findings, probe=None):
   """One-line summary opening every report. Derived only from observed state.
 
+  Every clause names whose reader it is about. The line used to read "matched, 2
+  sample(s) received, payload FULL; 1 ERROR", where the first half described
+  rti_doctor's own probe and the second described two application endpoints that
+  will never communicate - true together, and unreadable together. It is the one
+  line most people read, so it is the last place the two should be mixed.
+
   A probe that failed part-way through still has real observations, but it must
   not present them as a finished measurement - so the incompleteness is appended
   rather than allowed to leave "payload FULL" standing on its own.
   """
   probe = probe or ProbeOutcome()
-  line = _verdict_body(findings, probe)
+  line = f"probe: {_verdict_body(findings, probe)}"
   if probe.incomplete_reason:
     line += f"; probe did not complete: {probe.incomplete_reason}"
+  observed = _problem_summary(findings, scope=SCOPE_OBSERVED)
+  if observed:
+    line += f"; system: {observed}"
   return line
 
 
 def _verdict_body(findings, probe):
   if not probe.attempted:
     reason = probe.skip_reason or "probe not run"
-    worst = max((f.severity for f in findings), default=Severity.OK)
+    worst = max((f.severity for f in in_scope(findings, SCOPE_PROBE)),
+                default=Severity.OK)
     if worst >= Severity.ERROR:
-      return f"not probed ({reason}); {_problem_summary(findings)}"
+      return f"not probed ({reason}); {_problem_summary(findings, SCOPE_PROBE)}"
     return f"not probed ({reason})"
 
   if not probe.matched:
-    return f"NOT MATCHED; {_problem_summary(findings)}"
+    return f"NOT MATCHED; {_problem_summary(findings, SCOPE_PROBE)}"
 
   # A writer probe against a reader target. "No samples received" is meaningless
   # here - the probe is the sending side, and unless it was asked to publish it
   # sent nothing by design. Reporting the match, which is what was measured.
   if probe.wrote_entity and not probe.wrote_samples:
-    tail = _problem_summary(findings)
+    tail = _problem_summary(findings, SCOPE_PROBE)
     base = "matched (writer probe; nothing published, so delivery not measured)"
     return f"{base}; {tail}" if tail else base
 
@@ -216,7 +274,7 @@ def _verdict_body(findings, probe):
   # through to the payload branches reported "payload NOT ATTEMPTED", which
   # reads as a step that failed rather than one that never applied.
   if probe.wrote_entity:
-    tail = _problem_summary(findings)
+    tail = _problem_summary(findings, SCOPE_PROBE)
     delivery = {True: "acknowledged by the reader",
                 False: "NOT acknowledged",
                 None: "acknowledgment not applicable (BEST_EFFORT)"}[
@@ -225,10 +283,11 @@ def _verdict_body(findings, probe):
     return f"{base}; {tail}" if tail else base
 
   if probe.samples_received == 0:
-    return f"matched but no samples received; {_problem_summary(findings)}"
+    return ("matched but no samples received; "
+            f"{_problem_summary(findings, SCOPE_PROBE)}")
 
   if probe.payload_verdict == PAYLOAD_FULL:
-    tail = _problem_summary(findings)
+    tail = _problem_summary(findings, SCOPE_PROBE)
     base = f"matched, {probe.samples_received} sample(s) received, payload FULL"
     return f"{base}; {tail}" if tail else base
 
@@ -250,27 +309,41 @@ def _verdict_body(findings, probe):
   return f"matched, samples arriving, payload {probe.payload_verdict}"
 
 
-def worst_finding(findings):
+def in_scope(findings, scope):
+  """Just the findings about `scope`. One place, so no caller filters by hand."""
+  return [item for item in findings if item.scope == scope]
+
+
+def worst_finding(findings, scope=None):
   """The finding a reader should open first, or None when nothing is wrong.
 
   Most severe wins; ties break to the LOWEST rung, because the rungs run from
   discovery upward and the earlier failure is the one that explains the later
   ones. A tie inside one rung keeps catalog order.
   """
+  if scope is not None:
+    findings = in_scope(findings, scope)
   problems = [item for item in findings if item.is_problem]
   if not problems:
     return None
   return min(problems, key=lambda item: (-int(item.severity), item.rung))
 
 
-def _problem_summary(findings):
-  """The counts, plus the one id worth opening first.
+def _problem_summary(findings, scope=None):
+  """The counts for one scope, plus the one id worth opening first.
 
   A bare tally - "1 ERROR, 1 WARN" - tells a reader how much is wrong and
   nothing about where to start, so the verdict line, which is the only line many
   people read, sent everyone scrolling through the findings section to work out
   what it was referring to. Naming the id costs a few characters and answers it.
+
+  Scoped, because a count that pools the probe's own troubles with the system's
+  answers neither question: "1 ERROR" over a report where the probe worked
+  perfectly and two application endpoints cannot match is a different situation
+  from one where the probe could not create a reader at all.
   """
+  if scope is not None:
+    findings = in_scope(findings, scope)
   hist = counts(findings)
   parts = []
   for sev in (Severity.ERROR, Severity.WARN):

@@ -147,17 +147,37 @@ def check_fragmentation(context):
   if not fragments:
     return []
 
-  # Ground truth is whether samples actually arrived. Two false positives were
-  # observed against a healthy local large-data writer and must not come back:
+  # Ground truth is whether samples actually arrived, because on a HEALTHY
+  # fragmented path these three counters are all equal and none of them counts
+  # samples. Measured on 2026-08-14 against the `large-data` fixture, with the
+  # participant capture dissected fragment by fragment:
   #
-  #   1. dropped_fragment_count is NOT by itself evidence of a fault. A healthy
-  #      TRANSIENT_LOCAL writer produced fragments=6, reassembled=6, dropped=6:
-  #      the "dropped" fragments were redundant copies from ordinary repair
-  #      traffic, and every sample still arrived intact.
-  #   2. reassembled_sample_count can lag, because the probe stops as soon as it
-  #      has walked one sample.
+  #   received_sample_count      3          <- three samples, 450444 bytes
+  #   received_fragment_count    9          <- 3 samples x 3 fragments
+  #   reassembled_sample_count   9          <- FRAGMENTS, despite the name
+  #   dropped_fragment_count     9
+  #   sent_nack_fragment_count   0
   #
-  # So reassembly is only called broken when nothing was delivered at all.
+  # and the capture carried exactly nine DATA_FRAG submessages: sequence numbers
+  # 241, 1 and 242, fragments 1-3 of each, every one appearing ONCE. The same
+  # shape appears at 6/6/6 with two samples on a UDP-only probe.
+  #
+  # Two conclusions the earlier comment here got wrong, and they matter because
+  # this text is what reassures an operator:
+  #
+  #   1. The drops are NOT redundant copies from repair traffic. Nothing arrived
+  #      twice, and sent_nack_fragment_count is 0, so no repair was requested.
+  #      dropped_fragment_count tracking received_fragment_count exactly, while
+  #      every sample is delivered intact, is what a working path looks like
+  #      here - so this counter is not readable as loss on its own.
+  #   2. reassembled_sample_count is not a count of samples. It equals the
+  #      fragment count, not received_sample_count, so comparing it against
+  #      "valid samples taken" compares two different units.
+  #
+  # RTI's own guidance says a clean path shows dropped_fragment_count = 0, which
+  # is not what this build does. Rather than argue with the measurement or the
+  # documentation, the check leans on neither: reassembly is called broken only
+  # when nothing was delivered at all.
   problem = probe.samples_taken == 0 and not reassembled
   if not problem:
     return [Finding(
@@ -165,7 +185,8 @@ def check_fragmentation(context):
         rung=RUNG_PAYLOAD,
         severity=Severity.INFO,
         title="Samples are fragmented and arriving intact",
-        observed=(f"received_fragment_count = {fragments}, "
+        observed=(f"received_sample_count = {_c(probe, 'received_sample_count')}, "
+                  f"received_fragment_count = {fragments}, "
                   f"reassembled_sample_count = {reassembled}, "
                   f"dropped_fragment_count = {dropped}, "
                   f"sent_nack_fragment_count = {nack_fragments}, "
@@ -174,9 +195,18 @@ def check_fragmentation(context):
                     "fragments it, and samples are being delivered. Large data is "
                     "worth knowing about because it is sensitive to message-size "
                     "and receive-buffer differences between vendors even when it "
-                    "currently works."),
-        evidence={"received_fragment_count": fragments,
-                  "reassembled_sample_count": reassembled},
+                    "currently works. Read the counters carefully: on a working "
+                    "fragmented path dropped_fragment_count equals "
+                    "received_fragment_count, and reassembled_sample_count counts "
+                    "FRAGMENTS rather than samples despite its name - measured "
+                    "here, and confirmed against a packet capture in which every "
+                    "fragment appeared exactly once. Neither is evidence of loss. "
+                    "The number that answers that question is "
+                    "received_sample_count, alongside the payload findings."),
+        evidence={"received_sample_count": _c(probe, "received_sample_count"),
+                  "received_fragment_count": fragments,
+                  "reassembled_sample_count": reassembled,
+                  "dropped_fragment_count": dropped},
     )]
 
   return [Finding(
@@ -202,6 +232,74 @@ def check_fragmentation(context):
                 "dropped_fragment_count": dropped,
                 "sent_nack_fragment_count": nack_fragments},
   )]
+
+
+def _mirrored_qos_names(probe, policy, kind):
+  """Whether the probe's own applied QoS names `kind`, e.g. durability VOLATILE.
+
+  Read from what the probe APPLIED rather than from what the peer advertised:
+  it is rti_doctor's own reader that lost the sample, so its own policy is what
+  decides whether the loss was inevitable.
+  """
+  value = (getattr(probe, "applied_reader_qos", None) or {}).get(policy)
+  return value is not None and kind in str(value).upper()
+
+
+def _joined_a_running_stream(probe, lost=0):
+  """Whether a loss here is the ordinary cost of joining a system already running.
+
+  A VOLATILE writer keeps nothing for a reader that was not there yet, so a
+  reliable reader attaching mid-stream is told the backlog is gone and counts it
+  as lost. rti_doctor does precisely that on every run against a live system, so
+  for this tool it is the normal case rather than the anomaly - reporting it as a
+  fault trains operators to ignore the section it appears in.
+
+  Three things keep that from excusing real loss:
+
+    * Data must then have flowed. Nothing arriving at all is a different report
+      and keeps its warning: "the backlog was dropped" and "nothing is being
+      delivered" must not render as the same event.
+    * The loss must not outweigh the delivery. Joining costs one gap
+      announcement; a shallow-history writer shedding samples continuously loses
+      them faster than the reader takes them, and that is a real fault wearing
+      the same reason code.
+    * The loss must not recur, and must sit at the match. RTI's guidance is that
+      this reason is benign only when it "occurs immediately around the first
+      match" and "does not continue after the match stabilizes" - which also
+      separates it from the other producers of LOST_BY_WRITER that magnitude
+      alone does not catch: writer resource-limit replacement, a reader marked
+      inactive, and writer-side LIFESPAN expiry.
+  """
+  taken = getattr(probe, "samples_taken", 0) or 0
+  return (_mirrored_qos_names(probe, "durability", "VOLATILE")
+          and _mirrored_qos_names(probe, "reliability", "RELIABLE")
+          and taken > 0
+          and (lost or 0) <= taken
+          and _loss_sat_at_the_match(probe))
+
+
+def _loss_sat_at_the_match(probe):
+  """Whether the recorded losses look like one event at the match, not a trend.
+
+  Reads the listener timeline, which is a list of formatted strings: their ORDER
+  and MULTIPLICITY are what carry the evidence, and neither needs the timestamps
+  parsed back out of the text.
+
+  An empty timeline does not disqualify. Absence of the record is not evidence
+  of recurrence, and treating it as such would put every run whose events went
+  unrecorded back to a warning - the noise this rule exists to remove. Only
+  positive contrary evidence disqualifies: more than one loss event, or a single
+  one detached from the match by other activity.
+  """
+  events = list(getattr(probe, "listener_events", None) or ())
+  lost = [index for index, event in enumerate(events) if "SAMPLE_LOST" in event]
+  matched = [index for index, event in enumerate(events)
+             if "SUBSCRIPTION_MATCHED" in event]
+  if len(lost) > 1:
+    return False
+  if lost and matched and lost[0] - matched[0] > 1:
+    return False
+  return True
 
 
 def check_window(context):
@@ -241,6 +339,20 @@ def check_window(context):
                   "uncommitted_sample_count": uncommitted},
     )]
 
+  # A late-join downgrade was tried here and reverted. It read a rejection with
+  # nothing uncommitted as the volatile backlog rather than a full window, which
+  # RTI's own guidance contradicts on both halves: this counter is bounded by
+  # `rtps_reliable_reader.receive_window_size` and counts ONLY out-of-order
+  # samples dropped because that window was full - the backlog a volatile writer
+  # declines is signalled by GAP and is not counted here at all - and
+  # `uncommitted_sample_count` "cannot, alone, distinguish a repairable loss
+  # from unavailable pre-reader history".
+  #
+  # A rising count is affirmative evidence of window exhaustion, so the two
+  # mistakes are not equally priced: a noisy WARN on a benign join costs
+  # attention, and an INFO reading "nothing to fix" over a real overflow costs
+  # the diagnosis. Doing this properly needs `received_gap_count` and
+  # `first_available_sample_sequence_number`, which is a separate change.
   return [Finding(
       id="data.window",
       rung=RUNG_PAYLOAD,
@@ -275,11 +387,14 @@ def check_deserialize_failure(context):
   lost_reason = compat.get(lost, "last_reason", None)
   rejected_reason = compat.get(rejected, "last_reason", None)
 
-  deserialization = compat.reason_matches(
+  # Exact reason, never a bitmask test - see the note above `compat.reason_is`.
+  # These states are ordinals, and testing them with `&` claimed a decode
+  # failure for every sample lost by the writer.
+  deserialization = compat.reason_is(
       lost_reason, compat.lost_reason_flag("LOST_BY_DESERIALIZATION_FAILURE"))
-  decode_lost = compat.reason_matches(
+  decode_lost = compat.reason_is(
       lost_reason, compat.lost_reason_flag("LOST_BY_DECODE_FAILURE"))
-  decode_rejected = compat.reason_matches(
+  decode_rejected = compat.reason_is(
       rejected_reason, compat.rejected_reason_flag("REJECTED_BY_DECODE_FAILURE"))
 
   observed = [
@@ -307,7 +422,10 @@ def check_deserialize_failure(context):
         observed="; ".join(observed) + f"; matched reason(s): {', '.join(which)}",
         root_cause=(
             "Connext received bytes on the wire and could not turn them into a "
-            "sample of this type. The reader's idea of the type does not match "
+            "sample of this type. This concerns samples that never reached the "
+            "application at all, so a payload finding about a sample that did "
+            "arrive is not in conflict with it - both can be true of one run. "
+            "The reader's idea of the type does not match "
             "the bytes the writer produced. Cross-vendor, the usual causes are an "
             "XCDR1/XCDR2 mismatch, an extensibility disagreement (FINAL vs "
             "APPENDABLE vs MUTABLE), differing member bounds, or a differing enum "
@@ -321,6 +439,35 @@ def check_deserialize_failure(context):
                   "sample_rejected_total": rejected_total,
                   "sample_rejected_reason": compat.reason_text(rejected_reason),
                   "matched_reasons": which},
+    )]
+
+  # LOST_BY_WRITER on a reliable reader that joined a volatile stream and then
+  # received data is the backlog gap, and it happens on essentially every run
+  # against a live system. Left at WARN it is the finding operators learn to
+  # scroll past, which costs the real warnings their attention. Narrow on
+  # purpose: only a writer loss, only with nothing rejected, only once data has
+  # actually flowed.
+  writer_loss = compat.reason_is(
+      lost_reason, compat.lost_reason_flag("LOST_BY_WRITER"))
+  if (writer_loss and not rejected_total
+      and _joined_a_running_stream(probe, lost=lost_total)):
+    return [Finding(
+        id="data.loss",
+        rung=RUNG_PAYLOAD,
+        severity=Severity.INFO,
+        title="The writer's backlog from before the probe joined was not delivered",
+        observed="; ".join(observed),
+        root_cause=(
+            "LOST_BY_WRITER means the writer no longer held the sample. "
+            "rti_doctor's reader is VOLATILE, so samples published before it "
+            "existed were never going to be delivered, and the writer says so "
+            "rather than sending them. Samples arrived afterwards, so this "
+            "describes the join, not the data path."),
+        remedy=("Nothing to fix. To see the earlier samples, both sides would "
+                "have to be TRANSIENT_LOCAL or stronger."),
+        evidence={"sample_lost_reason": compat.reason_text(lost_reason),
+                  "sample_lost_total": lost_total,
+                  "late_join": True},
     )]
 
   return [Finding(
@@ -407,7 +554,14 @@ def check_payload_walk(context):
   failed = walk.failed
   absent = walk.absent
 
-  detail = [f"{total - len(failed)} of {total} member(s) read successfully"]
+  # Scoped to the sample that was taken, always. This finding and
+  # `data.deserialize_failure` describe different populations - one a sample that
+  # arrived and was walked, the other samples that never became samples - and
+  # both can be true in the same run. Stated flatly as "payload fully
+  # deserialized" beside a decode ERROR, the two read as a contradiction the
+  # report never resolves, and the reader cannot tell which to believe.
+  detail = [f"{total - len(failed)} of {total} member(s) read successfully in "
+            f"the sample taken"]
   if absent:
     detail.append(f"{len(absent)} optional member(s) legitimately absent")
   if walk.truncated:

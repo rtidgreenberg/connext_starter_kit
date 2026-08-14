@@ -212,8 +212,43 @@ def _partitions_overlap(writer_endpoint, reader_endpoint):
   return False, writer_names, reader_names
 
 
+#: The policies DDS actually subjects to requested/offered compatibility. A
+#: mismatch on any of these is an RxO incompatibility and may be described with
+#: "offered" and "requested"; anything else `compare_endpoints` reports is a
+#: reason two endpoints will not match that is NOT an RxO contract, and saying
+#: so is the difference between sending an operator to diff QoS policies and
+#: sending them to diff the thing that actually differs.
+#:
+#: PARTITION is the one that bit us. It decides matching, so it belongs in the
+#: comparison, but it matches by name intersection with wildcards - there is no
+#: offered side and no requested side - and filing it under "QoS incompatible"
+#: named the wrong mechanism for a correct conclusion.
+RXO_POLICIES = frozenset((
+    "RELIABILITY", "DURABILITY", "LIVELINESS", "DESTINATION_ORDER",
+    "PRESENTATION", "DEADLINE", "LATENCY_BUDGET", "OWNERSHIP",
+    "DATA_REPRESENTATION",
+))
+
+
+def is_rxo(mismatch):
+  """Whether this mismatch is a requested/offered incompatibility.
+
+  Matched on the leading token, because a policy name here may carry the field
+  that differed - "PRESENTATION access_scope", "LIVELINESS lease_duration". An
+  exact-equality test read those as non-RxO and sent them to a table that has no
+  entry for them, which is a crash rather than a mislabelling; the tests for
+  those two policies are what caught it.
+  """
+  policy = str(mismatch.get("policy") or "")
+  return policy.split(" ")[0] in RXO_POLICIES
+
+
 def compare_endpoints(writer, reader):
-  """Every RxO incompatibility between a discovered writer and reader.
+  """Every observable reason a discovered writer and reader will not match.
+
+  Returns RxO incompatibilities and non-RxO ones together - callers split them
+  with `is_rxo` - because both answer "will these two communicate" and a caller
+  that had to ask twice would eventually ask once.
 
   Returns ``(mismatches, unevaluated)``. A mismatch dict is an observed
   incompatibility; an unevaluated dict names a policy whose discovery data was
@@ -416,10 +451,12 @@ def compare_endpoints(writer, reader):
         "both endpoints, so no partition claim can be made for either side. An "
         "unreadable policy is not the default partition."))
   elif not overlap:
+    # Deliberately NOT offered/requested: partitions are two sets compared for
+    # intersection, and neither side is offering the other anything.
     mismatches.append({
         "policy": "PARTITION",
-        "offered": ", ".join(writer_partitions) or "(default)",
-        "requested": ", ".join(reader_partitions) or "(default)",
+        "writer_partitions": ", ".join(writer_partitions) or "(default)",
+        "reader_partitions": ", ".join(reader_partitions) or "(default)",
         "rule": "Reader and writer must share at least one partition name. "
                 "Partitions are matched as strings, with wildcards allowed.",
     })
@@ -466,8 +503,14 @@ def check_rxo_pairs(context):
       )]
     return []
 
+  # Which counterpart this is, and of how many. A single "QoS incompatible"
+  # finding says nothing about whether it is the only reader on the topic or
+  # one of six, and the difference decides how much of the system is affected.
+  # The probe is excluded and says so: it mirrors the writer and would always
+  # match, so counting it would inflate every one of these numbers with an
+  # endpoint the operator does not have.
   out = []
-  for peer in peers:
+  for index, peer in enumerate(peers, start=1):
     writer = endpoint if endpoint.is_writer else peer
     reader = peer if endpoint.is_writer else endpoint
     mismatches, unevaluated = compare_endpoints(writer, reader)
@@ -476,7 +519,10 @@ def check_rxo_pairs(context):
     reader_participant = context.registry.participant_for(reader)
     writer_label = _label(writer, writer_participant)
     reader_label = _label(reader, reader_participant)
+    census = (f" Counterpart {index} of {len(peers)} discovered on this topic; "
+              f"rti_doctor's own probe is not counted.")
     evidence = {"writer": writer_label, "reader": reader_label,
+                "counterparts_discovered": len(peers),
                 "writer_key": writer.key, "reader_key": reader.key,
                 "writer_participant_key": writer.participant_key,
                 "reader_participant_key": reader.participant_key,
@@ -492,35 +538,91 @@ def check_rxo_pairs(context):
           title=f"No observable QoS mismatch: {writer_label} -> {reader_label}",
           observed=("No requested/offered incompatibility was observed in the "
                     "discovery QoS available for this pair." +
-                    _unevaluated_text(unevaluated)),
+                    _unevaluated_text(unevaluated) + census),
           evidence=evidence,
             refs=[DOC_OMG_DDS_RTPS],
       ))
       continue
 
-    detail = "; ".join(
-        f"{m['policy']}: writer offers {m['offered']}, reader requests {m['requested']}"
-        for m in mismatches)
-    rules = " ".join(m["rule"] for m in mismatches)
-    policies = ", ".join(m["policy"] for m in mismatches)
+    # Split by mechanism, not lumped by outcome. Both stop these two
+    # communicating, and an operator acts on each differently: an RxO mismatch
+    # is fixed by changing a QoS value, a disjoint partition by changing a
+    # string that is not a QoS contract at all.
+    rxo = [m for m in mismatches if is_rxo(m)]
+    other = [m for m in mismatches if not is_rxo(m)]
 
-    evidence["mismatches"] = mismatches
-    out.append(Finding(
-        id="qos.rxo_mismatch",
-        rung=RUNG_MATCH,
-        severity=Severity.ERROR,
-        title=f"QoS incompatible ({policies}): {writer_label} -> {reader_label}",
-        observed=detail + "." + _unevaluated_text(unevaluated),
-        root_cause=(
-            "These two endpoints are both live in the system and will never "
-            "communicate: DDS only matches a reader to a writer when every "
-            "requested/offered policy is compatible. " + rules),
-        remedy=(f"Change {policies} on one side. The reader is the constrained "
-                f"side - it must request no more than the writer offers."),
-        evidence=evidence,
+    if rxo:
+      detail = "; ".join(
+          f"{m['policy']}: writer offers {m['offered']}, reader requests {m['requested']}"
+          for m in rxo)
+      policies = ", ".join(m["policy"] for m in rxo)
+      out.append(Finding(
+          id="qos.rxo_mismatch",
+          rung=RUNG_MATCH,
+          severity=Severity.ERROR,
+          title=f"QoS incompatible ({policies}): {writer_label} -> {reader_label}",
+          observed=detail + "." + _unevaluated_text(unevaluated) + census,
+          root_cause=(
+              "These two endpoints are both live in the system and will never "
+              "communicate: DDS matches a reader to a writer only when every "
+              "APPLICABLE requested/offered (RxO) policy is compatible. Not "
+              "every QoS policy is an RxO contract - HISTORY, RESOURCE_LIMITS, "
+              "OWNERSHIP_STRENGTH, TIME_BASED_FILTER and LIFESPAN may differ "
+              "freely and are not worth comparing here. "
+              + " ".join(m["rule"] for m in rxo)),
+          remedy=(f"Change {policies} on one side. The reader is the constrained "
+                  f"side - it must request no more than the writer offers."),
+          evidence={**evidence, "mismatches": rxo},
           refs=[DOC_OMG_DDS_RTPS],
-    ))
+      ))
+
+    for mismatch in other:
+      out.append(_non_rxo_finding(mismatch, writer_label, reader_label,
+                                  evidence, unevaluated, census))
   return out
+
+
+#: Non-RxO reasons a pair will not match, by policy: the finding id to file it
+#: under and how to describe the two sides. Keyed rather than special-cased so a
+#: second one - a type-consistency or security mismatch reported from here -
+#: cannot quietly land back in the RxO bucket.
+NON_RXO_FINDINGS = {
+    "PARTITION": {
+        "id": "qos.partition_disjoint",
+        "title": "No shared partition",
+        "sides": ("writer_partitions", "reader_partitions"),
+        "root_cause": (
+            "These two endpoints are both live in the system and will never "
+            "communicate, but NOT because of a requested/offered QoS "
+            "incompatibility: PARTITION is not an RxO policy. It is matched by "
+            "name intersection, so neither side offers or requests anything - "
+            "they simply have no name in common."),
+        "remedy": ("Give the two endpoints a partition name in common, or clear "
+                   "the policy on one side to put it in the default partition. "
+                   "Do not go looking for a QoS value to relax; there is not "
+                   "one."),
+    },
+}
+
+
+def _non_rxo_finding(mismatch, writer_label, reader_label, evidence,
+                     unevaluated, census):
+  """One finding for a non-RxO reason a pair will not match."""
+  spec = NON_RXO_FINDINGS[mismatch["policy"]]
+  writer_key, reader_key = spec["sides"]
+  return Finding(
+      id=spec["id"],
+      rung=RUNG_MATCH,
+      severity=Severity.ERROR,
+      title=f"{spec['title']}: {writer_label} -> {reader_label}",
+      observed=(f"writer {writer_key.split('_')[-1]}: {mismatch[writer_key]}; "
+                f"reader {reader_key.split('_')[-1]}: {mismatch[reader_key]}."
+                + _unevaluated_text(unevaluated) + census),
+      root_cause=spec["root_cause"] + " " + mismatch["rule"],
+      remedy=spec["remedy"],
+      evidence={**evidence, "mismatch": mismatch},
+      refs=[DOC_OMG_DDS_RTPS],
+  )
 
 
 def _label(endpoint, participant):

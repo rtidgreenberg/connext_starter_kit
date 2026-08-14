@@ -12,7 +12,9 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rti_doctor import discovery, findings as f, netcapture  # noqa: E402
+import rti.connextdds as dds  # noqa: E402
+
+from rti_doctor import compat, discovery, findings as f, netcapture  # noqa: E402
 from rti_doctor import probe, records, typewalk  # noqa: E402
 from rti_doctor.checks import CheckContext, blind_spots, static_discovery  # noqa: E402
 from rti_doctor.checks import probe_match, probe_payload  # noqa: E402
@@ -24,6 +26,23 @@ from rti_doctor.checks import qos_match, type_compat  # noqa: E402
 
 class FakeProperty(dict):
   """Stands in for a PropertyQosPolicy, which behaves like a mapping."""
+
+
+class FakeRejectedStatus:
+  """A SampleRejectedStatus whose reason carries a name, as the real one does.
+
+  `compat.reason_text` reads `.name` off the enum, and those names run to 43
+  characters - wider than the value column any fixed-width table can give them.
+  """
+
+  class _Reason:
+    def __init__(self, name):
+      self.name = name
+
+  def __init__(self, reason_name, total_count=1):
+    self.last_reason = self._Reason(reason_name)
+    self.total_count = total_count
+    self.total_count_change = total_count
 
 
 class FakeDiscovery:
@@ -279,6 +298,62 @@ class TestStaticDiscovery(unittest.TestCase):
     registry = FakeRegistry([record], [endpoint_record()])
     context = CheckContext(registry=registry, participant_record=record)
     self.assertEqual(static_discovery.check_no_endpoints(context), [])
+
+
+class TestLocatorRendering(unittest.TestCase):
+  """A locator kind is a name in every report, never a bare integer."""
+
+  def test_udpv4_locator_is_named(self):
+    self.assertEqual(records.locator_text(FakeLocator("10.0.2.15", 7411, kind=1)),
+                     "10.0.2.15:7411 (UDPv4)")
+
+  def test_shared_memory_is_named_and_shows_no_address(self):
+    """`kind=16777216` and a bogus 0.0.0.0 were the whole complaint."""
+    text = records.locator_text(FakeLocator("0.0.0.0", 7410, kind=16777216))
+    self.assertEqual(text, "port 7410 (SHMEM)")
+    self.assertNotIn("0.0.0.0", text)
+    self.assertNotIn("16777216", text)
+
+  def test_tcp_locator_keeps_its_address(self):
+    """TCP is not IP-less; only the kinds in NON_IP_LOCATOR_KINDS drop it."""
+    self.assertEqual(records.locator_text(FakeLocator("10.0.2.15", 7400, kind=9)),
+                     "10.0.2.15:7400 (TCPV4_WAN)")
+
+  def test_unknown_kind_keeps_its_integer(self):
+    """A number beats a wrong name: no rounding to the nearest known kind."""
+    self.assertEqual(records.locator_text(FakeLocator("10.0.2.15", 7411, kind=4242)),
+                     "10.0.2.15:7411 (kind=4242)")
+
+  def test_unreadable_kind_renders_the_address_alone(self):
+    locator = FakeLocator("10.0.2.15", 7411)
+    del locator.kind
+    self.assertEqual(records.locator_text(locator), "10.0.2.15:7411")
+
+  def test_a_real_time_wan_locator_is_named_and_shows_no_address(self):
+    """A 7.x peer can advertise kind 0x01000001; the binding has no constant.
+
+    Its sixteen octets are a transport structure - flags, a UUID, a public port
+    and address - so the last four are no more an address than SHMEM's zeroes.
+    """
+    locator = FakeLocator("10.0.2.15", 7411,
+                          kind=records.LOCATOR_KIND_UDPV4_WAN)
+    self.assertEqual(records.locator_text(locator), "port 7411 (UDPv4_WAN)")
+
+  def test_a_udpv6_locator_is_not_rendered_as_a_fabricated_ipv4(self):
+    """The last four of sixteen v6 octets are not an address.
+
+    Printed as a dotted quad they name a host that exists nowhere, and
+    `static_discovery.check_locators` then judged that invention for
+    reachability.
+    """
+    address = bytes.fromhex("20010db8000000000000000000000001")
+    locator = FakeLocator("0.0.0.0", 7411, kind=records.LOCATOR_KIND_UDPV6)
+    locator.address = list(address)
+    self.assertEqual(records.locator_text(locator), "2001:db8::1:7411 (UDPv6)")
+
+  def test_kind_name_is_available_on_its_own(self):
+    self.assertEqual(records.locator_kind_text(records.LOCATOR_KIND_SHMEM), "SHMEM")
+    self.assertEqual(records.locator_kind_text(None), "")
 
 
 # --- Type resolution ---------------------------------------------------------
@@ -693,6 +768,20 @@ class TestDiscoveryLifecycle(unittest.TestCase):
 
 # --- Payload -----------------------------------------------------------------
 
+class FakeStatus:
+  """A status object with a count and a reason, as the payload checks read them.
+
+  The reason itself is a REAL `SampleLostState` / `SampleRejectedState` in these
+  tests, never a stand-in: the comparison under test is a property of the
+  binding's enum, so faking the enum would fake the answer.
+  """
+
+  def __init__(self, total_count=0, last_reason=None):
+    self.total_count = total_count
+    self.total_count_change = 0
+    self.last_reason = last_reason
+
+
 class FakeProbe:
   def __init__(self, **kwargs):
     self.attempted = True
@@ -733,15 +822,289 @@ class FakeProbe:
     return self.matched_count > 0
 
 
+class TestSampleStateReasonsAreOrdinals(unittest.TestCase):
+  """The shape of the real enums, asserted against the real binding.
+
+  Everything here is what `compat.reason_is` depends on being true. It is
+  checked against `rti.connextdds` rather than a fake precisely because the bug
+  it guards was a wrong belief ABOUT the binding - a fake built from the same
+  belief would have agreed with the bug and passed.
+  """
+
+  def test_sample_lost_states_are_not_one_hot(self):
+    """The whole reason a bitmask test is invalid."""
+    values = [int(getattr(dds.SampleLostState, name))
+              for name in dir(dds.SampleLostState) if name.isupper()]
+    self.assertTrue(any(bin(value).count("1") > 1 for value in values),
+                    "SampleLostState looks one-hot; re-check whether `&` is now "
+                    "a valid membership test before trusting this module")
+
+  def test_the_colliding_ordinals_are_still_what_they_were(self):
+    """LOST_BY_WRITER shares a bit with LOST_BY_DESERIALIZATION_FAILURE."""
+    writer = int(dds.SampleLostState.LOST_BY_WRITER)
+    deserialization = int(dds.SampleLostState.LOST_BY_DESERIALIZATION_FAILURE)
+    self.assertEqual((writer, deserialization), (1, 13))
+    self.assertTrue(writer & deserialization,
+                    "the exact collision the ordinal comparison exists to survive")
+
+  def test_a_writer_loss_is_not_a_deserialization_failure(self):
+    self.assertFalse(compat.reason_is(
+        dds.SampleLostState.LOST_BY_WRITER,
+        dds.SampleLostState.LOST_BY_DESERIALIZATION_FAILURE))
+
+  def test_a_deserialization_failure_is_itself(self):
+    self.assertTrue(compat.reason_is(
+        dds.SampleLostState.LOST_BY_DESERIALIZATION_FAILURE,
+        dds.SampleLostState.LOST_BY_DESERIALIZATION_FAILURE))
+
+  def test_rejected_states_compare_the_same_way(self):
+    self.assertFalse(compat.reason_is(
+        dds.SampleRejectedState.REJECTED_BY_INSTANCES_LIMIT,
+        dds.SampleRejectedState.REJECTED_BY_DECODE_FAILURE))
+    self.assertTrue(compat.reason_is(
+        dds.SampleRejectedState.REJECTED_BY_DECODE_FAILURE,
+        dds.SampleRejectedState.REJECTED_BY_DECODE_FAILURE))
+
+  def test_an_absent_reason_matches_nothing(self):
+    """A version without the flag must not read as a match."""
+    self.assertFalse(compat.reason_is(dds.SampleLostState.LOST_BY_WRITER, None))
+    self.assertFalse(compat.reason_is(None, dds.SampleLostState.LOST_BY_WRITER))
+
+
+class TestDeserializeFailureCheck(unittest.TestCase):
+  """A decode ERROR is the strongest claim this tool makes; it must be exact."""
+
+  def _probe(self, lost=None, rejected=None):
+    return FakeProbe(
+        sample_lost=FakeStatus(total_count=1 if lost is not None else 0,
+                               last_reason=lost or dds.SampleLostState.NOT_LOST),
+        sample_rejected=FakeStatus(
+            total_count=1 if rejected is not None else 0,
+            last_reason=rejected or dds.SampleRejectedState.NOT_REJECTED))
+
+  def test_a_writer_loss_is_reported_as_loss_not_as_a_decode_failure(self):
+    """Regression: a Fast DDS/Connext report showed a decode ERROR beside
+    'payload fully deserialized'. A reliable reader joining a volatile stream
+    always loses one sample this way, so this fired on ordinary late joins."""
+    result = probe_payload.check_deserialize_failure(
+        CheckContext(probe=self._probe(lost=dds.SampleLostState.LOST_BY_WRITER)))
+    self.assertEqual(ids(result), ["data.loss"])
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_a_real_deserialization_failure_is_still_an_error(self):
+    result = probe_payload.check_deserialize_failure(CheckContext(
+        probe=self._probe(lost=dds.SampleLostState.LOST_BY_DESERIALIZATION_FAILURE)))
+    self.assertEqual(ids(result), ["data.deserialize_failure"])
+    self.assertEqual(result[0].severity, f.Severity.ERROR)
+    self.assertIn("LOST_BY_DESERIALIZATION_FAILURE", result[0].observed)
+
+  def test_a_decode_rejection_is_an_error(self):
+    result = probe_payload.check_deserialize_failure(CheckContext(
+        probe=self._probe(
+            rejected=dds.SampleRejectedState.REJECTED_BY_DECODE_FAILURE)))
+    self.assertEqual(ids(result), ["data.deserialize_failure"])
+
+  def test_an_unrelated_rejection_is_not_a_decode_failure(self):
+    result = probe_payload.check_deserialize_failure(CheckContext(
+        probe=self._probe(
+            rejected=dds.SampleRejectedState.REJECTED_BY_SAMPLES_LIMIT)))
+    self.assertEqual(ids(result), ["data.loss"])
+
+  def test_nothing_lost_or_rejected_is_silent(self):
+    self.assertEqual(
+        probe_payload.check_deserialize_failure(CheckContext(probe=self._probe())),
+        [])
+
+
+#: The probe's own applied QoS for a reliable reader mirroring a volatile
+#: writer - what rti_doctor applies on nearly every run against a live system.
+LATE_JOIN_QOS = {"durability": dds.DurabilityKind.VOLATILE,
+                 "reliability": dds.ReliabilityKind.RELIABLE}
+
+
+class TestLateJoinIsNotAFault(unittest.TestCase):
+  """Joining a running system costs one backlog gap. That is not a warning.
+
+  rti_doctor attaches to systems that are already publishing - that is the whole
+  job - so this path runs on nearly every report. A WARN here is the finding
+  operators learn to scroll past, which is what makes the next real one invisible.
+  """
+
+  def _lost_by_writer(self, **kwargs):
+    return FakeProbe(
+        sample_lost=FakeStatus(total_count=1,
+                               last_reason=dds.SampleLostState.LOST_BY_WRITER),
+        sample_rejected=FakeStatus(
+            total_count=0, last_reason=dds.SampleRejectedState.NOT_REJECTED),
+        applied_reader_qos=LATE_JOIN_QOS, **kwargs)
+
+  def test_a_backlog_gap_after_data_flowed_is_informational(self):
+    result = probe_payload.check_deserialize_failure(
+        CheckContext(probe=self._lost_by_writer(samples_taken=1)))
+    self.assertEqual(ids(result), ["data.loss"])
+    self.assertEqual(result[0].severity, f.Severity.INFO)
+    self.assertTrue(result[0].evidence["late_join"])
+
+  def test_the_same_loss_with_no_data_stays_a_warning(self):
+    """'The backlog was dropped' and 'nothing is arriving' are not one event."""
+    result = probe_payload.check_deserialize_failure(
+        CheckContext(probe=self._lost_by_writer(samples_taken=0)))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_a_transient_local_reader_losing_samples_stays_a_warning(self):
+    """Durability that should have replayed the backlog makes the loss real."""
+    probe = self._lost_by_writer(samples_taken=1)
+    probe.applied_reader_qos = {**LATE_JOIN_QOS,
+                                "durability": dds.DurabilityKind.TRANSIENT_LOCAL}
+    result = probe_payload.check_deserialize_failure(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_a_loss_for_another_reason_stays_a_warning(self):
+    """Only LOST_BY_WRITER is explained by joining late."""
+    probe = self._lost_by_writer(samples_taken=1)
+    probe.sample_lost = FakeStatus(
+        total_count=1, last_reason=dds.SampleLostState.LOST_BY_SAMPLES_LIMIT)
+    result = probe_payload.check_deserialize_failure(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_losing_more_than_arrived_stays_a_warning(self):
+    """Joining costs one gap. A writer shedding samples continuously does not.
+
+    A shallow-history VOLATILE writer outrunning its reader reports the same
+    LOST_BY_WRITER, and an unbounded downgrade would file it as "nothing to fix".
+    """
+    probe = self._lost_by_writer(samples_taken=2)
+    probe.sample_lost = FakeStatus(
+        total_count=5000, last_reason=dds.SampleLostState.LOST_BY_WRITER)
+    result = probe_payload.check_deserialize_failure(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_an_unreadable_uncommitted_counter_keeps_the_warning(self):
+    """A counter this Connext version cannot supply is not evidence of zero."""
+    probe = FakeProbe(samples_taken=1, applied_reader_qos=LATE_JOIN_QOS,
+                      protocol={"out_of_range_rejected_sample_count": 1})
+    result = probe_payload.check_window(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_a_recurring_loss_is_not_a_join_artifact(self):
+    """RTI: benign only when the loss "does not continue after the match
+    stabilizes". Repeated SAMPLE_LOST events are a trend, not a join - which is
+    how writer LIFESPAN expiry and resource-limit replacement show up, and
+    neither is caught by magnitude alone."""
+    probe = self._lost_by_writer(samples_taken=9)
+    probe.listener_events = ["12:00:00 SUBSCRIPTION_MATCHED current_count=1",
+                             "12:00:00 SAMPLE_LOST reason=LOST_BY_WRITER",
+                             "12:00:03 SAMPLE_LOST reason=LOST_BY_WRITER"]
+    result = probe_payload.check_deserialize_failure(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_a_loss_detached_from_the_match_is_not_a_join_artifact(self):
+    """RTI: benign only when it "occurs immediately around the first match"."""
+    probe = self._lost_by_writer(samples_taken=9)
+    probe.listener_events = ["12:00:00 SUBSCRIPTION_MATCHED current_count=1",
+                             "12:00:01 SAMPLE_REJECTED reason=REJECTED_BY_X",
+                             "12:00:02 SAMPLE_LOST reason=LOST_BY_WRITER"]
+    result = probe_payload.check_deserialize_failure(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_one_loss_at_the_match_is_still_informational(self):
+    """The real timeline from a Fast DDS -> Connext run, in order."""
+    probe = self._lost_by_writer(samples_taken=1)
+    probe.listener_events = ["11:15:13 SUBSCRIPTION_MATCHED current_count=1",
+                             "11:15:13 SAMPLE_LOST reason=LOST_BY_WRITER"]
+    result = probe_payload.check_deserialize_failure(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.INFO)
+
+  def test_an_unrecorded_timeline_does_not_disqualify(self):
+    """Absence of the record is not evidence of recurrence.
+
+    Disqualifying on an empty timeline would return every run whose events went
+    unrecorded to a warning - the noise this rule exists to remove.
+    """
+    probe = self._lost_by_writer(samples_taken=1)
+    probe.listener_events = []
+    result = probe_payload.check_deserialize_failure(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.INFO)
+
+  def test_a_rejection_alongside_keeps_the_warning(self):
+    probe = self._lost_by_writer(samples_taken=1)
+    probe.sample_rejected = FakeStatus(
+        total_count=1,
+        last_reason=dds.SampleRejectedState.REJECTED_BY_SAMPLES_LIMIT)
+    result = probe_payload.check_deserialize_failure(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_a_rejection_is_a_warning_even_on_a_late_join(self):
+    """out_of_range_rejected counts ONLY a full receive window, per RTI.
+
+    A late-join downgrade was tried here and reverted: the backlog a volatile
+    writer declines is signalled by GAP and never reaches this counter, so an
+    INFO reading "nothing to fix" would sit over real window exhaustion.
+    """
+    probe = FakeProbe(samples_taken=1, applied_reader_qos=LATE_JOIN_QOS,
+                      protocol={"out_of_range_rejected_sample_count": 1,
+                                "uncommitted_sample_count": 0})
+    result = probe_payload.check_window(CheckContext(probe=probe))
+    self.assertEqual(ids(result), ["data.window"])
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_a_full_receive_window_is_still_a_warning(self):
+    """Uncommitted samples alongside mean an earlier sequence number is missing."""
+    probe = FakeProbe(samples_taken=1, applied_reader_qos=LATE_JOIN_QOS,
+                      protocol={"out_of_range_rejected_sample_count": 9,
+                                "uncommitted_sample_count": 4})
+    result = probe_payload.check_window(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+    self.assertIn("reduce the writer's send rate", result[0].remedy)
+
+  def test_rejections_without_the_late_join_signature_stay_a_warning(self):
+    probe = FakeProbe(samples_taken=1, applied_reader_qos={},
+                      protocol={"out_of_range_rejected_sample_count": 1,
+                                "uncommitted_sample_count": 0})
+    result = probe_payload.check_window(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+
 class TestPayloadChecks(unittest.TestCase):
 
   def test_dropped_fragments_alone_are_not_an_error(self):
-    """Regression: healthy large data showed fragments=6/reassembled=6/dropped=6."""
+    """Regression: healthy large data showed fragments=6/reassembled=6/dropped=6.
+
+    Confirmed against a fragment-level capture: 3 samples, 9 DATA_FRAG, each
+    appearing exactly once, every sample delivered. dropped_fragment_count
+    tracking received_fragment_count is what a WORKING path looks like here.
+    """
     probe = FakeProbe(samples_taken=1, protocol={
+        "received_sample_count": 2,
         "received_fragment_count": 6, "reassembled_sample_count": 6,
         "dropped_fragment_count": 6, "sent_nack_fragment_count": 0})
     result = probe_payload.check_fragmentation(CheckContext(probe=probe))
     self.assertEqual(result[0].severity, f.Severity.INFO)
+
+  def test_the_fragment_counters_are_explained_in_their_own_units(self):
+    """The counters invite three wrong readings; the text has to head them off.
+
+    dropped == received looks like total loss, reassembled_sample_count looks
+    like samples, and neither matches "valid samples taken".
+    """
+    probe = FakeProbe(samples_taken=1, protocol={
+        "received_sample_count": 3,
+        "received_fragment_count": 9, "reassembled_sample_count": 9,
+        "dropped_fragment_count": 9, "sent_nack_fragment_count": 0})
+    finding = probe_payload.check_fragmentation(CheckContext(probe=probe))[0]
+    self.assertIn("received_sample_count = 3", finding.observed)
+    self.assertIn("FRAGMENTS rather than samples", finding.root_cause)
+    self.assertIn("Neither is evidence of loss", finding.root_cause)
+    self.assertEqual(finding.evidence["received_sample_count"], 3)
+
+  def test_fragments_with_nothing_delivered_is_still_an_error(self):
+    """The one reading the counters do support: nothing was ever rebuilt."""
+    probe = FakeProbe(samples_taken=0, protocol={
+        "received_sample_count": 0,
+        "received_fragment_count": 9, "reassembled_sample_count": 0,
+        "dropped_fragment_count": 9, "sent_nack_fragment_count": 4})
+    result = probe_payload.check_fragmentation(CheckContext(probe=probe))
+    self.assertEqual(result[0].severity, f.Severity.ERROR)
 
   def test_no_sample_and_no_reassembly_is_an_error(self):
     probe = FakeProbe(samples_taken=0, protocol={
@@ -1123,8 +1486,8 @@ class TestRxO(unittest.TestCase):
          {"ownership": Policy(Kind("EXCLUSIVE"))}),
         ("DATA_REPRESENTATION", {"representation": Representation([0])},
          {"representation": Representation([2])}),
-        ("PARTITION", {"partition": Partition(["writer"])},
-         {"partition": Partition(["reader"])}),
+        # PARTITION is deliberately absent: it decides matching but is not an
+        # RxO contract, so it has its own finding. See TestNonRxOMismatches.
     )
     for expected, writer_kwargs, reader_kwargs in cases:
       with self.subTest(policy=expected):
@@ -1174,6 +1537,77 @@ class TestRxO(unittest.TestCase):
     result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
     self.assertEqual(ids(result), ["qos.compatible"])
 
+  def test_disjoint_partitions_are_not_called_a_qos_incompatibility(self):
+    """PARTITION decides matching and is NOT an RxO policy.
+
+    RTI is explicit that it matches by name intersection with wildcards, so
+    there is no offered side and no requested side. Filed under "QoS
+    incompatible" it named the wrong mechanism for a correct conclusion, and
+    sent the operator to diff QoS values when the thing that differs is a
+    string.
+    """
+    writer, reader, registry = self._pair(
+        {"partition": self._partition(["telemetry"])},
+        {"partition": self._partition(["control"])})
+    result = qos_match.check_rxo_pairs(
+        CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(ids(result), ["qos.partition_disjoint"])
+    finding = result[0]
+    self.assertEqual(finding.severity, f.Severity.ERROR)
+    self.assertIn("telemetry", finding.observed)
+    self.assertIn("control", finding.observed)
+    self.assertNotIn("offers", finding.observed)
+    self.assertNotIn("requests", finding.observed)
+    self.assertIn("not an RxO policy", finding.root_cause)
+
+  def test_a_partition_and_an_rxo_mismatch_are_reported_separately(self):
+    """Two mechanisms, two findings - an operator acts on each differently."""
+    writer, reader, registry = self._pair(
+        {"partition": self._partition(["telemetry"]),
+         "reliability": self._policy("BEST_EFFORT")},
+        {"partition": self._partition(["control"]),
+         "reliability": self._policy("RELIABLE")})
+    result = qos_match.check_rxo_pairs(
+        CheckContext(endpoint=writer, registry=registry))
+    self.assertEqual(sorted(ids(result)),
+                     ["qos.partition_disjoint", "qos.rxo_mismatch"])
+    rxo = next(item for item in result if item.id == "qos.rxo_mismatch")
+    self.assertEqual([m["policy"] for m in rxo.evidence["mismatches"]],
+                     ["RELIABILITY"], "PARTITION leaked into the RxO finding")
+
+  def test_the_rxo_finding_says_which_policies_are_not_rxo_contracts(self):
+    """Stops an operator hunting HISTORY or RESOURCE_LIMITS differences."""
+    writer, reader, registry = self._pair(
+        {"reliability": self._policy("BEST_EFFORT")},
+        {"reliability": self._policy("RELIABLE")})
+    result = qos_match.check_rxo_pairs(
+        CheckContext(endpoint=writer, registry=registry))
+    self.assertIn("APPLICABLE", result[0].root_cause)
+    for policy in ("HISTORY", "RESOURCE_LIMITS", "OWNERSHIP_STRENGTH"):
+      self.assertIn(policy, result[0].root_cause)
+
+  def test_a_qualified_policy_name_is_still_an_rxo_policy(self):
+    """Regression: exact-match `is_rxo` crashed on these.
+
+    A mismatch may name the field that differed - "PRESENTATION access_scope",
+    "LIVELINESS lease_duration" - and an exact-equality test read those as
+    non-RxO, sending them to a table with no entry for them.
+    """
+    for policy in ("PRESENTATION access_scope", "LIVELINESS lease_duration",
+                   "PRESENTATION coherent_access", "DATA_REPRESENTATION"):
+      with self.subTest(policy=policy):
+        self.assertTrue(qos_match.is_rxo({"policy": policy}))
+    self.assertFalse(qos_match.is_rxo({"policy": "PARTITION"}))
+
+  def test_every_policy_compared_as_rxo_is_actually_an_rxo_policy(self):
+    """The guard that keeps a non-RxO policy from rejoining the RxO bucket."""
+    self.assertEqual(
+        qos_match.RXO_POLICIES,
+        frozenset(("RELIABILITY", "DURABILITY", "LIVELINESS",
+                   "DESTINATION_ORDER", "PRESENTATION", "DEADLINE",
+                   "LATENCY_BUDGET", "OWNERSHIP", "DATA_REPRESENTATION")))
+    self.assertNotIn("PARTITION", qos_match.RXO_POLICIES)
+
   def test_readable_partitions_are_reported_as_evaluated(self):
     """A policy that was compared must not appear in the incomplete list."""
     writer, reader, registry = self._pair(
@@ -1187,10 +1621,12 @@ class TestRxO(unittest.TestCase):
   def test_named_partitions_still_match_and_mismatch(self):
     for writer_names, reader_names, expected in (
         (["telemetry"], ["telemetry"], "qos.compatible"),
-        (["telemetry"], ["control"], "qos.rxo_mismatch"),
+        # Disjoint partitions stop the pair matching, but not as an RxO
+        # incompatibility - PARTITION is matched by name intersection.
+        (["telemetry"], ["control"], "qos.partition_disjoint"),
         (["telem*"], ["telemetry"], "qos.compatible"),
         ([], [], "qos.compatible"),          # both explicitly default
-        ([], ["telemetry"], "qos.rxo_mismatch"),
+        ([], ["telemetry"], "qos.partition_disjoint"),
     ):
       with self.subTest(writer=writer_names, reader=reader_names):
         writer, reader, registry = self._pair(
@@ -2148,6 +2584,294 @@ class TestUdpOnlyTransport(unittest.TestCase):
         type_lookup_settings=settings))
     self.assertIn("transport", text)
     self.assertIn("UDPv4 only", text)
+
+
+class TestReportReadability(unittest.TestCase):
+  """How the report reads, as opposed to what it concludes.
+
+  These are not cosmetic: a line too wide to fit a terminal, a counter that
+  cannot be found among forty zeros, and a verdict that says how much is wrong
+  without saying where to start all cost the reader the evidence the tool went
+  to some trouble to collect.
+  """
+
+  #: A fixed environment, so width assertions do not depend on how the suite
+  #: was invoked. Under the tier runner the real argv is a 400-character
+  #: unittest command line, which `_kv_atomic` correctly refuses to wrap - it is
+  #: atomic by intent, not by token - and which would otherwise make this test
+  #: pass alone and fail in a tier.
+  ENVIRONMENT = {"argv": "rti_doctor --domain 7 --topic T", "host": "test-host",
+                 "os": "Linux", "machine": "x86_64", "connext": "7.7.0",
+                 "nddshome": "/opt/rti", "python": "3.11.13"}
+
+  def _report(self, **kwargs):
+    from rti_doctor import report as report_module
+    kwargs.setdefault("domain_id", 7)
+    kwargs.setdefault("scope", "topic 'T'")
+    kwargs.setdefault("all_findings", [])
+    kwargs.setdefault("environment", self.ENVIRONMENT)
+    return report_module.render_text(report_module.ReportData(**kwargs))
+
+  def _finding(self, id, severity, rung, **kwargs):
+    return f.Finding(id=id, rung=rung, severity=severity,
+                     title=kwargs.pop("title", id), **kwargs)
+
+  def _lines_past_the_width(self, text):
+    """Rendered lines wider than WIDTH, excluding unbreakable single tokens.
+
+    A path, a URL or a command line is one token; the renderer cannot break it
+    without destroying the only thing it is for, and does not try.
+    """
+    from rti_doctor import report as report_module
+    return [line for line in text.splitlines()
+            if len(line) > report_module.WIDTH
+            and max((len(word) for word in line.split()), default=0)
+            < report_module.WIDTH // 2]
+
+  def test_no_prose_line_exceeds_the_report_width(self):
+    """Regression: the topology coverage note ran to 274 characters.
+
+    Long paths, URLs and command lines are exempt - they are single unbreakable
+    tokens, and wrapping them would destroy the only thing they are for.
+    """
+    text = self._report(topology={
+        "source": "builtin discovery", "scope": "remote entities observed",
+        "selected_domain_id": 7, "participants": 2, "readers": 1, "writers": 1,
+        "topics": ["T"],
+        "completion_note": (
+            "A late-starting observer can miss already-announced endpoints. Use "
+            "the optional 32-second passive domain scan to wait for the next "
+            "default-domain announcement; it identifies active domains but "
+            "cannot reconstruct endpoint announcements that were not replayed.")})
+    self.assertEqual(self._lines_past_the_width(text), [],
+                     "wrappable prose ran past the report width")
+
+  def test_no_table_row_in_a_populated_report_exceeds_the_width(self):
+    """Regression: the whole of Appendix B, with no prose at fault.
+
+    The prose test above renders a report with no probe, no own configuration
+    and no capture - which is every fixed-column table the report has. On a
+    Connext that supplies none of the counters, each of those ~45 rows put its
+    name in a 52-character column and the unavailability marker after it, and
+    the appendix ran 12 characters past the width from end to end.
+    """
+    result = probe.ProbeResult()
+    result.attempted = result.created = True
+    result.elapsed = 2.0
+    # Every status left None, which is exactly how an old Connext renders: each
+    # counter reads as unavailable rather than as a number.
+    result.sample_rejected = FakeRejectedStatus(
+        "REJECTED_BY_SAMPLES_PER_REMOTE_WRITER_LIMIT")
+    result.applied_reader_qos = {
+        "reader_resource_limits.max_remote_writers_per_instance": "1",
+        "resource_limits.max_samples_per_instance": "LENGTH_UNLIMITED"}
+    text = self._report(
+        probe_result=result,
+        type_lookup_settings={"type_object_max_serialized_length": "8192"},
+        participant_evidence={"source": "p.pcap", "kind": "rti network capture",
+                              "packets": 81, "data_packets": 53})
+    self.assertIn("n/a on Connext", text)
+    self.assertEqual(self._lines_past_the_width(text), [],
+                     "a fixed-column table row ran past the report width")
+
+  def test_an_unavailable_counter_is_still_distinct_from_a_zero(self):
+    """The marker got shorter to fit the width; it must not get vaguer.
+
+    A reader who takes the unavailability marker for a zero draws the opposite
+    conclusion from the one the line supports, so the appendix says outright
+    what it means - and the counter still renders, rather than being omitted.
+    """
+    result = probe.ProbeResult()
+    result.attempted = result.created = True
+    text = self._report(probe_result=result)
+    self.assertIn("cannot supply", text)
+    self.assertIn("It is not a zero.", text)
+    self.assertIn(compat.na_text(), text)
+
+  def test_a_long_value_stays_on_its_label_line(self):
+    """A path or URL past the width overflows rather than moving below its label.
+
+    Moving it was tried and reverted. The report's own parser reads a field as
+    "label, then value on the same line", so the split emptied every `refs` list
+    and dropped `source` from the wire appendix. `test_doctor_e2e` holds the
+    parse-level regression; this is the rendering half.
+    """
+    path = "/" + "/".join(f"very_long_directory_component_{n}" for n in range(6))
+    text = self._report(wire_evidence={"source": path, "packets": 1})
+    line = next(line for line in text.splitlines() if line.startswith("Capture "))
+    self.assertIn(path, line)
+
+  def test_a_live_counter_is_marked_and_a_zero_is_not(self):
+    from rti_doctor import report as report_module
+    self.assertTrue(report_module._counter("sample_lost", 1).startswith("*"))
+    self.assertFalse(report_module._counter("sample_lost", 0).startswith("*"))
+
+  def test_a_negative_change_is_marked(self):
+    """current_count_change of -1 is a peer that unmatched mid-probe."""
+    from rti_doctor import report as report_module
+    self.assertTrue(
+        report_module._counter("current_count_change", -1).startswith("*"))
+
+  def test_a_sentinel_sequence_number_is_not_marked(self):
+    """-1 there means "none"; it is a sentinel, not a measurement."""
+    from rti_doctor import report as report_module
+    self.assertFalse(
+        report_module._counter("last_committed_sample_sequence_number", -1)
+        .startswith("*"))
+
+  def test_an_unavailable_counter_is_not_marked(self):
+    from rti_doctor import report as report_module
+    self.assertFalse(
+        report_module._counter("total_count", compat.na_text()).startswith("*"))
+
+  def test_a_reason_is_marked_only_when_something_happened(self):
+    from rti_doctor import report as report_module
+    self.assertTrue(report_module._notable_reason("SampleLostState.LOST_BY_WRITER"))
+    self.assertFalse(report_module._notable_reason("SampleLostState.NOT_LOST"))
+    self.assertFalse(
+        report_module._notable_reason("SampleRejectedState.NOT_REJECTED"))
+
+  def test_an_unknown_instance_loss_is_still_marked(self):
+    """Regression: a "UNKNOWN" quiet-word silenced LOST_BY_UNKNOWN_INSTANCE."""
+    from rti_doctor import report as report_module
+    self.assertTrue(report_module._notable_reason(
+        "SampleLostState.LOST_BY_UNKNOWN_INSTANCE"))
+
+  def test_the_verdict_names_the_finding_to_open_first(self):
+    """A bare "1 ERROR, 1 WARN" says how much is wrong, never where to start."""
+    findings = [self._finding("data.window", f.Severity.WARN, 5),
+                self._finding("type.no_type_info", f.Severity.ERROR, 3)]
+    self.assertIn("start at type.no_type_info", f._problem_summary(findings))
+
+  def test_the_worst_finding_breaks_ties_towards_the_earlier_rung(self):
+    """Two ERRORs: the lower rung is the one that explains the other."""
+    findings = [self._finding("data.deserialize_failure", f.Severity.ERROR, 5),
+                self._finding("locator.unroutable", f.Severity.ERROR, 2)]
+    self.assertEqual(f.worst_finding(findings).id, "locator.unroutable")
+
+  def test_a_clean_run_names_nothing_to_start_at(self):
+    self.assertEqual(f._problem_summary(
+        [self._finding("match.ok", f.Severity.OK, 4)]), "")
+
+  def test_ok_findings_are_never_offered_as_a_starting_point(self):
+    self.assertIsNone(f.worst_finding([
+        self._finding("match.ok", f.Severity.OK, 4),
+        self._finding("repr.offered", f.Severity.INFO, 3)]))
+
+  def test_the_participant_capture_says_its_counts_are_frames(self):
+    """Regression: "Frames 6" over "DATA 3 / HEARTBEAT 5" read as bad addition.
+
+    They are frames CONTAINING each submessage kind, and one frame carries
+    several, so they legitimately sum past the frame count.
+    """
+    text = self._report(participant_evidence={
+        "source": "/tmp/p.pcap", "packets": 6, "data_packets": 3,
+        "heartbeats": 5, "acknacks": 1, "gaps": 1})
+    self.assertIn("HEARTBEAT in these frames", text)
+    # The caveat is wrapped to the report width, so compare against one line.
+    self.assertIn("count frames and not submessages", " ".join(text.split()))
+
+
+class TestFindingScope(unittest.TestCase):
+  """Probe evidence and system evidence must never be pooled.
+
+  The two can disagree and both be right - rti_doctor mirrors the peer's QoS, so
+  its own reader matches writers an application reader provably cannot - and a
+  report that mixes them tells the operator the tool is confused.
+  """
+
+  def test_the_catalog_a_check_came_from_decides_its_scope(self):
+    from rti_doctor import checks as checks_module
+    probe = FakeProbe(samples_taken=1, protocol={"received_heartbeat_count": 1})
+    observed = checks_module.run_checks(
+        CheckContext(participant_record=participant_record()),
+        static_discovery.CHECKS, scope=f.SCOPE_OBSERVED)
+    measured = checks_module.run_checks(
+        CheckContext(probe=probe, endpoint=endpoint_record()),
+        probe_payload.CHECKS, scope=f.SCOPE_PROBE)
+    self.assertTrue(observed, "expected at least one observed finding")
+    self.assertTrue(all(item.scope == f.SCOPE_OBSERVED for item in observed))
+    self.assertTrue(all(item.scope == f.SCOPE_PROBE for item in measured))
+
+  def test_a_broken_check_is_blamed_on_the_tool_not_the_system(self):
+    from rti_doctor import checks as checks_module
+
+    def exploding(context):
+      raise RuntimeError("boom")
+
+    result = checks_module.run_checks(CheckContext(), (exploding,),
+                                      scope=f.SCOPE_OBSERVED)
+    self.assertEqual(ids(result), ["internal.check_failed"])
+    self.assertEqual(result[0].scope, f.SCOPE_TOOL)
+
+  def test_the_report_separates_the_two_bodies_of_evidence(self):
+    from rti_doctor import report as report_module
+    system = f.Finding(id="qos.rxo_mismatch", rung=4, severity=f.Severity.ERROR,
+                       title="QoS incompatible", scope=f.SCOPE_OBSERVED)
+    probe = f.Finding(id="match.ok", rung=4, severity=f.Severity.OK,
+                      title="Reader matched the writer", scope=f.SCOPE_PROBE)
+    text = report_module.render_text(report_module.ReportData(
+        domain_id=7, scope="topic 'T'", all_findings=[system, probe]))
+    self.assertIn("OBSERVED IN THE SYSTEM", text)
+    self.assertIn("MEASURED BY RTI DOCTOR'S OWN PROBE", text)
+    # The scope caveat is wrapped to the report width, so compare against one
+    # line; the two headings above are their own lines and are not.
+    self.assertIn("NOT the application's endpoint", " ".join(text.split()))
+    self.assertLess(text.index("OBSERVED IN THE SYSTEM"),
+                    text.index("MEASURED BY RTI DOCTOR'S OWN PROBE"),
+                    "the system is what the operator came to find out")
+
+  def test_peer_names_the_counterparts_and_excludes_the_probe(self):
+    """PEER is where a reader looks first and described only one end.
+
+    The pair identity was stated properly, but only inside an RxO finding well
+    down the list - which is most of why the probe's own match read as the
+    system's.
+    """
+    from rti_doctor import report as report_module
+    mismatch = f.Finding(
+        id="qos.rxo_mismatch", rung=4, severity=f.Severity.ERROR,
+        title="QoS incompatible", scope=f.SCOPE_OBSERVED,
+        evidence={"writer": "Writer in 'app_writer' (RTI Connext)",
+                  "reader": "Reader in 'app_reader' (RTI Connext)"})
+    text = report_module.render_text(report_module.ReportData(
+        domain_id=7, scope="topic 'T'", all_findings=[mismatch],
+        endpoint=endpoint_record(kind="Writer")))
+    # Rejoined, because the line wraps: asserting on the rendered text would be
+    # asserting on where the wrap happened to fall.
+    flat = " ".join(text.split())
+    self.assertIn("Counterparts", flat)
+    self.assertIn("Reader in 'app_reader' (RTI Connext)", flat)
+    self.assertIn("own probe is not among them", flat)
+
+  def test_a_topic_with_no_counterpart_says_nothing_about_counterparts(self):
+    from rti_doctor import report as report_module
+    text = report_module.render_text(report_module.ReportData(
+        domain_id=7, scope="topic 'T'", all_findings=[],
+        endpoint=endpoint_record(kind="Writer")))
+    self.assertNotIn("Counterparts", text)
+
+  def test_the_scope_headers_do_not_truncate_the_findings_section(self):
+    """A sub-header that were a rule line would end the section for the parser.
+
+    Everything below it - every probe finding - would then be silently dropped
+    from anything that reads the report back.
+    """
+    import subprocess
+    import doctor_e2e
+    from rti_doctor import report as report_module
+    findings = [
+        f.Finding(id="qos.rxo_mismatch", rung=4, severity=f.Severity.ERROR,
+                  title="QoS incompatible", scope=f.SCOPE_OBSERVED),
+        f.Finding(id="match.ok", rung=4, severity=f.Severity.OK,
+                  title="Reader matched the writer", scope=f.SCOPE_PROBE),
+    ]
+    text = report_module.render_text(report_module.ReportData(
+        domain_id=7, scope="topic 'T'", all_findings=findings))
+    parsed = doctor_e2e.parse_report(
+        subprocess.CompletedProcess(["doctor"], 0, text, ""))
+    self.assertEqual(sorted(item["id"] for item in parsed["findings"]),
+                     ["match.ok", "qos.rxo_mismatch"])
 
 
 class TestReliablePath(unittest.TestCase):

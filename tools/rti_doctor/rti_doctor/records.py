@@ -4,6 +4,7 @@ These are plain data objects built from builtin topic samples, deliberately
 decoupled from the DDS objects so every check can be unit-tested with fakes.
 """
 
+import ipaddress
 import time
 from dataclasses import dataclass, field
 
@@ -141,9 +142,14 @@ class EndpointRecord:
 
 
 def locator_ip(locator):
-  """IPv4 dotted-quad from a Locator's address bytes, or None.
+  """The address a Locator carries, read according to its kind, or None.
 
-  Connext stores the address as 16 bytes; for UDPv4 the address is the last 4.
+  Connext stores every address as 16 bytes. For UDPv4 the address is the last 4
+  of them, which is why this read the last four unconditionally - and on a UDPv6
+  locator that printed the tail of a v6 address as a dotted quad: an address
+  that exists nowhere, reported with no hint it was manufactured, and then
+  judged for reachability by `static_discovery.check_locators`. A v6 locator now
+  renders as v6.
   """
   address = compat.get(locator, "address", None)
   if address is None:
@@ -152,6 +158,11 @@ def locator_ip(locator):
     octets = [int(b) for b in address]
   except (TypeError, ValueError):
     return None
+  if compat.get_int(locator, "kind") == LOCATOR_KIND_UDPV6 and len(octets) >= 16:
+    try:
+      return str(ipaddress.IPv6Address(bytes(octets[-16:])))
+    except (ValueError, TypeError):
+      return None
   if len(octets) < 4:
     return None
   return ".".join(str(b) for b in octets[-4:])
@@ -163,7 +174,45 @@ def locator_ip(locator):
 #: never reaches a network interface. A capture of that pair is empty for a
 #: reason that has nothing to do with the endpoints being broken.
 LOCATOR_KIND_UDPV4 = 1
+LOCATOR_KIND_UDPV6 = 2
 LOCATOR_KIND_SHMEM = 0x01000000
+#: RTI Real-Time WAN Transport. The Python binding exposes no constant for it,
+#: so it can only ever arrive from a peer on the wire - which is exactly the
+#: traffic this tool reads. Its sixteen address octets are a transport-specific
+#: structure carrying flags, a UUID, a public port and a public address, so the
+#: last four of them are not an address any more than SHMEM's zeroes are.
+LOCATOR_KIND_UDPV4_WAN = 0x01000001
+
+#: Every locator kind by the name `rti.connextdds.LocatorKind` gives it. Written
+#: out rather than read from the binding because these records are deliberately
+#: DDS-free: a table a fake locator can be tested against is worth more than one
+#: that exists only when Connext imports.
+#:
+#: Kind 2 is UDPv6. The binding also spells 2 as `SHMEM_510`, which is what
+#: Connext used for shared memory through 5.1.0 - a peer this tool does not
+#: support, so the ambiguity is resolved in favour of the modern meaning.
+LOCATOR_KIND_NAMES = {
+    -1: "INVALID",
+    0: "ANY",
+    LOCATOR_KIND_UDPV4: "UDPv4",
+    LOCATOR_KIND_UDPV6: "UDPv6",
+    3: "INTRA",
+    8: "TCPV4_LAN",
+    9: "TCPV4_WAN",
+    10: "TLSV4_LAN",
+    11: "TLSV4_WAN",
+    1000: "RESERVED",
+    LOCATOR_KIND_SHMEM: "SHMEM",
+    LOCATOR_KIND_UDPV4_WAN: "UDPv4_WAN",
+}
+
+#: Kinds whose sixteen address octets are not an IP address, and so must not be
+#: rendered as one. They are all zeroes, which printed as "0.0.0.0" - and that
+#: is exactly the unspecified-address fault `static_discovery._address_problem`
+#: reports, so a SHMEM locator read as broken for having no IP address, which is
+#: its ordinary condition.
+NON_IP_LOCATOR_KINDS = frozenset(
+    (-1, 0, 3, 1000, LOCATOR_KIND_SHMEM, LOCATOR_KIND_UDPV4_WAN))
 
 
 def advertises_shared_memory(*owners):
@@ -182,15 +231,37 @@ def advertises_shared_memory(*owners):
   return False
 
 
+def locator_kind_text(kind):
+  """An RTPS locator kind by name, falling back to `kind=N` when unrecognized.
+
+  A number is better than a wrong name: an unknown kind keeps its integer rather
+  than being rounded to the nearest one this table happens to know.
+  """
+  if kind is None:
+    return ""
+  return LOCATOR_KIND_NAMES.get(kind, f"kind={kind}")
+
+
 def locator_text(locator):
-  """"ip:port (kind=N)" for reports, degrading gracefully on odd locators."""
-  ip = locator_ip(locator) or "unknown"
-  port = compat.get_int(locator, "port")
+  """"ip:port (UDPv4)" for reports, degrading gracefully on odd locators.
+
+  Named rather than numbered. `kind=16777216` is SHMEM and `kind=9` is
+  TCPV4_WAN, and an operator reading a report should not have to know that - the
+  kind is often the whole explanation for a finding (a pair on one host that
+  talks over shared memory), so it has to be legible where the finding is.
+
+  A non-IP locator prints its port and no address, for the reason in
+  `NON_IP_LOCATOR_KINDS`.
+  """
   kind = compat.get_int(locator, "kind")
-  text = f"{ip}:{port}" if port is not None else ip
-  if kind is not None:
-    text = f"{text} (kind={kind})"
-  return text
+  port = compat.get_int(locator, "port")
+  if kind in NON_IP_LOCATOR_KINDS:
+    text = f"port {port}" if port is not None else "no address"
+  else:
+    ip = locator_ip(locator) or "unknown"
+    text = f"{ip}:{port}" if port is not None else ip
+  name = locator_kind_text(kind)
+  return f"{text} ({name})" if name else text
 
 
 def first_locator_ip(locators):

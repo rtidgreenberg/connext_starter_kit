@@ -77,8 +77,16 @@ def at_least(major, minor):
 
 
 def na_text():
-  """The exact string used wherever a counter is unavailable."""
-  return f"n/a (not available on Connext {connext_version()})"
+  """The exact string used wherever a counter is unavailable.
+
+  Terse on purpose. An old Connext renders this on some 45 of Appendix B's 55
+  lines, and the longer form it replaced - "n/a (not available on Connext X)" -
+  was 38 characters against a value column with 26 left of the report's width,
+  so every one of those lines either overran the width or folded in two. The
+  version is stated once in the report header; "n/a" already says the value is
+  not available, and the appendix legend says what that means about the version.
+  """
+  return f"n/a on Connext {connext_version()}"
 
 
 # --- Safe access -------------------------------------------------------------
@@ -230,33 +238,44 @@ def snapshot(obj, names):
   return {name: get_int(obj, name) for name in names}
 
 
-# --- Bitmask-style status reasons -------------------------------------------
+# --- Status reasons ----------------------------------------------------------
+#
+# These look like bitmasks and are not. `SampleLostState` and
+# `SampleRejectedState` expose `test`, `test_any`, `&` and `count`, and their
+# values are consecutive ORDINALS: on 7.7.0, LOST_BY_WRITER is 1, LOST_BY_
+# UNKNOWN_INSTANCE is 12, LOST_BY_DESERIALIZATION_FAILURE is 13 (0b1101),
+# LOST_BY_DECODE_FAILURE is 14. Nothing in the enum is one-hot.
+#
+# So `reason & flag` is not a membership test. A sample lost by the writer -
+# ordinal 1 - ANDed with 13 is 1, which is truthy, and the caller reads a
+# deserialization failure that never happened. This is not hypothetical: it made
+# every late-joining probe report a decode ERROR beside a payload that had
+# deserialized perfectly, because a reliable reader joining a volatile stream
+# always loses one sample to LOST_BY_WRITER.
+#
+# The `test_any` fallback was no better. The binding declares it
+# `test_any(self) -> bool`, taking no argument: handed a flag it raises
+# TypeError, and on its own it answers "is anything set", which is not the
+# question either.
+#
+# Equality is the only correct test, and being ordinals, it is exact.
 
-def reason_matches(reason, flag):
-  """Test a SampleLostState / SampleRejectedState against a flag.
-
-  These are bitset-like objects exposing ``test``/``test_any``, but they also
-  support ``&`` and ``==`` depending on version, so try each in turn rather
-  than assuming one works.
-  """
+def reason_is(reason, flag):
+  """Whether a SampleLostState / SampleRejectedState IS exactly this reason."""
   if reason is None or flag is None:
     return False
   try:
-    return bool(reason & flag)
+    return int(reason) == int(flag)
   except Exception:
     pass
   try:
-    return bool(reason.test_any(flag))
-  except Exception:
-    pass
-  try:
-    return reason == flag
+    return bool(reason == flag)
   except Exception:
     return False
 
 
 def lost_reason_flag(name):
-  """Look up a SampleLostState flag by name, or None if this version lacks it."""
+  """Look up a SampleLostState reason by name, or None if this version lacks it."""
   state = getattr(dds, "SampleLostState", None)
   return get(state, name, None)
 

@@ -330,7 +330,7 @@ in step with the text. Everything a script needs is on the face of the report:
 one `[SEVERITY] rung N  finding.id` line per finding, labelled fields under it,
 and a fixed section order. `test/doctor_e2e.py` reads it back that way.
 
-`s` in the TUI, or `-o` headlessly, writes a plain-text report: fixed 100-column
+`s` in the TUI, or `-o` headlessly, writes a plain-text report: fixed 80-column
 width, ASCII only, fixed section order so two reports diff cleanly. It carries an
 environment header (host, OS, Connext version, `NDDSHOME`, Python, domain, the
 exact command), the verdict, the peer identity, every finding with observed
@@ -340,7 +340,9 @@ counter dump.
 Three rules the writer follows:
 
 - **Only observed values.** A counter unavailable on this Connext version prints
-  `n/a (not available on Connext X.Y.Z)` — never `0`, never omitted.
+  `n/a on Connext X.Y.Z` — never `0`, never omitted. Appendix B says in its own
+  legend that the marker is not a zero, since the marker itself is terse enough
+  to be misread as one.
 - **The raw appendix is complete, not filtered**, so anyone who doubts a finding
   can check the evidence themselves.
 - **Nothing is filtered out by a guess.** A finding whose likely cause is also
@@ -395,7 +397,7 @@ Findings have stable, greppable ids. The ones that matter most:
 | `reliable.no_acknowledgment` | 5 | Heartbeats sent, nothing answering — a return-path fault |
 | `reliable.not_measured` | 5 | Neither counters nor a capture could observe the handshake |
 | `reliable.evidence_disagrees` | 5 | Capture and status counters disagree about heartbeats |
-| `data.fragmentation` | 5 | Large-data reassembly state |
+| `data.fragmentation` | 5 | Large-data reassembly state — read its counters with [FRAGMENT_COUNT_OBSERVATIONS.md](docs/FRAGMENT_COUNT_OBSERVATIONS.md), since two of them do not count what they are named for |
 | `data.deserialize_failure` | 5 | Connext itself could not decode a sample |
 | `payload.partial` | 5 | Which field paths are unreadable |
 

@@ -373,7 +373,7 @@ class TestTsharkFields(unittest.TestCase):
     self.assertIn("3.6.2.0", text)
 
   def test_a_writer_probe_does_not_blame_connext_for_reader_counters(self):
-    """The false claim in a saved report: "not available on Connext 7.7.0".
+    """The false claim in a saved report: "n/a on Connext 7.7.0".
 
     Selecting a READER makes the probe create a WRITER, so no reader status was
     ever sampled - `datareader_protocol_status` and `datareader_cache_status`
@@ -449,8 +449,9 @@ class TestTsharkFields(unittest.TestCase):
     self.assertIn("RTI Network Capture", text)
     self.assertIn("SHARED MEMORY", text)
     # The scope caveat is the point: it sees one participant, ours, and no
-    # traffic between two others.
-    self.assertIn("only rti_doctor's own frames", text)
+    # traffic between two others. It is wrapped to the report width, so compare
+    # against a single line.
+    self.assertIn("only rti_doctor's own frames", " ".join(text.split()))
     self.assertIn("81", text)
     self.assertIn("15", text)
 

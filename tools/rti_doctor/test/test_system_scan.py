@@ -197,6 +197,30 @@ class TestSystemScan(unittest.TestCase):
     self.assertIn("RTI_DOCTOR OWN CONFIGURATION", text)
     self.assertIn("request_types_filter", text)
 
+  def test_no_system_report_line_exceeds_the_report_width(self):
+    """The system report has its own renderer, so it needs its own guard.
+
+    The endpoint report's width test would not have caught this one: the capture
+    hint is appended by `render_system_text` alone, and it went out as a single
+    131-character line. Single unbreakable tokens - a path, a GUID, the command
+    line - are exempt, as they are everywhere else in the report.
+    """
+    snapshot = system_scan.scan(
+        registry_with_fastdds_peers()[0], own_qos=None,
+        type_lookup_settings={"request_types_filter": "*"}, domain_id=7,
+        captured_at=123.0)
+    text = report.render_system_text(
+        snapshot, 7, environment={
+            "argv": "rti_doctor --domain 7", "host": "test", "os": "Linux",
+            "machine": "x86_64", "connext": "7.7.0", "nddshome": "/opt/rti",
+            "python": "3.x"},
+        type_lookup_settings={"request_types_filter": "*"})
+    too_wide = [line for line in text.splitlines()
+                if len(line) > report.WIDTH
+                and max((len(word) for word in line.split()), default=0)
+                < report.WIDTH // 2]
+    self.assertEqual(too_wide, [], "a system report line ran past the width")
+
   def test_system_report_contains_metrics_and_issue_relationships(self):
     snapshot = system_scan.scan(
         registry_with_reliability_fault(), own_qos=None,

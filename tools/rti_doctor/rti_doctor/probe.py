@@ -123,7 +123,7 @@ class ProbeResult:
     # stay `{}` / `None` on the reader path rather than being folded into
     # `protocol`/`cache`, because a report that printed reader counters for a
     # run that created a writer would be describing an entity that never
-    # existed - which is how "n/a (not available on Connext 7.7.0)" came to be
+    # existed - which is how "n/a on Connext 7.7.0" came to be
     # printed for statuses this tool never asked for.
     self.writer_protocol = {}
     self.writer_cache = {}

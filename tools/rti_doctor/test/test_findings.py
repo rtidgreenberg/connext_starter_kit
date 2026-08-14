@@ -94,7 +94,34 @@ class TestVerdict(unittest.TestCase):
   def test_not_matched(self):
     outcome = f.ProbeOutcome(attempted=True, matched=False)
     items = [make("match.none", 4, f.Severity.ERROR)]
-    self.assertTrue(f.verdict_line(items, outcome).startswith("NOT MATCHED"))
+    self.assertTrue(f.verdict_line(items, outcome).startswith("probe: NOT MATCHED"))
+
+  def test_the_verdict_says_whose_reader_each_half_describes(self):
+    """The probe can match a writer that an application reader never will.
+
+    rti_doctor mirrors the peer's QoS, so against a BEST_EFFORT writer its own
+    reader requests BEST_EFFORT and succeeds while a RELIABLE application reader
+    cannot match at all. Unlabelled, "matched, payload FULL; 1 ERROR" reads as
+    one contradictory statement instead of two true ones.
+    """
+    outcome = f.ProbeOutcome(attempted=True, matched=True, samples_received=2,
+                             payload_verdict=f.PAYLOAD_FULL)
+    items = [make("qos.rxo_mismatch", 4, f.Severity.ERROR)]
+    for item in items:
+      item.scope = f.SCOPE_OBSERVED
+    line = f.verdict_line(items, outcome)
+    self.assertTrue(line.startswith("probe: matched, 2 sample(s) received"))
+    self.assertIn("system: 1 ERROR; start at qos.rxo_mismatch", line)
+
+  def test_a_probe_problem_is_not_counted_against_the_system(self):
+    """And the reverse: the probe's own troubles are not the system's."""
+    outcome = f.ProbeOutcome(attempted=True, matched=True, samples_received=0)
+    items = [make("data.silent", 5, f.Severity.WARN)]
+    for item in items:
+      item.scope = f.SCOPE_PROBE
+    line = f.verdict_line(items, outcome)
+    self.assertIn("1 WARN; start at data.silent", line)
+    self.assertNotIn("system:", line)
 
   def test_matched_but_silent(self):
     outcome = f.ProbeOutcome(attempted=True, matched=True, samples_received=0)

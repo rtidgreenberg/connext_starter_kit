@@ -23,7 +23,11 @@ import time
 from . import (compat, findings as f, probe as probe_mod, records, typewalk,
                vendors, wire)
 
-WIDTH = 100
+#: Every wrappable line in both reports is laid out against this. 80 is the
+#: width a report survives being pasted into: a terminal at its default size, a
+#: mail client, a bug comment. Prose, rules and section bars all follow it; the
+#: single-token exemption below (a path, a URL, a command line) does not.
+WIDTH = 80
 RULE = "=" * WIDTH
 THIN = "-" * WIDTH
 
@@ -75,6 +79,111 @@ def _wrap(text, indent=15, width=WIDTH):
     lines.append(current)
   pad = " " * indent
   return [pad + line for line in lines]
+
+
+def _kv_block(label, value, pad=16):
+  """`_kv` for a value long enough to need wrapping, with a hanging indent.
+
+  Prose in a header column has to wrap like prose everywhere else. The topology
+  coverage note ran to 274 characters on one line - the only unwrapped paragraph
+  in the report, sitting in a block of short labelled counts, and wide enough to
+  break any terminal it was read in.
+  """
+  block = _wrap(value, indent=pad)
+  if not block:
+    return []
+  return [_kv(label, block[0][pad:], pad=pad)] + block[1:]
+
+
+#: Where the fixed-column tables - Appendix B's counters, the own-configuration
+#: blocks - put their value. The widest counter name Connext supplies is 48
+#: characters, so a pad of 52 leaves a visible gap after even that one. It also
+#: leaves only WIDTH - 54 columns for the value, which `_table_row` folds past.
+TABLE_PAD = 52
+
+
+def _table_row(name, value, gutter="  ", pad=TABLE_PAD):
+  """One `name value` row of a fixed-column table.
+
+  A value too long for its column moves below its name rather than running past
+  WIDTH, with the gutter mark staying on the name's line. That is safe here and
+  is not safe for `_kv` (see below): nothing parses these tables - the report's
+  own parser reads the header, the verdict, the findings and Appendix C - and
+  the value gets the width of the page instead of the 26 columns left beside a
+  48-character name, which is narrower than a single DDS enum name like
+  REJECTED_BY_SAMPLES_PER_REMOTE_WRITER_LIMIT.
+  """
+  text = str(value)
+  row = f"{gutter}{str(name).ljust(pad)}{text}"
+  if len(row) <= WIDTH:
+    return row
+  return "\n".join([f"{gutter}{name}"] + _wrap(text, indent=len(gutter) + 2))
+
+
+# A path, a URL or a command line stays on its label's line however far it runs
+# past WIDTH. Moving it to its own line under the label was tried and reverted:
+# the text report is this tool's only output contract, its parser reads a field
+# as "label, then value on the same line", and the split silently emptied every
+# `refs` list - every reference URL here is longer than WIDTH - and dropped
+# `source` from the wire appendix, which the vendor tier asserts is a real file.
+# A value that overflows is a cosmetic problem; one the parser cannot find is
+# not. See `test_a_long_value_stays_parseable_on_its_label_line`.
+#
+# So WIDTH binds every line the report writes EXCEPT a `_kv` field whose value
+# is too long for its column. Besides paths and URLs, that is Appendix C's
+# list-valued fields - "Writer IDs in matching frames" passes WIDTH at five
+# writers, and a capture on a busy topic sees more. Folding those means teaching
+# every consumer of the report, not just this repo's parser, to join
+# continuation lines; the fixed-column tables fold instead because nothing
+# parses them (`_table_row`).
+
+
+def _is_live(name, text):
+  """Whether a rendered counter says something happened.
+
+  Any non-zero number counts, including a negative one: `current_count_change`
+  of -1 is a peer that unmatched during the probe, which is exactly the kind of
+  line this mark exists to surface. The one exception is the -1 that sequence
+  number fields use for "none" - a sentinel, not a measurement, and marking
+  three of those on every healthy report would spend the mark on the lines it is
+  meant to make findable.
+  """
+  try:
+    value = float(text)
+  except (TypeError, ValueError):
+    return False
+  if value == -1 and str(name).endswith("sequence_number"):
+    return False
+  return value != 0
+
+
+def _counter(name, value, notable=None):
+  """One Appendix B counter, marked in the gutter when it is not zero.
+
+  About 45 of that appendix's 55 lines read zero on a healthy run, and the one
+  or two carrying the whole story - a sample_lost total, an out-of-range
+  rejection - are typographically identical to them. The mark makes the appendix
+  skimmable without dropping the zeros, which are evidence in their own right: a
+  counter that exists and reads zero is a different claim from one this Connext
+  version cannot supply at all.
+  """
+  text = str(value)
+  if notable is None:
+    notable = _is_live(name, text)
+  return _table_row(name, text, gutter=f"{'*' if notable else ' '} ")
+
+
+def _notable_reason(text):
+  """Whether a last_reason line says anything happened.
+
+  The rendered form carries its enum name - "SampleLostState.NOT_LOST" - so the
+  quiet values are matched anywhere in the string, not as a prefix. They are
+  listed exactly; a bare "UNKNOWN" was tried and silenced
+  LOST_BY_UNKNOWN_INSTANCE, which is a real loss and the opposite of quiet.
+  """
+  upper = str(text or "").upper()
+  return bool(upper) and not any(
+      quiet in upper for quiet in ("NOT_LOST", "NOT_REJECTED", "N/A"))
 
 
 def _labelled(label, text, indent=15):
@@ -129,7 +238,10 @@ def render_system_text(snapshot, domain_id, environment=None,
   if snapshot.fastdds_product_versions:
     lines += [_kv("Observed", ", ".join(snapshot.fastdds_product_versions)), ""]
   else:
-    lines += [_kv("Observed", CAPTURE_PLACEHOLDER), CAPTURE_HINT, ""]
+    # The hint is a paragraph, so it wraps like one. Appended whole it was the
+    # system report's only line past WIDTH, at 131 characters.
+    lines += ([_kv("Observed", CAPTURE_PLACEHOLDER)]
+              + _wrap(CAPTURE_HINT, indent=0) + [""])
   lines += _section("ISSUE SUMMARY")
   lines += [_kv("Errors", str(counts[f.Severity.ERROR])),
             _kv("Warnings", str(counts[f.Severity.WARN])),
@@ -170,7 +282,7 @@ def render_system_text(snapshot, domain_id, environment=None,
             "issue above can be judged against how it was measured.", ""]
   if type_lookup_settings:
     for key, value in sorted(type_lookup_settings.items()):
-      lines.append(f"  {str(key).ljust(52)}{value}")
+      lines.append(_table_row(key, value))
   else:
     lines.append("  (no type-lookup settings recorded)")
   lines.append("")
@@ -379,7 +491,10 @@ def _render_capture_summary(data):
   if gained:
     lines.append("New from packets, not available from discovery")
     for label, value, note in gained:
-      lines.append(_kv(f"  {label}", value, CAPTURE_LABEL_PAD))
+      # These labels are this summary's own, not the parsed Appendix C field
+      # names, so a value too wide for the column folds under it rather than
+      # running past WIDTH - a wire representation naming several encodings does.
+      lines.append(_table_row(label, value, pad=CAPTURE_LABEL_PAD - 2))
       lines.extend(_wrap(note, indent=4))
   for note in unchanged:
     lines.extend(_wrap(note, indent=2))
@@ -547,8 +662,39 @@ def _render_peer(data):
         participant.default_unicast_locators if participant else [])
     if locators:
       lines.append(_kv("Locators", ", ".join(records.locator_text(l) for l in locators)))
+  lines += _counterpart_lines(data)
   lines.append("")
   return lines
+
+
+def _counterpart_lines(data):
+  """The application endpoints on the other side of this topic, named here.
+
+  The RxO findings state the pair properly - "Writer in 'X' (Fast DDS) -> Reader
+  in 'Y' (Connext)" - but that is buried in the findings list, and PEER, which
+  is where a reader looks first, described only one end. Naming both here is
+  most of what stops the probe's own match reading as the system's.
+
+  Read from the RxO findings' evidence rather than recomputed: they already did
+  the pairing, and a second implementation would be free to disagree with the
+  first about who the counterparts are.
+  """
+  labels, key = [], "reader" if getattr(data.endpoint, "is_writer", False) else "writer"
+  for finding in data.findings:
+    # Every per-pair verdict qos_match can produce. A counterpart that will not
+    # match for a non-RxO reason is still a counterpart, and leaving it out
+    # would make PEER disagree with the findings below it.
+    if finding.id in ("qos.compatible", "qos.rxo_mismatch",
+                      "qos.partition_disjoint"):
+      label = finding.evidence.get(key)
+      if label and label not in labels:
+        labels.append(label)
+  if not labels:
+    return []
+  return _kv_block(
+      "Counterparts",
+      f"{len(labels)} discovered on this topic: {', '.join(labels)}. "
+      "rti_doctor's own probe is not among them.")
 
 
 def _render_topology(data):
@@ -573,37 +719,65 @@ def render_topology_text(topology):
   if others:
     lines.append(_kv("Other domains", ", ".join(str(item) for item in others)
                      + " (heard announcing; no counts above apply to them)"))
-  lines.append(_kv("Coverage", topology["completion_note"]))
+  lines.extend(_kv_block("Coverage", topology["completion_note"]))
+  lines.append("")
+  return lines
+
+
+def _severity_summary(findings):
+  hist = f.counts(findings)
+  summary = ", ".join(f"{hist[s]} {s.label}" for s in
+                      (f.Severity.ERROR, f.Severity.WARN, f.Severity.INFO, f.Severity.OK)
+                      if hist.get(s))
+  return summary or "none"
+
+
+def _render_one_finding(finding):
+  lines = [f"[{finding.severity.label}] rung {finding.rung}  {finding.id}"]
+  lines += _labelled("", finding.title)
+  lines += _labelled("Observed", finding.observed)
+  lines += _labelled("Root cause", finding.root_cause)
+  lines += _labelled("Remedy", finding.remedy)
+  # Context, not a filter: this finding is listed, counted and carried into
+  # the exit code whether or not something here would explain it.
+  if finding.explained_by:
+    lines += _labelled("Likely explained by",
+                       ", ".join(finding.explained_by) +
+                       " - confirm it applies to this endpoint before acting "
+                       "on it, since the link is by finding id alone.")
+  for ref in finding.refs:
+    lines.append(f"  {'Reference'.ljust(13)}{ref}")
   lines.append("")
   return lines
 
 
 def _render_findings(data):
+  """Findings in scoped blocks: the observed system first, the probe after.
+
+  The system comes first deliberately. It is what the operator came to find out,
+  and it is true whether or not rti_doctor ran; the probe is this tool's own
+  experiment, and putting it second stops its success being read as the headline.
+
+  Sub-headers are plain left-aligned lines. They must NOT be rule lines - the
+  report's parser ends a section at the next `---`, so an underlined sub-header
+  here would truncate the findings section and silently drop everything below it.
+  """
   findings = list(data.findings)
-  hist = f.counts(findings)
-  summary = ", ".join(f"{hist[s]} {s.label}" for s in
-                      (f.Severity.ERROR, f.Severity.WARN, f.Severity.INFO, f.Severity.OK)
-                      if hist.get(s))
-  lines = _section(f"FINDINGS  ({summary or 'none'})")
+  lines = _section(f"FINDINGS  ({_severity_summary(findings)})")
 
   if not findings:
     lines += ["No findings.", ""]
-  for finding in findings:
-    lines.append(f"[{finding.severity.label}] rung {finding.rung}  {finding.id}")
-    lines += _labelled("", finding.title)
-    lines += _labelled("Observed", finding.observed)
-    lines += _labelled("Root cause", finding.root_cause)
-    lines += _labelled("Remedy", finding.remedy)
-    # Context, not a filter: this finding is listed, counted and carried into
-    # the exit code whether or not something here would explain it.
-    if finding.explained_by:
-      lines += _labelled("Likely explained by",
-                         ", ".join(finding.explained_by) +
-                         " - confirm it applies to this endpoint before acting "
-                         "on it, since the link is by finding id alone.")
-    for ref in finding.refs:
-      lines.append(f"  {'Reference'.ljust(13)}{ref}")
+    return lines
+
+  for scope in (f.SCOPE_OBSERVED, f.SCOPE_PROBE, f.SCOPE_TOOL):
+    group = f.in_scope(findings, scope)
+    if not group:
+      continue
+    lines.append(f"{f.SCOPE_TITLES[scope]}  ({_severity_summary(group)})")
+    lines.extend(_wrap(f.SCOPE_NOTES[scope], indent=2))
     lines.append("")
+    for finding in group:
+      lines.extend(_render_one_finding(finding))
   return lines
 
 
@@ -643,12 +817,16 @@ def _render_counter_appendix(data):
   else:
     lines.append(f"probe window: {result.elapsed:.2f}s; valid samples taken: "
                  f"{result.samples_taken}")
+  lines.append("* marks a counter above zero, or a reason that is not the quiet default.")
+  # Paired with the marker's terse form. A reader who takes "n/a" for zero draws
+  # the opposite conclusion from the one the line supports.
+  lines.append("n/a marks a counter this Connext version cannot supply. It is not a zero.")
   lines.append("")
 
   lines.append("publication_matched" if wrote else "subscription_matched")
   for name in ("current_count", "current_count_change", "total_count",
                "total_count_change"):
-    lines.append(f"  {name.ljust(52)}{compat.counter_text(result.subscription_matched, name)}")
+    lines.append(_counter(name, compat.counter_text(result.subscription_matched, name)))
 
   # Which incompatible-QoS status exists at all depends on which entity the
   # probe created. Printing the reader's on a writer probe reported a status
@@ -656,11 +834,12 @@ def _render_counter_appendix(data):
   if wrote:
     lines.append("offered_incompatible_qos")
     for name in ("total_count", "total_count_change"):
-      lines.append(f"  {name.ljust(52)}"
-                   f"{compat.counter_text(result.offered_incompatible_qos, name)}")
+      lines.append(_counter(
+          name, compat.counter_text(result.offered_incompatible_qos, name)))
     policy = compat.get(result.offered_incompatible_qos, "last_policy", None)
-    lines.append(f"  {'last_policy'.ljust(52)}"
-                 f"{policy if policy is not None else compat.na_text()}")
+    lines.append(_counter("last_policy",
+                          policy if policy is not None else compat.na_text(),
+                          notable=policy is not None))
     policies = compat.incompatible_policies(result.offered_incompatible_qos)
     if policies:
       policy_text = ", ".join(f"{name} (x{count})" for name, count in policies)
@@ -668,14 +847,16 @@ def _render_counter_appendix(data):
       policy_text = compat.na_text()
     else:
       policy_text = "none"
-    lines.append(f"  {'policies'.ljust(52)}{policy_text}")
+    lines.append(_counter("policies", policy_text, notable=bool(policies)))
   else:
     lines.append("requested_incompatible_qos")
     for name in ("total_count", "total_count_change"):
-      lines.append(f"  {name.ljust(52)}"
-                   f"{compat.counter_text(result.requested_incompatible_qos, name)}")
+      lines.append(_counter(
+          name, compat.counter_text(result.requested_incompatible_qos, name)))
     policy = compat.get(result.requested_incompatible_qos, "last_policy", None)
-    lines.append(f"  {'last_policy'.ljust(52)}{policy if policy is not None else compat.na_text()}")
+    lines.append(_counter("last_policy",
+                          policy if policy is not None else compat.na_text(),
+                          notable=policy is not None))
     # `last_policy` names one policy; `policies` names all of them. Kept side by
     # side rather than replacing it, because a reader comparing this report
     # against the middleware's own status output should find both fields.
@@ -686,11 +867,11 @@ def _render_counter_appendix(data):
       policy_text = compat.na_text()
     else:
       policy_text = "none"
-    lines.append(f"  {'policies'.ljust(52)}{policy_text}")
+    lines.append(_counter("policies", policy_text, notable=bool(policies)))
 
   if wrote:
     # The whole reader block is omitted rather than printed as unavailable.
-    # `n/a (not available on Connext X)` is a claim about the middleware, and
+    # `n/a on Connext X` is a claim about the middleware, and
     # every reader status read that way on this path was really "no reader was
     # ever created" - the probe made a writer, because the selected endpoint is
     # a reader. Those statuses exist on this Connext version; nothing asked for
@@ -698,39 +879,39 @@ def _render_counter_appendix(data):
     lines.append("datawriter_protocol_status")
     for name in probe_mod.WRITER_PROTOCOL_COUNTERS:
       value = result.writer_protocol.get(name)
-      lines.append(f"  {name.ljust(52)}{compat.na_text() if value is None else value}")
+      lines.append(_counter(name, compat.na_text() if value is None else value))
 
     lines.append("reliable_writer_cache_changed_status")
     for name in probe_mod.WRITER_CACHE_COUNTERS:
       value = result.writer_cache.get(name)
-      lines.append(f"  {name.ljust(52)}{compat.na_text() if value is None else value}")
+      lines.append(_counter(name, compat.na_text() if value is None else value))
   else:
     lines.append("sample_lost")
     for name in ("total_count", "total_count_change"):
-      lines.append(f"  {name.ljust(52)}{compat.counter_text(result.sample_lost, name)}")
-    lines.append(f"  {'last_reason'.ljust(52)}"
-                 f"{compat.reason_text(compat.get(result.sample_lost, 'last_reason', None))}")
+      lines.append(_counter(name, compat.counter_text(result.sample_lost, name)))
+    reason = compat.reason_text(compat.get(result.sample_lost, "last_reason", None))
+    lines.append(_counter("last_reason", reason, notable=_notable_reason(reason)))
 
     lines.append("sample_rejected")
     for name in ("total_count", "total_count_change"):
-      lines.append(f"  {name.ljust(52)}{compat.counter_text(result.sample_rejected, name)}")
-    lines.append(f"  {'last_reason'.ljust(52)}"
-                 f"{compat.reason_text(compat.get(result.sample_rejected, 'last_reason', None))}")
+      lines.append(_counter(name, compat.counter_text(result.sample_rejected, name)))
+    reason = compat.reason_text(compat.get(result.sample_rejected, "last_reason", None))
+    lines.append(_counter("last_reason", reason, notable=_notable_reason(reason)))
 
     lines.append("datareader_protocol_status")
     for name in probe_mod.PROTOCOL_COUNTERS:
       value = result.protocol.get(name)
-      lines.append(f"  {name.ljust(52)}{compat.na_text() if value is None else value}")
+      lines.append(_counter(name, compat.na_text() if value is None else value))
 
     lines.append("datareader_cache_status")
     for name in probe_mod.CACHE_COUNTERS:
       value = result.cache.get(name)
-      lines.append(f"  {name.ljust(52)}{compat.na_text() if value is None else value}")
+      lines.append(_counter(name, compat.na_text() if value is None else value))
 
   lines.append("topic")
   count = result.inconsistent_topic_count
-  lines.append(f"  {'inconsistent_topic_status.total_count'.ljust(52)}"
-               f"{compat.na_text() if count is None else count}")
+  lines.append(_counter("inconsistent_topic_status.total_count",
+                        compat.na_text() if count is None else count))
   lines.append("")
 
   if wrote and not result.wrote_samples:
@@ -866,14 +1047,24 @@ def _render_participant_evidence(data):
     lines.append("")
     return lines
   lines.append(_kv("  Capture", evidence.get("source", "unknown"), WIRE_LABEL_PAD))
-  for label, key in (("Frames from this participant", "packets"),
-                     ("DATA", "data_packets"),
-                     ("DATA_FRAG", "data_fragments"),
-                     ("HEARTBEAT", "heartbeats"),
-                     ("ACKNACK", "acknacks"),
-                     ("GAP", "gaps"),
-                     ("NACK_FRAG", "nack_fragments")):
+  # Every count below is FRAMES CONTAINING that submessage, which is what
+  # `wire.summarize` measures - not submessages. One RTPS frame routinely
+  # carries several kinds at once, so these sum to more than the frame count,
+  # and labelled "DATA 3 / HEARTBEAT 5" beside "Frames 6" the appendix read like
+  # a tool that cannot add up. The interface-capture block above already says
+  # "in matching frames" for the same numbers; this now says it too.
+  lines.append(_kv("  Frames from this participant",
+                   str(evidence.get("packets", 0)), WIRE_LABEL_PAD))
+  for label, key in (("DATA in these frames", "data_packets"),
+                     ("DATA_FRAG in these frames", "data_fragments"),
+                     ("HEARTBEAT in these frames", "heartbeats"),
+                     ("ACKNACK in these frames", "acknacks"),
+                     ("GAP in these frames", "gaps"),
+                     ("NACK_FRAG in these frames", "nack_fragments")):
     lines.append(_kv(f"  {label}", str(evidence.get(key, 0)), WIRE_LABEL_PAD))
+  lines.extend(_wrap("A frame may carry several submessage kinds, so these "
+                     "count frames and not submessages, and they sum to more "
+                     "than the frame count above.", indent=2))
   encapsulations = evidence.get("encapsulation_ids") or []
   lines.append(_kv("  Observed DDS data representation",
                    wire.encapsulation_text(encapsulations) if encapsulations
@@ -937,7 +1128,7 @@ def _render_config_appendix(data):
   lines.append("")
   if data.type_lookup_settings:
     for key, value in sorted(data.type_lookup_settings.items()):
-      lines.append(f"  {key.ljust(52)}{value}")
+      lines.append(_table_row(key, value))
   else:
     lines.append("  (no type-lookup settings recorded)")
   result = data.probe_result
@@ -951,7 +1142,9 @@ def _render_config_appendix(data):
     else:
       lines.append("  probe reader/subscriber QoS mirrored from the writer:")
     for key, value in sorted(result.applied_reader_qos.items()):
-      lines.append(f"    {key.ljust(50)}{value}")
+      # Nested a level under its heading, so the value column matches the rows
+      # above it: two more of indent against two less of pad.
+      lines.append(_table_row(key, value, gutter="    ", pad=TABLE_PAD - 2))
   lines.append("")
   return lines
 

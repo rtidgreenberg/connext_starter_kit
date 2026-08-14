@@ -2,7 +2,7 @@
 
 ## RTI Connext DDS Tooling
 
-For questions, design tasks, code reviews, implementations, debugging, or build issues involving DDS, RTI Connext, RTI infrastructure services, or RTI Rapid Prototyping, use RTI MCP tools selectively based on the task. Do not query Connext AI automatically; use it only when the user explicitly asks for it.
+For questions, design tasks, code reviews, implementations, debugging, or build issues involving DDS, RTI Connext, or RTI infrastructure services, use RTI MCP tools selectively based on the task. Do not query Connext AI automatically; use it only when the user explicitly asks for it.
 
 - Use `ask_connext` / `mcp_rti_mcp_ask_connext_question` only when the user explicitly requests a Connext AI query for DDS, RTI Connext APIs, QoS, code generation, build setup, or infrastructure services behavior.
 - Use RTI MCP code validation tools when reviewing or modifying DDS-related code, including `mcp_rti_mcp_validate_modern_cpp_code` for modern C++ DDS code and `mcp_rti_mcp_validate_xml_code` for Connext XML configuration.

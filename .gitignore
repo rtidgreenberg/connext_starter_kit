@@ -50,7 +50,7 @@ connext_dds_env_7.3/
 connext_dds_env_7.7_py*/
 connext_dds_env_py38_backup/
 
-# RTI Rapid Prototyping test output
+# Local test output
 test_output/
 
 # RTI Doctor local vendor-fixture artifacts

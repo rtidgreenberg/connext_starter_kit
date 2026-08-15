@@ -11,8 +11,11 @@ side of it. Because it sees both the writers' offered QoS and the readers'
 requested QoS in discovery data, it can report why two live endpoints will never
 match without you supplying anything.
 
-It creates DataReaders and nothing else. It never writes user data, never changes
-remote configuration, and always closes what it created.
+It creates one endpoint of its own and nothing else: a DataReader to diagnose a
+writer, or a DataWriter to diagnose a reader — the probe mirrors whichever side
+you selected. It never changes remote configuration, and always closes what it
+created. It publishes user data in exactly one case, and only when you say so
+each time: see [Verifying Delivery to a Reader](#verifying-delivery-to-a-reader-w---write-samples).
 
 ## Requirements
 
@@ -75,6 +78,7 @@ selecting one shows only that severity. Keys:
 | `r` | Re-scan (every screen shows a snapshot, never a live feed) |
 | `c` | On an endpoint report: capture RTPS packets for that endpoint |
 | `C` | On an endpoint report: choose the capture interface, and run the pass again |
+| `w` | On a **reader** report: publish synthetic samples to verify delivery — asks first, every time |
 | `s` | Save the current system or diagnostic report as a shareable text file |
 | `b` / `Esc` | Back |
 | `q` | Quit |
@@ -160,7 +164,9 @@ rti_doctor therefore restricts its own participant to UDPv4
 With it, the same run captured 57 DATA, 6 HEARTBEAT and 2 ACKNACK frames, and
 the packet counts matched the status counters exactly.
 
-The cost is real and every report states it in Appendix D: the probe exercises a
+The cost is real and every report states it in the own-configuration appendix
+(lettered `D` when a packet appendix is present and `C` when it is not, so the
+section order stays fixed either way): the probe exercises a
 **different transport** from the one a same-host application pair uses. A
 UDP-only probe that succeeds does not prove the application's shared-memory path
 works. Capturing a same-host pair on `lo` — not the host's NIC — is what makes
@@ -224,6 +230,13 @@ interoperate with standard SPDP at all), a secure-vs-unsecure mismatch,
 reuses the passive domain-0 announcement scan, so "nothing is here" can become
 "something is alive, but on domain 5".
 
+Those conditions are read from *our* participant's QoS, so in a report they are
+filed under `RTI DOCTOR'S OWN CONFIGURATION` rather than among the system's
+findings — see [Findings are grouped by whose evidence they
+are](#findings-are-grouped-by-whose-evidence-they-are). The domain checks
+(`blind.other_domain_active`, `blind.empty_domain`) read the registry instead and
+stay with the system: "nothing was discovered here" is an observation.
+
 It does **not** diagnose multicast reachability. Whether multicast works between
 two hosts is not observable from either side's participant QoS, and a finding
 derived from rti_doctor's own defaults would describe the diagnostic, not the
@@ -241,7 +254,7 @@ system it was pointed at.
     --settle          Seconds to let discovery settle first (default: 3.0)
     --scan-timeout    Seconds to listen for active domains (default: 32.0)
     --no-domain-scan  Skip the active-domain scan before prompting
-    --no-probe        Static checks only; never create a reader
+    --no-probe        Static checks only; create no endpoint of our own
     --type-object-v1-only
           Advertise TypeObject v1 and disable TypeLookup v2 for an experiment
     --pcap PATH       Analyze RTPS user-data packets in an existing capture (with --topic)
@@ -250,6 +263,14 @@ system it was pointed at.
               In the TUI it answers the capture question up front, so every
               endpoint report captures on entry without asking (no default:
               the TUI asks, and Skip is an answer)
+    --network-capture Record our own participant with RTI Network Capture,
+              shared memory included. A launch flag by necessity - see below
+    --write-samples   Let the probe PUBLISH synthetic samples when the selected
+              endpoint is a reader. Consent, not a default - see below
+    --ready-file PATH Write PATH once the participant exists (test hook)
+    --ready-after-participants N
+              Wait for N remote participants before proceeding (test hook)
+    --ready-timeout   Seconds to wait for the above (default: 15.0)
 -i, --interval        UI refresh interval (default: 2.0)
     --debug-log PATH  Discovery/probe log output
     --connext-log PATH
@@ -337,6 +358,27 @@ exact command), the verdict, the peer identity, every finding with observed
 evidence / root cause / remedy, the discovered type as IDL, and a complete raw
 counter dump.
 
+### Findings are grouped by whose evidence they are
+
+Three bodies of evidence can disagree and all be right, so the findings section
+keeps them apart under their own headings, each stating what it is — plus a
+fourth heading for a failure inside rti_doctor, which is nobody's system:
+
+| Heading | What it is read from |
+|---|---|
+| `OBSERVED IN THE SYSTEM` | Discovery data about endpoints that were already running. Nothing here depends on rti_doctor having created anything |
+| `RTI DOCTOR'S OWN CONFIGURATION` | The QoS *our* participant runs under, inherited from this environment's profiles. It says what rti_doctor may be unable to see — so an empty section above may be this, and not the system |
+| `MEASURED BY RTI DOCTOR'S OWN PROBE` | The endpoint we created. It mirrors the peer, so it can match and exchange data where a real application endpoint cannot, and the reverse |
+| `RTI DOCTOR ITSELF` | A check that raised. A bug here, about no one's system |
+
+The split is not cosmetic. The probe mirrors the writer's QoS, so against a
+BEST_EFFORT writer it requests BEST_EFFORT, matches, and reads data — while the
+application's RELIABLE reader never will. In one list, "matched, payload FULL"
+sits beside "these two will never communicate" and reads as the tool
+contradicting itself. The verdict line carries the same separation: `probe: …`,
+then `system: …`, then `rti_doctor's own config: …`, each with its own counts and
+its own "start at" id.
+
 Three rules the writer follows:
 
 - **Only observed values.** A counter unavailable on this Connext version prints
@@ -361,12 +403,19 @@ conflating them is what makes this class of bug expensive:
 
 | Verdict | Meaning |
 |---|---|
-| `not probed (...)` | Could not even create a reader — usually no type (rung 3) |
+| `not probed (...)` | Could not even create an endpoint — usually no type (rung 3) |
 | `NOT MATCHED` | Endpoints exist but don't match — rung 3 or 4 |
 | `matched but no samples received` | Writer idle, filtered, or the return path is broken |
 | `payload FULL` | Every member of a real sample was read successfully |
 | `payload PARTIAL` | Specific field paths could not be decoded |
 | `payload FAILED` | Nothing in the sample could be decoded |
+
+On a **reader** target the probe is a writer, so the delivery verdicts read from
+the sending side instead: `matched (writer probe; nothing published, so delivery
+not measured)` when you declined to publish, and `matched, N sample(s)
+published, acknowledged by the reader` when you consented. Neither is a payload
+walk — the probe serialized those bytes itself, so reading them back would be
+this tool grading its own homework.
 
 ## Finding IDs
 
@@ -390,7 +439,9 @@ Findings have stable, greppable ids. The ones that matter most:
 | `type.extensibility` | 3 | FINAL/APPENDABLE/MUTABLE hazards |
 | `repr.no_common` | 3 | Writer offers XCDR2 only |
 | `qos.rxo_mismatch` | 4 | Two live endpoints whose QoS can never match, policies named |
-| `match.none` | 4 | The probe reader never matched |
+| `qos.partition_disjoint` | 4 | Two live endpoints with no partition name in common — *not* an RxO incompatibility, so there is no QoS value to relax |
+| `qos.mismatch_undescribed` | 4 | A non-RxO reason to not match that this catalog has no description for: reported from the record, with the rule that produced it |
+| `match.none` | 4 | The probe never matched |
 | `data.silent` | 5 | Matched but nothing arrived, with the sub-case identified |
 | `reliable.ok` | 5 | RELIABLE handshake confirmed: heartbeats out, acknowledgments back |
 | `reliable.no_heartbeat` | 5 | RELIABLE and matched, but no heartbeats — an asymmetric match |
@@ -429,7 +480,8 @@ behavior. RTI's own cross-vendor guidance is to use the VENDOR mask (`0x1A9`).
 
 `rti_doctor` sets the VENDOR mask for its own process before creating any DDS
 entity, so it cannot fail to decode a peer because of its own encoding defaults,
-and records the mask actually in force in Appendix C of every report:
+and records the mask actually in force in the own-configuration appendix of
+every report:
 
 ```text
   xtypes_compliance_mask     0x9a9 (VENDOR applied)
@@ -538,16 +590,19 @@ license itself, keeps the whole run in `test_output/run_tests_<tier>.log`, and
 on a red run prints the failing test names and that path:
 
 ```bash
-./tools/rti_doctor/run_tests.sh          # unit (the default), ~372 tests
+./tools/rti_doctor/run_tests.sh          # unit (the default), ~500 tests
 ./tools/rti_doctor/run_tests.sh live     # unit + live domain: needs a license
 ./tools/rti_doctor/run_tests.sh vendor   # cross-vendor e2e: needs Docker images
 ./tools/rti_doctor/run_tests.sh all      # everything
 ```
 
 The tiers differ by what they need. `unit` creates no DDS entity, so it needs
-neither `NDDSHOME` nor a license — this is the tier CI runs. `live` creates real
-participants. `vendor` additionally needs Docker and the Cyclone/Fast DDS
-images, and takes over ten minutes.
+neither `NDDSHOME` nor a license — this is the tier CI runs, and it finishes in
+about twenty seconds. `live` re-runs those and adds real participants on a local
+domain, about six minutes. `vendor` additionally needs Docker and the
+Cyclone/Fast DDS images, and takes over ten minutes; its ~34 cases include
+declared expected failures, which are documented cross-vendor limitations rather
+than regressions.
 
 To run one module — worth doing as a *diagnostic*, since several vendor
 failures are order-dependent and "green alone, red in a tier" is itself a
@@ -682,6 +737,7 @@ PYTHONPATH=tools/rti_doctor "$VENV_PYTHON" \
 | `large_data` | Samples above the MTU, to exercise fragmentation |
 | `partition` | Writer in a named partition |
 | `bad_pair` | A BEST_EFFORT writer *and* a RELIABLE/EXCLUSIVE reader — two live endpoints that can never match |
+| `scale` | Many participants and endpoints at once, so the scan can be measured at scale (`--scale-participants`, `--scale-endpoints-per-participant`, `--scale-topics`) |
 
 ## Relationship to rti_spy and rti_view
 

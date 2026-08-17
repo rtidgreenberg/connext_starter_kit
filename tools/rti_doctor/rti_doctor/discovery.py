@@ -287,51 +287,16 @@ def configure_type_lookup_qos(qos):
   return applied
 
 
-def configure_transport(qos, network_capture_active=False):
-  """Pick the probe's transport, and return the note the report will carry.
+def configure_transport(qos):
+  """Keep Connext's default transports and report the capture-relevant choice.
 
-  One decision in one place, because the two halves must not drift: forcing
-  UDP-only exists *solely* so a tshark capture can observe the probe, and RTI
-  Network Capture makes that unnecessary by instrumenting the participant
-  instead of an interface. Leaving the restriction on under network capture
-  would make the probe use a transport the application does not, buying no
-  observability at all - so the same condition has to govern both, and a caller
-  that could set one without the other would eventually set only one.
+  RTI Network Capture records rti_doctor's participant on every transport it
+  uses, including UDPv4 and shared memory. Restricting the probe to UDPv4 would
+  test a different path from a same-host application pair, so Doctor leaves the
+  participant transport policy untouched even when capture is disabled.
   """
-  if network_capture_active:
-    return "UDPv4 and shared memory (RTI Network Capture observes both)"
-  return configure_udp_only_transport(qos)
-
-
-def configure_udp_only_transport(qos):
-  """Restrict rti_doctor's own participant to UDPv4, disabling shared memory.
-
-  Transport is a participant-level policy in Connext - there is no per-writer
-  setting - so this is where a UDP-only probe has to be established.
-
-  Why: two participants on one host prefer SHMEM, and shared-memory traffic
-  never reaches a network interface, so tshark cannot observe it on any
-  interface with any filter. Measured against this repo's `healthy` fixture on
-  2026-08-13: the probe took 256 samples and counted 6 heartbeats while a
-  capture of ALL UDP for the same window carried only SPDP/SEDP and not one
-  HEARTBEAT. Packet evidence was structurally unobtainable for a same-host pair.
-
-  What it costs, and it is not nothing: the probe now exercises a DIFFERENT
-  transport from the one a same-host application pair uses. A UDP-only probe
-  that succeeds does not prove the application's shared-memory path works, and a
-  UDP-only probe that fails on reachability says nothing about SHMEM either. The
-  trade is deliberate - packet evidence an operator can actually read beats an
-  unobservable path - but every report says which transport it measured, which
-  is why this returns a string for the report's own-configuration appendix.
-
-  Never raises: a binding that does not expose the policy leaves the default in
-  place and says so, rather than costing the run its participant.
-  """
-  try:
-    qos.transport_builtin.mask = dds.TransportBuiltinMask.UDPv4
-    return "UDPv4 only (shared memory disabled, so captures can observe the probe)"
-  except Exception as error:
-    return f"default (UDP-only not applied: {error})"
+  del qos
+  return "Connext default transports (UDPv4 and shared memory enabled)"
 
 
 def create_participant(domain_id, name="RTI DOCTOR", registry=None,
@@ -342,11 +307,9 @@ def create_participant(domain_id, name="RTI DOCTOR", registry=None,
   missed between construction and listener installation - the same ordering
   rti_spy uses.
 
-  `network_capture_active` decides the transport. Forcing UDP-only exists purely
-  so a tshark capture can observe the probe; RTI Network Capture instruments the
-  participant instead of the interface and records shared memory too, so when it
-  is running the restriction is not just unnecessary but harmful - it would make
-  the probe use a transport the application does not, for no observability gain.
+  RTI Network Capture records the participant across its default UDPv4 and
+  shared-memory transports. Doctor does not narrow the transport policy, whether
+  or not participant capture is enabled.
   """
   previous_factory_qos = dds.DomainParticipant.participant_factory_qos
   factory_qos = dds.DomainParticipantFactoryQos()
@@ -363,8 +326,7 @@ def create_participant(domain_id, name="RTI DOCTOR", registry=None,
   if type_object_v1_only:
     configure_type_object_v1_only(qos)
   type_lookup_settings = configure_type_lookup_qos(qos)
-  type_lookup_settings["transport"] = configure_transport(
-      qos, network_capture_active)
+  type_lookup_settings["transport"] = configure_transport(qos)
   type_lookup_settings["type_object_discovery"] = (
       "v1-only" if type_object_v1_only else "default (v2 TypeLookup enabled)")
 

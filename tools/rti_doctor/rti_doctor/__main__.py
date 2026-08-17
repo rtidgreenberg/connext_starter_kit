@@ -147,13 +147,14 @@ def parse_args(argv=None):
                                  "question up front, so every endpoint report captures "
                                  "on entry without asking (no default: the TUI asks, "
                                  "and Skip is an answer)")
-  parser.add_argument("--network-capture", action="store_true",
+  parser.add_argument("--network-capture", action="store_true", default=True,
                       help="Record rti_doctor's own participant with RTI Network "
-                           "Capture while probing. Unlike --capture-interface this "
-                           "needs no interface and no capture privileges, and it "
-                           "observes SHARED MEMORY traffic that no interface capture "
-                           "can see. It must be enabled before any DDS entity exists, "
-                           "so it is a launch flag and cannot be turned on later")
+                           "Capture while probing (default; use --no-network-capture "
+                           "to disable)")
+  parser.add_argument("--no-network-capture", action="store_false",
+                      dest="network_capture",
+                      help="Do not record rti_doctor's own participant with RTI "
+                           "Network Capture")
   parser.add_argument("--write-samples", action="store_true",
                       help="Let the probe PUBLISH synthetic samples when the selected "
                            "endpoint is a reader, to verify delivery end to end. The "

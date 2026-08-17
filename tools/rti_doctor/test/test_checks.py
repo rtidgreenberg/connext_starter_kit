@@ -2607,78 +2607,40 @@ class TestNetworkCapture(unittest.TestCase):
     self.assertIn("before any other Connext call", reason)
 
 
-class TestUdpOnlyTransport(unittest.TestCase):
-  """rti_doctor's own participant is UDP-only so a capture can observe it.
+class TestDefaultTransport(unittest.TestCase):
+  """rti_doctor preserves Connext's default UDPv4 and SHMEM transports."""
 
-  Transport is participant-level in Connext, so this is set once on the
-  diagnostic participant rather than per probe entity.
-  """
-
-  def test_network_capture_leaves_shared_memory_enabled(self):
-    """The restriction exists only so tshark can see the probe.
-
-    RTI Network Capture instruments the participant instead of the interface and
-    records shared memory too, so forcing UDP there would make the probe use a
-    transport the application does not, for no observability gain at all.
-    """
+  def test_transport_is_unchanged_when_network_capture_is_enabled(self):
     import rti.connextdds as dds
     qos = dds.DomainParticipantQos()
     default = dds.DomainParticipantQos().transport_builtin.mask
-    note = discovery.configure_transport(qos, network_capture_active=True)
+    note = discovery.configure_transport(qos)
     self.assertEqual(qos.transport_builtin.mask, default,
                      "network capture must leave the transport untouched")
     self.assertIn("shared memory", note)
 
-  def test_without_network_capture_the_transport_is_narrowed(self):
+  def test_transport_is_unchanged_when_network_capture_is_disabled(self):
     import rti.connextdds as dds
     qos = dds.DomainParticipantQos()
-    note = discovery.configure_transport(qos, network_capture_active=False)
-    self.assertEqual(qos.transport_builtin.mask,
-                     dds.TransportBuiltinMask.UDPv4)
-    self.assertIn("UDPv4 only", note)
-
-  def test_the_mask_is_narrowed_to_udpv4(self):
-    """The default is UDPv4|SHMEM (0b11); SHMEM is what has to come off.
-
-    Compared by equality rather than by `test`/`test_any`: on this binding
-    `TransportBuiltinMask.test` takes a bit position and `test_any` takes no
-    argument at all, so both read as False against a mask value and would pass
-    this test for the wrong reason.
-    """
-    import rti.connextdds as dds
-    qos = dds.DomainParticipantQos()
-    self.assertNotEqual(qos.transport_builtin.mask,
-                        dds.TransportBuiltinMask.UDPv4)
-    note = discovery.configure_udp_only_transport(qos)
-    self.assertEqual(qos.transport_builtin.mask,
-                     dds.TransportBuiltinMask.UDPv4)
-    self.assertIn("UDPv4 only", note)
-
-  def test_an_unsettable_policy_costs_the_run_nothing(self):
-    """A binding without the policy must leave the default, not raise."""
-    class Frozen:
-      @property
-      def transport_builtin(self):
-        raise RuntimeError("not available on this binding")
-
-    note = discovery.configure_udp_only_transport(Frozen())
-    self.assertIn("not applied", note)
+    default = dds.DomainParticipantQos().transport_builtin.mask
+    note = discovery.configure_transport(qos)
+    self.assertEqual(qos.transport_builtin.mask, default)
+    self.assertIn("default transports", note)
 
   def test_the_transport_choice_reaches_the_report(self):
     """Every report must say which transport it measured over.
 
-    A UDP-only probe does not exercise the shared-memory path a same-host
-    application pair uses, so the report cannot leave the reader to assume.
+    The report must name the default transports a same-host probe can use.
     """
     import rti.connextdds as dds
     from rti_doctor import report as report_module
-    settings = {"transport": discovery.configure_udp_only_transport(
-        dds.DomainParticipantQos())}
+    settings = {"transport": discovery.configure_transport(
+      dds.DomainParticipantQos())}
     text = report_module.render_text(report_module.ReportData(
         domain_id=7, scope="topic 'T'", all_findings=[],
         type_lookup_settings=settings))
     self.assertIn("transport", text)
-    self.assertIn("UDPv4 only", text)
+    self.assertIn("default transports", text)
 
 
 class TestReportReadability(unittest.TestCase):

@@ -1,10 +1,10 @@
 # RTI Doctor
 
 `rti_doctor` is a Python/Textual DDS **interoperability diagnostic**. You point it
-at a domain, it discovers every participant on it — including ones from Fast DDS,
-Cyclone DDS, OpenDDS, or OpenSplice — and for any topic it tells you whether
-communication is possible, whether samples can be fully deserialized, and what the
-most likely root cause is when they can't.
+at a domain, it discovers every participant on it, including ones from other DDS
+vendors, and for any topic it tells you whether communication is possible, whether
+samples can be fully deserialized, and what the most likely root cause is when they
+can't.
 
 It is an **observer inserted into a running system**, not a replacement for one
 side of it. Because it sees both the writers' offered QoS and the readers'
@@ -19,16 +19,15 @@ each time: see [Verifying Delivery to a Reader](#verifying-delivery-to-a-reader-
 
 ## Requirements
 
-**Connext** — an RTI Connext DDS install and a license. `run_rti_doctor.sh`
-resolves `NDDSHOME` and the license file itself; set `NDDSHOME` or
-`RTI_LICENSE_FILE` only to override what it finds. See
-[Supported Connext Versions](#supported-connext-versions).
+**Connext Python API** — the launcher uses the repository's shared Python
+bootstrap to find or install it. See [Supported Connext
+Versions](#supported-connext-versions).
 
-**Python** — nothing to install by hand. The launcher creates a virtual
-environment named for the detected Connext and Python versions
-(`connext_dds_env_<connext>_py<python>/` at the repo root), installs
-`requirements.txt` into it on **every** launch, and installs the `rti.connext`
-matching your `NDDSHOME`.
+**Python** — nothing to install by hand. The launcher creates the matching
+repository-local virtual environment and synchronizes its runtime dependencies
+on every launch. 7.3 uses `connext_dds_env_7.3/`; 7.7 uses
+`connext_dds_env/` for Python 3.10 or `connext_dds_env_7.7_py<python>/` for a
+newer supported Python version.
 
 **tshark — optional, and only for wire evidence.** Doctor runs fully without it:
 `--pcap`, `--capture-interface` and the TUI's capture step are the only things
@@ -63,6 +62,25 @@ From the repository root:
 ./tools/rti_doctor/run_rti_doctor.sh
 ```
 
+The launcher calls `scripts/python_env.sh` to find `NDDSHOME`, create the
+matching repository-local virtual environment, install the Connext Python API
+and Doctor's runtime dependencies, and resolve a license. With a native Connext
+installation, it automatically uses the bundled activated wheel. Otherwise, an
+interactive terminal prompts you to download the public PyPI package or provide
+an activated wheel. The PyPI choice needs `RTI_LICENSE_FILE` when the launcher
+cannot find one automatically.
+
+To use packet capture, also install `tshark`; the wire checks are tested with
+Wireshark/tshark 4.4.9:
+
+```bash
+sudo apt install tshark          # Debian/Ubuntu
+```
+
+Capture provides wire evidence that discovery alone cannot: RTPS reliable
+handshake traffic, user-data representation, and a Fast DDS peer's product
+version when it advertises one.
+
 You'll be asked for a domain ID exactly as `rti_spy` asks, then get a system
 overview. Use `Up`/`Down` and `Enter` to choose Issues or DDS Topology & Health.
 The Issues menu shows Errors, Warnings, and Info with their current counts;
@@ -85,6 +103,27 @@ selecting one shows only that severity. Keys:
 
 Every screen shows a *snapshot*, not a live view, so a reading never changes
 under you while you read it. `r` takes a new one.
+
+## Deploy With an Activated Wheel
+
+To install a supplied activated wheel on the deployment machine, run:
+
+```bash
+RTI_PYTHON_SOURCE=activated-wheel \
+RTI_PYTHON_WHEEL=/opt/rti-wheels/rti_connext_activated-<version>-cp<python>-<platform>.whl \
+./tools/rti_doctor/run_rti_doctor.sh --domain 1 --system
+```
+
+This creates the repository-local virtual environment and installs the wheel.
+For later runs, omit both `RTI_PYTHON_SOURCE` and `RTI_PYTHON_WHEEL`; the default
+`auto` mode reuses the matching installed activated package:
+
+```bash
+./tools/rti_doctor/run_rti_doctor.sh --domain 1 --system
+```
+
+No separate `RTI_LICENSE_FILE` configuration is needed. When a native Connext
+installation is present, `auto` also finds its matching bundled activated wheel.
 
 ## Packet Capture Is Something You Ask For
 
@@ -129,52 +168,32 @@ one endpoint, so a version that *is* found is narrowed to the GUID prefix that
 advertised it — otherwise a Connext report sharing a domain with a Fast DDS
 writer would lead with that writer's version as though it were its own.
 
-### RTI Network Capture: the shared-memory half (`--network-capture`)
+### RTI Network Capture (`--no-network-capture` to disable)
 
-`tshark` reads interfaces. RTI Network Capture instruments the **participant**,
-so it records what rti_doctor's own probe actually sent and received on every
-transport it used — **including shared memory**, which no interface capture can
-observe. Verified on this host: 81 RTPS frames with 15 HEARTBEAT and 14 ACKNACK,
-carrying no IP layer at all, dissected by `tshark` as ordinary RTPS. It writes a
-standard PCAP, so the same parser and the same appendix read it.
+RTI's `nddsnetworkcapture` instruments the **participant** and writes a standard
+PCAP of rti_doctor's own probe traffic on every transport it used, including UDP
+and **shared memory**, which no interface capture can observe. Doctor then uses
+`tshark` to parse that generated PCAP as ordinary RTPS. Verified on this host:
+81 RTPS frames with 15 HEARTBEAT and 14 ACKNACK, carrying no IP layer at all.
 
 Two properties follow from how it works, and both are stated in every report:
 
-* **It is a launch flag, not a keypress.** The binding requires `enable()`
-  before *any* other Connext call, so it is decided before the participant
-  exists. `--capture-interface` can still be chosen or changed at any time.
+* **It starts by default, before any DDS call.** The binding requires `enable()`
+  before *any* other Connext call, so `--no-network-capture` must be supplied at
+  launch to disable it. `--capture-interface` can still be chosen or changed at
+  any time.
 * **It is scoped to one participant — ours.** It shows rti_doctor's conversation
   with the peer in both directions and nothing else. It can never show traffic
   between two other participants, which is exactly what an interface capture is
   good at. The two are complements; Appendix C reports them separately.
 
-With `--network-capture` the UDP-only restriction below is lifted, because the
-reason for it is gone.
+### rti_doctor uses Connext's default transports
 
-### rti_doctor's own participant is UDP-only
-
-Two participants on one host prefer the **shared-memory** transport, and SHMEM
-traffic never reaches a network interface — so no capture, on any interface,
-with any filter, can observe it. Measured against the `healthy` fixture on
-2026-08-13: the probe took 256 samples and counted 6 heartbeats while a capture
-of *all* UDP for the same window carried only SPDP/SEDP and not one HEARTBEAT.
-
-rti_doctor therefore restricts its own participant to UDPv4
-(`transport_builtin.mask`), which is a participant-level policy in Connext.
-With it, the same run captured 57 DATA, 6 HEARTBEAT and 2 ACKNACK frames, and
-the packet counts matched the status counters exactly.
-
-The cost is real and every report states it in the own-configuration appendix
-(lettered `D` when a packet appendix is present and `C` when it is not, so the
-section order stays fixed either way): the probe exercises a
-**different transport** from the one a same-host application pair uses. A
-UDP-only probe that succeeds does not prove the application's shared-memory path
-works. Capturing a same-host pair on `lo` — not the host's NIC — is what makes
-their UDP traffic visible, because a local destination address routes over
-loopback.
-
-Prefer `--network-capture` when the pair is on one host: it observes shared
-memory directly, so the transport never has to be changed to be measured.
+rti_doctor leaves `transport_builtin.mask` unchanged, so its participant uses
+Connext's default UDPv4 and shared-memory transports. RTI Network Capture records
+both for Doctor's own participant; `tshark` parses the resulting PCAP. An
+interface capture remains useful for traffic among other participants, but it
+cannot observe same-host shared-memory traffic.
 
 ## Verifying Delivery to a Reader (`w`, `--write-samples`)
 
@@ -263,8 +282,10 @@ system it was pointed at.
               In the TUI it answers the capture question up front, so every
               endpoint report captures on entry without asking (no default:
               the TUI asks, and Skip is an answer)
-    --network-capture Record our own participant with RTI Network Capture,
-              shared memory included. A launch flag by necessity - see below
+    --network-capture Record our own participant with RTI Network Capture
+          (default)
+    --no-network-capture
+          Disable RTI Network Capture for our own participant
     --write-samples   Let the probe PUBLISH synthetic samples when the selected
               endpoint is a reader. Consent, not a default - see below
     --ready-file PATH Write PATH once the participant exists (test hook)
@@ -314,7 +335,7 @@ guess about another finding.
 |---|---|
 | `0` | A diagnosis ran and reported no ERROR-severity finding |
 | `1` | A diagnosis ran and reported at least one ERROR-severity finding |
-| `2` | The named topic was not found — or the arguments were rejected |
+| `2` | The named topic was not found |
 | `3` | `--ready-after-participants` was not met before `--ready-timeout` |
 | `4` | Doctor could not run: no license, an unusable domain, a failed startup |
 | `130` | Interrupted (`Ctrl-C`) |
@@ -325,8 +346,8 @@ traceback, so a CI job could not tell "your system has an error" from "Doctor
 never ran". A `4` prints one line on stderr saying what failed; the traceback
 goes to `--debug-log`.
 
-`2` is still overloaded — argparse rejects a bad command line with it as well —
-so a wrapper that retries on "topic absent" should check stderr before looping.
+Rejected arguments exit `4`, so CI can distinguish a missing topic from a
+command line that Doctor could not run.
 
 ## Manual Scenarios
 

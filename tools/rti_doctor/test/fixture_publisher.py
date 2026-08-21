@@ -22,13 +22,16 @@ Modes:
 import argparse
 import glob
 import os
+import random
 import sys
 import time
 
 import rti.connextdds as dds
 
 MODES = ("healthy", "best_effort", "no_type_info", "type_conflict",
-         "large_data", "partition", "bad_pair", "scale")
+         "large_data", "partition", "bad_pair", "scale", "mixed_qos")
+
+MIXED_QOS_POLICIES = ("reliability", "durability", "deadline", "ownership")
 
 
 def configure_rti_environment():
@@ -167,6 +170,114 @@ def run_scale(args):
   return 0
 
 
+def mixed_qos_plan(topic_count, seed):
+  """Two reproducibly chosen incompatible QoS policies for every topic."""
+  chooser = random.Random(seed)
+  return [tuple(chooser.sample(MIXED_QOS_POLICIES, 2))
+          for _ in range(topic_count)]
+
+
+def _mixed_reader_qos():
+  qos = dds.DataReaderQos()
+  qos.reliability.kind = dds.ReliabilityKind.RELIABLE
+  qos.durability.kind = dds.DurabilityKind.TRANSIENT_LOCAL
+  qos.deadline.period = dds.Duration(1)
+  qos.ownership.kind = dds.OwnershipKind.EXCLUSIVE
+  return qos
+
+
+def _mixed_writer_qos(incompatible_policies=()):
+  """A compatible writer, optionally weakened on the named QoS policies."""
+  qos = dds.DataWriterQos()
+  qos.reliability.kind = dds.ReliabilityKind.RELIABLE
+  qos.durability.kind = dds.DurabilityKind.TRANSIENT_LOCAL
+  qos.deadline.period = dds.Duration(1)
+  qos.ownership.kind = dds.OwnershipKind.EXCLUSIVE
+  if "reliability" in incompatible_policies:
+    qos.reliability.kind = dds.ReliabilityKind.BEST_EFFORT
+  if "durability" in incompatible_policies:
+    qos.durability.kind = dds.DurabilityKind.VOLATILE
+  if "deadline" in incompatible_policies:
+    qos.deadline.period = dds.Duration(3)
+  if "ownership" in incompatible_policies:
+    qos.ownership.kind = dds.OwnershipKind.SHARED
+  return qos
+
+
+def run_mixed_qos(args):
+  """Five applications and six topics with two good and two bad pairs each.
+
+  Every topic has two writers and two readers. The compatible writer offers the
+  QoS both readers request, so it matches twice. The other writer is weakened
+  on two selected policies, so it mismatches both readers. This produces the
+  useful $2 \times 2$ matrix: two matching pairs and two QoS errors per topic.
+  """
+  dynamic_type = build_rich_type(args.type_name)
+  participants, held, topics = [], [], {}
+  plan = mixed_qos_plan(args.mixed_topics, args.mixed_seed)
+
+  for index in range(args.mixed_participants):
+    qos = dds.DomainParticipantQos()
+    qos.participant_name.name = f"{args.participant_name}_app_{index + 1}"
+    participant = dds.DomainParticipant(args.domain, qos=qos)
+    participants.append(participant)
+    topics[index] = {}
+    held += [dds.Publisher(participant), dds.Subscriber(participant)]
+
+  def topic_for(participant_index, topic_name):
+    topic = topics[participant_index].get(topic_name)
+    if topic is None:
+      topic = dds.DynamicData.Topic(participants[participant_index], topic_name,
+                                    dynamic_type)
+      topics[participant_index][topic_name] = topic
+      held.append(topic)
+    return topic
+
+  writers = []
+  for index, incompatible_policies in enumerate(plan):
+    topic_name = f"{args.topic}_{index + 1:02d}"
+    good_writer_index = index % args.mixed_participants
+    bad_writer_index = (index + 1) % args.mixed_participants
+    reader_indices = ((index + 2) % args.mixed_participants,
+                      (index + 3) % args.mixed_participants)
+    good_publisher = held[good_writer_index * 2]
+    bad_publisher = held[bad_writer_index * 2]
+    writers.append(dds.DynamicData.DataWriter(
+        good_publisher, topic_for(good_writer_index, topic_name),
+        _mixed_writer_qos()))
+    writers.append(dds.DynamicData.DataWriter(
+        bad_publisher, topic_for(bad_writer_index, topic_name),
+        _mixed_writer_qos(incompatible_policies)))
+    held += writers[-2:]
+    for reader_index in reader_indices:
+      subscriber = held[reader_index * 2 + 1]
+      reader = dds.DynamicData.DataReader(
+          subscriber, topic_for(reader_index, topic_name), _mixed_reader_qos())
+      held.append(reader)
+    print(f"mixed QoS topic={topic_name}: 2 matching pairs; 2 incompatible "
+          f"pairs ({', '.join(incompatible_policies).upper()})", flush=True)
+
+  print(f"publishing mode=mixed_qos domain={args.domain} "
+        f"participants={args.mixed_participants} topics={args.mixed_topics} "
+      f"endpoints={args.mixed_topics * 4} "
+        f"seed={args.mixed_seed}", flush=True)
+  deadline, counter = time.monotonic() + args.duration, 0
+  try:
+    while time.monotonic() < deadline:
+      counter += 1
+      for writer in writers:
+        sample = dds.DynamicData(dynamic_type)
+        populate_rich(sample, counter)
+        writer.write(sample)
+      time.sleep(args.period)
+  except KeyboardInterrupt:
+    pass
+  finally:
+    for participant in participants:
+      participant.close()
+  return 0
+
+
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("--mode", choices=MODES, default="healthy")
@@ -183,6 +294,12 @@ def main():
                       help="scale mode: how many distinct topics to spread over")
   parser.add_argument("--scale-endpoints-per-participant", type=int, default=16,
                       help="scale mode: readers+writers created per participant")
+  parser.add_argument("--mixed-participants", type=int, default=5,
+                      help="mixed_qos mode: named applications to create")
+  parser.add_argument("--mixed-topics", type=int, default=6,
+                      help="mixed_qos mode: topics with two good and two bad pairs")
+  parser.add_argument("--mixed-seed", type=int, default=42,
+                      help="mixed_qos mode: reproducible QoS-policy selection")
   args = parser.parse_args()
 
   configure_rti_environment()
@@ -200,6 +317,10 @@ def main():
 
   if args.mode == "scale":
     return run_scale(args)
+  if args.mode == "mixed_qos":
+    if args.mixed_participants != 5 or args.mixed_topics != 6:
+      parser.error("mixed_qos requires exactly 5 participants and 6 topics")
+    return run_mixed_qos(args)
 
   participant = dds.DomainParticipant(args.domain, qos=participant_qos)
 

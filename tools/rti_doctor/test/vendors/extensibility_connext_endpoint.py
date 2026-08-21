@@ -79,6 +79,15 @@ def write_ready_file(path):
     ready_file.write("ready\n")
 
 
+def sleep_or_interrupt(seconds):
+  """Sleep between polls, returning false when Ctrl-C requests shutdown."""
+  try:
+    time.sleep(seconds)
+  except KeyboardInterrupt:
+    return False
+  return True
+
+
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("--domain", type=int, required=True)
@@ -199,7 +208,8 @@ def main():
       results["matched"] = max(results["matched"], writer.publication_matched_status.current_count)
       results["samples"] += 1
       observe_contact(writer, "offered_incompatible_qos_status")
-      time.sleep(0.05)
+      if not sleep_or_interrupt(0.05):
+        break
   else:
     reader_qos = dds.DataReaderQos()
     reader_qos.data_representation.value = [int(
@@ -221,7 +231,8 @@ def main():
       results["matched"] = max(results["matched"], reader.subscription_matched_status.current_count)
       results["samples"] += sum(1 for sample in reader.take() if sample.info.valid)
       observe_contact(reader, "requested_incompatible_qos_status")
-      time.sleep(0.05)
+      if not sleep_or_interrupt(0.05):
+        break
 
   participant.close()
   if results["incompatible_policies"]:

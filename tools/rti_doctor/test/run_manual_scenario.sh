@@ -22,6 +22,7 @@ Scenarios:
   large-data                  Fragmented Connext samples; expect INFO fragmentation.
   partition                   Writer in a named partition; Doctor mirrors it.
   bad-pair                    Writer plus incompatible Connext reader; expect RxO ERROR.
+    mixed-qos-topology          Five apps, six topics; two matching and two incompatible pairs each.
   rxo-compatible              Connext writer/reader with compatible RELIABILITY.
   rxo-reliability-mismatch    BEST_EFFORT writer and RELIABLE reader; expect RxO ERROR.
     connext-cyclone-compatible  Connext writer and Cyclone reader with compatible RELIABILITY.
@@ -66,6 +67,7 @@ scenarios=(
     large-data
     partition
     bad-pair
+    mixed-qos-topology
     rxo-compatible
     rxo-reliability-mismatch
     connext-cyclone-compatible
@@ -268,6 +270,27 @@ EOF
         --participant-name "$MANUAL_PARTICIPANT_PREFIX"
 }
 
+run_mixed_qos_topology() {
+    local topic_prefix="$topic"
+    if [[ "$topic_prefix" == "DoctorManual" ]]; then
+        topic_prefix="DoctorManualMixed"
+    fi
+    cat <<EOF
+Mixed QoS topology started: domain=${domain}, topics=${topic_prefix}_01 through ${topic_prefix}_06
+Participants: ${MANUAL_PARTICIPANT_PREFIX}_app_1 through ${MANUAL_PARTICIPANT_PREFIX}_app_5
+Each topic has two writers and two readers: the compatible writer matches both
+readers; the other writer mismatches both readers on two seeded QoS policies.
+In another terminal, run:
+    ./tools/rti_doctor/run_rti_doctor.sh --domain ${domain}
+Inspect any ${topic_prefix}_NN topic. Expected result: two compatible writer-reader
+pairs and two qos.rxo_mismatch findings naming the printed QoS policies.
+EOF
+    PYTHONPATH="$TOOL_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+        python "$SCRIPT_DIR/fixture_publisher.py" --mode mixed_qos \
+        --domain "$domain" --topic "$topic_prefix" --duration "$duration" \
+        --participant-name "$MANUAL_PARTICIPANT_PREFIX"
+}
+
 start_rxo_endpoint() {
     local vendor="$1"
     local role="$2"
@@ -443,6 +466,9 @@ case "$scenario" in
             bad-pair) expected="qos.rxo_mismatch naming RELIABILITY and OWNERSHIP." ;;
         esac
         run_fixture "$fixture_mode" "$expected"
+        ;;
+    mixed-qos-topology)
+        run_mixed_qos_topology
         ;;
     rxo-compatible)
         run_rxo_pair connext connext compatible \

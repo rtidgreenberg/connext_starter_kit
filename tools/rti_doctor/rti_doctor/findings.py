@@ -154,13 +154,13 @@ CAUSAL_EXPLAINERS = {
         "transport.class_mismatch",
         "security.mismatch",
         "type.no_type_info",
-        "match.incompatible_qos",
+        "qos.rxo_mismatch",
         "repr.no_common",
     ),
     # A reader that could not be created is usually explained entirely by the
     # missing type.
     "probe.not_created": ("type.no_type_info",),
-    "data.silent": ("match.none", "match.incompatible_qos"),
+    "data.silent": ("match.none", "qos.rxo_mismatch"),
     "data.window": ("data.fragmentation",),
     "payload.partial": ("data.deserialize_failure",),
     "endpoint.none": (

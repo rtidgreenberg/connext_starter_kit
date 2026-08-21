@@ -1928,12 +1928,13 @@ class TestProbeMatchScoping(unittest.TestCase):
       policies = ()
     return Status()
 
-  def test_incompatible_qos_is_an_error_only_when_attributable(self):
+  def test_incompatible_qos_with_one_matched_writer_is_a_topic_warning(self):
+    """An incompatible writer cannot be identified from matched publications."""
     probe_result = FakeProbe(requested_incompatible_qos=self._status("DATA_REPRESENTATION"),
                              correlated=True, matched_other_count=0)
     result = probe_match.check_incompatible_qos(CheckContext(probe=probe_result))
-    self.assertEqual(ids(result), ["match.incompatible_qos"])
-    self.assertEqual(result[0].severity, f.Severity.ERROR)
+    self.assertEqual(ids(result), ["match.incompatible_qos_topic"])
+    self.assertEqual(result[0].severity, f.Severity.WARN)
 
   def test_incompatible_qos_with_other_writers_is_a_topic_warning(self):
     """The status is reader-side and does not name the writer that caused it."""
@@ -2139,8 +2140,8 @@ class TestCorrelationDoesNotOverclaim(unittest.TestCase):
     probe._correlate(FakeMatchedPublicationReader({"h1": "w1"}), endpoint, result)
     self.assertEqual(result.matched_other_count, 0)
 
-  def test_transient_neighbour_does_not_downgrade_a_real_incompatibility(self):
-    """The end state is what counts: exit code 1 must survive a transient."""
+  def test_no_matched_neighbour_does_not_attribute_an_incompatibility(self):
+    """Incompatible peers cannot appear in the matched-publications list."""
     class Status:
       total_count = 1
       last_policy = "RELIABILITY"
@@ -2148,8 +2149,8 @@ class TestCorrelationDoesNotOverclaim(unittest.TestCase):
     probe_result = FakeProbe(requested_incompatible_qos=Status(),
                              correlated=True, matched_other_count=0)
     result = probe_match.check_incompatible_qos(CheckContext(probe=probe_result))
-    self.assertEqual(ids(result), ["match.incompatible_qos"])
-    self.assertEqual(result[0].severity, f.Severity.ERROR)
+    self.assertEqual(ids(result), ["match.incompatible_qos_topic"])
+    self.assertEqual(result[0].severity, f.Severity.WARN)
 
   def test_unresolvable_publication_also_blocks_attribution(self):
     class Status:

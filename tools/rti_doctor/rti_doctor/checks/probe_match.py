@@ -152,11 +152,9 @@ def check_incompatible_qos(context):
   observed.append(_scope_text(probe))
 
   # requested_incompatible_qos is a READER status: it says some writer on this
-  # topic offered a policy the reader would not accept, never which one. It may
-  # only be reported as a fact about the selected writer when that writer is the
-  # only one this reader could have rejected.
-  attributable = (probe.correlated and not probe.matched_other_count
-                  and not probe.matched_unreadable_count)
+  # topic offered a policy the reader would not accept, never which one.
+  # Matched-publication handles cannot close that gap: incompatible writers are
+  # not matched and therefore absent from that list.
 
   root = ("A reader and writer only communicate when every requested-offered "
           "(RxO) policy is compatible. ")
@@ -165,37 +163,19 @@ def check_incompatible_qos(context):
   else:
     root += ("The reported policy could not be mapped to a known RxO rule; treat "
              "the policy name as authoritative.")
-  # Worth stating: the probe mirrors the writer's QoS, so an incompatibility here
-  # is not an artefact of the probe's own choices.
-  root += (" Note that rti_doctor's probe mirrors the discovered writer's QoS, so "
-           "this mismatch is not caused by the probe requesting something unusual "
-           "- it reflects a policy the writer offers that no compliant reader can "
-           "accept, or one that could not be mirrored on this version.")
+  root += (" The status is aggregated across writers on this topic, so it does "
+           "not identify which discovered writer offered the incompatible policy.")
 
   evidence = {"total_count": total, "last_policy": str(policy),
               "policies": policy_detail,
               "probe_reader_qos": probe.applied_reader_qos,
+              "status_scope": "topic",
               "writer_identified": probe.correlated,
               "other_writers_matched": probe.matched_other_count}
 
-  if attributable:
-    return [Finding(
-        id="match.incompatible_qos",
-        rung=RUNG_MATCH,
-        severity=Severity.ERROR,
-        title=f"Incompatible QoS: {policy}",
-        observed="; ".join(observed),
-        root_cause=root,
-        remedy=(f"Align the {policy} policy between writer and reader. The reader "
-                f"is the constrained side: it must request no more than the writer "
-                f"offers."),
-        evidence=evidence,
-    )]
-
-  # Deliberately a DIFFERENT id, at WARN. It is not registered in
-  # CAUSAL_EXPLAINERS, so an unattributable rejection is never offered as the
-  # explanation for data.silent or match.none - a maybe must not be presented
-  # as the cause of a real symptom.
+  # This id is deliberately absent from CAUSAL_EXPLAINERS: an aggregate
+  # topic-level rejection must not be offered as the explanation for a
+  # pair-specific symptom.
   return [Finding(
       id="match.incompatible_qos_topic",
       rung=RUNG_MATCH,

@@ -386,7 +386,8 @@ SAMPLE_LOST | SAMPLE_REJECTED | SUBSCRIPTION_MATCHED`, plus polling of
 |---|---|---|
 | `qos.rxo_predict` | Predict incompatibility *before* creating a reader | writer QoS vs planned reader QoS across reliability, durability, deadline, liveliness, ownership, destination_order, presentation, partition, representation |
 | `match.none` | Never matched within `--probe-timeout` | `subscription_matched_status.current_count` |
-| `match.incompatible_qos` | Exactly which policy blocked it | `requested_incompatible_qos_status.last_policy` + `.policies`, mapped to a plain-English RxO rule |
+| `qos.rxo_mismatch` | Exactly which discovered writer-reader pair and policy are incompatible | Direct comparison of their discovery QoS under the requested/offered rules |
+| `match.incompatible_qos_topic` | A probe reader encountered an incompatible writer on its topic | `requested_incompatible_qos_status.last_policy` + `.policies`; aggregate status, not pair attribution |
 | `match.topic_inconsistent` | Local topic definition conflict | `InconsistentTopicStatus.total_count` (Topic-level, not reader-level) |
 
 ### Deferred Payload-Health Diagnosis
@@ -542,7 +543,7 @@ Deliverables: separate-process publishers modeled on
 
 - `fixture_healthy.py` — baseline, expect `FULL`
 - `fixture_qos_mismatch.py` — BEST_EFFORT writer against a stricter reader
-  → expect `match.incompatible_qos` naming RELIABILITY
+  → expect `qos.rxo_mismatch` naming RELIABILITY
 - `fixture_no_type_info.py` — `type_object_max_serialized_length = 0`
   → expect `type.no_type_info` with the "propagation disabled" sub-reason
 - `fixture_type_conflict.py` — same topic, different type

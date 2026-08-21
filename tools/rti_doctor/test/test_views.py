@@ -546,6 +546,20 @@ class TestPairedIssueOpensAReport(unittest.TestCase):
     self.assertEqual([role for role, _, _ in pushed.choices],
                      ["Writer (offers)", "Reader (requests)"])
 
+  def test_issue_detail_prioritizes_endpoint_pages_over_raw_identifiers(self):
+    issue = issue_with(
+        writer_keys=("w1",), reader_keys=("r1",),
+        evidence={"writer": "Writer in 'writer-app'", "reader": "Reader in 'reader-app'"})
+    text = system_overview._issue_endpoint_navigation(self.session, issue)
+    self.assertIn("Writer (offers): Writer in 'writer-app'", text)
+    self.assertIn("Reader (requests): Reader in 'reader-app'", text)
+    self.assertIn("[bold]Endpoint pages[/bold]", text)
+    self.assertIn("Press [bold]o[/bold] to choose an endpoint page.", text)
+    technical_ids = system_overview._issue_technical_ids(issue)
+    self.assertIn("[bold]Technical identifiers[/bold]", technical_ids)
+    self.assertIn("Writers: w1", technical_ids)
+    self.assertIn("Readers: r1", technical_ids)
+
   def test_one_endpoint_opens_its_report_directly(self):
     pushed, _ = self._opened(issue_with(writer_keys=("w1",)))
     self.assertNotIsInstance(pushed, system_overview.EndpointChoiceScreen)

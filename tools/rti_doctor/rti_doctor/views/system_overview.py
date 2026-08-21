@@ -46,6 +46,28 @@ def _issue_endpoints(session, issue):
   return found
 
 
+def _issue_endpoint_navigation(session, issue):
+  """Detail text naming issue endpoints and the action that opens one."""
+  endpoints = _issue_endpoints(session, issue)
+  lines = [f"{role}: {label}" for role, label, _ in endpoints]
+  if not lines:
+    return "[bold]Endpoint pages[/bold]\n(none still in discovery)"
+  return ("[bold]Endpoint pages[/bold]\n" + "\n".join(lines)
+          + "\nPress [bold]o[/bold] to choose an endpoint page.")
+
+
+def _issue_technical_ids(issue):
+  """Secondary discovery IDs for operators who need to correlate raw evidence."""
+  lines = []
+  if issue.writer_keys:
+    lines.append(f"Writers: {', '.join(issue.writer_keys)}")
+  if issue.reader_keys:
+    lines.append(f"Readers: {', '.join(issue.reader_keys)}")
+  if issue.participant_keys:
+    lines.append(f"Participants: {', '.join(issue.participant_keys)}")
+  return "[bold]Technical identifiers[/bold]\n" + "\n".join(lines) if lines else ""
+
+
 def _open_issue_report(screen, session, issue):
   """Open a targeted report for `issue`, asking which endpoint when ambiguous.
 
@@ -439,7 +461,7 @@ class IssueListScreen(Screen):
 
 
 class EndpointChoiceScreen(Screen):
-  """Pick which endpoint of a multi-endpoint issue to diagnose."""
+  """Pick which endpoint page of a multi-endpoint issue to open."""
 
   BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
               ("q", "quit_app", "Quit")]
@@ -455,7 +477,7 @@ class EndpointChoiceScreen(Screen):
     yield Header()
     yield Static(f"[bold]{escape(self.issue.title)}[/bold]")
     yield Static("This issue involves more than one endpoint. Choose which one "
-                 "to diagnose - a targeted report describes one endpoint.")
+                 "to open - each endpoint page describes one endpoint.")
     with Container(id="endpoint_choice"):
       yield self.table
     yield Footer()
@@ -505,13 +527,14 @@ class IssueDetailScreen(Screen):
       lines = [f"[bold]{self.issue.severity.label}: {self.issue.title}[/bold]", "",
                f"Finding: {', '.join(self.issue.finding_ids)}",
                f"Scope: {self.issue.scope}",
-               f"Topic: {self.issue.topic_name or '(domain-wide)'}",
-               f"Writers: {', '.join(self.issue.writer_keys) or '(none)'}",
-               f"Readers: {', '.join(self.issue.reader_keys) or '(none)'}",
-               f"Participants: {', '.join(self.issue.participant_keys) or '(none)'}", "",
+               f"Topic: {self.issue.topic_name or '(domain-wide)'}", "",
+               _issue_endpoint_navigation(self.session, self.issue), "",
                "[bold]Observed[/bold]", self.issue.observed or "(none)", "",
                "[bold]Likely cause[/bold]", self.issue.root_cause or "(none)", "",
                "[bold]Recommendation[/bold]", self.issue.recommendation or "(none)"]
+      technical_ids = _issue_technical_ids(self.issue)
+      if technical_ids:
+        lines += ["", technical_ids]
       yield Static("\n".join(lines))
     self.status = Static("", id="issue_detail_status")
     yield self.status

@@ -182,8 +182,9 @@ Two properties follow from how it works, and both are stated in every report:
 
 * **It starts by default, before any DDS call.** The binding requires `enable()`
   before *any* other Connext call, so `--no-network-capture` must be supplied at
-  launch to disable it. `--capture-interface` can still be chosen or changed at
-  any time.
+  launch to disable it. The TUI asks for an interface before the first endpoint
+  diagnostic and keeps that choice for the session; restart Doctor to choose a
+  different interface.
 * **It is scoped to one participant — ours.** It shows rti_doctor's conversation
   with the peer in both directions and nothing else. It can never show traffic
   between two other participants, which is exactly what an interface capture is
@@ -643,6 +644,16 @@ pip install -r tools/rti_doctor/requirements.txt \
             -r tools/rti_doctor/requirements-dev.txt
 ```
 
+```bash
+export VENV_PYTHON=$(ls -d connext_dds_env_*/bin/python | head -1)
+```
+
+Run the static gate with that environment:
+
+```bash
+PYTHON="$VENV_PYTHON" ./tools/rti_doctor/run_lint.sh
+```
+
 `run_tests.sh` is the entry point. It resolves `NDDSHOME`, the venv and the
 license itself, keeps the whole run in `test_output/run_tests_<tier>.log`, and
 on a red run prints the failing test names and that path:
@@ -651,7 +662,7 @@ on a red run prints the failing test names and that path:
 ./tools/rti_doctor/run_tests.sh          # unit (the default), ~500 tests
 ./tools/rti_doctor/run_tests.sh live     # unit + live domain: needs a license
 ./tools/rti_doctor/run_tests.sh vendor   # cross-vendor e2e: needs Docker images
-./tools/rti_doctor/run_tests.sh all      # everything
+./tools/rti_doctor/run_tests.sh all      # every configured test tier
 ```
 
 The tiers differ by what they need. `unit` creates no DDS entity, so it needs
@@ -665,10 +676,6 @@ than regressions.
 To run one module — worth doing as a *diagnostic*, since several vendor
 failures are order-dependent and "green alone, red in a tier" is itself a
 finding — use the venv interpreter the launcher built:
-
-```bash
-export VENV_PYTHON=$(ls -d connext_dds_env_*/bin/python | head -1)
-```
 
 Unit tests — no DDS participant required:
 
@@ -704,6 +711,10 @@ PYTHONPATH=tools/rti_doctor "$VENV_PYTHON" \
 Set `RTI_DOCTOR_TEST_CAPTURE_INTERFACE` when `any` is not the interface that
 observes your DDS traffic. All RTI Doctor test artifacts remain under
 `tools/rti_doctor/test_output/`.
+
+The versioned [Fast DDS compatibility matrix](docs/FAST_DDS_COMPATIBILITY_MATRIX.md)
+records every tested payload-deserialization configuration separately from
+expected-rejection, discovery-only, and historical wire-evidence cases.
 
 RxO data-flow tests construct all diagnosed requested/offered mismatches
 (reliability, durability, liveliness kind and lease, destination order,

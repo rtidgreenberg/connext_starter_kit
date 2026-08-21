@@ -16,6 +16,9 @@ textual-dev
 # errors that must be cleared before it can gate anything (backlog ENV-2).
 mypy
 
+# `run_lint.sh` uses pyflakes for undefined-name and unused-import checks.
+pyflakes
+
 # Eclipse Cyclone DDS, the second vendor in the `vendor` tier: every
 # Connext/Cyclone fault control, the RxO vendor matrix, the extensibility
 # matrix and the Cyclone wire E2E need it, and eleven of them skip silently

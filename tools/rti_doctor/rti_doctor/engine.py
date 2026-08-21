@@ -45,7 +45,7 @@ class Session:
   """One diagnostic session: a participant, a registry, and our own config."""
 
   def __init__(self, participant, registry, own_qos, type_lookup_settings,
-               domain_id, type_wait=5.0, probe_timeout=10.0,
+               domain_id, type_wait=5.0, probe_timeout=10.0, settle=3.0,
                active_domains=None, domain_scan_ran=False,
                capture_interface=None, network_capture=False):
     self.participant = participant
@@ -55,6 +55,10 @@ class Session:
     self.domain_id = domain_id
     self.type_wait = type_wait
     self.probe_timeout = probe_timeout
+    # Carried only so a child process launched from the TUI can inherit the
+    # operator's `--settle`; nothing in this session waits on it, because the
+    # settle happened before the session existed.
+    self.settle = settle
     self.active_domains = active_domains or set()
     self.domain_scan_ran = domain_scan_ran
     # Where a capture listens. Once `capture_choice_made` is set, `None` means

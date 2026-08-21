@@ -46,6 +46,10 @@ not bear on a Fast DDS engagement.
       the peer's Fast DDS version and the representation seen on the wire —
       rather than only a frame count, and the same summary heads the Overview
       tab and the saved report.
+- [ ] On a Fast DDS writer report, `x` runs the isolated TypeObject/XTypes-mask
+      compatibility matrix in fresh processes. It needs a native Connext 7.7
+      install (`RTI_DOCTOR_NDDSHOME_77`, default `~/rti_connext_dds-7.7.0`) on
+      the target host; without it the runner exits 3 and reports why.
 - [ ] `Run capture to ascertain` in a report means nobody captured — not that
       the peer is on a current version.
 - [ ] **The version now comes from the parameter's own bytes, and it did not

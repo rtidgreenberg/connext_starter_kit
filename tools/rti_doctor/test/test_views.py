@@ -9,6 +9,8 @@ raised.
 import asyncio
 import logging
 import os
+import shutil
+import subprocess
 import sys
 import time
 import unittest
@@ -592,6 +594,8 @@ class CaptureStubSession(StubSession):
   def __init__(self, capture_interface=None, network_capture=False):
     super().__init__()
     self.probe_timeout = 10.0
+    self.type_wait = 5.0
+    self.settle = 3.0
     self.capture_interface = capture_interface
     self.capture_choice_made = capture_interface is not None
     self.capture_off_reason = None
@@ -763,6 +767,207 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     for expected in ("eth0", "/tmp/one.pcapng", "10s", ".tshark.log",
                      "privileges", "probing"):
       self.assertIn(expected, said)
+
+  def test_fastdds_writer_compatibility_command_uses_an_isolated_matrix(self):
+    session = CaptureStubSession()
+    session.type_wait = 4.0
+    endpoint = FakeEndpoint("w1", "Writer", topic_name="FastTelemetry")
+    endpoint.vendor_id = type("Vendor", (), {"value": [0x01, 0x0F]})()
+    screen = report_screen.ReportScreen(session, endpoint=endpoint)
+    command = screen._compatibility_command("/tmp/matrix")
+    self.assertEqual(command[:2], ["bash", os.path.join(
+        report_screen.paths.TOOL_ROOT, "run_version_matrix.sh")])
+    self.assertIn("--topic", command)
+    self.assertEqual(command[command.index("--topic") + 1], "FastTelemetry")
+    self.assertIn("--output-dir", command)
+    self.assertEqual(command[command.index("--output-dir") + 1], "/tmp/matrix")
+
+  def test_fastdds_writer_report_advertises_the_compatibility_matrix(self):
+    session = CaptureStubSession()
+    endpoint = FakeEndpoint("w1", "Writer")
+    endpoint.vendor_id = type("Vendor", (), {"value": [0x01, 0x0F]})()
+    screen = report_screen.ReportScreen(session, endpoint=endpoint, probe=False)
+    self.assertIn("press x", screen._compatibility_hint_text().lower())
+
+  def test_matrix_progress_lines_from_the_runner_all_parse(self):
+    """Every line `run_version_matrix.sh` emits, taken from the script itself.
+
+    The runner reports a result verbatim, so a progress line has two tokens or
+    seven. A fixed four-field split raised ValueError on the very first line -
+    "MATRIX_PROGRESS preflight running" - and the worker died before any profile
+    ran, leaving the screen on its "Preparing..." placeholder for good.
+    """
+    screen = report_screen.CompatibilityMatrixScreen([], "/tmp/matrix")
+    screen.progress = mock.Mock()
+    emitted = [
+        "MATRIX_PROGRESS preflight running",
+        "MATRIX_PROGRESS preflight complete",
+        "MATRIX_PROGRESS default-v2 running",
+        "MATRIX_PROGRESS default-v2 ERROR findings or startup failure",
+        "MATRIX_PROGRESS vendor-v2 running",
+        "MATRIX_PROGRESS vendor-v2 no ERROR findings",
+    ]
+    for line in emitted:
+      screen._note_progress(line)
+    self.assertEqual(screen.states["preflight"], "complete")
+    self.assertEqual(screen.states["default-v2"],
+                     "ERROR findings or startup failure")
+    self.assertEqual(screen.states["vendor-v2"], "no ERROR findings")
+    # An untouched profile keeps its placeholder rather than gaining a row of
+    # mis-split tokens.
+    self.assertEqual(screen.states["vendor-v1"], "waiting")
+    self.assertEqual(set(screen.states),
+                     {"preflight"} | set(report_screen.MATRIX_PROFILES))
+
+  def test_the_runner_script_emits_only_progress_lines_the_screen_parses(self):
+    """The script is the source of truth for the profile list and the prefix."""
+    path = os.path.join(report_screen.paths.TOOL_ROOT, "run_version_matrix.sh")
+    self.assertTrue(os.path.isfile(path), "the matrix runner must be present")
+    with open(path, encoding="utf-8") as handle:
+      script = handle.read()
+    for profile in report_screen.MATRIX_PROFILES:
+      self.assertIn(profile, script)
+
+  def test_a_malformed_progress_line_does_not_stop_the_matrix(self):
+    screen = report_screen.CompatibilityMatrixScreen([], "/tmp/matrix")
+    screen.progress = mock.Mock()
+    with self.assertLogs(level="WARNING"):
+      screen._note_progress("MATRIX_PROGRESS preflight")
+      screen._note_progress("MATRIX_PROGRESS not-a-profile running")
+    self.assertEqual(screen.states["preflight"], "waiting")
+
+  def test_leaving_the_matrix_screen_stops_the_child_observers(self):
+    """Three child observers on the diagnosed domain must not outlive the screen."""
+    screen = report_screen.CompatibilityMatrixScreen([], "/tmp/matrix")
+    process = mock.Mock()
+    process.pid = 4321
+    process.poll.return_value = None
+    screen.process = process
+    with mock.patch.object(report_screen.os, "getpgid", return_value=4321), \
+         mock.patch.object(report_screen.os, "killpg") as killpg:
+      screen.on_unmount()
+    killpg.assert_called_once_with(4321, report_screen.signal.SIGTERM)
+    process.wait.assert_called_once()
+    self.assertIsNone(screen.process)
+
+  def test_a_wedged_matrix_runner_is_killed_rather_than_left_running(self):
+    screen = report_screen.CompatibilityMatrixScreen([], "/tmp/matrix")
+    process = mock.Mock()
+    process.pid = 4321
+    process.poll.return_value = None
+    process.wait.side_effect = subprocess.TimeoutExpired("bash", 5.0)
+    screen.process = process
+    with mock.patch.object(report_screen.os, "getpgid", return_value=4321), \
+         mock.patch.object(report_screen.os, "killpg") as killpg:
+      screen.on_unmount()
+    self.assertEqual([call.args[1] for call in killpg.call_args_list],
+                     [report_screen.signal.SIGTERM, report_screen.signal.SIGKILL])
+
+  def test_a_matrix_worker_failure_is_reported_on_screen(self):
+    """`exit_on_error=False` keeps the TUI up, so the screen must say why."""
+    screen = report_screen.CompatibilityMatrixScreen([], "/tmp/matrix")
+    screen.detail = mock.Mock()
+    with mock.patch.object(screen, "_stream_matrix",
+                           side_effect=RuntimeError("popen exploded")), \
+         self.assertLogs(level="ERROR"):
+      asyncio.run(screen._run_matrix())
+    self.assertIn("popen exploded", screen.detail.update.call_args[0][0])
+
+  def test_the_matrix_is_offered_only_on_a_fastdds_writer(self):
+    """The footer documents the keymap, so it must not advertise a refusal."""
+    session = CaptureStubSession()
+    fastdds = FakeEndpoint("w1", "Writer")
+    fastdds.vendor_id = type("Vendor", (), {"value": [0x01, 0x0F]})()
+    rti = FakeEndpoint("w2", "Writer")
+    rti.vendor_id = type("Vendor", (), {"value": [0x01, 0x01]})()
+    reader = FakeEndpoint("r1", "Reader")
+    reader.vendor_id = type("Vendor", (), {"value": [0x01, 0x0F]})()
+    for endpoint, offered in ((fastdds, True), (rti, False), (reader, False)):
+      screen = report_screen.ReportScreen(session, endpoint=endpoint)
+      self.assertEqual(screen.check_action("compatibility_matrix", ()), offered,
+                       f"{endpoint.key} should{'' if offered else ' not'} offer x")
+    participant = report_screen.ReportScreen(
+        session, participant=records.ParticipantRecord(key="p1", name="app"))
+    self.assertFalse(participant.check_action("compatibility_matrix", ()))
+
+  def test_a_missing_runner_is_named_instead_of_reporting_an_empty_matrix(self):
+    session = CaptureStubSession()
+    endpoint = FakeEndpoint("w1", "Writer", topic_name="FastTelemetry")
+    endpoint.vendor_id = type("Vendor", (), {"value": [0x01, 0x0F]})()
+    screen = report_screen.ReportScreen(session, endpoint=endpoint)
+    screen.status = mock.Mock()
+    with mock.patch.object(report_screen.os.path, "isfile", return_value=False):
+      # `self.app` raises off-app, so reaching the push at all fails this test.
+      screen.action_compatibility_matrix()
+    self.assertIn("runner is missing", screen.status.update.call_args[0][0])
+
+  def test_the_matrix_never_settles_for_less_than_the_runner_default(self):
+    """An interactive `--settle` tuned for a local RTI peer is too short here."""
+    session = CaptureStubSession()
+    session.settle = 3.0
+    endpoint = FakeEndpoint("w1", "Writer", topic_name="FastTelemetry")
+    endpoint.vendor_id = type("Vendor", (), {"value": [0x01, 0x0F]})()
+    screen = report_screen.ReportScreen(session, endpoint=endpoint)
+    command = screen._compatibility_command("/tmp/matrix")
+    self.assertEqual(float(command[command.index("--settle") + 1]),
+                     report_screen.MATRIX_MIN_SETTLE)
+    # An operator who asked for longer gets what they asked for.
+    session.settle = report_screen.MATRIX_MIN_SETTLE + 10.0
+    command = screen._compatibility_command("/tmp/matrix")
+    self.assertEqual(float(command[command.index("--settle") + 1]),
+                     report_screen.MATRIX_MIN_SETTLE + 10.0)
+
+  def test_publish_verification_is_available_only_for_readers(self):
+    session = CaptureStubSession()
+    writer = report_screen.ReportScreen(session, endpoint=FakeEndpoint("w1", "Writer"))
+    reader = report_screen.ReportScreen(session, endpoint=FakeEndpoint("r1", "Reader"))
+    self.assertFalse(writer.check_action("verify_delivery", ()))
+    self.assertTrue(reader.check_action("verify_delivery", ()))
+
+  def test_compatibility_matrix_rejects_an_rti_writer(self):
+    session = CaptureStubSession()
+    endpoint = FakeEndpoint("w1", "Writer")
+    endpoint.vendor_id = type("Vendor", (), {"value": [0x01, 0x01]})()
+    screen = report_screen.ReportScreen(session, endpoint=endpoint)
+    screen.status = mock.Mock()
+    screen.action_compatibility_matrix()
+    self.assertIn("RTI Connext writer", screen.status.update.call_args[0][0])
+
+  def _matrix_output_dir(self, profile, report_text):
+    """One child profile report on disk, as the runner would leave it."""
+    output_dir = os.path.join(os.path.dirname(__file__), "matrix_findings")
+    report_dir = os.path.join(output_dir, profile)
+    os.makedirs(report_dir, exist_ok=True)
+    self.addCleanup(shutil.rmtree, output_dir, ignore_errors=True)
+    with open(os.path.join(report_dir, "topic_report.txt"), "w",
+              encoding="utf-8") as handle:
+      handle.write(report_text)
+    return output_dir
+
+  def test_compatibility_matrix_extracts_profile_problem_titles(self):
+    """Scraped from a real rendered report, rules and all.
+
+    A hand-written fixture without the `report._section` rules passed while the
+    scrape was returning the 80-dash rule as every profile's verdict, because
+    the rule is exactly the line a real report puts after "VERDICT".
+    """
+    data = report.ReportData(
+        domain_id=7, scope="topic 'Telemetry'",
+        endpoint=FakeEndpoint("w1", "Writer"),
+        all_findings=[findings.Finding(
+            id="match.none", rung=4, severity=findings.Severity.ERROR,
+            title="Reader never matched the writer",
+            observed="No matched publication was observed.",
+            root_cause="The reader saw no compatible writer.",
+            remedy="Compare the requested and offered QoS.")])
+    output_dir = self._matrix_output_dir("vendor-v1", report.render_text(data))
+    screen = report_screen.CompatibilityMatrixScreen([], output_dir)
+    text = screen._profile_findings()
+    self.assertIn("match.none", text)
+    self.assertIn("Reader never matched the writer", text)
+    # The verdict, not the rule that `_section` puts under the heading.
+    self.assertNotRegex(text, r"vendor-v1: -{5,}")
+    self.assertIn(f"vendor-v1: {data.verdict}", text)
 
   def test_a_reader_report_probes_on_entry_too(self):
     """The reader probe existed and was unreachable from the TUI.
@@ -1203,7 +1408,7 @@ class TestPublishingNeedsApproval(unittest.TestCase):
     result = self.drive(session, FakeEndpoint("w1", "Writer"), self._press_w)
     self.assertNotIsInstance(result["screen"],
                              report_screen.PublishConsentScreen)
-    self.assertIn("already verified", result["said"])
+    self.assertNotIn("Publish", result["said"])
 
   def test_a_passive_report_has_no_writer_to_publish_from(self):
     session = CaptureStubSession(capture_interface="lo")

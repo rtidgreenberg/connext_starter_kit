@@ -97,6 +97,7 @@ selecting one shows only that severity. Keys:
 | `c` | On an endpoint report: capture RTPS packets for that endpoint |
 | `C` | On an endpoint report: choose the capture interface, and run the pass again |
 | `w` | On a **reader** report: publish synthetic samples to verify delivery — asks first, every time |
+| `x` | On a **Fast DDS writer** report: run the isolated TypeObject/XTypes-mask compatibility matrix |
 | `s` | Save the current system or diagnostic report as a shareable text file |
 | `b` / `Esc` | Back |
 | `q` | Quit |
@@ -218,6 +219,41 @@ reporting rti_doctor's own restraint as a fault of the peer.
 When approved, the probe publishes and — for a RELIABLE reader — waits for
 acknowledgment, so the verdict reads `matched, 3 sample(s) published,
 acknowledged by the reader`.
+
+## Fast DDS Compatibility Matrix (`x`)
+
+A Fast DDS writer that a Connext reader cannot resolve a type from is usually a
+TypeObject question — which representation was published, and which XTypes
+compliance mask the reader asked with. Those are startup-time settings: they
+cannot be changed in a running session, because the mask has to be applied
+before the first Connext call.
+
+So the matrix runs *outside* this process. On a **Fast DDS writer** report, `x`
+launches `run_version_matrix.sh`, which starts fresh `rti_doctor` observers
+against the same domain and topic, one per profile, and stops at the first that
+comes back with no ERROR findings:
+
+| Profile | XTypes mask | TypeObject |
+|---|---|---|
+| `default-v2` | Connext default | V2 with TypeLookup |
+| `vendor-v2` | `VENDOR` | V2 with TypeLookup |
+| `vendor-v1` | `VENDOR` | inline V1 |
+
+A passive preflight runs first and confirms the topic is actually visible; if it
+is not, no probe starts. The screen shows a row per profile as the runner
+reports it, then the verdict and problem titles scraped from each child report,
+with everything left under
+`tools/rti_doctor/test_output/fastdds_compatibility/`.
+
+The child runs settle for at least 20 seconds — cross-vendor discovery is
+slower than the interactive session's `--settle`, and the preflight would
+otherwise check for the topic before the writer had been seen. A longer explicit
+`--settle` is carried through.
+
+Leaving the screen stops the runner and its observers; they are launched in
+their own process group so one signal reaches all of them. A profile that passes
+is evidence about *this observer* — it does not prove the same profile fixes
+another application or an RTI service.
 
 ## The Visibility Ladder
 

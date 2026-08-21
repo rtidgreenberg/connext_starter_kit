@@ -478,6 +478,28 @@ def _unevaluated_text(unevaluated):
           f"compatible nor found incompatible on these policies.")
 
 
+def _rxo_mismatch_text(writer_participant_name, reader_participant_name,
+                       mismatches, unevaluated, census):
+  """Readable requested/offered rows for one incompatible writer-reader pair."""
+  policy_width = max(len("POLICY"), *(len(item["policy"]) for item in mismatches))
+  offered_width = max(len("WRITER OFFERS"),
+                      *(len(item["offered"]) for item in mismatches))
+  lines = [f"Writer participant: '{writer_participant_name}'",
+           f"Reader participant: '{reader_participant_name}'",
+           "",
+           f"{'POLICY':<{policy_width}} | {'WRITER OFFERS':<{offered_width}} | "
+           "READER REQUESTS",
+           f"{'-' * policy_width}-+-{'-' * offered_width}-+-{'-' * len('READER REQUESTS')}"]
+  lines.extend(
+      f"{item['policy']:<{policy_width}} | {item['offered']:<{offered_width}} | "
+      f"{item['requested']}" for item in mismatches)
+  suffix = _unevaluated_text(unevaluated).strip()
+  if suffix:
+    lines.extend(("", suffix))
+  lines.append(census.strip())
+  return "\n".join(lines)
+
+
 def check_rxo_pairs(context):
   """Compare the focused endpoint against every counterpart on its topic."""
   endpoint = context.endpoint
@@ -519,9 +541,15 @@ def check_rxo_pairs(context):
     reader_participant = context.registry.participant_for(reader)
     writer_label = _label(writer, writer_participant)
     reader_label = _label(reader, reader_participant)
+    writer_participant_name = _participant_name(writer_participant)
+    reader_participant_name = _participant_name(reader_participant)
     census = (f" Counterpart {index} of {len(peers)} discovered on this topic; "
               f"rti_doctor's own probe is not counted.")
+    participant_context = (f"Writer participant: '{writer_participant_name}'; "
+                 f"reader participant: '{reader_participant_name}'. ")
     evidence = {"writer": writer_label, "reader": reader_label,
+          "writer_participant_name": writer_participant_name,
+          "reader_participant_name": reader_participant_name,
                 "counterparts_discovered": len(peers),
                 "writer_key": writer.key, "reader_key": reader.key,
                 "writer_participant_key": writer.participant_key,
@@ -536,7 +564,7 @@ def check_rxo_pairs(context):
           rung=RUNG_MATCH,
           severity=Severity.OK,
           title=f"No observable QoS mismatch: {writer_label} -> {reader_label}",
-          observed=("No requested/offered incompatibility was observed in the "
+          observed=(participant_context + "No requested/offered incompatibility was observed in the "
                     "discovery QoS available for this pair." +
                     _unevaluated_text(unevaluated) + census),
           evidence=evidence,
@@ -552,16 +580,15 @@ def check_rxo_pairs(context):
     other = [m for m in mismatches if not is_rxo(m)]
 
     if rxo:
-      detail = "; ".join(
-          f"{m['policy']}: writer offers {m['offered']}, reader requests {m['requested']}"
-          for m in rxo)
       policies = ", ".join(m["policy"] for m in rxo)
       out.append(Finding(
           id="qos.rxo_mismatch",
           rung=RUNG_MATCH,
           severity=Severity.ERROR,
           title=f"QoS incompatible ({policies}): {writer_label} -> {reader_label}",
-          observed=detail + "." + _unevaluated_text(unevaluated) + census,
+          observed=_rxo_mismatch_text(writer_participant_name,
+                                      reader_participant_name, rxo,
+                                      unevaluated, census),
           root_cause=(
               "These two endpoints are both live in the system and will never "
               "communicate: DDS matches a reader to a writer only when every "
@@ -632,7 +659,9 @@ def _non_rxo_finding(mismatch, writer_label, reader_label, evidence,
       rung=RUNG_MATCH,
       severity=Severity.ERROR,
       title=f"{spec['title']}: {writer_label} -> {reader_label}",
-      observed=(f"writer {writer_key.split('_')[-1]}: {mismatch[writer_key]}; "
+      observed=(f"Writer participant: '{evidence['writer_participant_name']}'; "
+            f"reader participant: '{evidence['reader_participant_name']}'. "
+            f"writer {writer_key.split('_')[-1]}: {mismatch[writer_key]}; "
                 f"reader {reader_key.split('_')[-1]}: {mismatch[reader_key]}."
                 + _unevaluated_text(unevaluated) + census),
       root_cause=spec["root_cause"] + " " + mismatch["rule"],
@@ -660,7 +689,9 @@ def _undescribed_non_rxo_finding(mismatch, policy, writer_label, reader_label,
       rung=RUNG_MATCH,
       severity=Severity.ERROR,
       title=f"{policy or 'A policy'} will not match: {writer_label} -> {reader_label}",
-      observed=((sides or "no per-side values were recorded") + "."
+      observed=(f"Writer participant: '{evidence['writer_participant_name']}'; "
+            f"reader participant: '{evidence['reader_participant_name']}'. "
+            + (sides or "no per-side values were recorded") + "."
                 + _unevaluated_text(unevaluated) + census),
       root_cause=(
           f"These two endpoints will never communicate, on {policy or 'a policy'}, "
@@ -677,8 +708,16 @@ def _undescribed_non_rxo_finding(mismatch, policy, writer_label, reader_label,
   )
 
 
+def _participant_name(participant):
+  """Participant application name suitable for primary finding context."""
+  if participant is None:
+    return "unknown participant"
+  name = str(participant.name or "").strip()
+  return name or "unnamed participant"
+
+
 def _label(endpoint, participant):
-  who = participant.name if participant is not None and participant.name else "?"
+  who = _participant_name(participant)
   vendor = participant.vendor_name if participant is not None else "unknown vendor"
   return f"{endpoint.kind} in '{who}' ({vendor})"
 

@@ -75,6 +75,12 @@ class TestSystemScan(unittest.TestCase):
     self.assertEqual(issue.writer_keys, ("writer-guid",))
     self.assertEqual(issue.reader_keys, ("reader-guid",))
     self.assertEqual(issue.participant_keys, ("participant-r", "participant-w"))
+    self.assertEqual(issue.evidence["writer_participant_name"], "writer-app")
+    self.assertEqual(issue.evidence["reader_participant_name"], "reader-app")
+    self.assertIn("Writer in 'writer-app'", issue.title)
+    self.assertIn("Reader in 'reader-app'", issue.title)
+    self.assertIn("Writer participant: 'writer-app'", issue.observed)
+    self.assertIn("Reader participant: 'reader-app'", issue.observed)
     self.assertIn("RELIABILITY", issue.evidence["mismatches"][0]["policy"])
 
   def test_snapshot_topology_and_evidence_are_immutable(self):
@@ -196,6 +202,18 @@ class TestSystemScan(unittest.TestCase):
         type_lookup_settings={"request_types_filter": "*"})
     self.assertIn("RTI_DOCTOR OWN CONFIGURATION", text)
     self.assertIn("request_types_filter", text)
+
+  def test_system_report_preserves_qos_requested_offered_table_rows(self):
+    snapshot = system_scan.scan(
+        registry_with_reliability_fault(), own_qos=None,
+        type_lookup_settings={"request_types_filter": "*"}, domain_id=7,
+        captured_at=123.0)
+    text = report.render_system_text(snapshot, 7, environment={
+        "argv": "rti_doctor", "host": "test", "os": "Linux",
+        "machine": "x86_64", "connext": "7.7.0", "nddshome": "/opt/rti",
+        "python": "3.x"})
+    self.assertIn("POLICY      | WRITER OFFERS | READER REQUESTS", text)
+    self.assertRegex(text, r"RELIABILITY \| BEST_EFFORT\s+\| RELIABLE")
 
   def test_no_system_report_line_exceeds_the_report_width(self):
     """The system report has its own renderer, so it needs its own guard.

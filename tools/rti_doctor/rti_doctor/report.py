@@ -210,6 +210,18 @@ def _labelled(label, text, indent=15):
   return [prefix + first[indent:]] + block[1:]
 
 
+def _labelled_observation(label, text, indent=15):
+  """Render an observation, retaining intentional table and paragraph lines."""
+  if "\n" not in str(text):
+    return _labelled(label, text, indent)
+  indent = max(indent, len(label) + 3)
+  prefix = f"  {label}".ljust(indent)
+  lines = str(text).splitlines()
+  if not lines:
+    return []
+  return [prefix + lines[0]] + [" " * indent + line for line in lines[1:]]
+
+
 def default_filename(domain_id, scope, timestamp=None):
   """rti_doctor_<domain>_<scope>_<timestamp>.txt with a filesystem-safe scope."""
   stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(timestamp or time.time()))
@@ -280,7 +292,7 @@ def render_system_text(snapshot, domain_id, environment=None,
       lines += _labelled("Readers", ", ".join(issue.reader_keys))
     if issue.participant_keys:
       lines += _labelled("Participants", ", ".join(issue.participant_keys))
-    lines += _labelled("Observed", issue.observed)
+    lines += _labelled_observation("Observed", issue.observed)
     lines += _labelled("Root cause", issue.root_cause)
     lines += _labelled("Recommendation", issue.recommendation)
     # Context, not a filter: this issue is listed and counted regardless.

@@ -220,7 +220,8 @@ def check_reliable_handshake(context):
             "exchange between them - but neither source could report one. The "
             "middleware counters were unavailable on this binding, and no "
             "packet capture was run for this endpoint."),
-        remedy=("Press c to capture RTPS packets for this endpoint. The "
+        remedy=("Open an endpoint report and select packet capture when it "
+          "opens. The "
                 "handshake is visible in the packets regardless of vendor, and "
                 "regardless of which counters the bindings expose."),
         evidence={"wire_heartbeats": wire_heartbeats,

@@ -3111,7 +3111,7 @@ class TestReliablePath(unittest.TestCase):
     result = reliable_path.check_reliable_handshake(self._context(probe))
     self.assertEqual(result[0].id, "reliable.not_measured")
     self.assertEqual(result[0].severity, f.Severity.INFO)
-    self.assertIn("Press c", result[0].remedy)
+    self.assertIn("Open an endpoint report", result[0].remedy)
 
   def test_a_failed_capture_is_not_read_as_a_quiet_wire(self):
     probe = FakeProbe(samples_taken=0, protocol={})

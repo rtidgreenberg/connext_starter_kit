@@ -47,7 +47,7 @@ CAPTURE_LABEL_PAD = 24
 #: endpoint report for diagnosis offers a capture, but a report can reach here
 #: having been opened passively or with Skip as the answer, so name the key too.
 CAPTURE_HINT = ("Open an endpoint report for diagnosis and choose a capture "
-                "interface, or press c on one, to capture RTPS packets for that "
+                "interface when it opens to capture RTPS packets for that "
                 "endpoint.")
 
 
@@ -466,8 +466,7 @@ def _wire_placeholder(data):
     lines.append(f"Fast DDS version: {CAPTURE_PLACEHOLDER}.")
   lines += [
       f"RTPS reliable handshake (HEARTBEAT/ACKNACK/GAP): {CAPTURE_PLACEHOLDER}.",
-      "Press c to capture RTPS packets for this endpoint, C to choose the "
-      "interface.", ""]
+      "Packet capture is selected when an endpoint report is opened.", ""]
   return lines
 
 

@@ -699,27 +699,6 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     out["said"] = status_text(screen)
     out["screen"] = pilot.app.screen
 
-  async def _press_capture(self, pilot, screen, out):
-    # Every status line the capture produced, in order. The announcement and
-    # the result both land on one widget, and the worker can finish before the
-    # test regains control, so reading the widget alone would only ever see the
-    # last of them - and what this has to prove is that the operator was told
-    # what was about to happen *before* tshark ran.
-    said = []
-    original = screen.status.update
-
-    def record(text):
-      said.append(str(text))
-      return original(text)
-
-    screen.status.update = record
-    out["said"] = said
-    await pilot.press("c")
-    await pilot.app.workers.wait_for_complete()
-    await pilot.pause()
-    out["announced"] = said[0] if said else ""
-    out["after"] = said[-1] if said else ""
-
   def test_opening_a_report_asks_before_capturing_anything(self):
     """The consent, before any tshark: a report with no answer yet must ask."""
     session = CaptureStubSession()
@@ -767,6 +746,27 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     for expected in ("eth0", "/tmp/one.pcapng", "10s", ".tshark.log",
                      "privileges", "probing"):
       self.assertIn(expected, said)
+
+  def test_a_reader_report_probes_on_entry_too(self):
+    """The reader probe existed and was unreachable from the TUI.
+
+    `probe_endpoint` already dispatches a non-writer to `probe_reader_endpoint`,
+    and the engine already picks the right checks for the result; the
+    `is_writer` gate on this screen was the only thing in the way. A reader
+    probe answers what no static check can - does anything match this reader.
+    """
+    session = CaptureStubSession("lo")
+
+    async def steps(pilot, screen, out):
+      out["said"] = screen._pass_announcement("lo", True, 10.0, "/x")
+
+    result = self.drive(session, FakeEndpoint("r1", "Reader"), steps)
+    probing = [call for call in session.calls if call["probe"]]
+    self.assertEqual(len(probing), 1)
+    self.assertEqual(probing[0]["capture_interface"], "lo")
+    # A reader probe creates a writer that never publishes, so the copy must
+    # not promise user data the Wire tab will then contradict.
+    self.assertIn("creating a writer", result["said"])
 
   def test_fastdds_writer_compatibility_command_uses_an_isolated_matrix(self):
     session = CaptureStubSession()
@@ -969,27 +969,6 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     self.assertNotRegex(text, r"vendor-v1: -{5,}")
     self.assertIn(f"vendor-v1: {data.verdict}", text)
 
-  def test_a_reader_report_probes_on_entry_too(self):
-    """The reader probe existed and was unreachable from the TUI.
-
-    `probe_endpoint` already dispatches a non-writer to `probe_reader_endpoint`,
-    and the engine already picks the right checks for the result; the
-    `is_writer` gate on this screen was the only thing in the way. A reader
-    probe answers what no static check can - does anything match this reader.
-    """
-    session = CaptureStubSession("lo")
-
-    async def steps(pilot, screen, out):
-      out["said"] = screen._pass_announcement("lo", True, 10.0, "/x")
-
-    result = self.drive(session, FakeEndpoint("r1", "Reader"), steps)
-    probing = [call for call in session.calls if call["probe"]]
-    self.assertEqual(len(probing), 1)
-    self.assertEqual(probing[0]["capture_interface"], "lo")
-    # A reader probe creates a writer that never publishes, so the copy must
-    # not promise user data the Wire tab will then contradict.
-    self.assertIn("creating a writer", result["said"])
-
   def test_a_capture_that_never_started_turns_capture_off_for_the_session(self):
     """One tshark refusal, not one per report.
 
@@ -1027,7 +1006,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
         "error": "tshark did not exit after termination and was killed"}
     result = self.drive(session, FakeEndpoint("w1", "Writer"), self._settle)
     self.assertIn("no packet evidence", result["said"])
-    self.assertIn("Press c to try again", result["said"])
+    self.assertNotIn("Press c", result["said"])
     self.assertNotIn("off for this session", result["said"])
     self.assertIsNone(session.capture_off_reason)
     self.assertEqual(session.capture_interface, "lo")
@@ -1055,34 +1034,10 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     self.assertIn("Diagnostic pass failed", result["said"])
     self.assertFalse(session.pass_in_flight())
 
-  def test_a_second_c_while_capturing_does_not_start_another(self):
-    session = CaptureStubSession("lo")
-
-    async def steps(pilot, screen, out):
-      screen.capturing = True
-      session.calls = []
-      await pilot.press("c")
-      await pilot.pause()
-      out["said"] = status_text(screen)
-
-    result = self.drive(session, FakeEndpoint("w1", "Writer"), steps)
-    self.assertIn("already running", result["said"])
-    self.assertEqual(session.calls, [])
-
-  def test_c_during_the_pass_waits_rather_than_racing_it(self):
-    """Two probes on one topic would each observe the other's traffic."""
-    session = CaptureStubSession("lo")
-
-    async def steps(pilot, screen, out):
-      screen.probing = True
-      session.calls = []
-      await pilot.press("c")
-      await pilot.pause()
-      out["said"] = status_text(screen)
-
-    result = self.drive(session, FakeEndpoint("w1", "Writer"), steps)
-    self.assertIn("still running", result["said"])
-    self.assertEqual(session.calls, [])
+  def test_capture_keys_are_not_bound_after_the_entry_choice(self):
+    keys = {binding[0] for binding in report_screen.ReportScreen.BINDINGS}
+    self.assertNotIn("c", keys)
+    self.assertNotIn("C", keys)
 
   def test_a_pass_running_on_another_report_blocks_this_one(self):
     """Workers survive navigation, so the guard has to outlive the screen.
@@ -1102,16 +1057,12 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
 
     async def steps(pilot, screen, out):
       out["screen"] = pilot.app.screen
-      await self._press_capture(pilot, screen, out)
 
     result = self.drive(session, FakeEndpoint("w1", "Writer"), steps, probe=False)
     self.assertIsInstance(result["screen"], report_screen.ReportScreen)
-    # `c` still collects evidence, and still does not upgrade it to a probe.
+    # Passive reports stay read-only and do not offer a capture rerun.
     requested = [call for call in session.calls if call["capture_interface"]]
-    self.assertEqual(len(requested), 1)
-    self.assertFalse(requested[0]["probe"])
-    self.assertEqual(requested[0]["capture_seconds"],
-                     engine.DEFAULT_CAPTURE_SECONDS)
+    self.assertEqual(requested, [])
 
   def test_choosing_an_interface_remembers_it_and_runs_the_pass(self):
     """CAP-2's acceptance: capture on `lo` from a TUI launched with no flags."""
@@ -1184,22 +1135,6 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     self.assertIsInstance(result["screen"],
                           report_screen.CaptureInterfaceScreen)
 
-  def test_capital_c_turns_capture_back_on_after_a_failure(self):
-    """Choosing again is how an operator says the reason no longer applies."""
-    session = CaptureStubSession("lo")
-    session.disable_capture("you don't have permission to capture")
-
-    async def steps(pilot, screen, out):
-      await pilot.press("C")
-      await pilot.pause()
-      await self._choose(pilot, "eth0")
-
-    self.drive(session, FakeEndpoint("w1", "Writer"), steps)
-    self.assertIsNone(session.capture_off_reason)
-    self.assertEqual(session.capture_interface, "eth0")
-    self.assertEqual([call["capture_interface"] for call in session.calls
-                      if call["capture_interface"]], ["eth0"])
-
   def test_the_picker_offers_skip_first_and_any_last(self):
     """N3, both ends: the reflexive Enter must land on the least privileged row.
 
@@ -1229,7 +1164,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
   def test_the_picker_does_not_enumerate_on_the_event_loop(self):
     """`tshark -D` runs extcap helpers, so it must not block construction.
 
-    Constructing the screen is done from `action_capture`, on the Textual event
+    The screen is constructed from `_offer_full_pass`, on the Textual event
     loop. Enumerating there froze the whole TUI for as long as tshark took.
     """
     session = CaptureStubSession()
@@ -1237,7 +1172,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
       report_screen.CaptureInterfaceScreen(session, lambda _: None)
     listed.assert_not_called()
 
-  def test_a_participant_report_says_capture_needs_an_endpoint(self):
+  def test_a_participant_report_has_no_capture_action(self):
     session = CaptureStubSession()
     collected = {}
 
@@ -1248,7 +1183,6 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
       async with app.run_test() as pilot:
         await pilot.pause()
         await app.workers.wait_for_complete()
-        await pilot.press("c")
         await pilot.pause()
         collected["said"] = status_text(screen)
 
@@ -1256,7 +1190,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
         domain_id=7, scope="participant 'app'", all_findings=[],
         participant=participant)
     asyncio.run(run())
-    self.assertIn("needs an endpoint", collected["said"])
+    self.assertIn("participant report", collected["said"])
 
   def test_the_wire_tab_says_how_to_get_packet_evidence(self):
     """H8/H9: an unasked question must not render as a settled one."""
@@ -1264,7 +1198,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
         domain_id=7, scope="topic 'Telemetry'", all_findings=[],
         endpoint=FakeEndpoint("w1", "Writer")))
     self.assertIn(report.CAPTURE_PLACEHOLDER, sections["wire"])
-    self.assertIn("Press c", sections["wire"])
+    self.assertIn("selected when an endpoint report is opened", sections["wire"])
 
   def test_the_overview_tab_shows_what_a_capture_produced(self):
     """The operator who pressed `c` is the one who must see the result.

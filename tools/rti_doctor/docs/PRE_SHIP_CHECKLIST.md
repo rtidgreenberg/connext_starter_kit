@@ -30,22 +30,30 @@ not bear on a Fast DDS engagement.
 - [ ] `tshark` is installed.
 - [ ] The account running Doctor has capture rights on the interface you will
       name.
-- [ ] Know which interface the engineer should pick. As of 2026-08-12 the TUI
-      asks: `c` opens an interface picker listing `tshark -D` when
+- [ ] Know which interface the engineer should pick, and brief it *before* they
+      start: the TUI asks once, when the first endpoint report opens, and there
+      is no key that reopens the picker. The picker lists `tshark -D` when
       `--capture-interface` was not given, remembers the answer for the session,
       and offers `any` last rather than silently defaulting to it — `any` needs
-      the widest privileges of any choice (N3, CAP-2). `C` reopens the picker.
-      Headless runs still need `--capture-interface` explicitly.
+      the widest privileges of any choice (N3, CAP-2). Changing the answer, or
+      recovering from a capture that failed, means restarting Doctor. Headless
+      runs still need `--capture-interface` explicitly.
 
 ## Brief the engineer
 
 - [ ] Packet capture is opt-in as of `ccaaa7b`. Headless:
-      `--topic X --capture-interface eth0`. TUI: `c` on a reader or writer
-      report, which asks which interface to use the first time and remembers
-      it; `C` changes it. The status line then names what the capture parsed —
+      `--topic X --capture-interface eth0`. TUI: opening a reader or writer
+      report asks which interface to use the first time and remembers the
+      answer — capture is no longer a separate keystroke, so the whole report
+      costs one probe rather than two. `Skip` is a real answer and is remembered
+      like any other. The status line then names what the capture parsed —
       the peer's Fast DDS version and the representation seen on the wire —
       rather than only a frame count, and the same summary heads the Overview
       tab and the saved report.
+- [ ] A capture that fails once turns capture off for the rest of the session,
+      by design, and nothing in the session turns it back on. If the engineer
+      sees that, they should fix the privileges (or install `tshark`) and run
+      Doctor again rather than looking for a key.
 - [ ] On a Fast DDS writer report, `x` runs the isolated TypeObject/XTypes-mask
       compatibility matrix in fresh processes. It needs a native Connext 7.7
       install (`RTI_DOCTOR_NDDSHOME_77`, default `~/rti_connext_dds-7.7.0`) on

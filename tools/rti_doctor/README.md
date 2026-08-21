@@ -94,8 +94,6 @@ selecting one shows only that severity. Keys:
 | `i` | In Topology: the issues linked to the highlighted row |
 | `m` | Observed domain metrics |
 | `r` | Re-scan (every screen shows a snapshot, never a live feed) |
-| `c` | On an endpoint report: capture RTPS packets for that endpoint |
-| `C` | On an endpoint report: choose the capture interface, and run the pass again |
 | `w` | On a **reader** report: publish synthetic samples to verify delivery — asks first, every time |
 | `x` | On a **Fast DDS writer** report: run the isolated TypeObject/XTypes-mask compatibility matrix |
 | `s` | Save the current system or diagnostic report as a shareable text file |
@@ -132,7 +130,9 @@ Opening a reader or writer report runs the full diagnostic in **one pass** —
 a probe and, if you consent to one, a packet capture. The first such report of
 a session asks where to capture, with `Skip` at the top of the list for "probe,
 but capture nothing". Both answers are remembered, so later reports run without
-asking; `C` changes the answer, and `--capture-interface` gives it up front.
+asking, and `--capture-interface` gives the answer up front. The choice is made
+when an endpoint report opens and nowhere else: there is no key that re-opens
+the picker, so changing it means restarting the session.
 
 One pass, not two. A capture with nothing on the wire is an empty file, so a
 capture on a probed endpoint has to be the thing that drives the probe — when
@@ -144,11 +144,12 @@ Before anything starts, the screen states the interface, the file it will write
 tshark's own `-a duration:`, so one that is abandoned still stops. If a capture
 fails — no capture privileges on this host, no `tshark` — capture turns itself
 off for the rest of the session rather than filing that refusal as the wire
-evidence of every later report. `C` turns it back on.
+evidence of every later report. Nothing in the session turns it back on; fix
+the privileges or install `tshark`, then run again.
 
 Reports opened *passively* — `o`, or from an issue — probe nothing and capture
-nothing, and never prompt. `c` is still how you ask for evidence on one of
-those, and it does not upgrade them to a probe.
+nothing, and never prompt. There is no way to add evidence to one of those
+either: open the endpoint from Topology to get a probed report.
 
 On exit, captures no saved report cites are removed; saving a report with `s`
 keeps the capture it names in Appendix C. `RTI_DOCTOR_KEEP_ARTIFACTS=1` keeps

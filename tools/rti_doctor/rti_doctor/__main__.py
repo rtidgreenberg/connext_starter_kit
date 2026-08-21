@@ -138,6 +138,10 @@ def parse_args(argv=None):
   parser.add_argument("--type-object-v1-only", action="store_true",
                       help="Advertise inline TypeObject v1 and disable TypeLookup v2 "
                            "for an interoperability experiment")
+  parser.add_argument("--xtypes-compliance", choices=("default", "vendor"),
+                      default="vendor", help="Observer XTypes compliance mask "
+                      "(default: vendor; compatibility child processes may use "
+                      "default)")
   packet_group = parser.add_mutually_exclusive_group()
   packet_group.add_argument("--pcap", default=None,
                             help="Analyze RTPS user-data packets in an existing PCAP/PCAPNG")
@@ -327,7 +331,8 @@ def build_session(domain_id, args, active_domains=None, domain_scan_ran=False,
   if compliance is not None:
     settings["xtypes_compliance_mask"] = (
         f"{compat.xtypes_mask_text()} "
-        f"({'VENDOR applied' if compliance.get('applied') else compliance.get('note', 'not applied')})")
+      f"({compliance.get('requested', 'unknown')} "
+      f"{'applied' if compliance.get('applied') else compliance.get('note', 'not applied')})")
   type_lookup_settings = settings
 
   return engine.Session(
@@ -533,11 +538,11 @@ def main(argv=None):
     connext_logging = configure_connext_logging(
         args.connext_log, args.connext_verbosity)
 
-    # Before ANY DDS entity exists: Connext's default XTypes compliance mask is not
-    # fully OMG-compliant, and RTI's cross-vendor guidance is to use the VENDOR
-    # mask. A diagnostic must not fail to decode a peer because of its own encoding
-    # defaults. What was actually applied is recorded in every report.
-    compliance = compat.set_vendor_xtypes_mask()
+    # Before ANY DDS entity exists: the normal observer uses RTI's cross-vendor
+    # VENDOR mask. The compatibility matrix may instead preserve the native
+    # default in an isolated child process. What was actually applied is recorded
+    # in every report.
+    compliance = compat.configure_xtypes_mask(args.xtypes_compliance)
 
     # Before the mask and before the participant, because the binding requires
     # it before every other Connext call. The resolved answer is stashed on

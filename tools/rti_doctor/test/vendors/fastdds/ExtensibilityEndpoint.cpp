@@ -73,6 +73,7 @@ int main(int argc, char** argv)
     std::string representation = "xcdr1";
     std::string type_metadata = "full";
     std::string type_lookup = "disabled";
+    bool qos_defaults = false;
     std::string wait_for_file;
     std::string endpoint_ready_file;
     int duration_seconds = 6;
@@ -107,6 +108,10 @@ int main(int argc, char** argv)
             if (argument == "--wait-timeout") wait_timeout_seconds = std::stoi(value);
             if (argument == "--endpoint-ready-file") endpoint_ready_file = value;
         }
+        else if (argument == "--qos-defaults")
+        {
+            qos_defaults = true;
+        }
     }
     if (domain < 0 || topic_name.empty() || duration_seconds <= 0 ||
             wait_timeout_seconds <= 0 ||
@@ -130,6 +135,7 @@ int main(int argc, char** argv)
                   << "[--representation xcdr1|xcdr2|default] "
                   << "[--type-metadata full|none] "
                   << "[--type-lookup enabled|disabled] "
+                  << "[--qos-defaults] "
                   << "[--wait-for-file PATH] [--wait-timeout positive] "
                   << "[--endpoint-ready-file PATH]" << std::endl;
         return 2;
@@ -195,22 +201,25 @@ int main(int argc, char** argv)
             return 6;
         }
         DataWriterQos qos = DATAWRITER_QOS_DEFAULT;
-        // "default" leaves the policy untouched, which is not the same as
-        // setting it to the value the default resolves to: what an application
-        // that never configured DATA_REPRESENTATION advertises in discovery is
-        // the question, and setting it explicitly is what hides the answer.
-        if (representation != "default")
+        if (!qos_defaults)
         {
-            qos.representation().m_value = {representation == "xcdr2"
-                ? XCDR2_DATA_REPRESENTATION : XCDR_DATA_REPRESENTATION};
+            // "default" leaves the policy untouched, which is not the same as
+            // setting it to the value the default resolves to: what an application
+            // that never configured DATA_REPRESENTATION advertises in discovery is
+            // the question, and setting it explicitly is what hides the answer.
+            if (representation != "default")
+            {
+                qos.representation().m_value = {representation == "xcdr2"
+                    ? XCDR2_DATA_REPRESENTATION : XCDR_DATA_REPRESENTATION};
+            }
+            qos.reliability().kind = reliability == "reliable"
+                ? RELIABLE_RELIABILITY_QOS : BEST_EFFORT_RELIABILITY_QOS;
+            qos.durability().kind = durability == "transient-local"
+                ? TRANSIENT_LOCAL_DURABILITY_QOS : VOLATILE_DURABILITY_QOS;
+            qos.deadline().period = {deadline_seconds, 0u};
+            qos.ownership().kind = ownership == "exclusive"
+                ? EXCLUSIVE_OWNERSHIP_QOS : SHARED_OWNERSHIP_QOS;
         }
-        qos.reliability().kind = reliability == "reliable"
-            ? RELIABLE_RELIABILITY_QOS : BEST_EFFORT_RELIABILITY_QOS;
-        qos.durability().kind = durability == "transient-local"
-            ? TRANSIENT_LOCAL_DURABILITY_QOS : VOLATILE_DURABILITY_QOS;
-        qos.deadline().period = {deadline_seconds, 0u};
-        qos.ownership().kind = ownership == "exclusive"
-            ? EXCLUSIVE_OWNERSHIP_QOS : SHARED_OWNERSHIP_QOS;
         WriterListener listener;
         DataWriter* writer = publisher->create_datawriter(topic, qos, &listener);
         if (writer == nullptr)
@@ -307,7 +316,8 @@ int main(int argc, char** argv)
               << "\",\"representation\":\"" << representation
               << "\",\"type_metadata\":\"" << type_metadata
               << "\",\"type_lookup\":\"" << type_lookup
-              << "\",\"results\":{\"matched\":" << matched
+              << "\",\"qos_defaults\":" << (qos_defaults ? "true" : "false")
+              << ",\"results\":{\"matched\":" << matched
               << ",\"samples\":" << samples << "}}" << std::endl;
     return 0;
 }

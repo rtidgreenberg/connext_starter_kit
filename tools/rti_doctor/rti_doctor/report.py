@@ -47,7 +47,7 @@ CAPTURE_LABEL_PAD = 24
 #: endpoint report for diagnosis offers a capture, but a report can reach here
 #: having been opened passively or with Skip as the answer, so name the key too.
 CAPTURE_HINT = ("Open an endpoint report for diagnosis and choose a capture "
-                "interface, or press c on one, to capture RTPS packets for that "
+                "interface when it opens to capture RTPS packets for that "
                 "endpoint.")
 
 
@@ -210,16 +210,45 @@ def _labelled(label, text, indent=15):
   return [prefix + first[indent:]] + block[1:]
 
 
+def _is_preformatted(line):
+  """Whether a line is a fixed-column table row rather than prose.
+
+  The requested/offered table aligns on `|`, under a rule of dashes and pluses.
+  Reflowing either destroys the alignment that makes the table readable, so both
+  pass through an observation verbatim while the prose around them wraps.
+  """
+  stripped = line.strip()
+  return "|" in stripped or (bool(stripped) and set(stripped) <= set("-+"))
+
+
 def _labelled_observation(label, text, indent=15):
-  """Render an observation, retaining intentional table and paragraph lines."""
-  if "\n" not in str(text):
+  """Render an observation, retaining intentional table and paragraph lines.
+
+  A single-paragraph observation wraps like any other field. A multi-line one
+  carries a fixed-column table, so its table rows pass through verbatim - but
+  only those. Passing the whole block through unwrapped left the prose that
+  frames the table (the unevaluated-policy note, the counterpart census) as
+  single lines of 340 and 98 characters, well past WIDTH.
+  """
+  text = str(text or "")
+  if "\n" not in text:
     return _labelled(label, text, indent)
   indent = max(indent, len(label) + 3)
-  prefix = f"  {label}".ljust(indent)
-  lines = str(text).splitlines()
-  if not lines:
+  pad = " " * indent
+  body = []
+  for line in text.splitlines():
+    if not line.strip():
+      # A blank line separates the table from its prose; keep it, without
+      # trailing indent whitespace.
+      body.append("")
+    elif _is_preformatted(line):
+      body.append(pad + line)
+    else:
+      body.extend(_wrap(line, indent=indent))
+  if not body:
     return []
-  return [prefix + lines[0]] + [" " * indent + line for line in lines[1:]]
+  prefix = f"  {label}".ljust(indent)
+  return [prefix + body[0][indent:]] + body[1:]
 
 
 def default_filename(domain_id, scope, timestamp=None):
@@ -437,8 +466,7 @@ def _wire_placeholder(data):
     lines.append(f"Fast DDS version: {CAPTURE_PLACEHOLDER}.")
   lines += [
       f"RTPS reliable handshake (HEARTBEAT/ACKNACK/GAP): {CAPTURE_PLACEHOLDER}.",
-      "Press c to capture RTPS packets for this endpoint, C to choose the "
-      "interface.", ""]
+      "Packet capture is selected when an endpoint report is opened.", ""]
   return lines
 
 
@@ -772,7 +800,7 @@ def _severity_summary(findings):
 def _render_one_finding(finding):
   lines = [f"[{finding.severity.label}] rung {finding.rung}  {finding.id}"]
   lines += _labelled("", finding.title)
-  lines += _labelled("Observed", finding.observed)
+  lines += _labelled_observation("Observed", finding.observed)
   lines += _labelled("Root cause", finding.root_cause)
   lines += _labelled("Remedy", finding.remedy)
   # Context, not a filter: this finding is listed, counted and carried into

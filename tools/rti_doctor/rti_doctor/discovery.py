@@ -462,11 +462,15 @@ def _sample_key(data, info, reader):
   try:
     key = _key_text(reader.key_value(info.instance_handle))
   except Exception as e:
-    logging.warning(f"[discovery] disposal sample could not be keyed: {e}")
+    # Some foreign builtin readers cannot recover a key from a disposal
+    # instance handle. This affects only removal of an already-departed endpoint
+    # from this short-lived observer cache; keep it in --debug-log rather than
+    # presenting it as an operator warning during a compatibility experiment.
+    logging.debug(f"[discovery] disposal sample could not be keyed: {e}")
     return ""
   if key is None:
-    logging.warning("[discovery] disposal sample carried no usable key; the "
-                    "departed endpoint stays in the registry")
+    logging.debug("[discovery] disposal sample carried no usable key; the "
+                  "departed endpoint stays in the registry")
     return ""
   return key
 

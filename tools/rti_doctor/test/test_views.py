@@ -9,6 +9,8 @@ raised.
 import asyncio
 import logging
 import os
+import shutil
+import subprocess
 import sys
 import time
 import unittest
@@ -592,6 +594,8 @@ class CaptureStubSession(StubSession):
   def __init__(self, capture_interface=None, network_capture=False):
     super().__init__()
     self.probe_timeout = 10.0
+    self.type_wait = 5.0
+    self.settle = 3.0
     self.capture_interface = capture_interface
     self.capture_choice_made = capture_interface is not None
     self.capture_off_reason = None
@@ -695,27 +699,6 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     out["said"] = status_text(screen)
     out["screen"] = pilot.app.screen
 
-  async def _press_capture(self, pilot, screen, out):
-    # Every status line the capture produced, in order. The announcement and
-    # the result both land on one widget, and the worker can finish before the
-    # test regains control, so reading the widget alone would only ever see the
-    # last of them - and what this has to prove is that the operator was told
-    # what was about to happen *before* tshark ran.
-    said = []
-    original = screen.status.update
-
-    def record(text):
-      said.append(str(text))
-      return original(text)
-
-    screen.status.update = record
-    out["said"] = said
-    await pilot.press("c")
-    await pilot.app.workers.wait_for_complete()
-    await pilot.pause()
-    out["announced"] = said[0] if said else ""
-    out["after"] = said[-1] if said else ""
-
   def test_opening_a_report_asks_before_capturing_anything(self):
     """The consent, before any tshark: a report with no answer yet must ask."""
     session = CaptureStubSession()
@@ -785,6 +768,207 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     # not promise user data the Wire tab will then contradict.
     self.assertIn("creating a writer", result["said"])
 
+  def test_fastdds_writer_compatibility_command_uses_an_isolated_matrix(self):
+    session = CaptureStubSession()
+    session.type_wait = 4.0
+    endpoint = FakeEndpoint("w1", "Writer", topic_name="FastTelemetry")
+    endpoint.vendor_id = type("Vendor", (), {"value": [0x01, 0x0F]})()
+    screen = report_screen.ReportScreen(session, endpoint=endpoint)
+    command = screen._compatibility_command("/tmp/matrix")
+    self.assertEqual(command[:2], ["bash", os.path.join(
+        report_screen.paths.TOOL_ROOT, "run_version_matrix.sh")])
+    self.assertIn("--topic", command)
+    self.assertEqual(command[command.index("--topic") + 1], "FastTelemetry")
+    self.assertIn("--output-dir", command)
+    self.assertEqual(command[command.index("--output-dir") + 1], "/tmp/matrix")
+
+  def test_fastdds_writer_report_advertises_the_compatibility_matrix(self):
+    session = CaptureStubSession()
+    endpoint = FakeEndpoint("w1", "Writer")
+    endpoint.vendor_id = type("Vendor", (), {"value": [0x01, 0x0F]})()
+    screen = report_screen.ReportScreen(session, endpoint=endpoint, probe=False)
+    self.assertIn("press x", screen._compatibility_hint_text().lower())
+
+  def test_matrix_progress_lines_from_the_runner_all_parse(self):
+    """Every line `run_version_matrix.sh` emits, taken from the script itself.
+
+    The runner reports a result verbatim, so a progress line has two tokens or
+    seven. A fixed four-field split raised ValueError on the very first line -
+    "MATRIX_PROGRESS preflight running" - and the worker died before any profile
+    ran, leaving the screen on its "Preparing..." placeholder for good.
+    """
+    screen = report_screen.CompatibilityMatrixScreen([], "/tmp/matrix")
+    screen.progress = mock.Mock()
+    emitted = [
+        "MATRIX_PROGRESS preflight running",
+        "MATRIX_PROGRESS preflight complete",
+        "MATRIX_PROGRESS default-v2 running",
+        "MATRIX_PROGRESS default-v2 ERROR findings or startup failure",
+        "MATRIX_PROGRESS vendor-v2 running",
+        "MATRIX_PROGRESS vendor-v2 no ERROR findings",
+    ]
+    for line in emitted:
+      screen._note_progress(line)
+    self.assertEqual(screen.states["preflight"], "complete")
+    self.assertEqual(screen.states["default-v2"],
+                     "ERROR findings or startup failure")
+    self.assertEqual(screen.states["vendor-v2"], "no ERROR findings")
+    # An untouched profile keeps its placeholder rather than gaining a row of
+    # mis-split tokens.
+    self.assertEqual(screen.states["vendor-v1"], "waiting")
+    self.assertEqual(set(screen.states),
+                     {"preflight"} | set(report_screen.MATRIX_PROFILES))
+
+  def test_the_runner_script_emits_only_progress_lines_the_screen_parses(self):
+    """The script is the source of truth for the profile list and the prefix."""
+    path = os.path.join(report_screen.paths.TOOL_ROOT, "run_version_matrix.sh")
+    self.assertTrue(os.path.isfile(path), "the matrix runner must be present")
+    with open(path, encoding="utf-8") as handle:
+      script = handle.read()
+    for profile in report_screen.MATRIX_PROFILES:
+      self.assertIn(profile, script)
+
+  def test_a_malformed_progress_line_does_not_stop_the_matrix(self):
+    screen = report_screen.CompatibilityMatrixScreen([], "/tmp/matrix")
+    screen.progress = mock.Mock()
+    with self.assertLogs(level="WARNING"):
+      screen._note_progress("MATRIX_PROGRESS preflight")
+      screen._note_progress("MATRIX_PROGRESS not-a-profile running")
+    self.assertEqual(screen.states["preflight"], "waiting")
+
+  def test_leaving_the_matrix_screen_stops_the_child_observers(self):
+    """Three child observers on the diagnosed domain must not outlive the screen."""
+    screen = report_screen.CompatibilityMatrixScreen([], "/tmp/matrix")
+    process = mock.Mock()
+    process.pid = 4321
+    process.poll.return_value = None
+    screen.process = process
+    with mock.patch.object(report_screen.os, "getpgid", return_value=4321), \
+         mock.patch.object(report_screen.os, "killpg") as killpg:
+      screen.on_unmount()
+    killpg.assert_called_once_with(4321, report_screen.signal.SIGTERM)
+    process.wait.assert_called_once()
+    self.assertIsNone(screen.process)
+
+  def test_a_wedged_matrix_runner_is_killed_rather_than_left_running(self):
+    screen = report_screen.CompatibilityMatrixScreen([], "/tmp/matrix")
+    process = mock.Mock()
+    process.pid = 4321
+    process.poll.return_value = None
+    process.wait.side_effect = subprocess.TimeoutExpired("bash", 5.0)
+    screen.process = process
+    with mock.patch.object(report_screen.os, "getpgid", return_value=4321), \
+         mock.patch.object(report_screen.os, "killpg") as killpg:
+      screen.on_unmount()
+    self.assertEqual([call.args[1] for call in killpg.call_args_list],
+                     [report_screen.signal.SIGTERM, report_screen.signal.SIGKILL])
+
+  def test_a_matrix_worker_failure_is_reported_on_screen(self):
+    """`exit_on_error=False` keeps the TUI up, so the screen must say why."""
+    screen = report_screen.CompatibilityMatrixScreen([], "/tmp/matrix")
+    screen.detail = mock.Mock()
+    with mock.patch.object(screen, "_stream_matrix",
+                           side_effect=RuntimeError("popen exploded")), \
+         self.assertLogs(level="ERROR"):
+      asyncio.run(screen._run_matrix())
+    self.assertIn("popen exploded", screen.detail.update.call_args[0][0])
+
+  def test_the_matrix_is_offered_only_on_a_fastdds_writer(self):
+    """The footer documents the keymap, so it must not advertise a refusal."""
+    session = CaptureStubSession()
+    fastdds = FakeEndpoint("w1", "Writer")
+    fastdds.vendor_id = type("Vendor", (), {"value": [0x01, 0x0F]})()
+    rti = FakeEndpoint("w2", "Writer")
+    rti.vendor_id = type("Vendor", (), {"value": [0x01, 0x01]})()
+    reader = FakeEndpoint("r1", "Reader")
+    reader.vendor_id = type("Vendor", (), {"value": [0x01, 0x0F]})()
+    for endpoint, offered in ((fastdds, True), (rti, False), (reader, False)):
+      screen = report_screen.ReportScreen(session, endpoint=endpoint)
+      self.assertEqual(screen.check_action("compatibility_matrix", ()), offered,
+                       f"{endpoint.key} should{'' if offered else ' not'} offer x")
+    participant = report_screen.ReportScreen(
+        session, participant=records.ParticipantRecord(key="p1", name="app"))
+    self.assertFalse(participant.check_action("compatibility_matrix", ()))
+
+  def test_a_missing_runner_is_named_instead_of_reporting_an_empty_matrix(self):
+    session = CaptureStubSession()
+    endpoint = FakeEndpoint("w1", "Writer", topic_name="FastTelemetry")
+    endpoint.vendor_id = type("Vendor", (), {"value": [0x01, 0x0F]})()
+    screen = report_screen.ReportScreen(session, endpoint=endpoint)
+    screen.status = mock.Mock()
+    with mock.patch.object(report_screen.os.path, "isfile", return_value=False):
+      # `self.app` raises off-app, so reaching the push at all fails this test.
+      screen.action_compatibility_matrix()
+    self.assertIn("runner is missing", screen.status.update.call_args[0][0])
+
+  def test_the_matrix_never_settles_for_less_than_the_runner_default(self):
+    """An interactive `--settle` tuned for a local RTI peer is too short here."""
+    session = CaptureStubSession()
+    session.settle = 3.0
+    endpoint = FakeEndpoint("w1", "Writer", topic_name="FastTelemetry")
+    endpoint.vendor_id = type("Vendor", (), {"value": [0x01, 0x0F]})()
+    screen = report_screen.ReportScreen(session, endpoint=endpoint)
+    command = screen._compatibility_command("/tmp/matrix")
+    self.assertEqual(float(command[command.index("--settle") + 1]),
+                     report_screen.MATRIX_MIN_SETTLE)
+    # An operator who asked for longer gets what they asked for.
+    session.settle = report_screen.MATRIX_MIN_SETTLE + 10.0
+    command = screen._compatibility_command("/tmp/matrix")
+    self.assertEqual(float(command[command.index("--settle") + 1]),
+                     report_screen.MATRIX_MIN_SETTLE + 10.0)
+
+  def test_publish_verification_is_available_only_for_readers(self):
+    session = CaptureStubSession()
+    writer = report_screen.ReportScreen(session, endpoint=FakeEndpoint("w1", "Writer"))
+    reader = report_screen.ReportScreen(session, endpoint=FakeEndpoint("r1", "Reader"))
+    self.assertFalse(writer.check_action("verify_delivery", ()))
+    self.assertTrue(reader.check_action("verify_delivery", ()))
+
+  def test_compatibility_matrix_rejects_an_rti_writer(self):
+    session = CaptureStubSession()
+    endpoint = FakeEndpoint("w1", "Writer")
+    endpoint.vendor_id = type("Vendor", (), {"value": [0x01, 0x01]})()
+    screen = report_screen.ReportScreen(session, endpoint=endpoint)
+    screen.status = mock.Mock()
+    screen.action_compatibility_matrix()
+    self.assertIn("RTI Connext writer", screen.status.update.call_args[0][0])
+
+  def _matrix_output_dir(self, profile, report_text):
+    """One child profile report on disk, as the runner would leave it."""
+    output_dir = os.path.join(os.path.dirname(__file__), "matrix_findings")
+    report_dir = os.path.join(output_dir, profile)
+    os.makedirs(report_dir, exist_ok=True)
+    self.addCleanup(shutil.rmtree, output_dir, ignore_errors=True)
+    with open(os.path.join(report_dir, "topic_report.txt"), "w",
+              encoding="utf-8") as handle:
+      handle.write(report_text)
+    return output_dir
+
+  def test_compatibility_matrix_extracts_profile_problem_titles(self):
+    """Scraped from a real rendered report, rules and all.
+
+    A hand-written fixture without the `report._section` rules passed while the
+    scrape was returning the 80-dash rule as every profile's verdict, because
+    the rule is exactly the line a real report puts after "VERDICT".
+    """
+    data = report.ReportData(
+        domain_id=7, scope="topic 'Telemetry'",
+        endpoint=FakeEndpoint("w1", "Writer"),
+        all_findings=[findings.Finding(
+            id="match.none", rung=4, severity=findings.Severity.ERROR,
+            title="Reader never matched the writer",
+            observed="No matched publication was observed.",
+            root_cause="The reader saw no compatible writer.",
+            remedy="Compare the requested and offered QoS.")])
+    output_dir = self._matrix_output_dir("vendor-v1", report.render_text(data))
+    screen = report_screen.CompatibilityMatrixScreen([], output_dir)
+    text = screen._profile_findings()
+    self.assertIn("match.none", text)
+    self.assertIn("Reader never matched the writer", text)
+    # The verdict, not the rule that `_section` puts under the heading.
+    self.assertNotRegex(text, r"vendor-v1: -{5,}")
+    self.assertIn(f"vendor-v1: {data.verdict}", text)
+
   def test_a_capture_that_never_started_turns_capture_off_for_the_session(self):
     """One tshark refusal, not one per report.
 
@@ -822,7 +1006,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
         "error": "tshark did not exit after termination and was killed"}
     result = self.drive(session, FakeEndpoint("w1", "Writer"), self._settle)
     self.assertIn("no packet evidence", result["said"])
-    self.assertIn("Press c to try again", result["said"])
+    self.assertNotIn("Press c", result["said"])
     self.assertNotIn("off for this session", result["said"])
     self.assertIsNone(session.capture_off_reason)
     self.assertEqual(session.capture_interface, "lo")
@@ -850,34 +1034,10 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     self.assertIn("Diagnostic pass failed", result["said"])
     self.assertFalse(session.pass_in_flight())
 
-  def test_a_second_c_while_capturing_does_not_start_another(self):
-    session = CaptureStubSession("lo")
-
-    async def steps(pilot, screen, out):
-      screen.capturing = True
-      session.calls = []
-      await pilot.press("c")
-      await pilot.pause()
-      out["said"] = status_text(screen)
-
-    result = self.drive(session, FakeEndpoint("w1", "Writer"), steps)
-    self.assertIn("already running", result["said"])
-    self.assertEqual(session.calls, [])
-
-  def test_c_during_the_pass_waits_rather_than_racing_it(self):
-    """Two probes on one topic would each observe the other's traffic."""
-    session = CaptureStubSession("lo")
-
-    async def steps(pilot, screen, out):
-      screen.probing = True
-      session.calls = []
-      await pilot.press("c")
-      await pilot.pause()
-      out["said"] = status_text(screen)
-
-    result = self.drive(session, FakeEndpoint("w1", "Writer"), steps)
-    self.assertIn("still running", result["said"])
-    self.assertEqual(session.calls, [])
+  def test_capture_keys_are_not_bound_after_the_entry_choice(self):
+    keys = {binding[0] for binding in report_screen.ReportScreen.BINDINGS}
+    self.assertNotIn("c", keys)
+    self.assertNotIn("C", keys)
 
   def test_a_pass_running_on_another_report_blocks_this_one(self):
     """Workers survive navigation, so the guard has to outlive the screen.
@@ -897,16 +1057,12 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
 
     async def steps(pilot, screen, out):
       out["screen"] = pilot.app.screen
-      await self._press_capture(pilot, screen, out)
 
     result = self.drive(session, FakeEndpoint("w1", "Writer"), steps, probe=False)
     self.assertIsInstance(result["screen"], report_screen.ReportScreen)
-    # `c` still collects evidence, and still does not upgrade it to a probe.
+    # Passive reports stay read-only and do not offer a capture rerun.
     requested = [call for call in session.calls if call["capture_interface"]]
-    self.assertEqual(len(requested), 1)
-    self.assertFalse(requested[0]["probe"])
-    self.assertEqual(requested[0]["capture_seconds"],
-                     engine.DEFAULT_CAPTURE_SECONDS)
+    self.assertEqual(requested, [])
 
   def test_choosing_an_interface_remembers_it_and_runs_the_pass(self):
     """CAP-2's acceptance: capture on `lo` from a TUI launched with no flags."""
@@ -979,22 +1135,6 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     self.assertIsInstance(result["screen"],
                           report_screen.CaptureInterfaceScreen)
 
-  def test_capital_c_turns_capture_back_on_after_a_failure(self):
-    """Choosing again is how an operator says the reason no longer applies."""
-    session = CaptureStubSession("lo")
-    session.disable_capture("you don't have permission to capture")
-
-    async def steps(pilot, screen, out):
-      await pilot.press("C")
-      await pilot.pause()
-      await self._choose(pilot, "eth0")
-
-    self.drive(session, FakeEndpoint("w1", "Writer"), steps)
-    self.assertIsNone(session.capture_off_reason)
-    self.assertEqual(session.capture_interface, "eth0")
-    self.assertEqual([call["capture_interface"] for call in session.calls
-                      if call["capture_interface"]], ["eth0"])
-
   def test_the_picker_offers_skip_first_and_any_last(self):
     """N3, both ends: the reflexive Enter must land on the least privileged row.
 
@@ -1024,7 +1164,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
   def test_the_picker_does_not_enumerate_on_the_event_loop(self):
     """`tshark -D` runs extcap helpers, so it must not block construction.
 
-    Constructing the screen is done from `action_capture`, on the Textual event
+    The screen is constructed from `_offer_full_pass`, on the Textual event
     loop. Enumerating there froze the whole TUI for as long as tshark took.
     """
     session = CaptureStubSession()
@@ -1032,7 +1172,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
       report_screen.CaptureInterfaceScreen(session, lambda _: None)
     listed.assert_not_called()
 
-  def test_a_participant_report_says_capture_needs_an_endpoint(self):
+  def test_a_participant_report_has_no_capture_action(self):
     session = CaptureStubSession()
     collected = {}
 
@@ -1043,7 +1183,6 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
       async with app.run_test() as pilot:
         await pilot.pause()
         await app.workers.wait_for_complete()
-        await pilot.press("c")
         await pilot.pause()
         collected["said"] = status_text(screen)
 
@@ -1051,7 +1190,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
         domain_id=7, scope="participant 'app'", all_findings=[],
         participant=participant)
     asyncio.run(run())
-    self.assertIn("needs an endpoint", collected["said"])
+    self.assertIn("participant report", collected["said"])
 
   def test_the_wire_tab_says_how_to_get_packet_evidence(self):
     """H8/H9: an unasked question must not render as a settled one."""
@@ -1059,7 +1198,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
         domain_id=7, scope="topic 'Telemetry'", all_findings=[],
         endpoint=FakeEndpoint("w1", "Writer")))
     self.assertIn(report.CAPTURE_PLACEHOLDER, sections["wire"])
-    self.assertIn("Press c", sections["wire"])
+    self.assertIn("selected when an endpoint report is opened", sections["wire"])
 
   def test_the_overview_tab_shows_what_a_capture_produced(self):
     """The operator who pressed `c` is the one who must see the result.
@@ -1203,7 +1342,7 @@ class TestPublishingNeedsApproval(unittest.TestCase):
     result = self.drive(session, FakeEndpoint("w1", "Writer"), self._press_w)
     self.assertNotIsInstance(result["screen"],
                              report_screen.PublishConsentScreen)
-    self.assertIn("already verified", result["said"])
+    self.assertNotIn("Publish", result["said"])
 
   def test_a_passive_report_has_no_writer_to_publish_from(self):
     session = CaptureStubSession(capture_interface="lo")

@@ -233,11 +233,37 @@ class TestSystemScan(unittest.TestCase):
             "machine": "x86_64", "connext": "7.7.0", "nddshome": "/opt/rti",
             "python": "3.x"},
         type_lookup_settings={"request_types_filter": "*"})
-    too_wide = [line for line in text.splitlines()
-                if len(line) > report.WIDTH
-                and max((len(word) for word in line.split()), default=0)
-                < report.WIDTH // 2]
-    self.assertEqual(too_wide, [], "a system report line ran past the width")
+    self.assertEqual(self._over_width(text), [],
+                     "a system report line ran past the width")
+
+  @staticmethod
+  def _over_width(text):
+    """Report lines past WIDTH, exempting single unbreakable tokens."""
+    return [line for line in text.splitlines()
+            if len(line) > report.WIDTH
+            and max((len(word) for word in line.split()), default=0)
+            < report.WIDTH // 2]
+
+  def test_a_qos_mismatch_observation_wraps_the_prose_around_its_table(self):
+    """The width guard's own fixture has no RxO mismatch, so it misses this.
+
+    A multi-line observation was passed through unwrapped to keep its
+    requested/offered table intact, which also stopped the prose framing the
+    table - the unevaluated-policy note and the counterpart census - from
+    wrapping. Both went out as single lines well past WIDTH.
+    """
+    snapshot = system_scan.scan(
+        registry_with_reliability_fault(), own_qos=None,
+        type_lookup_settings={"request_types_filter": "*"}, domain_id=7,
+        captured_at=123.0)
+    text = report.render_system_text(snapshot, 7, environment={
+        "argv": "rti_doctor", "host": "test", "os": "Linux",
+        "machine": "x86_64", "connext": "7.7.0", "nddshome": "/opt/rti",
+        "python": "3.x"})
+    # The fixture must actually exercise the table, or this guards nothing.
+    self.assertIn("POLICY      | WRITER OFFERS | READER REQUESTS", text)
+    self.assertEqual(self._over_width(text), [],
+                     "a QoS observation line ran past the width")
 
   def test_system_report_contains_metrics_and_issue_relationships(self):
     snapshot = system_scan.scan(
@@ -280,7 +306,7 @@ class TestSystemScan(unittest.TestCase):
         "connext": "7.7.0", "nddshome": "/opt/rti", "python": "3.x"})
     self.assertIn("FAST DDS VERSION EVIDENCE", text)
     self.assertIn(report.CAPTURE_PLACEHOLDER, text)
-    self.assertIn("press c", text)
+    self.assertIn("choose a capture interface", text)
 
   def test_an_observed_version_replaces_the_placeholder(self):
     registry, peers = registry_with_fastdds_peers()

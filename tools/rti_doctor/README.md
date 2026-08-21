@@ -94,9 +94,8 @@ selecting one shows only that severity. Keys:
 | `i` | In Topology: the issues linked to the highlighted row |
 | `m` | Observed domain metrics |
 | `r` | Re-scan (every screen shows a snapshot, never a live feed) |
-| `c` | On an endpoint report: capture RTPS packets for that endpoint |
-| `C` | On an endpoint report: choose the capture interface, and run the pass again |
 | `w` | On a **reader** report: publish synthetic samples to verify delivery — asks first, every time |
+| `x` | On a **Fast DDS writer** report: run the isolated TypeObject/XTypes-mask compatibility matrix |
 | `s` | Save the current system or diagnostic report as a shareable text file |
 | `b` / `Esc` | Back |
 | `q` | Quit |
@@ -131,7 +130,9 @@ Opening a reader or writer report runs the full diagnostic in **one pass** —
 a probe and, if you consent to one, a packet capture. The first such report of
 a session asks where to capture, with `Skip` at the top of the list for "probe,
 but capture nothing". Both answers are remembered, so later reports run without
-asking; `C` changes the answer, and `--capture-interface` gives it up front.
+asking, and `--capture-interface` gives the answer up front. The choice is made
+when an endpoint report opens and nowhere else: there is no key that re-opens
+the picker, so changing it means restarting the session.
 
 One pass, not two. A capture with nothing on the wire is an empty file, so a
 capture on a probed endpoint has to be the thing that drives the probe — when
@@ -143,11 +144,12 @@ Before anything starts, the screen states the interface, the file it will write
 tshark's own `-a duration:`, so one that is abandoned still stops. If a capture
 fails — no capture privileges on this host, no `tshark` — capture turns itself
 off for the rest of the session rather than filing that refusal as the wire
-evidence of every later report. `C` turns it back on.
+evidence of every later report. Nothing in the session turns it back on; fix
+the privileges or install `tshark`, then run again.
 
 Reports opened *passively* — `o`, or from an issue — probe nothing and capture
-nothing, and never prompt. `c` is still how you ask for evidence on one of
-those, and it does not upgrade them to a probe.
+nothing, and never prompt. There is no way to add evidence to one of those
+either: open the endpoint from Topology to get a probed report.
 
 On exit, captures no saved report cites are removed; saving a report with `s`
 keeps the capture it names in Appendix C. `RTI_DOCTOR_KEEP_ARTIFACTS=1` keeps
@@ -218,6 +220,41 @@ reporting rti_doctor's own restraint as a fault of the peer.
 When approved, the probe publishes and — for a RELIABLE reader — waits for
 acknowledgment, so the verdict reads `matched, 3 sample(s) published,
 acknowledged by the reader`.
+
+## Fast DDS Compatibility Matrix (`x`)
+
+A Fast DDS writer that a Connext reader cannot resolve a type from is usually a
+TypeObject question — which representation was published, and which XTypes
+compliance mask the reader asked with. Those are startup-time settings: they
+cannot be changed in a running session, because the mask has to be applied
+before the first Connext call.
+
+So the matrix runs *outside* this process. On a **Fast DDS writer** report, `x`
+launches `run_version_matrix.sh`, which starts fresh `rti_doctor` observers
+against the same domain and topic, one per profile, and stops at the first that
+comes back with no ERROR findings:
+
+| Profile | XTypes mask | TypeObject |
+|---|---|---|
+| `default-v2` | Connext default | V2 with TypeLookup |
+| `vendor-v2` | `VENDOR` | V2 with TypeLookup |
+| `vendor-v1` | `VENDOR` | inline V1 |
+
+A passive preflight runs first and confirms the topic is actually visible; if it
+is not, no probe starts. The screen shows a row per profile as the runner
+reports it, then the verdict and problem titles scraped from each child report,
+with everything left under
+`tools/rti_doctor/test_output/fastdds_compatibility/`.
+
+The child runs settle for at least 20 seconds — cross-vendor discovery is
+slower than the interactive session's `--settle`, and the preflight would
+otherwise check for the topic before the writer had been seen. A longer explicit
+`--settle` is carried through.
+
+Leaving the screen stops the runner and its observers; they are launched in
+their own process group so one signal reaches all of them. A profile that passes
+is evidence about *this observer* — it does not prove the same profile fixes
+another application or an RTI service.
 
 ## The Visibility Ladder
 

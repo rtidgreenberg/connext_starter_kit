@@ -38,7 +38,8 @@ class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
       raise unittest.SkipTest(f"Fast DDS image '{FASTDDS_IMAGE}' is unavailable")
 
   def _connext_command(self, domain, topic, role, extensibility, representation,
-                       duration, start_file=None, ready_file=None):
+                       duration, start_file=None, ready_file=None,
+                       qos_defaults=False):
     command = [
         sys.executable, CONNEXT, "--domain", str(domain), "--topic", topic,
         "--role", role, "--extensibility", extensibility, "--schema", "fastdds",
@@ -54,10 +55,13 @@ class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
       command.extend(("--wait-for-file", start_file, "--wait-timeout", "120"))
     if ready_file is not None:
       command.extend(("--endpoint-ready-file", ready_file))
+    if qos_defaults:
+      command.append("--qos-defaults")
     return command
 
   def _fastdds_command(self, domain, topic, role, extensibility, representation,
-                       duration, control_dir=None, start_file=None, ready_file=None):
+                       duration, control_dir=None, start_file=None, ready_file=None,
+                       qos_defaults=False):
     command = [
       "docker", "run", "--rm", "--network", "host", "--entrypoint",
       f"/doctor-extensibility-build/doctor_fastdds_{extensibility}",
@@ -76,6 +80,8 @@ class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
     if ready_file is not None:
       command.extend(("--endpoint-ready-file",
                       f"/control/{os.path.basename(ready_file)}"))
+    if qos_defaults:
+      command.append("--qos-defaults")
     return command
 
   # 30s was under the observed worst case: a `docker run` on a loaded host has
@@ -95,7 +101,8 @@ class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
 
   def _run_pair(self, writer_vendor, writer_extensibility,
                 reader_vendor, reader_extensibility, writer_representation="xcdr1",
-                reader_representation="xcdr1"):
+                reader_representation="xcdr1", writer_qos_defaults=False,
+                reader_qos_defaults=False):
     domain = domains.for_suite("test_fastdds_extensibility_vendor_e2e")
     topic = f"DoctorFastDdsExtensibility_{uuid.uuid4().hex}"
     control_dir = tempfile.mkdtemp(prefix="rti_doctor_fastdds_repr_", dir=HERE)
@@ -105,16 +112,20 @@ class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
     writer_ready_file = os.path.join(control_dir, "writer.ready")
     command_for = self._fastdds_command if writer_vendor == "fastdds" else self._connext_command
     writer_kwargs = ({"control_dir": control_dir, "start_file": writer_start_file,
-                      "ready_file": writer_ready_file}
+                      "ready_file": writer_ready_file,
+                      "qos_defaults": writer_qos_defaults}
                      if writer_vendor == "fastdds" else
-                     {"start_file": writer_start_file, "ready_file": writer_ready_file})
+                     {"start_file": writer_start_file, "ready_file": writer_ready_file,
+                      "qos_defaults": writer_qos_defaults})
     writer_command = command_for(domain, topic, "writer", writer_extensibility,
                                  writer_representation, 8, **writer_kwargs)
     command_for = self._fastdds_command if reader_vendor == "fastdds" else self._connext_command
     reader_kwargs = ({"control_dir": control_dir, "start_file": reader_start_file,
-                      "ready_file": reader_ready_file}
+                      "ready_file": reader_ready_file,
+                      "qos_defaults": reader_qos_defaults}
                      if reader_vendor == "fastdds" else
-                     {"start_file": reader_start_file, "ready_file": reader_ready_file})
+                     {"start_file": reader_start_file, "ready_file": reader_ready_file,
+                      "qos_defaults": reader_qos_defaults})
     reader_command = command_for(domain, topic, "reader", reader_extensibility,
                                  reader_representation, 10, **reader_kwargs)
     # Launch both before releasing either. Each fixture creates its participant,
@@ -284,6 +295,15 @@ class TestFastDdsExtensibilityVendorDataFlow(unittest.TestCase):
             self._assert_data_flows(writer, reader)
           else:
             self._assert_representation_blocks_the_match(writer, reader)
+
+  def test_fastdds_and_connext_default_endpoint_qos_deserialize(self):
+    writer, reader = self._run_pair(
+        "fastdds", "final", "connext", "final",
+        writer_representation="default", writer_qos_defaults=True,
+        reader_qos_defaults=True)
+    self.assertTrue(writer["qos_defaults"], writer)
+    self.assertTrue(reader["qos_defaults"], reader)
+    self._assert_data_flows(writer, reader)
 
 
 if __name__ == "__main__":

@@ -105,6 +105,8 @@ def main():
                       default="shared")
   parser.add_argument("--representation", choices=("xcdr1", "xcdr2"),
                       default="xcdr1")
+  parser.add_argument("--qos-defaults", action="store_true",
+                      help="Leave endpoint QoS at middleware defaults")
   parser.add_argument("--duration", type=float, default=6.0)
   parser.add_argument("--participant-name",
                       help="Participant name to advertise in discovery "
@@ -180,19 +182,20 @@ def main():
 
   if args.role == "writer":
     writer_qos = dds.DataWriterQos()
-    writer_qos.data_representation.value = [int(
-      dds.DataRepresentation.XCDR2 if args.representation == "xcdr2"
-      else dds.DataRepresentation.XCDR)]
-    writer_qos.reliability.kind = (
-        dds.ReliabilityKind.RELIABLE if args.reliability == "reliable"
-        else dds.ReliabilityKind.BEST_EFFORT)
-    writer_qos.durability.kind = (
-      dds.DurabilityKind.TRANSIENT_LOCAL if args.durability == "transient-local"
-      else dds.DurabilityKind.VOLATILE)
-    writer_qos.deadline.period = dds.Duration(args.deadline_seconds)
-    writer_qos.ownership.kind = (
-      dds.OwnershipKind.EXCLUSIVE if args.ownership == "exclusive"
-      else dds.OwnershipKind.SHARED)
+    if not args.qos_defaults:
+      writer_qos.data_representation.value = [int(
+        dds.DataRepresentation.XCDR2 if args.representation == "xcdr2"
+        else dds.DataRepresentation.XCDR)]
+      writer_qos.reliability.kind = (
+          dds.ReliabilityKind.RELIABLE if args.reliability == "reliable"
+          else dds.ReliabilityKind.BEST_EFFORT)
+      writer_qos.durability.kind = (
+        dds.DurabilityKind.TRANSIENT_LOCAL if args.durability == "transient-local"
+        else dds.DurabilityKind.VOLATILE)
+      writer_qos.deadline.period = dds.Duration(args.deadline_seconds)
+      writer_qos.ownership.kind = (
+        dds.OwnershipKind.EXCLUSIVE if args.ownership == "exclusive"
+        else dds.OwnershipKind.SHARED)
     writer = dds.DynamicData.DataWriter(dds.Publisher(participant), topic, writer_qos)
     write_ready_file(args.endpoint_ready_file)
     counter = 0
@@ -212,19 +215,20 @@ def main():
         break
   else:
     reader_qos = dds.DataReaderQos()
-    reader_qos.data_representation.value = [int(
-      dds.DataRepresentation.XCDR2 if args.representation == "xcdr2"
-      else dds.DataRepresentation.XCDR)]
-    reader_qos.reliability.kind = (
-        dds.ReliabilityKind.RELIABLE if args.reliability == "reliable"
-        else dds.ReliabilityKind.BEST_EFFORT)
-    reader_qos.durability.kind = (
-      dds.DurabilityKind.TRANSIENT_LOCAL if args.durability == "transient-local"
-      else dds.DurabilityKind.VOLATILE)
-    reader_qos.deadline.period = dds.Duration(args.deadline_seconds)
-    reader_qos.ownership.kind = (
-      dds.OwnershipKind.EXCLUSIVE if args.ownership == "exclusive"
-      else dds.OwnershipKind.SHARED)
+    if not args.qos_defaults:
+      reader_qos.data_representation.value = [int(
+        dds.DataRepresentation.XCDR2 if args.representation == "xcdr2"
+        else dds.DataRepresentation.XCDR)]
+      reader_qos.reliability.kind = (
+          dds.ReliabilityKind.RELIABLE if args.reliability == "reliable"
+          else dds.ReliabilityKind.BEST_EFFORT)
+      reader_qos.durability.kind = (
+        dds.DurabilityKind.TRANSIENT_LOCAL if args.durability == "transient-local"
+        else dds.DurabilityKind.VOLATILE)
+      reader_qos.deadline.period = dds.Duration(args.deadline_seconds)
+      reader_qos.ownership.kind = (
+        dds.OwnershipKind.EXCLUSIVE if args.ownership == "exclusive"
+        else dds.OwnershipKind.SHARED)
     reader = dds.DynamicData.DataReader(dds.Subscriber(participant), topic, reader_qos)
     write_ready_file(args.endpoint_ready_file)
     while time.monotonic() < deadline:
@@ -249,6 +253,7 @@ def main():
                     "deadline_seconds": args.deadline_seconds,
                     "ownership": args.ownership,
                     "representation": args.representation,
+                    "qos_defaults": args.qos_defaults,
                     "type_object_v1_only": args.type_object_v1_only,
                     "results": results}),
         flush=True)

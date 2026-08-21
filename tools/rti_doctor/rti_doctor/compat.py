@@ -406,3 +406,20 @@ def set_vendor_xtypes_mask():
 
   result["after"] = xtypes_mask_text()
   return result
+
+
+def configure_xtypes_mask(mode):
+  """Apply the requested observer XTypes mask before DDS entities exist.
+
+  ``default`` intentionally leaves Connext's process default intact. The child
+  compatibility runner clears the environment override before starting this
+  process, so this is a real default-mask experiment rather than an inherited
+  ``NDDS_XTYPES_COMPLIANCE_MASK`` setting.
+  """
+  if mode == "default":
+    return {"requested": "DEFAULT", "before": xtypes_mask_text(),
+            "after": xtypes_mask_text(), "applied": True,
+            "note": "Connext default preserved"}
+  if mode == "vendor":
+    return set_vendor_xtypes_mask()
+  raise ValueError(f"unsupported XTypes compliance mode: {mode}")

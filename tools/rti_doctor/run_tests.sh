@@ -44,6 +44,7 @@ VENDOR=(
     test_vendor_wire_e2e
     test_extensibility_vendor_e2e
     test_fastdds_extensibility_vendor_e2e
+    test_fastdds_recording_service_e2e
     test_fastdds_type_object_e2e
 )
 

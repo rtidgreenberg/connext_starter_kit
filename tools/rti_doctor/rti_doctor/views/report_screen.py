@@ -24,13 +24,16 @@ disk is swept at exit (CAP-1). Reports opened passively - `o`, or from an issue
 import asyncio
 import logging
 import os
+import signal
+import subprocess
+import time
 
 from rich.markup import escape
 from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static, TabbedContent, TabPane
 
-from .. import engine as engine_mod, probe as probe_mod, report as report_mod, wire
+from .. import engine as engine_mod, paths, probe as probe_mod, report as report_mod, vendors, wire
 
 #: Shown for the Skip row. Skip is an answer - "probe, but capture nothing" -
 #: and is remembered like any other, so it is worth naming rather than leaving
@@ -237,15 +240,213 @@ class PublishConsentScreen(Screen):
     self.app.exit()
 
 
+#: The profiles `run_version_matrix.sh` tries, in the order it tries them. The
+#: script owns the real list; this mirrors it so the progress table can show a
+#: row per profile before the runner has reached it.
+MATRIX_PROFILES = ("default-v2", "vendor-v2", "vendor-v1")
+
+#: Discovery settle floor for a matrix child run, matching the runner script's
+#: own `--settle` default. Cross-vendor discovery is slower than the interactive
+#: session's settle, and the preflight fails the topic check if it looks too
+#: early, so a shorter session value is not carried into the children.
+MATRIX_MIN_SETTLE = 20.0
+
+#: How long a terminated matrix runner gets to exit before it is killed.
+MATRIX_STOP_GRACE = 5.0
+
+
+class CompatibilityMatrixScreen(Screen):
+  """Live progress and evidence for isolated Fast DDS compatibility probes."""
+
+  BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
+              ("q", "quit_app", "Quit")]
+
+  def __init__(self, command, output_dir):
+    super().__init__()
+    self.command = command
+    self.output_dir = output_dir
+    self.progress = None
+    self.detail = None
+    # Held so leaving the screen can stop the run; see `on_unmount`.
+    self.process = None
+    self.states = {"preflight": "waiting",
+                   **{profile: "waiting" for profile in MATRIX_PROFILES}}
+
+  def compose(self):
+    yield Header()
+    yield Static("[bold]Fast DDS Compatibility Matrix[/bold]")
+    self.progress = Static("", id="compatibility_matrix_progress")
+    yield self.progress
+    with VerticalScroll(id="compatibility_matrix_detail"):
+      self.detail = Static("Preparing isolated observer processes...")
+      yield self.detail
+    yield Footer()
+
+  async def on_mount(self):
+    self.title = "rti_doctor - Fast DDS compatibility matrix"
+    self._render_progress()
+    self.run_worker(self._run_matrix(), exit_on_error=False)
+
+  def _render_progress(self):
+    lines = ["Profile       Status"]
+    lines.extend(f"{name:<13} {state}" for name, state in self.states.items())
+    self.progress.update("\n".join(lines))
+
+  @staticmethod
+  def _next_text(lines, index):
+    """The next line of report text after `index`, skipping section rules.
+
+    `report._section` wraps every heading in a rule of dashes, so the line after
+    "VERDICT" is that rule, not the verdict. Taking the first non-blank line
+    reported an 80-dash rule as the verdict of every profile.
+    """
+    for item in lines[index + 1:]:
+      stripped = item.strip()
+      if not stripped or set(stripped) <= set("-="):
+        continue
+      return stripped
+    return ""
+
+  def _profile_findings(self):
+    """Compact verdict and problem titles from completed child reports."""
+    rows = []
+    for profile in MATRIX_PROFILES:
+      path = os.path.join(self.output_dir, profile, "topic_report.txt")
+      if not os.path.isfile(path):
+        continue
+      try:
+        with open(path, encoding="utf-8") as handle:
+          lines = [line.rstrip() for line in handle]
+      except OSError:
+        continue
+      verdict = ""
+      for index, line in enumerate(lines):
+        if line.startswith("VERDICT"):
+          verdict = self._next_text(lines, index)
+          break
+      findings = []
+      for index, line in enumerate(lines):
+        if line.startswith("[ERROR]") or line.startswith("[WARN]"):
+          findings.append(f"{line} {self._next_text(lines, index)}")
+      rows.append(f"{profile}: {verdict or 'report completed'}")
+      rows.extend(f"  {finding}" for finding in findings[:4])
+    return "\n".join(rows) or "No completed profile reports were available."
+
+  def _note_progress(self, line):
+    """Record one MATRIX_PROGRESS line from the runner.
+
+    The state is the rest of the line, not a single token: the runner reports
+    results verbatim ("no ERROR findings", "ERROR findings or startup failure"),
+    so a fixed four-field split raised ValueError on the three-token
+    "MATRIX_PROGRESS preflight running" and killed this worker before the first
+    profile ran.
+    """
+    parts = line.split(" ", 2)
+    if len(parts) < 3:
+      logging.warning(f"[matrix] malformed progress line: {line!r}")
+      return
+    _, profile, state = parts
+    if profile not in self.states:
+      logging.warning(f"[matrix] unknown profile: {profile!r}")
+      return
+    self.states[profile] = state
+    self._render_progress()
+
+  async def _run_matrix(self):
+    """Drive the runner, reporting any failure on screen.
+
+    The worker is started with `exit_on_error=False` so a failure here cannot
+    take the TUI down with it - which also means nothing else would ever say
+    the matrix had stopped, and the screen would sit on its placeholder.
+    """
+    try:
+      await self._stream_matrix()
+    except Exception as error:  # noqa: BLE001 - reported, not swallowed
+      logging.error(f"[matrix] runner failed: {error}")
+      self.detail.update(f"The compatibility matrix stopped: {error}")
+
+  async def _stream_matrix(self):
+    try:
+      # Its own process group, so leaving this screen can take the whole tree
+      # of child rti_doctor observers down with it rather than orphaning them.
+      process = await asyncio.to_thread(
+          lambda: subprocess.Popen(
+              self.command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+              text=True, start_new_session=True))
+    except OSError as error:
+      self.detail.update(f"Could not start compatibility matrix: {error}")
+      return
+    self.process = process
+
+    output = []
+    while True:
+      line = await asyncio.to_thread(process.stdout.readline)
+      if not line:
+        break
+      line = line.rstrip()
+      output.append(line)
+      if line.startswith("MATRIX_PROGRESS "):
+        self._note_progress(line)
+      else:
+        self.detail.update("\n".join(output[-12:]))
+
+    status = await asyncio.to_thread(process.wait)
+    summary_path = os.path.join(self.output_dir, "summary.txt")
+    try:
+      with open(summary_path, encoding="utf-8") as handle:
+        summary = handle.read().strip()
+    except OSError:
+      summary = "No matrix summary was written."
+    self.detail.update(
+      f"Matrix exit: {status}\nEvidence: {self.output_dir}\n\n"
+      f"Findings\n{self._profile_findings()}\n\nSummary\n{summary}")
+
+  def on_unmount(self):
+    """Stop the matrix when the screen goes away.
+
+    The runner launches up to three child rti_doctor observers, each of which
+    joins the domain being diagnosed. Leaving them running would keep observing
+    - and would let a second press of `x` put two matrices on one domain, each
+    seeing the other's traffic. `start_new_session` in `_run_matrix` is what
+    makes one signal reach the whole tree rather than just bash.
+    """
+    self._stop_matrix()
+
+  def _stop_matrix(self):
+    process = self.process
+    self.process = None
+    if process is None or process.poll() is not None:
+      return
+    try:
+      os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+    except (OSError, ProcessLookupError) as error:
+      logging.warning(f"[matrix] could not stop the runner: {error}")
+      return
+    try:
+      process.wait(timeout=MATRIX_STOP_GRACE)
+    except subprocess.TimeoutExpired:
+      # A probe wedged in a Connext call will not return on SIGTERM; the run is
+      # already abandoned, so do not leave the observers on the domain.
+      try:
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+      except (OSError, ProcessLookupError):
+        pass
+
+  def action_back(self):
+    self.app.pop_screen()
+
+  def action_quit_app(self):
+    self.app.exit()
+
+
 class ReportScreen(Screen):
   """Findings for one endpoint or participant."""
 
   BINDINGS = [
       ("b", "back", "Back"),
       ("escape", "back", "Back"),
-      ("c", "capture", "Capture packets"),
-      ("C", "choose_interface", "Capture interface"),
       ("w", "verify_delivery", "Publish to verify delivery"),
+      ("x", "compatibility_matrix", "Fast DDS compatibility"),
       ("s", "save", "Save report"),
       ("q", "quit_app", "Quit"),
   ]
@@ -277,6 +478,25 @@ class ReportScreen(Screen):
     self.status = None
     self.capturing = False
     self.probing = False
+
+  def check_action(self, action, parameters):
+    """Hide inapplicable controls from the footer and keymap.
+
+    The footer is the only place the keymap is documented, so an action it
+    advertises has to be one this report will actually run - otherwise `x` is
+    offered on a participant or an RTI writer and answers with a refusal.
+    """
+    del parameters
+    if action == "verify_delivery":
+      return bool(self.endpoint is not None and not self.endpoint.is_writer)
+    if action == "compatibility_matrix":
+      return self._compatibility_applies()
+    return True
+
+  def _compatibility_applies(self):
+    """Whether the isolated Fast DDS matrix has a target on this report."""
+    return bool(self.endpoint is not None and self.endpoint.is_writer
+                and vendors.is_fastdds(getattr(self.endpoint, "vendor_id", None)))
 
   def compose(self):
     yield Header()
@@ -327,6 +547,13 @@ class ReportScreen(Screen):
 
   # --- The full diagnostic pass ----------------------------------------------
 
+  def _compatibility_hint_text(self):
+    """Advertise the opt-in matrix only where it applies."""
+    if not self._compatibility_applies():
+      return ""
+    return (" Fast DDS writer detected: press x to run isolated default/V2, "
+            "vendor/V2, and vendor/V1 compatibility profiles.")
+
   def _offer_full_pass(self):
     """Run the full diagnostic on entry, asking about capture the first time.
 
@@ -340,15 +567,17 @@ class ReportScreen(Screen):
           "Static checks complete (participant report: no probe, no packet "
           "capture).")
       return
+    compatibility_hint = self._compatibility_hint_text()
     if not self.probe:
       self.status.update(
           "Static checks complete (opened without probing, so nothing else "
-          "runs). Press c for RTPS packet evidence, C to choose the interface.")
+          "runs). Capture choices are made when opening an endpoint report."
+          + compatibility_hint)
       return
     if self.session.pass_in_flight():
       self.status.update(
           "A diagnostic pass started from another report is still finishing. "
-          "Press c to run this one when it is done.")
+          "Open this endpoint again after it finishes." + compatibility_hint)
       return
     if self.session.capture_off_reason:
       self._begin_pass(None)
@@ -377,7 +606,7 @@ class ReportScreen(Screen):
     probing = self.probe and self.endpoint is not None
     if not probing and not interface:
       self.status.update("Nothing to run: this report does not probe, and no "
-                         "capture interface was chosen. Press C to choose one.")
+                         "capture interface was chosen.")
       return
     seconds = (self.session.probe_timeout if probing
                else engine_mod.DEFAULT_CAPTURE_SECONDS)
@@ -429,20 +658,18 @@ class ReportScreen(Screen):
               f"'{interface}' for {seconds:.0f}s, writing {destination} (and a "
               f".tshark.log beside it)"
               + (f", while {probe_text}. " if probing else ". ")
-              + "Capture needs packet-capture privileges on this host. "
-                "Press C to change the interface.")
+              + "Capture needs packet-capture privileges on this host.")
     if self.session.capture_off_reason:
       return (f"Packet capture is off for this session: "
               f"{_short(self.session.capture_off_reason)}. Now {probe_text} on "
-              f"'{topic}'. Press C to choose another interface and turn it "
-              f"back on.")
+              f"'{topic}'.")
     if dismissed:
       return (f"No interface chosen, so nothing is being captured. Now "
               f"{probe_text} on '{topic}'. The next report will ask again; "
-              f"press C to choose one now.")
+              "choose an interface when opening it.")
     return (f"Full diagnostic on '{topic}' without packet capture "
             f"({SKIP_CAPTURE} is remembered for this session): {probe_text}. "
-            f"Press C to choose a capture interface and run it again.")
+          "The capture choice remains in effect for this session.")
 
   async def _run_pass(self, probing, seconds, destination, interface,
                       write_samples=False):
@@ -503,9 +730,8 @@ class ReportScreen(Screen):
       # exception is a bug, not a privilege problem, and stays per-report.
       if evidence.get("error_stage") == "start":
         self.session.disable_capture(evidence["error"])
-        return (f"{reason} Packet capture is now off for this session; press C "
-                f"to choose another interface.{tail}")
-      return f"{reason} Press c to try again, C to change the interface.{tail}"
+        return f"{reason} Packet capture is now off for this session.{tail}"
+      return f"{reason}{tail}"
     # Name what was parsed, not just how many frames matched. A capture can
     # yield the peer's product version while matching zero user-data frames,
     # and the count alone reported that as nothing.
@@ -513,25 +739,6 @@ class ReportScreen(Screen):
             f"{report_mod.capture_headline(self.data)}. Written to {source}. "
             f"See Overview for what the capture added, Wire for the full "
             f"counts. {self.data.verdict}")
-
-  # --- Packet capture on request ---------------------------------------------
-
-  def action_capture(self):
-    """Get packet evidence for this endpoint now.
-
-    Still the way to ask for a capture the entry pass did not run: after a Skip,
-    after a dismissal, or on a report opened passively.
-    """
-    if not self._capture_allowed():
-      return
-    # Falsy for any reason - never asked, Skip, or disabled by a failure - means
-    # there is no interface to capture on, so ask rather than reaching for the
-    # most privileged one there is (CAP-2).
-    if not self.session.capture_interface:
-      self.app.push_screen(
-          CaptureInterfaceScreen(self.session, self._begin_pass))
-      return
-    self._begin_pass(self.session.capture_interface)
 
   def action_verify_delivery(self):
     """Prove delivery to a discovered reader, with consent, by publishing to it.
@@ -547,9 +754,8 @@ class ReportScreen(Screen):
       return
     if self.endpoint.is_writer:
       self.status.update(
-          "This endpoint is a writer, so delivery is already verified by reading "
-          "what it publishes - nothing needs to be written. Press c for packet "
-          "evidence.")
+          "This endpoint is a writer, so publishing verification is not "
+          "available for it.")
       return
     if not self.probe:
       self.status.update(
@@ -562,6 +768,51 @@ class ReportScreen(Screen):
       return
     self.app.push_screen(PublishConsentScreen(self.endpoint, self._begin_write_pass))
 
+  @staticmethod
+  def _matrix_runner_path():
+    return os.path.join(paths.TOOL_ROOT, "run_version_matrix.sh")
+
+  def _compatibility_command(self, output_dir):
+    """Fresh-process Fast DDS matrix command for this writer's topic."""
+    # `settle` is the interactive session's discovery settle, tuned for a local
+    # RTI peer; a cross-vendor child run needs at least the runner's own
+    # default or its preflight topic check can fire before the writer is seen.
+    settle = max(float(getattr(self.session, "settle", 0.0)), MATRIX_MIN_SETTLE)
+    return ["bash", self._matrix_runner_path(),
+            "--domain", str(self.session.domain_id), "--topic", self.endpoint.topic_name,
+            "--settle", str(settle),
+            "--type-wait", str(self.session.type_wait),
+            "--probe-timeout", str(self.session.probe_timeout),
+            "--output-dir", output_dir]
+
+  def action_compatibility_matrix(self):
+    """Run isolated TypeObject/mask experiments for a Fast DDS writer."""
+    if self.endpoint is None or not self.endpoint.is_writer:
+      self.status.update("Compatibility experiments apply to a selected writer.")
+      return
+    vendor_id = getattr(self.endpoint, "vendor_id", None)
+    if vendors.is_rti(vendor_id):
+      self.status.update("This is an RTI Connext writer; no cross-vendor matrix is needed.")
+      return
+    if not vendors.is_fastdds(vendor_id):
+      self.status.update("The automated matrix currently supports Fast DDS writers only.")
+      return
+    if self.probing or self.session.pass_in_flight():
+      self.status.update("Wait for the current diagnostic pass to finish before running the matrix.")
+      return
+    # Say the runner is missing here rather than letting bash report it into the
+    # matrix screen's output pane, where it reads as a matrix that found nothing.
+    runner = self._matrix_runner_path()
+    if not os.path.isfile(runner):
+      self.status.update(
+          f"The compatibility matrix runner is missing: {runner}")
+      return
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    output_dir = paths.test_output_path(
+        "fastdds_compatibility", f"{self.session.domain_id}_{stamp}")
+    command = self._compatibility_command(output_dir)
+    self.app.push_screen(CompatibilityMatrixScreen(command, output_dir))
+
   def _begin_write_pass(self, approved):
     """Re-run the pass, publishing only if the operator said to."""
     if not self.is_current:
@@ -572,16 +823,6 @@ class ReportScreen(Screen):
           "and the reliable handshake from the probe writer's own counters.")
       return
     self._begin_pass(self.session.capture_interface, write_samples=True)
-
-  def action_choose_interface(self):
-    """Re-open the picker, so one choice does not bind the whole session.
-
-    Also the way back from a capture that failed: recording a choice clears the
-    reason capture was turned off.
-    """
-    if not self._capture_allowed():
-      return
-    self.app.push_screen(CaptureInterfaceScreen(self.session, self._begin_pass))
 
   def _capture_allowed(self):
     if self.endpoint is None:

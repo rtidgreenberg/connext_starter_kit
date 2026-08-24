@@ -96,6 +96,15 @@ class ProbeResult:
     self.samples_taken = 0
     self.walk = None
     self.sample_repr = ""
+    # The Data view's payload: the text of every sample the probe took from the
+    # selected writer, oldest first. `sample_repr` above stays truncated to the
+    # one line Appendix B cites it as; these are kept long enough to read a
+    # whole sample, which is the only reason the Data view exists.
+    self.sample_texts = []
+    # Collection stopped early because a sample came back at DATA_SAMPLE_LIMIT.
+    # The report says so: "one sample" and "one sample because the rest were too
+    # expensive to render" are different statements about the writer.
+    self.sample_texts_capped = False
     # Writer-identity correlation. The probe's reader is created on a TOPIC, so
     # subscription_matched, requested_incompatible_qos and every sample can
     # belong to a different writer publishing the same topic. matched_count and
@@ -393,12 +402,51 @@ def _publication_key(reader, handle):
   return None if value is None else str(value)
 
 
-def _correlate(reader, endpoint, result):
-  """Instance handles among the reader's matched publications that ARE `endpoint`.
+def scan_matched_publications(reader, endpoint):
+  """`(target_handles, others, unreadable)` for `endpoint`, or None.
 
-  Returns None when the selected writer cannot be identified - the binding does
-  not expose matched publications, or none of their keys could be read. A None
-  return is not "no match": it means observations stay topic-scoped and no
+  The one implementation of "which of this reader's matched publications ARE
+  the selected writer", shared by the probe and by the live data view so the two
+  can never disagree about whose samples they are showing. It reports counts and
+  draws no conclusion; `_correlate` owns what the probe records, and it is the
+  only caller that touches a ProbeResult.
+
+  None means the selected writer cannot be identified at all - the binding does
+  not expose matched publications, or an unreadable key could have been the
+  writer we are looking for. It is never "no match".
+  """
+  handles = compat.get(reader, "matched_publications", None)
+  if handles is None:
+    return None
+  try:
+    handles = list(handles)
+  except TypeError:
+    return None
+
+  target, others, unreadable = set(), 0, 0
+  for handle in handles:
+    key = _publication_key(reader, handle)
+    if key is None:
+      unreadable += 1
+    elif key == endpoint.key:
+      target.add(str(handle))
+    else:
+      others += 1
+
+  # An empty target set is only a conclusion when EVERY publication resolved.
+  # An unreadable key could have been the selected writer, and reporting "never
+  # matched" from that would be the exact false certainty this exists to
+  # prevent. Covers the all-unreadable case too.
+  if not target and unreadable:
+    return None
+  return target, others, unreadable
+
+
+def _correlate(reader, endpoint, result):
+  """`scan_matched_publications`, recorded onto a ProbeResult.
+
+  Returns None when the selected writer cannot be identified - see the scan. A
+  None return is not "no match": it means observations stay topic-scoped and no
   finding may claim they describe the selected writer.
 
   An empty set IS a conclusion: the reader matched, or failed to match, and the
@@ -420,30 +468,10 @@ def _correlate(reader, endpoint, result):
     result.matched_unreadable_count = 0
     return None
 
-  handles = compat.get(reader, "matched_publications", None)
-  if handles is None:
+  scan = scan_matched_publications(reader, endpoint)
+  if scan is None:
     return uncorrelated()
-  try:
-    handles = list(handles)
-  except TypeError:
-    return uncorrelated()
-
-  target, others, unreadable = set(), 0, 0
-  for handle in handles:
-    key = _publication_key(reader, handle)
-    if key is None:
-      unreadable += 1
-    elif key == endpoint.key:
-      target.add(str(handle))
-    else:
-      others += 1
-
-  # An empty target set is only a conclusion when EVERY publication resolved.
-  # An unreadable key could have been the selected writer, and reporting "never
-  # matched" from that would be the exact false certainty this function exists
-  # to prevent. Covers the all-unreadable case too.
-  if not target and unreadable:
-    return uncorrelated()
+  target, others, unreadable = scan
 
   result.correlated = True
   # Current values, deliberately NOT a running max. `attributable` and
@@ -458,7 +486,7 @@ def _correlate(reader, endpoint, result):
   return target
 
 
-def _sample_is_target(sample, target_handles, exclusive):
+def sample_is_target(sample, target_handles, exclusive):
   """Is this sample from the selected writer?
 
   When the reader matched only the selected writer, every sample on the topic is
@@ -471,6 +499,42 @@ def _sample_is_target(sample, target_handles, exclusive):
   if handle is None:
     return exclusive
   return str(handle) in target_handles
+
+
+#: How many taken samples the Data view keeps, and how much of each one. The
+#: probe stops as soon as it has a walked sample and a match, so in practice
+#: this holds the first non-empty `take()` rather than a recording of the topic:
+#: a diagnostic that buffered a fast writer's whole stream would become a load
+#: on the system it is measuring. `DATA_SAMPLE_LIMIT` is far longer than
+#: `sample_repr`'s default because the Data view's entire purpose is showing
+#: the payload, and a rich type truncated at 800 characters shows a fragment.
+DATA_SAMPLE_COUNT = 20
+DATA_SAMPLE_LIMIT = 4000
+
+
+def collect_sample_text(result, data):
+  """Record one sample's text for the report's Data section, or decline to.
+
+  Bounded in count and in cost, and the cost is the less obvious one:
+  `sample_repr` serializes the WHOLE payload and truncates afterwards, so every
+  text costs a full to_json() regardless of the limit. Twenty of them inside the
+  probe's timed window is nothing for a telemetry struct and twenty
+  multi-megabyte serializations on a large-data topic - paid by every probe, the
+  CLI's and the matrix children's included, where before this section existed
+  exactly one was paid.
+
+  A text that comes back at the limit is the signal that this payload is large,
+  so the first one to hit it is the last one collected: for a big type the cost
+  returns to the single serialization it always was, and a small type still gets
+  its whole window. `sample_texts_capped` is how the report says which of those
+  two happened.
+  """
+  if len(result.sample_texts) >= DATA_SAMPLE_COUNT or result.sample_texts_capped:
+    return
+  text = sample_repr(data, limit=DATA_SAMPLE_LIMIT)
+  result.sample_texts.append(text)
+  if len(text) >= DATA_SAMPLE_LIMIT:
+    result.sample_texts_capped = True
 
 
 def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1,
@@ -527,14 +591,15 @@ def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1,
       for sample in reader.take():
         if not sample.info.valid:
           continue
-        if target_handles is not None and not _sample_is_target(
+        if target_handles is not None and not sample_is_target(
             sample, target_handles, exclusive):
           result.samples_other += 1
           continue
         result.samples_taken += 1
+        collect_sample_text(result, sample.data)
         if result.walk is None:
           result.walk = typewalk.walk_sample(sample.data, endpoint.type)
-          result.sample_repr = _sample_repr(sample.data)
+          result.sample_repr = sample_repr(sample.data)
 
       # Stop early once there is a walked sample AND a match: nothing further
       # is learned by waiting, and a snappy probe is a usable probe.
@@ -794,7 +859,7 @@ def _close_all(endpoint, container, topic, topic_name):
       logging.error(f"[probe] error closing {label} for '{topic_name}': {e}")
 
 
-def _sample_repr(data, limit=800):
+def sample_repr(data, limit=800):
   for accessor in ("to_json", "to_string"):
     method = compat.get(data, accessor, None)
     if callable(method):

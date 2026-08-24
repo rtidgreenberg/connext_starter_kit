@@ -1911,15 +1911,15 @@ class TestProbeCorrelation(unittest.TestCase):
     self.assertFalse(result.correlated)
 
   def test_sample_from_the_target_handle_is_attributed(self):
-    self.assertTrue(probe._sample_is_target(FakeSample("h1"), {"h1"}, False))
+    self.assertTrue(probe.sample_is_target(FakeSample("h1"), {"h1"}, False))
 
   def test_sample_from_another_writer_is_not_attributed(self):
-    self.assertFalse(probe._sample_is_target(FakeSample("h2"), {"h1"}, False))
+    self.assertFalse(probe.sample_is_target(FakeSample("h2"), {"h1"}, False))
 
   def test_unattributable_sample_counts_only_when_target_is_exclusive(self):
     """With other writers matched, an unreadable handle must not be credited."""
-    self.assertTrue(probe._sample_is_target(FakeSample(None), {"h1"}, True))
-    self.assertFalse(probe._sample_is_target(FakeSample(None), {"h1"}, False))
+    self.assertTrue(probe.sample_is_target(FakeSample(None), {"h1"}, True))
+    self.assertFalse(probe.sample_is_target(FakeSample(None), {"h1"}, False))
 
 
 class TestProbeMatchScoping(unittest.TestCase):
@@ -2168,7 +2168,7 @@ class TestCorrelationDoesNotOverclaim(unittest.TestCase):
     self.assertEqual(ids(result), ["match.incompatible_qos_topic"])
 
   def test_unattributable_sample_is_not_credited_when_a_publication_is_unresolved(self):
-    self.assertFalse(probe._sample_is_target(FakeSample(None), {"h1"}, False))
+    self.assertFalse(probe.sample_is_target(FakeSample(None), {"h1"}, False))
 
   def test_silence_names_the_neighbour_instead_of_inventing_a_drop(self):
     """samples_taken is writer-scoped; received_sample_count is topic-wide."""

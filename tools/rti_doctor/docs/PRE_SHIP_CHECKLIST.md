@@ -54,7 +54,7 @@ not bear on a Fast DDS engagement.
       by design, and nothing in the session turns it back on. If the engineer
       sees that, they should fix the privileges (or install `tshark`) and run
       Doctor again rather than looking for a key.
-- [ ] On a Fast DDS writer report, `x` runs the isolated TypeObject/XTypes-mask
+- [ ] On a non-RTI writer report, `x` runs the isolated TypeObject/XTypes-mask
       compatibility matrix in fresh processes. It needs a native Connext 7.7
       install (`RTI_DOCTOR_NDDSHOME_77`, default `~/rti_connext_dds-7.7.0`) on
       the target host; without it the runner exits 3 and reports why.

@@ -95,7 +95,7 @@ selecting one shows only that severity. Keys:
 | `m` | Observed domain metrics |
 | `r` | Re-scan (every screen shows a snapshot, never a live feed) |
 | `w` | On a **reader** report: publish synthetic samples to verify delivery — asks first, every time |
-| `x` | On a **Fast DDS writer** report: run the isolated TypeObject/XTypes-mask compatibility matrix |
+| `x` | On a **non-RTI writer** report: run the isolated TypeObject/XTypes-mask compatibility matrix |
 | `s` | Save the current system or diagnostic report as a shareable text file |
 | `b` / `Esc` | Back |
 | `q` | Quit |
@@ -222,18 +222,20 @@ When approved, the probe publishes and — for a RELIABLE reader — waits for
 acknowledgment, so the verdict reads `matched, 3 sample(s) published,
 acknowledged by the reader`.
 
-## Fast DDS Compatibility Matrix (`x`)
+## Cross-Vendor Compatibility Matrix (`x`)
 
-A Fast DDS writer that a Connext reader cannot resolve a type from is usually a
-TypeObject question — which representation was published, and which XTypes
-compliance mask the reader asked with. Those are startup-time settings: they
-cannot be changed in a running session, because the mask has to be applied
-before the first Connext call.
+A foreign writer whose type a Connext reader cannot resolve is usually a
+TypeObject question: which representation was published, and which XTypes
+compliance mask the reader asked with. Fast DDS and Cyclone are the two vendors
+this has been measured against, but the question is not vendor-specific. Those
+are startup-time settings: they cannot be changed in a running session, because
+the mask has to be applied before the first Connext call.
 
-So the matrix runs *outside* this process. On a **Fast DDS writer** report, `x`
-launches `run_version_matrix.sh`, which starts fresh `rti_doctor` observers
-against the same domain and topic, one per profile, and stops at the first that
-comes back with no ERROR findings:
+So the matrix runs *outside* this process. On a **non-RTI writer** report —
+Fast DDS, Cyclone, OpenDDS, or any peer whose RTPS vendor id reads as something
+other than RTI — `x` launches `run_version_matrix.sh`, which starts fresh
+`rti_doctor` observers against the same domain and topic, one per profile, and
+stops at the first that comes back with no ERROR findings:
 
 | Profile | XTypes mask | TypeObject |
 |---|---|---|
@@ -245,7 +247,7 @@ A passive preflight runs first and confirms the topic is actually visible; if it
 is not, no probe starts. The screen shows a row per profile as the runner
 reports it, then the verdict and problem titles scraped from each child report,
 with everything left under
-`tools/rti_doctor/test_output/fastdds_compatibility/`.
+`tools/rti_doctor/test_output/cross_vendor_compatibility/`.
 
 The child runs settle for at least 20 seconds — cross-vendor discovery is
 slower than the interactive session's `--settle`, and the preflight would

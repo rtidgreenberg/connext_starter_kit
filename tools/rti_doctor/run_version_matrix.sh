@@ -1,5 +1,5 @@
 #!/bin/bash
-# Try Connext 7.7 TypeObject profiles against one Fast DDS topic.
+# Try Connext 7.7 TypeObject profiles against one non-RTI vendor's topic.
 
 set -euo pipefail
 
@@ -17,8 +17,10 @@ usage() {
 Usage: run_version_matrix.sh --domain ID --topic TOPIC [options]
 
 Run fresh Connext 7.7 rti_doctor processes against one topic. The report UI
-offers this runner only for a selected Fast DDS writer. It first confirms that
-the requested topic is visible, then tries:
+offers this runner for a selected writer belonging to any non-RTI vendor. Every
+profile below is a property of THIS observer - nothing here is specific to one
+peer implementation. It first confirms that the requested topic is visible,
+then tries:
 
     default-v2  Connext default XTypes mask and TypeObject V2/TypeLookup
     vendor-v2   VENDOR XTypes mask and TypeObject V2/TypeLookup
@@ -30,7 +32,7 @@ does not prove the same profile fixes another application or RTI service.
 
 Options:
   -d, --domain ID              DDS domain to observe (required).
-  -t, --topic TOPIC            Topic whose writer must be Fast DDS (required).
+  -t, --topic TOPIC            Topic with a non-RTI writer (required).
       --nddshome-7.7 PATH      Native Connext 7.7 installation.
       --settle SECONDS         Discovery settle time per run (default: 20).
       --type-wait SECONDS      Type-resolution wait per run (default: 10).
@@ -38,7 +40,7 @@ Options:
   -o, --output-dir PATH        Evidence output directory.
   -h, --help                   Show this help.
 
-Choose a topic with one Fast DDS writer. Current `--topic` selection prefers
+Choose a topic with one non-RTI writer. Current `--topic` selection prefers
 the first discovered writer and cannot yet choose an endpoint by GUID.
 EOF
 }
@@ -77,7 +79,7 @@ if [[ ! -d "$NDDSHOME_77" ]]; then
 fi
 
 if [[ -z "$OUTPUT_DIR" ]]; then
-    OUTPUT_DIR="$SCRIPT_DIR/test_output/fastdds_typeobject_matrix_$(date +%Y%m%d_%H%M%S)"
+    OUTPUT_DIR="$SCRIPT_DIR/test_output/cross_vendor_typeobject_matrix_$(date +%Y%m%d_%H%M%S)"
 fi
 mkdir -p "$OUTPUT_DIR"
 MANIFEST="$OUTPUT_DIR/manifest.txt"
@@ -91,7 +93,7 @@ run_doctor() {
 }
 
 {
-    echo "RTI Doctor Fast DDS TypeObject probe matrix"
+    echo "RTI Doctor cross-vendor TypeObject probe matrix"
     echo "Started: $(date -Is)"
     echo "Domain: $DOMAIN"
     echo "Topic: $TOPIC"

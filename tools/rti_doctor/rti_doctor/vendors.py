@@ -13,6 +13,7 @@ vendors, so it is only ever reported for RTI.
 from . import compat
 
 RTI = "RTI Connext"
+RTI_MICRO = "RTI Connext DDS Micro"
 OPENSPLICE = "ADLINK/Vortex OpenSplice"
 OPENDDS = "OpenDDS"
 FASTDDS = "eProsima Fast DDS"
@@ -22,13 +23,29 @@ CYCLONE = "Eclipse Cyclone DDS"
 VENDOR_NAMES = {
     (0x01, 0x01): RTI,
     (0x01, 0x02): OPENSPLICE,
+    (0x01, 0x0A): RTI_MICRO,
     (0x01, 0x03): OPENDDS,
     (0x01, 0x0F): FASTDDS,
     (0x01, 0x10): CYCLONE,
 }
 
 #: Vendors rti_doctor is validated against. Others are recognized but untested.
+#: Micro is deliberately absent: recognizing its vendor id is not the same as
+#: having measured against it.
 VALIDATED = (CYCLONE, FASTDDS)
+
+#: Every RTPS vendor id belonging to an RTI product. `is_rti` stays 01.01 alone
+#: because what it gates - reporting `product_version`, an RTI Core discovery
+#: extension - is true of Core and not established for Micro. What must cover
+#: the whole family is `is_foreign`: it drives an action, and offering a
+#: "cross-vendor" TypeObject matrix against RTI Connext Micro would be running
+#: a cross-vendor experiment against RTI. `docs/CODE_REVIEW_2026-08-04.md`
+#: recorded 01.0A as unmapped while it was only a naming gap; a gate inverted it
+#: into a wrong answer.
+RTI_VENDOR_IDS = ((0x01, 0x01), (0x01, 0x0A))
+
+#: RTPS VENDORID_UNKNOWN: the wire saying "not stated". Not a vendor.
+VENDORID_UNKNOWN = (0x00, 0x00)
 
 #: Vendors for which an empty DATA_REPRESENTATION advertisement from a *writer*
 #: has been measured to mean XCDR1, rather than "said nothing".
@@ -155,6 +172,35 @@ def is_fastdds(vendor_id):
   whose vendor could not be determined is the misattribution this guards.
   """
   return vendor_octets(vendor_id) == (0x01, 0x0F)
+
+
+def is_rti_family(vendor_id):
+  """True for any RTI product's vendor id, Core or Micro.
+
+  Separate from `is_rti` on purpose - see `RTI_VENDOR_IDS`.
+  """
+  return vendor_octets(vendor_id) in RTI_VENDOR_IDS
+
+
+def is_foreign(vendor_id):
+  """True for a peer whose vendor id is readable and belongs to no RTI product.
+
+  What the cross-vendor experiments turn on. They are about a Connext observer
+  reading another implementation's type metadata, so the question is "not us",
+  not which vendor it is - the runner behind them applies XTypes and TypeObject
+  profiles to this participant and does nothing vendor-specific.
+
+  An unreadable vendor id returns False, the same misattribution guard
+  `is_fastdds` carries: offering a cross-vendor experiment on the strength of a
+  vendor that could not be determined claims more than the evidence supports.
+  RTPS `VENDORID_UNKNOWN` (00.00) is refused for that same reason and not
+  because it is unrecognized - it is the wire saying "not stated", which is a
+  vendor we do not know rather than a vendor that is not RTI.
+  """
+  octets = vendor_octets(vendor_id)
+  if octets is None or octets == VENDORID_UNKNOWN:
+    return False
+  return octets not in RTI_VENDOR_IDS
 
 
 def is_recognized(vendor_id):

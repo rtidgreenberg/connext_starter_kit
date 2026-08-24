@@ -20,7 +20,8 @@ Its rules:
 
 import time
 
-from . import (compat, findings as f, probe as probe_mod, records, typewalk,
+from . import (compat, findings as f, livedata, probe as probe_mod, records,
+               typewalk,
                vendors, wire)
 
 #: Every wrappable line in both reports is laid out against this. 80 is the
@@ -450,6 +451,7 @@ def render_view_sections(data):
       "findings": "\n".join(_render_findings(data)),
       "type": "\n".join(_render_type_appendix(data)),
       "probe": "\n".join(_render_counter_appendix(data)),
+      "data": "\n".join(_render_data_appendix(data)),
       "wire": "\n".join(_render_wire_appendix(data) or _wire_placeholder(data)),
       "config": "\n".join(_render_config_appendix(data)),
   }
@@ -1008,6 +1010,117 @@ def _render_counter_appendix(data):
   if result.sample_repr:
     lines.append("first valid sample")
     for line in str(result.sample_repr).splitlines():
+      lines.append(f"  {line}")
+    lines.append("")
+  return lines
+
+
+def _render_data_appendix(data):
+  """The payload itself, for the Data view.
+
+  Every other section describes the data - its IDL, its counters, its frames.
+  This one shows it, which is the question an operator opening a writer report
+  usually asks first: is anything arriving, and does it look right? It prints
+  each sample as Connext renders it rather than reformatting it, so what is on
+  screen is the middleware's own view of the bytes and not this tool's opinion
+  of them; Appendix A already reports the member-by-member walk.
+
+  Every sample here was decoded by the type that arrived over discovery, which
+  is the only type the probe has. So a sample that reads correctly is also
+  evidence that the discovered type matches what the writer is really
+  publishing - and a garbled one is evidence that it does not.
+  """
+  lines = _section("SAMPLE DATA")
+  result = data.probe_result
+  if result is None:
+    # Only what this report can actually do. A participant report has no
+    # endpoint, so Textual hides `p` and naming it would advertise a key that is
+    # not on the screen; and a reader target or an unresolved type refuses the
+    # feed, so inviting the operator to select this tab would be an invitation
+    # to read the refusal again.
+    refusal = livedata.why_not(data.endpoint)
+    if data.endpoint is None:
+      offer = ("This is a participant report, so there is no endpoint to probe "
+               "or stream from.")
+    elif refusal is None:
+      offer = ("No probe was run, so nothing was received. Press p to probe "
+               "this endpoint, or select this tab to stream samples live from "
+               "it.")
+    else:
+      offer = f"No probe was run, so nothing was received. Press p to probe "\
+              f"this endpoint. A live feed is not available here: {refusal}"
+    lines += _wrap(offer, indent=0)
+    lines.append("")
+    return lines
+
+  wrote = getattr(result, "probe_kind", "reader") == "writer"
+
+  # Before either description of what the probe DID: a probe that created no
+  # entity did neither. Ordered the other way, a reader target whose type never
+  # resolved was told "the probe created a WRITER and received nothing" - which
+  # names an entity that was never created and buries the reason it was not.
+  if not result.created:
+    entity = "writer" if wrote else "reader"
+    lines += _wrap(f"No {entity} was created, so no sample was received: "
+                   f"{result.create_error or f'{entity} not created'}.",
+                   indent=0)
+    lines.append("")
+    return lines
+
+  if wrote:
+    lines += _wrap(
+        "The selected endpoint is a reader, so the probe created a WRITER and "
+        "received nothing. There is no incoming payload to show here: what "
+        "this probe can report is whether that reader matched and acknowledged, "
+        "which is in the counter appendix.", indent=0)
+    lines.append("")
+    if result.samples_written:
+      lines.append(_kv("synthetic samples published", result.samples_written, 30))
+      lines.append("")
+    return lines
+
+  texts = list(getattr(result, "sample_texts", None) or ())
+  if not texts:
+    # `error` is a failure AFTER the reader was created, so the window it
+    # reports is not a window the writer was observed for. Calling that "the
+    # expected result for a writer with nothing to say" would report this tool's
+    # own aborted probe as the peer's silence.
+    if result.error:
+      lines += _wrap(
+          f"The reader was created and the probe then failed after "
+          f"{result.elapsed:.2f}s: {result.error}. No sample was received, and "
+          "that is a statement about this probe rather than about the writer.",
+          indent=0)
+    else:
+      lines += _wrap(
+          f"The reader was created and took no valid sample in "
+          f"{result.elapsed:.2f}s. That is the expected result for a writer "
+          "with nothing to say, and it is also the symptom of a writer that "
+          "cannot deliver - the findings separate the two.", indent=0)
+    lines.append("")
+    return lines
+
+  # Say what was withheld. A capped view that presents itself as the whole
+  # take reads as "the writer sent four samples", which is a different fact.
+  count = (f"{len(texts)} of {result.samples_taken}"
+           if result.samples_taken > len(texts) else str(len(texts)))
+  lines.append(_kv("samples shown", f"{count}, oldest first", 30))
+  if getattr(result, "sample_texts_capped", False):
+    lines += _wrap(
+        "Only the sample(s) below were rendered: this payload reaches the "
+        "per-sample display limit, and rendering a window of them would have "
+        "cost the probe a full serialization each. The counters describe the "
+        "whole window; this section describes what was cheap to show.",
+        indent=0)
+  # Said here because `s` would otherwise drop it without a word. This section
+  # is the one the saved report leaves out: it is the only place a report holds
+  # application payload, and a shareable file is not the place to put it by
+  # default.
+  lines.append("This section is not written to the saved report.")
+  lines.append("")
+  for index, text in enumerate(texts, start=1):
+    lines.append(f"sample {index}")
+    for line in str(text).splitlines():
       lines.append(f"  {line}")
     lines.append("")
   return lines

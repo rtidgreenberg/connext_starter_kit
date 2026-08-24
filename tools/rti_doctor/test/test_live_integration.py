@@ -147,10 +147,124 @@ class TestHealthy(LiveFixtureTest):
 
   def test_interactive_report_sections_are_split_by_concern(self):
     sections = report.render_view_sections(self.diagnose())
-    self.assertEqual(set(sections), {"overview", "findings", "type", "probe", "wire", "config"})
+    self.assertEqual(set(sections), {"overview", "findings", "type", "probe",
+                                     "data", "wire", "config"})
     self.assertIn("VERDICT", sections["overview"])
     self.assertIn("FINDINGS", sections["findings"])
     self.assertIn("DISCOVERED TYPE", sections["type"])
+
+  def test_selecting_the_data_tab_streams_live_samples_and_closes_the_reader(self):
+    """The live feed, end to end against the real fixture writer.
+
+    Worth a live test rather than a stub: everything that could be wrong here is
+    in the parts a stub replaces - that a reader built from the DISCOVERED type
+    matches the writer, that `take()` yields samples this fast, and above all
+    that leaving the tab actually closes the entity. The last assertion is the
+    one that matters: this is the only reader in the tool that outlives the call
+    that created it.
+    """
+    import asyncio
+
+    from textual.app import App
+    from textual.widgets import TabbedContent
+
+    from rti_doctor.views.report_screen import ReportScreen
+
+    writer = self.registry.find_writer(self.TOPIC)
+    screen = ReportScreen(self.session, endpoint=writer, probe=False)
+
+    class Harness(App):
+      def on_mount(self):
+        self.push_screen(screen)
+
+    seen = {}
+
+    async def drive():
+      app = Harness()
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        seen["before"] = screen.live
+        screen.query_one("#report_tabs", TabbedContent).active = "data"
+        await pilot.pause()
+        seen["opened"] = screen.live
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline and not screen.live_samples:
+          await pilot.pause(0.2)
+        seen["samples"] = len(screen.live_samples)
+        seen["received"] = screen.live.received
+        seen["body"] = str(screen.bodies["data"].render())
+        screen.query_one("#report_tabs", TabbedContent).active = "probe"
+        await pilot.pause()
+        seen["after"] = screen.live
+        seen["closed"] = seen["opened"].closed
+
+    asyncio.run(drive())
+    self.assertIsNone(seen["before"], "a reader existed before the tab was opened")
+    self.assertGreater(seen["samples"], 0,
+                       "no live sample arrived from the fixture writer")
+    self.assertGreater(seen["received"], 0)
+    self.assertIn("STREAMING", seen["body"])
+    self.assertIn("sample-", seen["body"],
+                  "the feed rendered no member of the received sample")
+    self.assertIsNone(seen["after"])
+    self.assertTrue(seen["closed"], "leaving the Data tab left the reader open")
+
+  def test_the_live_feed_leaves_no_reader_behind(self):
+    """The invariant the probe has always had, now for an entity it does not own.
+
+    Counted on the participant rather than taken from the screen: a feed that
+    dropped its reference without closing would satisfy every assertion above
+    and still leave a subscription on the topic.
+    """
+    import asyncio
+
+    from textual.app import App
+    from textual.widgets import TabbedContent
+
+    from rti_doctor.views.report_screen import ReportScreen
+
+    if not hasattr(self.participant, "find_subscribers"):
+      self.skipTest("this binding cannot enumerate subscribers")
+    before = len(self.participant.find_subscribers())
+    writer = self.registry.find_writer(self.TOPIC)
+
+    for _ in range(3):
+      screen = ReportScreen(self.session, endpoint=writer, probe=False)
+
+      class Harness(App):
+        def on_mount(self):
+          self.push_screen(screen)
+
+      async def drive():
+        app = Harness()
+        async with app.run_test() as pilot:
+          await pilot.pause()
+          await app.workers.wait_for_complete()
+          screen.query_one("#report_tabs", TabbedContent).active = "data"
+          await pilot.pause(0.4)
+          screen.query_one("#report_tabs", TabbedContent).active = "overview"
+          await pilot.pause()
+
+      asyncio.run(drive())
+
+    self.assertEqual(len(self.participant.find_subscribers()), before,
+                     "the live feed leaked a subscriber")
+
+  def test_the_data_tab_shows_the_payload_it_received(self):
+    """The Data tab prints what the probe's reader actually took.
+
+    Worth asserting live rather than on a stub: the text can only be there if a
+    DynamicData reader built from the DISCOVERED type deserialized a real
+    sample from the separate fixture process. `sample-N` is `populate_rich`'s
+    label member, so finding it here means the payload survived the round trip
+    and not merely that a section rendered.
+    """
+    sections = report.render_view_sections(self.diagnose())
+    self.assertIn("SAMPLE DATA", sections["data"])
+    self.assertIn("sample 1", sections["data"])
+    self.assertIn("sample-", sections["data"],
+                  "the Data tab rendered no member of the received sample")
 
   def test_report_counters_are_real_not_na(self):
     """Regression: EventCount64 counters rendered as 'not available'."""

@@ -22,6 +22,7 @@ disk is swept at exit (CAP-1). Reports opened passively - `o`, or from an issue
 """
 
 import asyncio
+import collections
 import logging
 import os
 import signal
@@ -33,7 +34,8 @@ from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static, TabbedContent, TabPane
 
-from .. import engine as engine_mod, paths, probe as probe_mod, report as report_mod, vendors, wire
+from .. import (engine as engine_mod, livedata, paths, probe as probe_mod,
+                report as report_mod, vendors, wire)
 
 #: Shown for the Skip row. Skip is an answer - "probe, but capture nothing" -
 #: and is remembered like any other, so it is worth naming rather than leaving
@@ -254,17 +256,49 @@ MATRIX_MIN_SETTLE = 20.0
 #: How long a terminated matrix runner gets to exit before it is killed.
 MATRIX_STOP_GRACE = 5.0
 
+#: How often the Data tab drains its live reader. Fast enough that a 30 Hz
+#: writer reads as a stream rather than as steps, slow enough that the event
+#: loop is not spending its life in `take()`.
+LIVE_POLL_SECONDS = 0.2
+
+#: Samples the feed keeps on screen. It is a window on a live topic, not a
+#: recording: a writer left running overnight must cost a bounded amount of
+#: memory, and an operator reads the newest arrivals at the bottom rather than
+#: the first hundred.
+#:
+#: `_render_live` rebuilds this whole window on every poll that brings a sample,
+#: so the pair of numbers is a cost. Measured on this host at the worst case the
+#: two allow - 200 samples at `livedata.SAMPLE_LIMIT`, 791 KB - one redraw is
+#: 5.5 ms median and 14.3 ms at worst against the 200 ms poll, and 0.7 ms for a
+#: payload the size of the test fixture's rich type. Raising either number, or
+#: shortening the poll, spends against that margin.
+LIVE_SAMPLE_HISTORY = 200
+
+#: Consecutive failed polls before the feed gives up and says so. A poll that
+#: fails returns nothing, and nothing is indistinguishable from a quiet writer -
+#: so a reader that cannot be read has to stop pretending to be one rather than
+#: log at five times a second forever.
+LIVE_ERROR_LIMIT = 5
+
 
 class CompatibilityMatrixScreen(Screen):
-  """Live progress and evidence for isolated Fast DDS compatibility probes."""
+  """Live progress and evidence for isolated cross-vendor compatibility probes.
+
+  Nothing in the runner behind this is specific to one vendor: it applies
+  Connext XTypes and TypeObject profiles to fresh observer processes, and the
+  peer is whatever is publishing the topic. `vendor` is therefore a label for
+  what was detected, not a switch - it names the peer this run is about so the
+  evidence left on disk can be read back months later.
+  """
 
   BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
               ("q", "quit_app", "Quit")]
 
-  def __init__(self, command, output_dir):
+  def __init__(self, command, output_dir, vendor=None):
     super().__init__()
     self.command = command
     self.output_dir = output_dir
+    self.vendor = vendor
     self.progress = None
     self.detail = None
     # Held so leaving the screen can stop the run; see `on_unmount`.
@@ -274,16 +308,28 @@ class CompatibilityMatrixScreen(Screen):
 
   def compose(self):
     yield Header()
-    yield Static("[bold]Fast DDS Compatibility Matrix[/bold]")
+    yield Static(f"[bold]{self._heading()}[/bold]")
     self.progress = Static("", id="compatibility_matrix_progress")
     yield self.progress
     with VerticalScroll(id="compatibility_matrix_detail"):
-      self.detail = Static("Preparing isolated observer processes...")
+      # `markup=False`: this pane shows child-report text and raw runner stdout.
+      # Parsed as markup, the reports' own "[ERROR]"/"[WARN]" labels vanish
+      # (verified on this Textual), and a peer-supplied name containing "[/]"
+      # raises MarkupError - collapsing a finished matrix into "the matrix
+      # stopped". The progress table above is ours and keeps its markup.
+      self.detail = Static("Preparing isolated observer processes...",
+                           markup=False)
       yield self.detail
     yield Footer()
 
+  def _heading(self):
+    """Named after the peer when one was identified, generic when not."""
+    if not self.vendor:
+      return "Cross-Vendor Compatibility Matrix"
+    return f"Cross-Vendor Compatibility Matrix - {self.vendor} writer"
+
   async def on_mount(self):
-    self.title = "rti_doctor - Fast DDS compatibility matrix"
+    self.title = "rti_doctor - cross-vendor compatibility matrix"
     self._render_progress()
     self.run_worker(self._run_matrix(), exit_on_error=False)
 
@@ -445,8 +491,9 @@ class ReportScreen(Screen):
   BINDINGS = [
       ("b", "back", "Back"),
       ("escape", "back", "Back"),
+      ("p", "probe", "Probe endpoint"),
       ("w", "verify_delivery", "Publish to verify delivery"),
-      ("x", "compatibility_matrix", "Fast DDS compatibility"),
+      ("x", "compatibility_matrix", "Cross-vendor compatibility"),
       ("s", "save", "Save report"),
       ("q", "quit_app", "Quit"),
   ]
@@ -474,10 +521,29 @@ class ReportScreen(Screen):
     self.probe = probe
     self.data = None
     self.bodies = {}
+    self.scrolls = {}
     self.body = None
     self.status = None
     self.capturing = False
     self.probing = False
+    # A capture picker of this screen's is open. Neither `probing` nor
+    # `capturing` is set while it waits for an answer, so without this a second
+    # offer stacks a second picker - and the answer discarded with it still
+    # calls `record_capture_choice`, changing the interface the session
+    # remembers, and replaces the pass announcement with a refusal.
+    self.asking = False
+    # The operator pressed `p`. Distinct from `probe`, which says this report
+    # probes: the request survives a refusal, the capability does not.
+    self.probe_requested = False
+    # The Data tab's live feed. Open only while that tab is the active one; see
+    # `on_tabbed_content_tab_activated`, which is also what closes it.
+    self.live = None
+    self.live_samples = collections.deque(maxlen=LIVE_SAMPLE_HISTORY)
+    self.live_timer = None
+    self.live_note = ""
+    # The header as last drawn, so a poll that brings nothing can still tell
+    # whether anything it would say has changed.
+    self.live_shown = ""
 
   def check_action(self, action, parameters):
     """Hide inapplicable controls from the footer and keymap.
@@ -487,28 +553,57 @@ class ReportScreen(Screen):
     offered on a participant or an RTI writer and answers with a refusal.
     """
     del parameters
+    if action == "probe":
+      return self.endpoint is not None
     if action == "verify_delivery":
-      return bool(self.endpoint is not None and not self.endpoint.is_writer)
+      # `self.probe` too: `action_verify_delivery` refuses a report that never
+      # probed, because there is no probe writer to publish from. Without it the
+      # footer advertised `w` on every passive reader report and answered with a
+      # refusal - and `refresh_bindings()` in `action_probe` had nothing to
+      # refresh, so the key stayed hidden after `p` made it real.
+      return bool(self.endpoint is not None and not self.endpoint.is_writer
+                  and self.probe)
     if action == "compatibility_matrix":
       return self._compatibility_applies()
     return True
 
   def _compatibility_applies(self):
-    """Whether the isolated Fast DDS matrix has a target on this report."""
+    """Whether the isolated cross-vendor matrix has a target on this report.
+
+    Any readable non-RTI writer. The gate used to be Fast DDS alone, which hid
+    the key on a Cyclone or OpenDDS writer - the peers the experiments are most
+    useful against - even though the runner does nothing Fast DDS-specific and
+    the profiles it tries are properties of THIS observer.
+    """
     return bool(self.endpoint is not None and self.endpoint.is_writer
-                and vendors.is_fastdds(getattr(self.endpoint, "vendor_id", None)))
+                and vendors.is_foreign(getattr(self.endpoint, "vendor_id", None)))
 
   def compose(self):
     yield Header()
-    self.status = Static("Running static checks...", id="report_status")
+    # `markup=False` here and on the tab bodies below, and it is the whole
+    # markup policy for this screen: everything either widget shows is
+    # generated - report text, sample payload, peer names, exception and tshark
+    # messages - and none of it is ours to interpret. A field or a message
+    # holding "[/]" would otherwise raise out of the update, and one holding
+    # "[red]" would silently delete the rest of its line. Set here rather than
+    # escaped at 27 call sites, because that is how one escaped line ended up
+    # beside an unescaped one.
+    self.status = Static("Running static checks...", id="report_status",
+                         markup=False)
     yield self.status
     with TabbedContent(id="report_tabs"):
+      # Data sits next to Probe because it is what the probe received. Every
+      # id here must have a section in `render_view_sections`, and vice versa:
+      # `_update_sections` indexes `bodies` by that function's keys.
       for tab_id, title in (("overview", "Overview"), ("findings", "Findings"),
                             ("type", "Type"), ("probe", "Probe"),
-                            ("wire", "Wire"), ("config", "Configuration")):
+                            ("data", "Data"), ("wire", "Wire"),
+                            ("config", "Configuration")):
         with TabPane(title, id=tab_id):
-          with VerticalScroll(classes="report_body"):
-            body = Static("")
+          scroll = VerticalScroll(classes="report_body")
+          self.scrolls[tab_id] = scroll
+          with scroll:
+            body = Static("", markup=False)
             self.bodies[tab_id] = body
             if tab_id == "overview":
               self.body = body
@@ -529,6 +624,12 @@ class ReportScreen(Screen):
     # `is_current`, not `is_mounted`: a screen is not yet mounted while its own
     # `on_mount` is still running, so `is_mounted` here is always False.
     if not self.is_current:
+      return
+    # `p` is live while the static pass above is awaited, so the operator may
+    # already have started their own pass - or be answering its capture picker.
+    # Offering again here would report their pass as "started from another
+    # report" and overwrite its announcement, or stack a second picker.
+    if self.probing or self.capturing or self.asking:
       return
     self._offer_full_pass()
 
@@ -551,7 +652,8 @@ class ReportScreen(Screen):
     """Advertise the opt-in matrix only where it applies."""
     if not self._compatibility_applies():
       return ""
-    return (" Fast DDS writer detected: press x to run isolated default/V2, "
+    vendor = vendors.vendor_name(getattr(self.endpoint, "vendor_id", None))
+    return (f" {vendor} writer detected: press x to run isolated default/V2, "
             "vendor/V2, and vendor/V1 compatibility profiles.")
 
   def _offer_full_pass(self):
@@ -568,30 +670,40 @@ class ReportScreen(Screen):
           "capture).")
       return
     compatibility_hint = self._compatibility_hint_text()
-    if not self.probe:
+    if not (self.probe or self.probe_requested):
+      created = "reader" if self.endpoint.is_writer else "writer"
       self.status.update(
-          "Static checks complete (opened without probing, so nothing else "
-          "runs). Capture choices are made when opening an endpoint report."
-          + compatibility_hint)
+          "Static checks complete (opened without probing, so nothing has "
+          f"touched the system). Press p to probe this endpoint: it creates a "
+          f"matching {created}, samples its statuses, and offers a packet "
+          "capture first." + compatibility_hint)
       return
     if self.session.pass_in_flight():
       self.status.update(
           "A diagnostic pass started from another report is still finishing. "
-          "Open this endpoint again after it finishes." + compatibility_hint)
+          "Press p to probe once it has." + compatibility_hint)
       return
     if self.session.capture_off_reason:
       self._begin_pass(None)
       return
     if not self.session.capture_choice_made:
+      if self.asking:
+        return
+      self.asking = True
       self.status.update(
           "Choose where to capture RTPS packets for the full diagnostic, or "
           f"{SKIP_CAPTURE} to probe without capturing.")
       self.app.push_screen(CaptureInterfaceScreen(
-          self.session, self._begin_pass,
-          on_dismiss=lambda: self._begin_pass(None, dismissed=True)))
+          self.session, self._answer_capture,
+          on_dismiss=lambda: self._answer_capture(None, dismissed=True)))
       return
     # An answer already exists, which may be a remembered Skip (None).
     self._begin_pass(self.session.capture_interface)
+
+  def _answer_capture(self, interface, dismissed=False):
+    """The picker's answer, which is also what closes the asking window."""
+    self.asking = False
+    self._begin_pass(interface, dismissed=dismissed)
 
   def _begin_pass(self, interface, dismissed=False, write_samples=False):
     """Start one combined probe+capture pass. The only path that runs either."""
@@ -603,6 +715,14 @@ class ReportScreen(Screen):
       return
     if not self._capture_allowed():
       return
+    # The request becomes the capability here, at the one place a pass starts.
+    if self.probe_requested:
+      self.probe_requested = False
+      self.probe = True
+      # Textual caches which bindings are active, and `w` is gated on this
+      # report probing - without this the reader-target key stays hidden until
+      # the screen is rebuilt.
+      self.refresh_bindings()
     probing = self.probe and self.endpoint is not None
     if not probing and not interface:
       self.status.update("Nothing to run: this report does not probe, and no "
@@ -617,7 +737,19 @@ class ReportScreen(Screen):
     self.status.update(
         self._pass_announcement(interface, probing, seconds, destination,
                                 dismissed, write_samples))
+    # One subscription at a time on this topic. A live feed running through a
+    # probe is load the probe is trying to measure, and its frames would land in
+    # that pass's capture as if they were the application's.
+    self._stop_live()
     self.probing, self.capturing = probing, bool(interface)
+    # The feed was closed above so the pass has the topic to itself. Say which
+    # of the two it is: `_stop_live` leaves "select this tab again to reopen",
+    # which is wrong for the whole length of a pass that will hand the feed back
+    # on its own - and selecting the tab now would only earn a refusal.
+    if self._data_tab_active():
+      self.live_note = ("This report's diagnostic pass is running. The live "
+                        "feed starts when it finishes.")
+      self._render_live()
     # Claimed for the window tshark itself is bounded by, so a claim nobody
     # releases expires no later than the capture it was protecting.
     self.session.claim_pass(seconds + engine_mod.CAPTURE_DURATION_MARGIN)
@@ -706,6 +838,10 @@ class ReportScreen(Screen):
       # deadline covers the case neither reaches - a worker cancelled before it
       # ever ran.
       self.session.release_pass()
+      # The pass is over, so the topic is free again. Reopen the feed if the
+      # operator is sitting on the Data tab - including after a failure, where
+      # a live stream is often the most useful thing left.
+      self._start_live_if_active()
 
   def _pass_result_text(self, interface, probing):
     """What the pass produced - and the one place capture turns itself off."""
@@ -740,6 +876,43 @@ class ReportScreen(Screen):
             f"See Overview for what the capture added, Wire for the full "
             f"counts. {self.data.verdict}")
 
+  def action_probe(self):
+    """Probe an endpoint whose report was opened without probing.
+
+    Passive is the right default for these reports and stays the default: a
+    report reached from an issue, from `o`, or from the endpoint picker creates
+    no entity and asks no question, because arriving on a screen must never be
+    what starts a probe. What was missing was the way out of it. The operator
+    who did want a probe had to leave and reopen the endpoint from a screen that
+    probes on entry - and the issue path has no such screen, so the writer an
+    issue names could not be probed at all without first finding it again by
+    hand in Browse.
+
+    This runs the same single pass the probing entry path runs, capture question
+    included: the question comes first because a capture has to be recording
+    before the probe it exists to observe.
+    """
+    if self.endpoint is None:
+      self.status.update("Probing needs an endpoint; this is a participant "
+                         "report.")
+      return
+    if self.probing or self.capturing:
+      # This report's own pass, which `_offer_full_pass` would have reported as
+      # "started from another report" - and it would have overwritten the
+      # announcement naming the interface, the duration and the capture file.
+      self.status.update("This report's diagnostic pass is already running.")
+      return
+    if self.asking:
+      self.status.update("Answer the capture question first.")
+      return
+    # `probe` is set by `_begin_pass`, where a pass actually starts - not here.
+    # `_offer_full_pass` can still refuse (another report's pass), and setting
+    # the flag before finding out told the rest of the screen this report probes
+    # when nothing ran: enough to unlock `w` and reach the publish consent from
+    # a report with no probe behind it.
+    self.probe_requested = True
+    self._offer_full_pass()
+
   def action_verify_delivery(self):
     """Prove delivery to a discovered reader, with consent, by publishing to it.
 
@@ -760,7 +933,7 @@ class ReportScreen(Screen):
     if not self.probe:
       self.status.update(
           "This report was opened without probing, so there is no probe writer "
-          "to publish from. Open it for diagnosis to verify delivery.")
+          "to publish from. Press p to probe first, then w to verify delivery.")
       return
     if self.session.pass_in_flight():
       self.status.update("A diagnostic pass is still finishing; try again when "
@@ -773,7 +946,7 @@ class ReportScreen(Screen):
     return os.path.join(paths.TOOL_ROOT, "run_version_matrix.sh")
 
   def _compatibility_command(self, output_dir):
-    """Fresh-process Fast DDS matrix command for this writer's topic."""
+    """Fresh-process cross-vendor matrix command for this writer's topic."""
     # `settle` is the interactive session's discovery settle, tuned for a local
     # RTI peer; a cross-vendor child run needs at least the runner's own
     # default or its preflight topic check can fire before the writer is seen.
@@ -786,16 +959,28 @@ class ReportScreen(Screen):
             "--output-dir", output_dir]
 
   def action_compatibility_matrix(self):
-    """Run isolated TypeObject/mask experiments for a Fast DDS writer."""
+    """Run isolated TypeObject/mask experiments against a non-RTI writer."""
     if self.endpoint is None or not self.endpoint.is_writer:
       self.status.update("Compatibility experiments apply to a selected writer.")
       return
     vendor_id = getattr(self.endpoint, "vendor_id", None)
-    if vendors.is_rti(vendor_id):
-      self.status.update("This is an RTI Connext writer; no cross-vendor matrix is needed.")
+    if vendors.is_rti_family(vendor_id):
+      self.status.update(
+          f"This is an {vendors.vendor_name(vendor_id)} writer; no cross-vendor "
+          "matrix is needed.")
       return
-    if not vendors.is_fastdds(vendor_id):
-      self.status.update("The automated matrix currently supports Fast DDS writers only.")
+    if not vendors.is_foreign(vendor_id):
+      # `is_foreign` refuses an unreadable id and a stated 00.00 alike, and its
+      # own docstring insists those are different: one is "we could not tell",
+      # the other is the peer saying "no vendor". Naming the wrong one points at
+      # the wrong remedy.
+      octets = vendors.vendor_octets(vendor_id)
+      self.status.update(
+          "This writer states RTPS VENDORID_UNKNOWN (00.00), which names no "
+          "vendor, so there is no cross-vendor claim for the matrix to test."
+          if octets == vendors.VENDORID_UNKNOWN else
+          "This writer's RTPS vendor id could not be read, so there is no "
+          "cross-vendor claim for the matrix to test.")
       return
     if self.probing or self.session.pass_in_flight():
       self.status.update("Wait for the current diagnostic pass to finish before running the matrix.")
@@ -809,9 +994,10 @@ class ReportScreen(Screen):
       return
     stamp = time.strftime("%Y%m%d_%H%M%S")
     output_dir = paths.test_output_path(
-        "fastdds_compatibility", f"{self.session.domain_id}_{stamp}")
+        "cross_vendor_compatibility", f"{self.session.domain_id}_{stamp}")
     command = self._compatibility_command(output_dir)
-    self.app.push_screen(CompatibilityMatrixScreen(command, output_dir))
+    self.app.push_screen(CompatibilityMatrixScreen(
+        command, output_dir, vendor=vendors.vendor_name(vendor_id)))
 
   def _begin_write_pass(self, approved):
     """Re-run the pass, publishing only if the operator said to."""
@@ -844,9 +1030,258 @@ class ReportScreen(Screen):
       return False
     return True
 
+  # --- The Data tab's live feed ----------------------------------------------
+
+  def on_tabbed_content_tab_activated(self, event):
+    """Open a reader on entering the Data tab; close it on leaving.
+
+    The tab selection IS the operator's request here, which is why this is the
+    one place in the report that creates a DDS entity without a keypress. It
+    stays honest because the same event closes it: there is no way to be reading
+    a topic and not be looking at the tab that says so.
+    """
+    active = getattr(event.tabbed_content, "active", None)
+    if active == "data":
+      self._start_live()
+    else:
+      self._stop_live()
+
+  def on_screen_suspend(self):
+    """Another screen went on top, so nothing is watching this feed.
+
+    A suspended report is not an unmounted one - without this the reader would
+    keep taking samples behind the capture picker or the matrix screen, which is
+    exactly the invisible subscription this design is meant not to have.
+    """
+    self._stop_live()
+
+  def on_screen_resume(self):
+    self._start_live_if_active()
+
+  def on_unmount(self):
+    self._stop_live()
+
+  def _start_live_if_active(self):
+    """Start only when Data is the tab actually on screen.
+
+    `is_current` first: this is reached from a pass's `finally`, which can run
+    after the operator navigated away and `on_unmount` already closed the feed.
+    Opening one there would leak the one reader in this tool that nothing else
+    is going to close.
+    """
+    if self._data_tab_active():
+      self._start_live()
+
+  def _data_tab_active(self):
+    """Is the Data tab the one on screen right now?
+
+    `app.screen is self`, NOT `is_current`: measured on this Textual, a screen
+    with another one pushed on top still reports `is_current` True, so that test
+    would have reopened the feed behind the capture picker when a pass finished
+    under it - the invisible subscription this design exists not to have. One
+    try around the whole check because a caller can be a pass's `finally`, and
+    both `app` and `query_one` reach for state a torn-down screen no longer has;
+    raising there would surface as a worker error for a screen nobody is looking
+    at.
+    """
+    try:
+      if self.app.screen is not self:
+        return False
+      tabs = self.query_one("#report_tabs", TabbedContent)
+    except Exception:
+      return False
+    return getattr(tabs, "active", None) == "data"
+
+  def _start_live(self):
+    """Open the feed's reader, or say why there will not be one.
+
+    Never raises into the event loop: a Data tab that cannot stream has to keep
+    being a readable tab, so a failure here becomes a line in the body.
+    """
+    if self.live is not None:
+      return
+    refusal = livedata.why_not(self.endpoint)
+    if refusal is not None:
+      self.live_note = refusal
+      self._render_live()
+      return
+    # One thing at a time on a topic, as everywhere else here: an extra
+    # subscription during a probe is load the probe is trying to measure, and
+    # its frames would land in that pass's capture.
+    if self.probing or self.capturing:
+      # This report's own pass, and its `finally` is what hands the feed back.
+      self.live_note = ("This report's diagnostic pass is running. The live "
+                        "feed starts when it finishes.")
+      self._render_live()
+      return
+    if self.session.pass_in_flight():
+      # Another report's pass, which will never call back here. Promising a
+      # restart would leave a dead tab waiting for an event that cannot arrive.
+      self.live_note = ("A diagnostic pass started from another report is "
+                        "still running. Select this tab again once it has "
+                        "finished.")
+      self._render_live()
+      return
+    try:
+      self.live = livedata.LiveSubscription(self.session.participant,
+                                           self.endpoint)
+    except Exception as error:
+      logging.error(f"[ReportScreen] live feed could not start: {error}")
+      self.live_note = f"The live feed could not create a reader: {error}"
+      self._render_live()
+      return
+    self.live_samples.clear()
+    self.live_note = ""
+    self.live_timer = self.set_interval(LIVE_POLL_SECONDS, self._pump_live)
+    self._render_live()
+
+  def _stop_live(self):
+    """Close the feed's reader and stop polling. Idempotent."""
+    timer, self.live_timer = self.live_timer, None
+    if timer is not None:
+      timer.stop()
+    live, self.live = self.live, None
+    # Cleared with the attempt that produced it. A note is about starting a
+    # feed, so a stale one left behind would keep annotating the tab - and one
+    # from a transient failure would outlive the failure for as long as the
+    # report is open.
+    had_note, self.live_note = bool(self.live_note), ""
+    if live is not None or had_note:
+      # The samples stay on screen; what is gone is the reader behind them, and
+      # the header has to stop claiming a stream that has been closed.
+      if live is not None:
+        live.close()
+      self._render_live()
+
+  def _pump_live(self):
+    if self.live is None:
+      return
+    samples, skipped = self.live.poll()
+    if self.live.errors >= LIVE_ERROR_LIMIT:
+      self._fail_live(f"The live reader stopped after "
+                      f"{self.live.errors} failed reads: "
+                      f"{self.live.last_error}")
+      return
+    # Redrawn for a changed header as well as for arrivals. `skipped` is one
+    # reason - a silent target on a busy topic, where the other-writer count is
+    # the only thing distinguishing "nothing is being published" from "nothing
+    # is being published BY THIS WRITER". Correlation is the other: it is
+    # unknown until the first poll resolves it, so a header rendered before any
+    # poll carries the topic-wide caveat and would keep carrying it for a writer
+    # that never sends.
+    if not samples and not skipped and self._live_header() == self.live_shown:
+      return
+    self.live_samples.extend(samples)
+    self._render_live()
+
+  def _fail_live(self, reason):
+    """Close a feed that cannot read, and say why instead of showing silence."""
+    self._stop_live()
+    self.live_note = reason
+    self._render_live()
+
+  def _render_live(self):
+    """Redraw the Data body from the feed, and follow the tail."""
+    body = self.bodies.get("data")
+    if body is None:
+      return
+    self.live_shown = self._live_header() if self.live is not None else ""
+    scroll = self.scrolls.get("data")
+    # Whether to follow the tail is decided BEFORE the update, from where the
+    # operator had scrolled to. Following unconditionally meant a writer sending
+    # every 200ms yanked the view back to the bottom five times a second, so the
+    # 200-sample window it keeps could not actually be read.
+    following = self._live_following(scroll)
+    body.update("\n".join(self._live_lines()))
+    if scroll is not None and self.live is not None and following:
+      try:
+        scroll.scroll_end(animate=False)
+      except Exception:
+        # Scrolling is a nicety; a feed that raised here would stop updating.
+        pass
+
+  @staticmethod
+  def _live_following(scroll):
+    """Was the view at the bottom, i.e. reading the newest arrivals?
+
+    True when there is nothing to scroll yet, so a feed that has just opened
+    starts by following. Any failure reading the offsets also answers True: the
+    tail is the useful default, and this is a nicety either way.
+    """
+    if scroll is None:
+      return True
+    try:
+      furthest = scroll.max_scroll_y
+      if furthest <= 0:
+        return True
+      # A line of slack, so a view resting one row short still follows.
+      return scroll.scroll_offset.y >= furthest - 1
+    except Exception:
+      return True
+
+  def _live_lines(self):
+    """Header, then every kept sample oldest-first, newest at the bottom."""
+    lines = []
+    if self.live is not None:
+      lines.append(self._live_header())
+      lines.append("A reader is open on the type discovery supplied. It closes "
+                   "when you leave this tab.")
+    elif self.live_samples:
+      closed = f"FEED CLOSED - {len(self.live_samples)} sample(s) still shown."
+      # The advice belongs to the note whenever there is one. During a pass,
+      # "select this tab again" would only earn a refusal - and the pass hands
+      # the feed back on its own, which is what the note says instead.
+      if not self.live_note:
+        closed += " Select this tab again to reopen the reader."
+      lines.append(closed)
+    if self.live_note:
+      lines.append(self.live_note)
+    if not self.live_samples:
+      if self.live is not None:
+        return lines + ["", "Waiting for the first sample..."]
+      # No feed and nothing streamed. The probe's own snapshot is the better
+      # thing to show than an empty screen - and it goes BELOW any refusal
+      # rather than instead of it: a feed that could not start is a reason to
+      # read what the probe captured, not a reason to hide it.
+      snapshot = (report_mod.render_view_sections(self.data)["data"]
+                  if self.data is not None else "")
+      return (lines + ["", snapshot]) if snapshot else lines
+    for sample in self.live_samples:
+      lines.append("")
+      lines.append(f"sample {sample.number}  {sample.clock}")
+      for line in str(sample.text).splitlines():
+        lines.append(f"  {line}")
+    return lines
+
+  def _live_header(self):
+    """What the feed has seen, including what it is NOT showing.
+
+    `dropped` and `others` are both differences between "the writer sent this"
+    and "this is on screen", and a header that reported only the visible count
+    would describe this UI's refresh rate as the writer's rate.
+    """
+    scope = ("" if self.live.correlated
+             else " (TOPIC-WIDE: this reader's matched publications could not "
+                  "be resolved, so samples are not attributed to this writer)")
+    parts = [f"{self.live.received} sample(s) received",
+             f"{len(self.live_samples)} shown"]
+    if self.live.dropped:
+      parts.append(f"{self.live.dropped} arrived faster than the view could "
+                   "show and were not kept")
+    if self.live.others:
+      parts.append(f"{self.live.others} from other writers on this topic")
+    return (f"STREAMING '{self.endpoint.topic_name}' - " + ", ".join(parts)
+            + scope)
+
   def _update_sections(self):
     for tab_id, text in report_mod.render_view_sections(self.data).items():
       self.bodies[tab_id].update(text)
+    # The feed owns the Data body only while it is OPEN, or while a refusal has
+    # something to say about why it is not. Deferring to it for kept samples
+    # alone put a closed feed's older arrivals over a fresher probe snapshot -
+    # and re-entering the tab clears them anyway.
+    if self.live is not None or self.live_note:
+      self._render_live()
 
   def action_back(self):
     self.app.pop_screen()

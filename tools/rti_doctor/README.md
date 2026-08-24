@@ -91,6 +91,7 @@ selecting one shows only that severity. Keys:
 | `Up` / `Down` / `Enter` | Select a menu item, drill into a participant/topic, or run the full diagnostic on an endpoint |
 | `1` / `2` / `3` / `4` | In Topology: participants, readers, writers, topics |
 | `o` | Open a report for the selected endpoint *without* probing or capturing — the cheap look |
+| `p` | On an endpoint report opened without probing: probe it now (offers a capture first) |
 | `i` | In Topology: the issues linked to the highlighted row |
 | `m` | Observed domain metrics |
 | `r` | Re-scan (every screen shows a snapshot, never a live feed) |
@@ -102,6 +103,21 @@ selecting one shows only that severity. Keys:
 
 Every screen shows a *snapshot*, not a live view, so a reading never changes
 under you while you read it. `r` takes a new one.
+
+**One deliberate exception:** a writer report's **Data** tab. Selecting it opens
+a reader on the type discovery supplied and streams samples as they arrive,
+newest at the bottom; leaving the tab closes that reader, and so does putting
+another screen on top of the report or backing out of it. It is the only reader
+in the tool that outlives the call that created it, which is why its lifetime is
+tied to the tab being the one you are looking at. Every other tab, and every
+other screen, is still a snapshot. While a diagnostic pass is running the feed
+steps aside — an extra subscription is load the pass is trying to measure — and
+comes back when the pass finishes.
+
+The endpoint lists mark in **orange** any endpoint a system issue names at
+WARNING or above, on both sides of a pair. Notes (INFO) are not marked: a
+healthy single-writer domain always reports `qos.no_counterpart` as a note, so
+marking those would paint a healthy system orange.
 
 ## Deploy With an Activated Wheel
 

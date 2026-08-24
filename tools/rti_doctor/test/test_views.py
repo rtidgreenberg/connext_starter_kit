@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import unittest
 from unittest import mock
@@ -20,8 +21,10 @@ from textual.app import App
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rti_doctor import engine, findings, records, report, system_scan  # noqa: E402
-from rti_doctor.views import browse, report_screen, system_overview  # noqa: E402
+from rti_doctor import (engine, findings, livedata, probe,  # noqa: E402
+                        records, report, system_scan, vendors)
+from rti_doctor.views import (browse, issue_marks, report_screen,  # noqa: E402
+                              system_overview)
 
 TOPOLOGY = {
     "participants": 2, "readers": 1, "writers": 1, "topic_count": 1,
@@ -466,10 +469,16 @@ class FakeEndpoint:
     self.type_resolution_delay = None
     self.representation = ()
     self.unicast_locators = ()
+    self.vendor_name = "RTI Connext"
 
   @property
   def is_writer(self):
     return self.kind == "Writer"
+
+
+def vendor_id(second_octet, first=0x01):
+  """An RTPS vendor id; `first` is only ever changed to build 00.00."""
+  return type("Vendor", (), {"value": [first, second_octet]})()
 
 
 def issue_with(writer_keys=(), reader_keys=(), evidence=None):
@@ -768,11 +777,11 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     # not promise user data the Wire tab will then contradict.
     self.assertIn("creating a writer", result["said"])
 
-  def test_fastdds_writer_compatibility_command_uses_an_isolated_matrix(self):
+  def test_a_foreign_writer_compatibility_command_uses_an_isolated_matrix(self):
     session = CaptureStubSession()
     session.type_wait = 4.0
     endpoint = FakeEndpoint("w1", "Writer", topic_name="FastTelemetry")
-    endpoint.vendor_id = type("Vendor", (), {"value": [0x01, 0x0F]})()
+    endpoint.vendor_id = vendor_id(0x0F)
     screen = report_screen.ReportScreen(session, endpoint=endpoint)
     command = screen._compatibility_command("/tmp/matrix")
     self.assertEqual(command[:2], ["bash", os.path.join(
@@ -782,10 +791,10 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     self.assertIn("--output-dir", command)
     self.assertEqual(command[command.index("--output-dir") + 1], "/tmp/matrix")
 
-  def test_fastdds_writer_report_advertises_the_compatibility_matrix(self):
+  def test_a_foreign_writer_report_advertises_the_compatibility_matrix(self):
     session = CaptureStubSession()
     endpoint = FakeEndpoint("w1", "Writer")
-    endpoint.vendor_id = type("Vendor", (), {"value": [0x01, 0x0F]})()
+    endpoint.vendor_id = vendor_id(0x0F)
     screen = report_screen.ReportScreen(session, endpoint=endpoint, probe=False)
     self.assertIn("press x", screen._compatibility_hint_text().lower())
 
@@ -1254,6 +1263,2087 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
         domain_id=7, scope="topic 'Telemetry'", all_findings=[],
         endpoint=FakeEndpoint("w1", "Writer")))
     self.assertNotIn("CAPTURE EVIDENCE", sections["overview"])
+
+
+class TestTheCompatibilityMatrixIsCrossVendor(unittest.TestCase):
+  """`x` is offered for any non-RTI writer, and says so without naming one.
+
+  The runner behind it starts fresh Connext observers under three XTypes and
+  TypeObject profiles; every one of those is a property of the OBSERVER, and
+  nothing in it is specific to a peer implementation. Gating the key on Fast DDS
+  therefore hid it on exactly the peers it is most useful against - a Cyclone or
+  OpenDDS writer whose type will not resolve - and titled the result after a
+  vendor that was not in the run.
+  """
+
+  def screen(self, second_octet=None, kind="Writer"):
+    endpoint = FakeEndpoint("w1", kind)
+    if second_octet is not None:
+      endpoint.vendor_id = vendor_id(second_octet)
+    return report_screen.ReportScreen(
+        CaptureStubSession("lo"), endpoint=endpoint, probe=False)
+
+  def test_the_key_is_offered_for_every_recognized_non_rti_vendor(self):
+    for octet, name in ((0x02, "OpenSplice"), (0x03, "OpenDDS"),
+                        (0x0F, "Fast DDS"), (0x10, "Cyclone")):
+      with self.subTest(vendor=name):
+        self.assertTrue(self.screen(octet).check_action("compatibility_matrix",
+                                                        None))
+
+  def test_an_unrecognized_but_readable_vendor_is_still_offered_it(self):
+    """The profiles are ours, not the peer's, so an unknown foreign peer is a
+    legitimate target - and its type failing to resolve is the usual reason to
+    reach for this."""
+    self.assertTrue(self.screen(0x7F).check_action("compatibility_matrix", None))
+
+  def test_an_rti_writer_is_not_offered_it(self):
+    self.assertFalse(self.screen(0x01).check_action("compatibility_matrix", None))
+
+  def test_an_unreadable_vendor_id_is_not_offered_it(self):
+    """The same misattribution guard the vendor module already applies: an
+    experiment offered on the strength of a vendor we could not determine claims
+    more than the evidence supports."""
+    self.assertFalse(self.screen(None).check_action("compatibility_matrix", None))
+
+  def test_a_reader_is_not_offered_it(self):
+    self.assertFalse(
+        self.screen(0x10, kind="Reader").check_action("compatibility_matrix",
+                                                     None))
+
+  def test_the_hint_names_the_vendor_it_found(self):
+    self.assertIn("Eclipse Cyclone DDS writer detected",
+                  self.screen(0x10)._compatibility_hint_text())
+    self.assertIn("eProsima Fast DDS writer detected",
+                  self.screen(0x0F)._compatibility_hint_text())
+
+  def test_no_key_label_advertises_one_vendor(self):
+    """The footer is where the keymap is documented, so it is where a
+    vendor-specific name would be read as a vendor-specific feature."""
+    labels = {binding[2] for binding in report_screen.ReportScreen.BINDINGS}
+    self.assertIn("Cross-vendor compatibility", labels)
+    self.assertNotIn("Fast DDS compatibility", labels)
+
+  def test_the_matrix_screen_heading_names_the_peer_when_it_knows_it(self):
+    named = report_screen.CompatibilityMatrixScreen(
+        [], "/tmp/matrix", vendor="Eclipse Cyclone DDS")
+    self.assertEqual(named._heading(),
+                     "Cross-Vendor Compatibility Matrix - Eclipse Cyclone DDS writer")
+    plain = report_screen.CompatibilityMatrixScreen([], "/tmp/matrix")
+    self.assertEqual(plain._heading(), "Cross-Vendor Compatibility Matrix")
+    self.assertNotIn("Fast DDS", plain._heading())
+
+  def test_an_rti_writer_that_reaches_the_action_is_told_why_not(self):
+    screen = self.screen(0x01)
+    screen.status = mock.Mock()
+    screen.action_compatibility_matrix()
+    self.assertIn("no cross-vendor matrix is needed",
+                  screen.status.update.call_args[0][0])
+
+  def test_an_unreadable_vendor_that_reaches_the_action_is_told_why_not(self):
+    screen = self.screen(None)
+    screen.status = mock.Mock()
+    screen.action_compatibility_matrix()
+    said = screen.status.update.call_args[0][0]
+    self.assertIn("vendor id could not be read", said)
+    self.assertNotIn("Fast DDS", said)
+
+  def test_the_evidence_directory_is_not_named_after_one_vendor(self):
+    """Driven by the key, because `Screen.app` is read-only in Textual and the
+    push is what carries the directory and the vendor label."""
+    recorded = {}
+
+    class Recorder(report_screen.Screen):
+      """Stands in for the matrix screen so no runner is spawned."""
+
+      def __init__(self, command, output_dir, vendor=None):
+        super().__init__()
+        recorded.update(command=command, output_dir=output_dir, vendor=vendor)
+
+    screen = self.screen(0x10)
+
+    async def run():
+      app = Harness(screen)
+      with mock.patch.object(report_screen, "CompatibilityMatrixScreen",
+                             Recorder), \
+           mock.patch.object(report_screen.os.path, "isfile",
+                             return_value=True):
+        async with app.run_test() as pilot:
+          await pilot.pause()
+          await app.workers.wait_for_complete()
+          await pilot.press("x")
+          await pilot.pause()
+
+    asyncio.run(run())
+    self.assertIn("cross_vendor_compatibility", recorded["output_dir"])
+    self.assertNotIn("fastdds", recorded["output_dir"])
+    self.assertEqual(recorded["vendor"], "Eclipse Cyclone DDS")
+
+
+class StubLive:
+  """Stands in for `livedata.LiveSubscription` with no domain behind it.
+
+  Records its own construction and closure, because the whole contract under
+  test is a lifetime: opened by selecting the Data tab, closed by everything
+  that means the operator has stopped looking at it.
+  """
+
+  opened = []
+
+  def __init__(self, participant, endpoint):
+    self.participant = participant
+    self.endpoint = endpoint
+    self.received = 0
+    self.others = 0
+    # Mirrors the real subscription's counters: the header reports what it is
+    # NOT showing as well as what it is, so a stub missing one is a stub that
+    # cannot catch the header regressing. `test_the_stub_mirrors_the_real
+    # _subscription` keeps this list honest.
+    self.dropped = 0
+    self.correlated = True
+    self.applied_qos = {}
+    self.errors = 0
+    self.last_error = ""
+    self.closes = 0
+    self.batches = []
+    StubLive.opened.append(self)
+
+  @property
+  def closed(self):
+    return self.closes > 0
+
+  def poll(self):
+    if not self.batches:
+      return [], 0
+    batch = self.batches.pop(0)
+    self.received += len(batch)
+    return batch, 0
+
+  def close(self):
+    self.closes += 1
+
+
+def live_samples(count, first=1):
+  return [livedata.LiveSample(number, 1700000000.5 + number,
+                              '{"id":%d}' % number)
+          for number in range(first, first + count)]
+
+
+class TestTheDataTabStreamsWhileItIsOpen(unittest.TestCase):
+  """A reader opens when the Data tab is selected and closes when it is not.
+
+  The tab selection is the request, which makes this the one place in the report
+  that creates a DDS entity without a keypress. That is only honest while the
+  converse holds: every way of ceasing to look at the tab - another tab, another
+  screen on top, leaving the report - has to close the reader. A subscription
+  nobody can see is exactly what this tool tells other people not to leave
+  behind.
+  """
+
+  def setUp(self):
+    StubLive.opened = []
+
+  def screen(self, endpoint=None, participant=None, session=None):
+    session = session or CaptureStubSession("lo")
+    session.participant = object()
+    if endpoint is None and participant is None:
+      endpoint = FakeEndpoint("w1", "Writer")
+    if endpoint is not None:
+      endpoint.type = object()
+    return report_screen.ReportScreen(
+        session, endpoint=endpoint, participant=participant, probe=False)
+
+  def drive(self, screen, steps):
+    collected = {}
+
+    async def run():
+      app = Harness(screen)
+      with mock.patch.object(livedata, "LiveSubscription", StubLive):
+        async with app.run_test() as pilot:
+          await pilot.pause()
+          await app.workers.wait_for_complete()
+          await steps(pilot, screen, collected)
+
+    asyncio.run(run())
+    return collected
+
+  @staticmethod
+  async def select(pilot, screen, tab_id):
+    screen.query_one("#report_tabs",
+                     report_screen.TabbedContent).active = tab_id
+    await pilot.pause()
+
+  def body(self, screen):
+    return str(screen.bodies["data"].render())
+
+  def test_nothing_is_open_until_the_data_tab_is_selected(self):
+    async def steps(pilot, screen, out):
+      out["before"] = screen.live
+
+    result = self.drive(self.screen(), steps)
+    self.assertIsNone(result["before"])
+    self.assertEqual(StubLive.opened, [])
+
+  def test_selecting_the_tab_opens_a_reader_and_starts_polling(self):
+    async def steps(pilot, screen, out):
+      await self.select(pilot, screen, "data")
+      out["live"] = screen.live
+      out["timer"] = screen.live_timer
+
+    result = self.drive(self.screen(), steps)
+    self.assertIsInstance(result["live"], StubLive)
+    self.assertIsNotNone(result["timer"])
+    self.assertEqual(len(StubLive.opened), 1)
+    self.assertEqual(StubLive.opened[0].endpoint.key, "w1")
+
+  def test_leaving_the_tab_closes_the_reader(self):
+    async def steps(pilot, screen, out):
+      await self.select(pilot, screen, "data")
+      out["opened"] = screen.live
+      await self.select(pilot, screen, "probe")
+      out["after"] = screen.live
+      out["timer"] = screen.live_timer
+
+    result = self.drive(self.screen(), steps)
+    self.assertTrue(result["opened"].closed)
+    self.assertIsNone(result["after"])
+    self.assertIsNone(result["timer"], "the poll timer outlived its reader")
+
+  def test_unmounting_the_report_closes_the_reader(self):
+    """Back out of the report while streaming and the reader must not survive."""
+    screen = self.screen()
+
+    async def steps(pilot, target, out):
+      await self.select(pilot, target, "data")
+      out["live"] = target.live
+
+    result = self.drive(screen, steps)
+    # `run_test` exiting unmounts the screen, which is the operator leaving.
+    self.assertTrue(result["live"].closed)
+
+  def test_a_screen_pushed_on_top_suspends_the_feed(self):
+    """A capture picker or the matrix screen leaves the report mounted.
+
+    Without the suspend handler the reader would keep taking samples behind
+    them, which is the invisible subscription this design exists not to have.
+    """
+    screen = self.screen()
+
+    async def steps(pilot, target, out):
+      await self.select(pilot, target, "data")
+      first = target.live
+      target.on_screen_suspend()
+      await pilot.pause()
+      out["suspended"] = (first.closed, target.live)
+      target.on_screen_resume()
+      await pilot.pause()
+      out["resumed"] = target.live
+
+    result = self.drive(screen, steps)
+    self.assertEqual(result["suspended"][0], True)
+    self.assertIsNone(result["suspended"][1])
+    self.assertIsInstance(result["resumed"], StubLive,
+                          "coming back to the tab did not reopen the reader")
+    self.assertEqual(len(StubLive.opened), 2)
+
+  def test_arriving_samples_are_rendered_newest_last(self):
+    async def steps(pilot, screen, out):
+      await self.select(pilot, screen, "data")
+      screen.live.batches = [live_samples(2), live_samples(1, first=3)]
+      screen._pump_live()
+      screen._pump_live()
+      out["body"] = self.body(screen)
+
+    body = self.drive(self.screen(), steps)["body"]
+    self.assertIn("STREAMING 'Telemetry'", body)
+    self.assertIn("sample 1", body)
+    self.assertIn("sample 3", body)
+    self.assertLess(body.index("sample 1"), body.index("sample 3"))
+    self.assertIn('{"id":3}', body)
+
+  def test_the_feed_keeps_a_bounded_window(self):
+    """A writer left running overnight must not be a memory leak."""
+    async def steps(pilot, screen, out):
+      await self.select(pilot, screen, "data")
+      screen.live.batches = [
+          live_samples(report_screen.LIVE_SAMPLE_HISTORY + 40)]
+      screen._pump_live()
+      out["kept"] = len(screen.live_samples)
+      out["body"] = self.body(screen)
+
+    result = self.drive(self.screen(), steps)
+    self.assertEqual(result["kept"], report_screen.LIVE_SAMPLE_HISTORY)
+    # The newest survive and the oldest are the ones dropped.
+    self.assertIn(f"sample {report_screen.LIVE_SAMPLE_HISTORY + 40}",
+                  result["body"])
+    self.assertNotIn("sample 1  ", result["body"])
+
+  def test_a_closed_feed_stops_claiming_to_be_streaming(self):
+    async def steps(pilot, screen, out):
+      await self.select(pilot, screen, "data")
+      screen.live.batches = [live_samples(2)]
+      screen._pump_live()
+      await self.select(pilot, screen, "wire")
+      out["body"] = self.body(screen)
+
+    body = self.drive(self.screen(), steps)["body"]
+    self.assertIn("FEED CLOSED", body)
+    self.assertNotIn("STREAMING", body)
+    # The samples already read stay readable; only the reader is gone.
+    self.assertIn("sample 2", body)
+
+  def test_a_reader_target_is_told_there_is_nothing_arriving(self):
+    async def steps(pilot, screen, out):
+      await self.select(pilot, screen, "data")
+      out["live"] = screen.live
+      out["body"] = self.body(screen)
+
+    result = self.drive(self.screen(FakeEndpoint("r1", "Reader")), steps)
+    self.assertIsNone(result["live"])
+    self.assertEqual(StubLive.opened, [])
+    self.assertIn("nothing arriving to show", result["body"])
+
+  def test_a_writer_with_no_discovered_type_says_so_instead_of_streaming(self):
+    endpoint = FakeEndpoint("w1", "Writer")
+    screen = self.screen(endpoint)
+    endpoint.type = None
+
+    async def steps(pilot, target, out):
+      await self.select(pilot, target, "data")
+      out["live"] = target.live
+      out["body"] = self.body(target)
+
+    result = self.drive(screen, steps)
+    self.assertIsNone(result["live"])
+    self.assertIn("No type information reached discovery", result["body"])
+
+  def test_a_participant_report_opens_nothing(self):
+    screen = self.screen(
+        participant=records.ParticipantRecord(key="p1", name="app"))
+
+    async def steps(pilot, target, out):
+      await self.select(pilot, target, "data")
+      out["live"] = target.live
+
+    self.assertIsNone(self.drive(screen, steps)["live"])
+    self.assertEqual(StubLive.opened, [])
+
+  def test_a_diagnostic_pass_takes_the_topic_back_and_gives_it_up_again(self):
+    """One subscription at a time: the feed steps aside for a probe.
+
+    A feed running through a pass is load the pass is trying to measure, and its
+    frames would land in that pass's capture as if the application had sent
+    them. It comes back afterwards because the operator is still on the tab.
+    """
+    session = CaptureStubSession("lo")
+
+    async def steps(pilot, screen, out):
+      await self.select(pilot, screen, "data")
+      out["first"] = screen.live
+      await pilot.press("p")
+      await pilot.app.workers.wait_for_complete()
+      await pilot.pause()
+      out["after"] = screen.live
+
+    result = self.drive(self.screen(session=session), steps)
+    self.assertTrue(result["first"].closed, "the feed ran through the probe")
+    self.assertTrue([call for call in session.calls if call["probe"]])
+    self.assertIsInstance(result["after"], StubLive)
+    self.assertEqual(len(StubLive.opened), 2)
+
+  def test_the_pass_result_does_not_overwrite_the_live_body(self):
+    """`_update_sections` redraws every tab from the last snapshot.
+
+    Without the guard it replaces a running stream with the probe's static
+    section, so the feed appears to freeze the moment a pass finishes.
+    """
+    async def steps(pilot, screen, out):
+      await self.select(pilot, screen, "data")
+      screen.live.batches = [live_samples(1)]
+      screen._pump_live()
+      screen.data = report.ReportData(
+          domain_id=7, scope="topic 'Telemetry'", all_findings=[],
+          endpoint=screen.endpoint)
+      screen._update_sections()
+      out["body"] = self.body(screen)
+
+    body = self.drive(self.screen(), steps)["body"]
+    self.assertIn("STREAMING", body)
+    self.assertIn("sample 1", body)
+
+
+class TestWhyALiveFeedCannotRun(unittest.TestCase):
+  """`livedata.why_not` keeps the refusals distinguishable.
+
+  "This target is a reader" and "this writer's type never resolved" have
+  different remedies, and an empty feed for either would read as a silent
+  writer - the one conclusion neither supports.
+  """
+
+  def test_a_writer_with_a_discovered_type_can_stream(self):
+    endpoint = FakeEndpoint("w1", "Writer")
+    endpoint.type = object()
+    self.assertIsNone(livedata.why_not(endpoint))
+
+  def test_a_reader_cannot(self):
+    endpoint = FakeEndpoint("r1", "Reader")
+    endpoint.type = object()
+    self.assertIn("is a reader", livedata.why_not(endpoint))
+
+  def test_a_writer_without_a_type_cannot(self):
+    self.assertIn("No type information",
+                  livedata.why_not(FakeEndpoint("w1", "Writer")))
+
+  def test_a_participant_report_cannot(self):
+    self.assertIn("participant report", livedata.why_not(None))
+
+
+class TestPayloadIsNeverParsedAsMarkup(unittest.TestCase):
+  """A Static parses Rich markup, and report bodies carry peer-supplied text.
+
+  Measured on this project's Textual 8.2.8: `update('{"x":"[/]"}')` raises
+  MarkupError, and `[red]` silently eats the rest of its line. So a writer
+  publishing a string field that happens to contain square brackets could crash
+  the live feed's timer or quietly delete part of its own payload - and the
+  payload is the one thing the Data tab exists to show verbatim.
+  """
+
+  HOSTILE = '{"label":"[/]","note":"[red]hidden","path":"a[0]"}'
+
+  def test_textual_really_does_raise_on_a_closing_tag(self):
+    """The premise, asserted rather than assumed.
+
+    If a future Textual stops interpreting markup here, this test says so and
+    the escaping below becomes belt-and-braces rather than load-bearing.
+    """
+    from textual.markup import MarkupError
+    with self.assertRaises(MarkupError):
+      report_screen.Static("").update(self.HOSTILE)
+
+  def test_a_report_body_takes_its_text_literally(self):
+    screen = report_screen.ReportScreen(
+        CaptureStubSession("lo"), endpoint=FakeEndpoint("w1", "Writer"),
+        probe=False)
+    result = probe.ProbeResult()
+    result.attempted = result.created = True
+    result.sample_texts = [self.HOSTILE]
+    result.samples_taken = 1
+
+    async def run():
+      app = Harness(screen)
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        # After mount: `_render_static` replaces `data` with the session's.
+        screen.data = report.ReportData(
+            domain_id=7, scope="topic 'Telemetry'", all_findings=[],
+            endpoint=screen.endpoint, probe_result=result)
+        screen._update_sections()
+        await pilot.pause()
+
+    asyncio.run(run())
+    body = str(screen.bodies["data"].render())
+    self.assertIn("[/]", body)
+    self.assertIn("[red]hidden", body, "markup ate part of the payload")
+
+  def test_the_live_feed_takes_its_samples_literally(self):
+    screen = report_screen.ReportScreen(
+        CaptureStubSession("lo"), endpoint=FakeEndpoint("w1", "Writer"),
+        probe=False)
+    screen.endpoint.type = object()
+    screen.session.participant = object()
+    StubLive.opened = []
+
+    async def run():
+      app = Harness(screen)
+      with mock.patch.object(livedata, "LiveSubscription", StubLive):
+        async with app.run_test() as pilot:
+          await pilot.pause()
+          await app.workers.wait_for_complete()
+          screen.query_one("#report_tabs",
+                           report_screen.TabbedContent).active = "data"
+          await pilot.pause()
+          screen.live.batches = [[livedata.LiveSample(1, 1700000000.0,
+                                                      self.HOSTILE)]]
+          screen._pump_live()
+          await pilot.pause()
+
+    asyncio.run(run())
+    body = str(screen.bodies["data"].render())
+    self.assertIn("[/]", body)
+    self.assertIn("[red]hidden", body)
+
+
+class TestTheFeedHeaderAccountsForEverySample(unittest.TestCase):
+  """What arrived, what is shown, and the difference between them.
+
+  `take()` returns copies of everything available in one call, so a display cap
+  cannot defer the surplus - it can only drop it. Dropping it silently would let
+  the header describe this UI's refresh rate as the writer's rate.
+  """
+
+  def subscription(self, reader, endpoint):
+    """A real `LiveSubscription`, with only the DDS constructors stubbed.
+
+    The earlier version of this helper used `object.__new__` and set the fields
+    by hand, which made the mirror test below vacuous: it could only compare the
+    attributes the test itself remembered, so two the constructor really adds
+    went unnoticed. Running the actual `__init__` is what makes that guard mean
+    something.
+    """
+    with mock.patch.object(livedata, "dds") as dds, \
+         mock.patch.object(livedata.probe, "build_subscriber",
+                           return_value=(mock.Mock(), {})), \
+         mock.patch.object(livedata.probe, "build_reader_qos",
+                           return_value=(mock.Mock(), {})):
+      dds.DynamicData.Topic.return_value = mock.Mock()
+      dds.DynamicData.DataReader.return_value = reader
+      return livedata.LiveSubscription(mock.Mock(), endpoint)
+
+  class FakeReader:
+    """Only what `poll` touches: matched publications and `take`."""
+
+    def __init__(self, samples, publication_key="w1"):
+        self.samples = samples
+        self.publication_key = publication_key
+        self.matched_publications = ["h1"]
+
+    def matched_publication_data(self, handle):
+      key = type("Value", (), {"value": self.publication_key})()
+      return type("Data", (), {"key": key})()
+
+    def take(self):
+      taken, self.samples = self.samples, []
+      return taken
+
+  @staticmethod
+  def sample(number, handle="h1", valid=True):
+    info = type("Info", (), {"valid": valid, "publication_handle": handle})()
+    data = type("Data", (), {"to_json": lambda self: '{"id":%d}' % number})()
+    return type("Sample", (), {"info": info, "data": data})()
+
+  def test_a_burst_past_the_display_cap_is_counted_not_hidden(self):
+    burst = [self.sample(n) for n in range(livedata.BATCH_LIMIT + 25)]
+    live = self.subscription(self.FakeReader(burst), FakeEndpoint("w1", "Writer"))
+    samples, skipped = live.poll()
+    self.assertEqual(len(samples), livedata.BATCH_LIMIT)
+    self.assertEqual(live.received, livedata.BATCH_LIMIT + 25)
+    self.assertEqual(live.dropped, 25)
+    self.assertEqual(skipped, 0)
+    # The newest survive, and their numbering stays continuous with `received`
+    # so the operator can see the gap rather than infer it.
+    self.assertEqual(samples[-1].number, live.received)
+
+  def test_another_writer_s_samples_are_skipped_and_counted_separately(self):
+    mixed = [self.sample(1), self.sample(2, handle="h9")]
+    reader = self.FakeReader(mixed)
+    live = self.subscription(reader, FakeEndpoint("w1", "Writer"))
+    samples, skipped = live.poll()
+    self.assertEqual(len(samples), 1)
+    self.assertEqual(skipped, 1)
+    self.assertEqual(live.others, 1)
+    self.assertEqual(live.received, 1)
+
+  def test_invalid_samples_are_neither_shown_nor_counted(self):
+    live = self.subscription(
+        self.FakeReader([self.sample(1, valid=False), self.sample(2)]),
+        FakeEndpoint("w1", "Writer"))
+    samples, _ = live.poll()
+    self.assertEqual(len(samples), 1)
+    self.assertEqual(live.received, 1)
+    self.assertEqual(live.dropped, 0)
+
+  def test_a_poll_that_raises_reports_nothing_rather_than_propagating(self):
+    """The poll runs on a UI timer, where an exception kills the feed."""
+    class Exploding(self.FakeReader):
+      def take(self):
+        raise RuntimeError("take exploded")
+
+    live = self.subscription(Exploding([]), FakeEndpoint("w1", "Writer"))
+    self.assertEqual(live.poll(), ([], 0))
+
+  def test_a_closed_subscription_polls_nothing(self):
+    live = self.subscription(self.FakeReader([self.sample(1)]),
+                             FakeEndpoint("w1", "Writer"))
+    live.close()
+    self.assertEqual(live.poll(), ([], 0))
+    self.assertTrue(live.closed)
+    live.close()  # idempotent: the view closes on tab change AND on unmount
+
+  def test_the_stub_mirrors_the_real_subscription(self):
+    """Every attribute the view reads must exist on both.
+
+    Twice now the header grew a counter and the stub did not, which fails as an
+    AttributeError inside a UI timer - a place where the real feed would simply
+    stop updating.
+    """
+    real = {name for name in vars(self.subscription(
+        self.FakeReader([]), FakeEndpoint("w1", "Writer")))
+        if not name.startswith("_")}
+    self.assertIn("correlated", real, "the helper no longer builds a real one")
+    stub = {name for name in vars(StubLive(object(), FakeEndpoint("w1", "Writer")))
+            if not name.startswith("_")}
+    self.assertEqual(real - stub, set(),
+                     "the stub is missing state the real subscription exposes")
+
+  def test_an_uncorrelated_feed_says_its_samples_are_topic_wide(self):
+    """The scan returning None means "cannot attribute", never "no match".
+
+    The probe carries that into its report as a topic-scoped caveat; a feed that
+    showed the same traffic under this endpoint's name with no caveat would be
+    the false certainty the three-valued scan exists to prevent.
+    """
+    class Uncorrelatable(self.FakeReader):
+      """The binding cannot report matched publications at all.
+
+      Set in `__init__`, not as a class attribute: the base sets the instance
+      attribute, which would shadow it and leave this fake correlatable.
+      """
+
+      def __init__(self, samples):
+        super().__init__(samples)
+        self.matched_publications = None
+
+    live = self.subscription(Uncorrelatable([self.sample(1), self.sample(2, "h9")]),
+                             FakeEndpoint("w1", "Writer"))
+    samples, skipped = live.poll()
+    self.assertFalse(live.correlated)
+    # Nothing is filtered, because nothing can be attributed either way.
+    self.assertEqual(len(samples), 2)
+    self.assertEqual(skipped, 0)
+
+    screen = report_screen.ReportScreen(
+        CaptureStubSession("lo"), endpoint=FakeEndpoint("w1", "Writer"),
+        probe=False)
+    screen.live = live
+    screen.live_samples.extend(samples)
+    self.assertIn("TOPIC-WIDE", screen._live_header())
+
+  def test_a_correlated_feed_carries_no_caveat(self):
+    screen = report_screen.ReportScreen(
+        CaptureStubSession("lo"), endpoint=FakeEndpoint("w1", "Writer"),
+        probe=False)
+    screen.live = StubLive(object(), screen.endpoint)
+    screen.live_samples.extend(live_samples(1))
+    self.assertNotIn("TOPIC-WIDE", screen._live_header())
+
+  def test_the_header_names_what_it_is_not_showing(self):
+    screen = report_screen.ReportScreen(
+        CaptureStubSession("lo"), endpoint=FakeEndpoint("w1", "Writer"),
+        probe=False)
+    screen.live = StubLive(object(), screen.endpoint)
+    screen.live.received, screen.live.dropped, screen.live.others = 4000, 3960, 7
+    screen.live_samples.extend(live_samples(2))
+    header = screen._live_header()
+    self.assertIn("4000 sample(s) received", header)
+    self.assertIn("3960 arrived faster", header)
+    self.assertIn("7 from other writers", header)
+
+
+class TestTheFeedNoteDoesNotHideTheSnapshot(unittest.TestCase):
+  """A feed that could not start is a reason to read the probe's samples.
+
+  The note used to replace the SAMPLE DATA appendix and then persist for the
+  life of the report, so one transient reader failure permanently hid the
+  payload the probe had already captured.
+  """
+
+  def screen(self):
+    session = CaptureStubSession("lo")
+    session.participant = object()
+    endpoint = FakeEndpoint("w1", "Writer")
+    endpoint.type = object()
+    return report_screen.ReportScreen(session, endpoint=endpoint, probe=False)
+
+  @staticmethod
+  def probed_data(endpoint):
+    """A report whose probe captured one sample, as a real pass would leave."""
+    result = probe.ProbeResult()
+    result.attempted = result.created = True
+    result.sample_texts = ['{"id":7}']
+    result.samples_taken = 1
+    return report.ReportData(
+        domain_id=7, scope="topic 'Telemetry'", all_findings=[],
+        endpoint=endpoint, probe_result=result)
+
+  def drive(self, screen, steps):
+    collected = {}
+
+    async def run():
+      app = Harness(screen)
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        # Assigned after mount: `_render_static` replaces `data` on the way in.
+        screen.data = self.probed_data(screen.endpoint)
+        screen._update_sections()
+        await steps(pilot, screen, collected)
+
+    asyncio.run(run())
+    return collected
+
+  def test_a_reader_that_will_not_open_still_shows_the_captured_samples(self):
+    screen = self.screen()
+
+    async def steps(pilot, target, out):
+      with mock.patch.object(livedata, "LiveSubscription",
+                             side_effect=RuntimeError("no reader for you")):
+        target.query_one("#report_tabs",
+                         report_screen.TabbedContent).active = "data"
+        await pilot.pause()
+      out["body"] = str(target.bodies["data"].render())
+
+    body = self.drive(screen, steps)["body"]
+    self.assertIn("could not create a reader", body)
+    self.assertIn("SAMPLE DATA", body, "the note replaced the snapshot")
+    self.assertIn('{"id":7}', body, "the probe's own samples were hidden")
+
+  def test_the_note_does_not_outlive_the_attempt(self):
+    screen = self.screen()
+
+    async def steps(pilot, target, out):
+      tabs = target.query_one("#report_tabs", report_screen.TabbedContent)
+      with mock.patch.object(livedata, "LiveSubscription",
+                             side_effect=RuntimeError("no reader for you")):
+        tabs.active = "data"
+        await pilot.pause()
+      tabs.active = "probe"
+      await pilot.pause()
+      out["note"] = target.live_note
+      target._update_sections()
+      await pilot.pause()
+      out["body"] = str(target.bodies["data"].render())
+
+    result = self.drive(screen, steps)
+    self.assertEqual(result["note"], "")
+    self.assertNotIn("could not create a reader", result["body"])
+    self.assertIn("SAMPLE DATA", result["body"])
+
+
+class TestProbingWhileThisReportIsAlreadyProbing(unittest.TestCase):
+  """`p` during this report's own pass must not misreport whose pass it is.
+
+  `_offer_full_pass` only knows "a pass is in flight somewhere", so it blamed
+  another report - and overwrote the pre-tshark announcement naming the
+  interface, the duration and the capture file on its way out.
+  """
+
+  def test_it_names_this_report_and_leaves_the_announcement_alone(self):
+    session = CaptureStubSession("lo")
+    screen = report_screen.ReportScreen(
+        session, endpoint=FakeEndpoint("w1", "Writer"), probe=False)
+    said = []
+
+    async def run():
+      app = Harness(screen)
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        # Mid-pass, exactly as an operator would find it.
+        screen.probing = True
+        original = screen.status.update
+        screen.status.update = lambda text: (said.append(str(text)),
+                                             original(text))[1]
+        await pilot.press("p")
+        await pilot.pause()
+        screen.probing = False
+
+    asyncio.run(run())
+    self.assertEqual(len(said), 1, said)
+    self.assertIn("This report's diagnostic pass", said[0])
+    self.assertNotIn("another report", said[0])
+    # And it did not start a second one.
+    self.assertEqual([call for call in session.calls if call["probe"]], [])
+
+
+class TestTheThirdReviewRound(unittest.TestCase):
+  """Regressions for defects a review found that the tests above did not.
+
+  Each one was reachable and none was caught by the suite that shipped with the
+  feature, which is the reason they are grouped rather than scattered: this is
+  the list to re-read before trusting this feature's coverage.
+  """
+
+  # --- The feed's rendering is bounded, not just its memory ------------------
+
+  def test_a_burst_renders_only_what_it_will_show(self):
+    """`sample_repr` serializes a whole payload, so rendering a 4000-sample
+    burst and then keeping 40 would stall the UI timer it runs on."""
+    helper = TestTheFeedHeaderAccountsForEverySample()
+    burst = [helper.sample(n) for n in range(livedata.BATCH_LIMIT * 3)]
+    live = helper.subscription(helper.FakeReader(burst),
+                               FakeEndpoint("w1", "Writer"))
+    renders = []
+    original = livedata.probe.sample_repr
+    with mock.patch.object(livedata.probe, "sample_repr",
+                           side_effect=lambda data, limit=None: (
+                               renders.append(1), original(data, limit or 800))[1]):
+      samples, _ = live.poll()
+    self.assertEqual(len(samples), livedata.BATCH_LIMIT)
+    self.assertEqual(len(renders), livedata.BATCH_LIMIT,
+                     "every sample in the burst was serialized to show 40")
+    # And the count still reflects everything that arrived.
+    self.assertEqual(live.received, livedata.BATCH_LIMIT * 3)
+    self.assertEqual(live.dropped, livedata.BATCH_LIMIT * 2)
+
+  # --- A restart is only promised where one can happen ----------------------
+
+  def feed_screen(self):
+    session = CaptureStubSession("lo")
+    session.participant = object()
+    endpoint = FakeEndpoint("w1", "Writer")
+    endpoint.type = object()
+    return report_screen.ReportScreen(session, endpoint=endpoint, probe=False)
+
+  def test_this_report_s_own_pass_promises_the_feed_back(self):
+    screen = self.feed_screen()
+    screen.probing = True
+    screen._start_live()
+    self.assertIn("This report's diagnostic pass", screen.live_note)
+    self.assertIn("starts when it finishes", screen.live_note)
+    self.assertIsNone(screen.live)
+
+  def test_another_report_s_pass_tells_the_operator_what_to_do(self):
+    """Nothing calls back into this screen when the pass belongs elsewhere, so
+    promising an automatic restart would leave a tab waiting forever."""
+    screen = self.feed_screen()
+    screen.session.claim_pass(60.0)
+    screen._start_live()
+    self.assertIn("another report", screen.live_note)
+    self.assertIn("Select this tab again", screen.live_note)
+    self.assertNotIn("starts when it finishes", screen.live_note)
+
+  # --- A pass finishing must not reopen a feed on a screen that is gone -----
+
+  def test_a_pass_finishing_under_another_screen_does_not_open_a_reader(self):
+    """The pass's `finally` can run after the operator moved on.
+
+    Modelled as another screen on top - the capture picker, the matrix screen -
+    which is the case that matters and the one `is_current` does NOT detect:
+    measured on this Textual, a screen under another still reports
+    `is_current` True.
+    """
+    from textual.screen import Screen
+
+    screen = self.feed_screen()
+    StubLive.opened = []
+
+    async def run():
+      app = Harness(screen)
+      with mock.patch.object(livedata, "LiveSubscription", StubLive):
+        async with app.run_test() as pilot:
+          await pilot.pause()
+          await app.workers.wait_for_complete()
+          screen.query_one("#report_tabs",
+                           report_screen.TabbedContent).active = "data"
+          await pilot.pause()
+          screen._stop_live()
+          app.push_screen(Screen())
+          await pilot.pause()
+          # Exactly what `_run_pass`'s finally does.
+          screen._start_live_if_active()
+          await pilot.pause()
+
+    asyncio.run(run())
+    # One from selecting the tab, and none from the pass finishing.
+    self.assertEqual(len(StubLive.opened), 1,
+                     "a reader was opened for a screen nobody is looking at")
+
+  def test_the_restart_hook_survives_a_torn_down_screen(self):
+    """It is called from a `finally`, where raising is worse than doing
+    nothing: reading `app` at all throws on a screen with no app."""
+    screen = self.feed_screen()
+    StubLive.opened = []
+    with mock.patch.object(livedata, "LiveSubscription", StubLive):
+      screen._start_live_if_active()   # never mounted: must not raise
+    self.assertEqual(StubLive.opened, [])
+
+  # --- Stale samples must not displace a fresher snapshot -------------------
+
+  def test_a_closed_feed_s_samples_do_not_replace_a_new_snapshot(self):
+    screen = self.feed_screen()
+    result = probe.ProbeResult()
+    result.attempted = result.created = True
+    result.sample_texts = ['{"fresh":true}']
+    result.samples_taken = 1
+    StubLive.opened = []
+
+    async def run():
+      app = Harness(screen)
+      with mock.patch.object(livedata, "LiveSubscription", StubLive):
+        async with app.run_test() as pilot:
+          await pilot.pause()
+          await app.workers.wait_for_complete()
+          tabs = screen.query_one("#report_tabs", report_screen.TabbedContent)
+          tabs.active = "data"
+          await pilot.pause()
+          screen.live.batches = [live_samples(1)]
+          screen._pump_live()
+          tabs.active = "probe"
+          await pilot.pause()
+          screen.data = report.ReportData(
+              domain_id=7, scope="topic 'Telemetry'", all_findings=[],
+              endpoint=screen.endpoint, probe_result=result)
+          screen._update_sections()
+          await pilot.pause()
+
+    asyncio.run(run())
+    body = str(screen.bodies["data"].render())
+    self.assertIn('{"fresh":true}', body, "older feed samples hid the snapshot")
+    self.assertNotIn("FEED CLOSED", body)
+
+  # --- VENDORID_UNKNOWN is not a foreign vendor -----------------------------
+
+  def test_an_unstated_vendor_id_is_not_offered_the_matrix(self):
+    """00.00 is the wire saying "not stated", which is a vendor we do not know
+    rather than a vendor that is not RTI."""
+    self.assertFalse(vendors.is_foreign(vendor_id(0x00, first=0x00)))
+    endpoint = FakeEndpoint("w1", "Writer")
+    endpoint.vendor_id = vendor_id(0x00, first=0x00)
+    screen = report_screen.ReportScreen(
+        CaptureStubSession("lo"), endpoint=endpoint, probe=False)
+    self.assertFalse(screen.check_action("compatibility_matrix", None))
+
+  def test_a_stated_foreign_vendor_still_is(self):
+    self.assertTrue(vendors.is_foreign(vendor_id(0x10)))
+    self.assertFalse(vendors.is_foreign(vendor_id(0x01)))
+    self.assertFalse(vendors.is_foreign(None))
+
+  # --- A probe that created nothing says so first ---------------------------
+
+  def test_a_reader_target_with_no_type_is_not_told_a_writer_was_created(self):
+    """`probe_reader_endpoint` sets `probe_kind` before it discovers it cannot
+    create anything, so the kind branch had to come second."""
+    result = probe.ProbeResult()
+    result.attempted = True
+    result.probe_kind = "writer"
+    result.create_error = "no type information available, cannot create a writer"
+    sections = report.render_view_sections(report.ReportData(
+        domain_id=7, scope="topic 'Telemetry'", all_findings=[],
+        endpoint=FakeEndpoint("r1", "Reader"), probe_result=result))
+    text = sections["data"]
+    self.assertIn("No writer was created", text)
+    self.assertIn("no type information available", text)
+    self.assertNotIn("created a WRITER", text)
+
+  def test_a_reader_target_that_did_create_a_writer_still_explains_itself(self):
+    result = probe.ProbeResult()
+    result.attempted = result.created = True
+    result.probe_kind = "writer"
+    result.samples_written = 3
+    sections = report.render_view_sections(report.ReportData(
+        domain_id=7, scope="topic 'Telemetry'", all_findings=[],
+        endpoint=FakeEndpoint("r1", "Reader"), probe_result=result))
+    self.assertIn("created a WRITER", sections["data"])
+
+
+class TestTheFourthReviewRound(unittest.TestCase):
+  """Regressions for the fourth pass: what the feed says when nothing arrives."""
+
+  def feed_screen(self):
+    session = CaptureStubSession("lo")
+    session.participant = object()
+    endpoint = FakeEndpoint("w1", "Writer")
+    endpoint.type = object()
+    return report_screen.ReportScreen(session, endpoint=endpoint, probe=False)
+
+  def open_feed(self, screen, steps):
+    """Run `steps` with the feed open, and return the body AS IT WAS THEN.
+
+    Read inside the app, not after it: unmounting runs `_stop_live`, which
+    clears any note and redraws - so a body read after teardown is a different
+    body, and an assertion on it is testing the teardown.
+    """
+    collected = {}
+
+    async def run():
+      app = Harness(screen)
+      with mock.patch.object(livedata, "LiveSubscription", StubLive):
+        async with app.run_test() as pilot:
+          await pilot.pause()
+          await app.workers.wait_for_complete()
+          screen.query_one("#report_tabs",
+                           report_screen.TabbedContent).active = "data"
+          await pilot.pause()
+          await steps(pilot, screen)
+          collected["body"] = str(screen.bodies["data"].render())
+
+    asyncio.run(run())
+    return collected["body"]
+
+  def test_the_topic_wide_caveat_clears_once_correlation_resolves(self):
+    """Correlation is unknown until the first poll, and a writer that never
+    sends would otherwise carry "cannot attribute" for the whole session."""
+    screen = self.feed_screen()
+
+    async def steps(pilot, target):
+      # As the real subscription starts: not yet polled, so not yet correlated.
+      target.live.correlated = False
+      target._render_live()
+      self.assertIn("TOPIC-WIDE", str(target.bodies["data"].render()))
+      # A poll that resolves correlation but brings nothing must still redraw.
+      target.live.correlated = True
+      target._pump_live()
+      await pilot.pause()
+
+    self.assertNotIn("TOPIC-WIDE", self.open_feed(screen, steps))
+
+  def test_a_quiet_poll_that_changes_nothing_does_not_redraw(self):
+    """The redraw is per changed header, not per tick: at the window's worst
+    case it costs milliseconds, and an idle feed should cost none of them."""
+    screen = self.feed_screen()
+    renders = []
+
+    async def steps(pilot, target):
+      original = target.bodies["data"].update
+      target.bodies["data"].update = lambda content: (
+          renders.append(1), original(content))[1]
+      target._pump_live()
+      target._pump_live()
+      await pilot.pause()
+      # Counted here rather than after the app exits: teardown redraws.
+      self.assertEqual(renders, [], "an idle feed redrew itself")
+
+    self.open_feed(screen, steps)
+
+  def test_a_reader_that_cannot_be_read_stops_and_says_so(self):
+    """A failing poll returns nothing, and nothing looks exactly like a quiet
+    writer - so the tool's own broken reader was reported as the peer's
+    silence, five log lines a second, forever."""
+    screen = self.feed_screen()
+
+    async def steps(pilot, target):
+      target.live.errors = report_screen.LIVE_ERROR_LIMIT
+      target.live.last_error = "RuntimeError: take failed"
+      opened = target.live
+      target._pump_live()
+      await pilot.pause()
+      self.assertTrue(opened.closed, "the failing reader was left open")
+      self.assertIsNone(target.live)
+      self.assertIsNone(target.live_timer, "the poll timer kept running")
+
+    body = self.open_feed(screen, steps)
+    self.assertIn("stopped after", body)
+    self.assertIn("take failed", body)
+    self.assertNotIn("Waiting for the first sample", body)
+
+  def test_one_failed_poll_is_not_enough_to_give_up(self):
+    screen = self.feed_screen()
+
+    async def steps(pilot, target):
+      target.live.errors = 1
+      target.live.last_error = "RuntimeError: transient"
+      target._pump_live()
+      await pilot.pause()
+      self.assertIsNotNone(target.live, "one bad read closed the feed")
+
+    self.open_feed(screen, steps)
+
+  def test_the_subscription_counts_consecutive_failures_and_forgets_them(self):
+    helper = TestTheFeedHeaderAccountsForEverySample()
+
+    class Flaky(helper.FakeReader):
+      def __init__(self, samples):
+        super().__init__(samples)
+        self.fail = True
+
+      def take(self):
+        if self.fail:
+          raise RuntimeError("take failed")
+        return super().take()
+
+    reader = Flaky([helper.sample(1)])
+    live = helper.subscription(reader, FakeEndpoint("w1", "Writer"))
+    live.poll()
+    live.poll()
+    self.assertEqual(live.errors, 2)
+    self.assertIn("take failed", live.last_error)
+    reader.fail = False
+    live.poll()
+    self.assertEqual(live.errors, 0, "a good read did not clear the streak")
+    self.assertEqual(live.last_error, "")
+
+  def test_w_is_hidden_until_this_report_probes(self):
+    """`action_verify_delivery` refuses a report that never probed, so the
+    footer must not advertise the key - and `p` is what makes it real."""
+    session = CaptureStubSession("lo")
+    endpoint = FakeEndpoint("r1", "Reader")
+    passive = report_screen.ReportScreen(session, endpoint=endpoint, probe=False)
+    self.assertFalse(passive.check_action("verify_delivery", None))
+    probed = report_screen.ReportScreen(session, endpoint=endpoint, probe=True)
+    self.assertTrue(probed.check_action("verify_delivery", None))
+    writer = report_screen.ReportScreen(
+        session, endpoint=FakeEndpoint("w1", "Writer"), probe=True)
+    self.assertFalse(writer.check_action("verify_delivery", None))
+
+  def test_the_refusals_point_at_p_rather_than_at_reopening(self):
+    """The dead end this change set removed, still quoted in two places."""
+    session = CaptureStubSession("lo")
+    screen = report_screen.ReportScreen(
+        session, endpoint=FakeEndpoint("r1", "Reader"), probe=False)
+    screen.status = mock.Mock()
+    screen.action_verify_delivery()
+    said = screen.status.update.call_args[0][0]
+    self.assertIn("Press p", said)
+    self.assertNotIn("Open it for diagnosis", said)
+
+    sections = report.render_view_sections(report.ReportData(
+        domain_id=7, scope="topic 'Telemetry'", all_findings=[],
+        endpoint=FakeEndpoint("w1", "Writer")))
+    self.assertIn("Press p", sections["data"])
+
+
+class TestTheFifthReviewRound(unittest.TestCase):
+  """Regressions for the fifth pass."""
+
+  def test_rti_connext_micro_is_not_a_foreign_vendor(self):
+    """01.0A is an RTI product, so a "cross-vendor" matrix against it would be
+    a cross-vendor experiment against RTI.
+
+    `docs/CODE_REVIEW_2026-08-04.md` recorded 01.0A as unmapped back when it was
+    only a naming gap; `is_foreign` turned it into a wrong answer that drives a
+    key.
+    """
+    micro = vendor_id(0x0A)
+    self.assertFalse(vendors.is_foreign(micro))
+    self.assertTrue(vendors.is_rti_family(micro))
+    self.assertTrue(vendors.is_rti_family(vendor_id(0x01)))
+    self.assertFalse(vendors.is_rti_family(vendor_id(0x10)))
+    # And it is named rather than reported as an unrecognized id.
+    self.assertEqual(vendors.vendor_name(micro), "RTI Connext DDS Micro")
+    # Recognized is not the same as measured against.
+    self.assertFalse(vendors.is_validated(micro))
+
+  def test_the_matrix_key_is_hidden_on_a_micro_writer(self):
+    endpoint = FakeEndpoint("w1", "Writer")
+    endpoint.vendor_id = vendor_id(0x0A)
+    screen = report_screen.ReportScreen(
+        CaptureStubSession("lo"), endpoint=endpoint, probe=False)
+    self.assertFalse(screen.check_action("compatibility_matrix", None))
+    screen.status = mock.Mock()
+    screen.action_compatibility_matrix()
+    said = screen.status.update.call_args[0][0]
+    self.assertIn("RTI Connext DDS Micro", said)
+    self.assertIn("no cross-vendor matrix is needed", said)
+    self.assertNotIn("could not be read", said)
+
+  def test_a_participant_report_does_not_advertise_a_hidden_key(self):
+    """`check_action` hides `p` with no endpoint, so the body must not name it."""
+    screen = report_screen.ReportScreen(
+        CaptureStubSession("lo"),
+        participant=records.ParticipantRecord(key="p1", name="app"))
+    self.assertFalse(screen.check_action("probe", None))
+    text = report.render_view_sections(report.ReportData(
+        domain_id=7, scope="participant 'app'", all_findings=[]))["data"]
+    self.assertIn("no endpoint to probe or stream", text)
+    self.assertNotIn("Press p", text)
+
+  def test_an_endpoint_report_still_names_the_key(self):
+    text = report.render_view_sections(report.ReportData(
+        domain_id=7, scope="topic 'Telemetry'", all_findings=[],
+        endpoint=FakeEndpoint("w1", "Writer")))["data"]
+    self.assertIn("Press p", text)
+
+  def test_failure_text_with_brackets_does_not_crash_the_report(self):
+    """Exception text is OS- and peer-supplied, and these Statics parse markup.
+
+    The same hazard the body rendering was fixed for, in the except branch that
+    reports it - where raising replaces a readable failure with a dead TUI.
+    """
+    session = CaptureStubSession("lo")
+    session.diagnose_endpoint = mock.Mock(
+        side_effect=RuntimeError("boom [/] at [red]offset"))
+    screen = report_screen.ReportScreen(
+        session, endpoint=FakeEndpoint("w1", "Writer"), probe=False)
+
+    async def run():
+      app = Harness(screen)
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        return str(screen.bodies["overview"].render())
+
+    said = asyncio.run(run())
+    self.assertIn("Static checks failed", said)
+    self.assertIn("boom", said)
+
+
+class TestTheSixthReviewRound(unittest.TestCase):
+  """Regressions for the sixth pass: one markup policy, and two honesty fixes.
+
+  The markup findings kept recurring because the fix was per call site, so three
+  rounds each found another unescaped sibling - and then an escaped one rendered
+  its own backslashes. The policy now lives on the widgets, and these tests
+  assert the property rather than any one call site.
+  """
+
+  HOSTILE = "boom [/] at [red]offset"
+
+  def test_every_generated_text_widget_takes_its_content_literally(self):
+    """The invariant, stated once: nothing that shows generated text parses it.
+
+    Asserted on the widgets so a new `status.update` call site cannot reintroduce
+    this, which is exactly how it kept coming back.
+    """
+    screen = report_screen.ReportScreen(
+        CaptureStubSession("lo"), endpoint=FakeEndpoint("w1", "Writer"),
+        probe=False)
+
+    async def run():
+      app = Harness(screen)
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        literal = {name: widget._render_markup is False
+                   for name, widget in
+                   [("status", screen.status)]
+                   + [(f"body:{tab}", body)
+                      for tab, body in screen.bodies.items()]}
+        return literal
+
+    literal = asyncio.run(run())
+    self.assertTrue(all(literal.values()),
+                    f"these parse markup: "
+                    f"{[k for k, v in literal.items() if not v]}")
+
+  def test_the_matrix_detail_pane_keeps_report_severity_labels(self):
+    """Report text uses "[ERROR]" labels, which markup silently swallows."""
+    screen = report_screen.CompatibilityMatrixScreen([], "/tmp/matrix")
+
+    async def run():
+      app = Harness(screen)
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        screen.detail.update("[ERROR] match.none  " + self.HOSTILE)
+        await pilot.pause()
+        return str(screen.detail.render())
+
+    shown = asyncio.run(run())
+    self.assertIn("[ERROR]", shown, "markup ate the severity label")
+    self.assertIn("[red]offset", shown)
+    self.assertIn("[/]", shown)
+
+  def test_error_text_reaches_the_operator_without_backslashes(self):
+    """The other half of the same mistake: escaping AND taking literally shows
+    the escape characters to the operator."""
+    session = CaptureStubSession("lo")
+    session.diagnose_endpoint = mock.Mock(side_effect=RuntimeError(self.HOSTILE))
+    screen = report_screen.ReportScreen(
+        session, endpoint=FakeEndpoint("w1", "Writer"), probe=False)
+
+    async def run():
+      app = Harness(screen)
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        return str(screen.bodies["overview"].render())
+
+    shown = asyncio.run(run())
+    self.assertIn(self.HOSTILE, shown)
+    self.assertNotIn("\\[", shown, "the operator was shown escape characters")
+
+  def test_p_during_the_capture_question_does_not_stack_a_second_picker(self):
+    """`probing` and `capturing` are both False while the picker waits, so the
+    entry offer and `p` could each push one - and the discarded answer still
+    changed the interface the session remembers."""
+    session = CaptureStubSession()          # no answer yet: it will ask
+    screen = report_screen.ReportScreen(
+        session, endpoint=FakeEndpoint("w1", "Writer"), probe=True)
+    pushed = []
+
+    async def run():
+      app = Harness(screen)
+      with mock.patch.object(report_screen.wire, "capture_interfaces",
+                             return_value=((("1", "lo"),), None)):
+        async with app.run_test() as pilot:
+          await pilot.pause()
+          await app.workers.wait_for_complete()
+          await pilot.pause()
+          pushed.append(self.pickers(app))
+          self.assertTrue(screen.asking)
+          # The operator presses `p` while the question is open.
+          screen.action_probe()
+          await pilot.pause()
+          pushed.append(self.pickers(app))
+          out = status_text(screen)
+      return out
+
+    said = asyncio.run(run())
+    # Counted in the stack, not just on top: a second picker pushed over the
+    # first would still leave a picker on top and look correct.
+    self.assertEqual(pushed, [1, 1], "`p` stacked a second capture picker")
+    self.assertIn("Answer the capture question first", said)
+
+  def test_the_entry_offer_does_not_stack_a_picker_over_an_open_one(self):
+    """The other half, and the one the race actually goes through.
+
+    `on_mount` awaits the static pass, and its trailing offer runs afterwards -
+    by which time `p` may have opened the picker. The guard in `action_probe`
+    cannot cover that direction, so this drives `_offer_full_pass` directly.
+    """
+    session = CaptureStubSession()
+    screen = report_screen.ReportScreen(
+        session, endpoint=FakeEndpoint("w1", "Writer"), probe=True)
+    counted = []
+
+    async def run():
+      app = Harness(screen)
+      with mock.patch.object(report_screen.wire, "capture_interfaces",
+                             return_value=((("1", "lo"),), None)):
+        async with app.run_test() as pilot:
+          await pilot.pause()
+          await app.workers.wait_for_complete()
+          await pilot.pause()
+          counted.append(self.pickers(app))
+          # Exactly what `on_mount` does after its await.
+          screen._offer_full_pass()
+          await pilot.pause()
+          counted.append(self.pickers(app))
+
+    asyncio.run(run())
+    self.assertEqual(counted, [1, 1],
+                     "the entry offer stacked a second capture picker")
+
+  @staticmethod
+  def pickers(app):
+    return len([screen for screen in app.screen_stack
+                if isinstance(screen, report_screen.CaptureInterfaceScreen)])
+
+  def test_answering_the_picker_reopens_the_asking_window(self):
+    """`asking` must not latch, or a declined pass locks the key out."""
+    session = CaptureStubSession()
+    screen = report_screen.ReportScreen(
+        session, endpoint=FakeEndpoint("w1", "Writer"), probe=True)
+
+    async def run():
+      app = Harness(screen)
+      with mock.patch.object(report_screen.wire, "capture_interfaces",
+                             return_value=((("1", "lo"),), None)):
+        async with app.run_test() as pilot:
+          await pilot.pause()
+          await app.workers.wait_for_complete()
+          await pilot.pause()
+          picker = app.screen
+          row = [index for index, choice in enumerate(picker.choices)
+                 if choice[1] == report_screen.SKIP_CAPTURE]
+          picker.table.move_cursor(row=row[0])
+          await pilot.press("enter")
+          await app.workers.wait_for_complete()
+          await pilot.pause()
+          return screen.asking
+
+    self.assertFalse(asyncio.run(run()), "`asking` latched after an answer")
+
+  def test_an_aborted_probe_is_not_reported_as_a_quiet_writer(self):
+    """`error` is a failure AFTER the reader was created, so its window is not
+    a window the writer was observed for."""
+    result = probe.ProbeResult()
+    result.attempted = result.created = True
+    result.elapsed = 3.0
+    result.error = "RuntimeError: status read failed"
+    text = report.render_view_sections(report.ReportData(
+        domain_id=7, scope="topic 'Telemetry'", all_findings=[],
+        endpoint=FakeEndpoint("w1", "Writer"), probe_result=result))["data"]
+    self.assertIn("the probe then failed", text)
+    self.assertIn("status read failed", text)
+    self.assertIn("probe rather than about the writer", text)
+    self.assertNotIn("nothing to say", text)
+
+  def test_a_clean_empty_window_still_reads_as_writer_silence(self):
+    result = probe.ProbeResult()
+    result.attempted = result.created = True
+    result.elapsed = 3.0
+    text = report.render_view_sections(report.ReportData(
+        domain_id=7, scope="topic 'Telemetry'", all_findings=[],
+        endpoint=FakeEndpoint("w1", "Writer"), probe_result=result))["data"]
+    self.assertIn("nothing to say", text)
+
+
+class TestTheSeventhReviewRound(unittest.TestCase):
+  """Regressions for the seventh pass."""
+
+  def test_a_report_that_cannot_stream_does_not_invite_streaming(self):
+    """The refusal and the invitation were printed one after the other.
+
+    A reader target and a writer with no resolved type both refuse the feed, so
+    "select this tab to stream" was an invitation to re-read the refusal.
+    """
+    reader = report.render_view_sections(report.ReportData(
+        domain_id=7, scope="topic 'Telemetry'", all_findings=[],
+        endpoint=FakeEndpoint("r1", "Reader")))["data"]
+    self.assertIn("Press p to probe", reader)
+    # Asserted within one line: report prose is wrapped to the report width.
+    self.assertIn("live feed is not available here", reader)
+    self.assertNotIn("select this tab to stream", reader)
+
+    typeless = FakeEndpoint("w1", "Writer")
+    typeless.type = None
+    text = report.render_view_sections(report.ReportData(
+        domain_id=7, scope="topic 'Telemetry'", all_findings=[],
+        endpoint=typeless))["data"]
+    self.assertIn("No type information reached discovery", text)
+    self.assertNotIn("select this tab to stream", text)
+
+  def test_a_writer_that_can_stream_is_still_offered_it(self):
+    streamable = FakeEndpoint("w1", "Writer")
+    streamable.type = object()
+    text = report.render_view_sections(report.ReportData(
+        domain_id=7, scope="topic 'Telemetry'", all_findings=[],
+        endpoint=streamable))["data"]
+    self.assertIn("select this tab to stream", text)
+
+  def test_the_payload_section_says_it_is_not_saved(self):
+    """`s` writes every other tab. Dropping this one silently would let an
+    operator believe the payload they just read is in the file."""
+    result = probe.ProbeResult()
+    result.attempted = result.created = True
+    result.sample_texts = ['{"id":1}']
+    result.samples_taken = 1
+    data = report.ReportData(
+        domain_id=7, scope="topic 'Telemetry'", all_findings=[],
+        endpoint=FakeEndpoint("w1", "Writer"), probe_result=result)
+    self.assertIn("not written to the saved report",
+                  report.render_view_sections(data)["data"])
+    # And the saved report genuinely does not carry it, which is what that
+    # sentence is promising.
+    self.assertNotIn("SAMPLE DATA", report.render_text(data))
+
+  def test_a_pass_started_from_the_data_tab_says_what_it_is_waiting_for(self):
+    """`_stop_live` leaves "select this tab again to reopen", which is wrong for
+    the length of a pass that hands the feed back by itself - and selecting the
+    tab during one only earns a refusal."""
+    session = CaptureStubSession("lo")          # answered: no picker is pushed
+    session.participant = object()
+    endpoint = FakeEndpoint("w1", "Writer")
+    endpoint.type = object()
+    screen = report_screen.ReportScreen(session, endpoint=endpoint, probe=False)
+    collected = {}
+
+    async def run():
+      app = Harness(screen)
+      with mock.patch.object(livedata, "LiveSubscription", StubLive):
+        async with app.run_test() as pilot:
+          await pilot.pause()
+          await app.workers.wait_for_complete()
+          screen.query_one("#report_tabs",
+                           report_screen.TabbedContent).active = "data"
+          await pilot.pause()
+          screen.live.batches = [live_samples(1)]
+          screen._pump_live()
+          await pilot.pause()
+          # `p` from the Data tab, with the capture question already answered.
+          screen.action_probe()
+          collected["during"] = str(screen.bodies["data"].render())
+          await app.workers.wait_for_complete()
+          await pilot.pause()
+          collected["after"] = str(screen.bodies["data"].render())
+
+    asyncio.run(run())
+    self.assertIn("diagnostic pass is running", collected["during"])
+    self.assertNotIn("Select this tab again", collected["during"])
+    # And the pass's finally hands it back, as that note promised.
+    self.assertIn("STREAMING", collected["after"])
+
+
+class TestTheEighthReviewRound(unittest.TestCase):
+  """Regressions for the eighth pass."""
+
+  def test_a_refused_probe_does_not_unlock_publishing(self):
+    """`p` that starts nothing must not make the report claim it probes.
+
+    `w` is gated on this report probing, and setting that flag before finding
+    out whether the pass would run was enough to reach the publish consent from
+    a report with no probe behind it.
+    """
+    session = CaptureStubSession("lo")
+    session.claim_pass(60.0)                      # another report is mid-pass
+    endpoint = FakeEndpoint("r1", "Reader")
+    screen = report_screen.ReportScreen(session, endpoint=endpoint, probe=False)
+    screen.status = mock.Mock()
+    self.assertFalse(screen.check_action("verify_delivery", None))
+
+    screen.action_probe()
+    self.assertFalse(screen.probe, "a refused probe still set the probe flag")
+    self.assertFalse(screen.check_action("verify_delivery", None),
+                     "a refused probe unlocked the publish key")
+    # And the refusal is what it said, rather than silence.
+    self.assertIn("another report", screen.status.update.call_args[0][0])
+
+  def test_a_probe_that_runs_does_unlock_publishing(self):
+    """The other direction: the flag has to arrive when a pass really starts."""
+    session = CaptureStubSession("lo")            # answered, so no picker
+    endpoint = FakeEndpoint("r1", "Reader")
+    screen = report_screen.ReportScreen(session, endpoint=endpoint, probe=False)
+    unlocked = {}
+
+    async def run():
+      app = Harness(screen)
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        screen.action_probe()
+        unlocked["probe"] = screen.probe
+        unlocked["w"] = screen.check_action("verify_delivery", None)
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+    asyncio.run(run())
+    self.assertTrue(unlocked["probe"])
+    self.assertTrue(unlocked["w"])
+
+  def test_the_request_survives_a_refusal_so_p_can_be_pressed_again(self):
+    session = CaptureStubSession("lo")
+    session.claim_pass(60.0)
+    screen = report_screen.ReportScreen(
+        session, endpoint=FakeEndpoint("w1", "Writer"), probe=False)
+    screen.status = mock.Mock()
+    screen.action_probe()
+    self.assertTrue(screen.probe_requested,
+                    "the request was dropped, so `p` would go back to the "
+                    "passive status line")
+    self.assertFalse(screen.probe)
+
+  def test_a_large_payload_is_not_serialized_twenty_times(self):
+    """Each text costs a full to_json() before it is truncated, so a window of
+    them on a large-data topic is paid inside the probe's timed window."""
+    result = probe.ProbeResult()
+    self.assertFalse(result.sample_texts_capped)
+
+    renders = []
+    big = "x" * (probe.DATA_SAMPLE_LIMIT * 4)
+
+    class BigSample:
+      def to_json(self):
+        renders.append(1)
+        return big
+
+    # The product's own rule, not a copy of it: reimplementing the loop here
+    # would pass with the cap removed.
+    for _ in range(probe.DATA_SAMPLE_COUNT):
+      probe.collect_sample_text(result, BigSample())
+    self.assertEqual(len(renders), 1, "a large payload was serialized repeatedly")
+    self.assertTrue(result.sample_texts_capped)
+
+  def test_a_small_payload_still_fills_the_window(self):
+    result = probe.ProbeResult()
+    renders = []
+
+    class SmallSample:
+      def to_json(self):
+        renders.append(1)
+        return '{"id":1}'
+
+    for _ in range(probe.DATA_SAMPLE_COUNT + 5):
+      probe.collect_sample_text(result, SmallSample())
+    self.assertEqual(len(result.sample_texts), probe.DATA_SAMPLE_COUNT)
+    self.assertFalse(result.sample_texts_capped)
+
+  def test_the_report_says_why_only_one_sample_is_shown(self):
+    """"One sample" and "one sample because the rest were too expensive to
+    render" are different statements about the writer."""
+    result = probe.ProbeResult()
+    result.attempted = result.created = True
+    result.sample_texts = ["x" * probe.DATA_SAMPLE_LIMIT]
+    result.samples_taken = 40
+    result.sample_texts_capped = True
+    text = report.render_view_sections(report.ReportData(
+        domain_id=7, scope="topic 'Telemetry'", all_findings=[],
+        endpoint=FakeEndpoint("w1", "Writer"), probe_result=result))["data"]
+    self.assertIn("Only the sample(s) below were rendered", text)
+    self.assertIn("1 of 40", text)
+
+  def test_an_unstated_vendor_is_not_reported_as_an_unreadable_one(self):
+    """`is_foreign` refuses both, and its docstring insists they differ: one is
+    "we could not tell", the other is the peer saying "no vendor"."""
+    session = CaptureStubSession("lo")
+
+    stated = FakeEndpoint("w1", "Writer")
+    stated.vendor_id = vendor_id(0x00, first=0x00)
+    screen = report_screen.ReportScreen(session, endpoint=stated, probe=False)
+    screen.status = mock.Mock()
+    screen.action_compatibility_matrix()
+    said = screen.status.update.call_args[0][0]
+    self.assertIn("VENDORID_UNKNOWN", said)
+    self.assertNotIn("could not be read", said)
+
+    unreadable = FakeEndpoint("w2", "Writer")
+    unreadable.vendor_id = None
+    screen = report_screen.ReportScreen(session, endpoint=unreadable, probe=False)
+    screen.status = mock.Mock()
+    screen.action_compatibility_matrix()
+    said = screen.status.update.call_args[0][0]
+    self.assertIn("could not be read", said)
+    self.assertNotIn("VENDORID_UNKNOWN", said)
+
+
+class TestIssueEndpointsAreMarked(unittest.TestCase):
+  """Endpoints a system issue names are orange in the endpoint lists.
+
+  These lists are where a system is skimmed, and they used to say nothing about
+  which rows the Issues screen was complaining about - so the walk from "1
+  ERROR on this domain" to the endpoint behind it went through two screens and
+  a by-eye comparison of 4-word instance handles.
+  """
+
+  def marks(self, issues):
+    return issue_marks.severity_by_endpoint(
+        system_scan.SystemScanSnapshot(captured_at=1.0, topology=TOPOLOGY,
+                                       issues=tuple(issues)))
+
+  def test_both_sides_of_a_pair_are_marked(self):
+    """An RxO mismatch is a property of the pair, not of the writer.
+
+    Marking only the writer would state that the reader is fine, and the reader
+    is exactly where the requested QoS that cannot be satisfied lives.
+    """
+    marks = self.marks([issue_with(writer_keys=("w1",), reader_keys=("r1",))])
+    self.assertEqual(set(marks), {"w1", "r1"})
+    self.assertEqual(marks["w1"], findings.Severity.ERROR)
+    self.assertEqual(marks["r1"], findings.Severity.ERROR)
+
+  def test_notes_are_not_marked(self):
+    """Measured, not assumed: a healthy single-writer domain always reports
+    `qos.no_counterpart` as an INFO note against its writer, so marking notes
+    would paint a healthy system orange and make the colour mean nothing."""
+    note = system_scan.SystemIssue(
+        key="issue", severity=findings.Severity.INFO,
+        finding_ids=("qos.no_counterpart",), title="No counterpart",
+        observed="", root_cause="", recommendation="", topic_name="Telemetry",
+        scope="pair", writer_keys=("w1",), reader_keys=(), participant_keys=(),
+        evidence={})
+    self.assertEqual(self.marks([note]), {})
+
+  def test_the_worst_severity_wins_for_an_endpoint_in_several_issues(self):
+    warning = system_scan.SystemIssue(
+        key="warn", severity=findings.Severity.WARN,
+        finding_ids=("type.assignability",), title="Assignability",
+        observed="", root_cause="", recommendation="", topic_name="Telemetry",
+        scope="pair", writer_keys=("w1",), reader_keys=(), participant_keys=(),
+        evidence={})
+    marks = self.marks([warning, issue_with(writer_keys=("w1",))])
+    self.assertEqual(marks["w1"], findings.Severity.ERROR)
+
+  def test_cells_are_orange_only_when_the_row_is_marked(self):
+    marked = issue_marks.cells(("Telemetry", "Writer"), findings.Severity.ERROR)
+    plain = issue_marks.cells(("Telemetry", "Writer"), None)
+    self.assertEqual([str(cell) for cell in marked], ["Telemetry", "Writer"])
+    self.assertEqual({str(cell.style) for cell in marked}, {issue_marks.STYLE})
+    self.assertEqual({str(cell.style) for cell in plain}, {""})
+
+  def test_the_legend_counts_what_it_marked(self):
+    text = issue_marks.legend([findings.Severity.ERROR, None,
+                               findings.Severity.WARN])
+    self.assertIn(issue_marks.STYLE, text)
+    self.assertIn("1 in an ERROR", text)
+    self.assertIn("1 in a WARNING", text)
+    self.assertIn("2 of 3", text)
+
+  def test_the_legend_says_so_when_nothing_here_is_named(self):
+    """An operator who knows the domain has errors and sees no orange needs to
+    read "not these endpoints", not wonder whether the marking ran."""
+    text = issue_marks.legend([None, None])
+    # Past tense and scoped: the marks come from a snapshot, the rows from the
+    # live registry, so the claim is about when the scan ran.
+    self.assertIn("No system issue named any of these 2", text)
+    self.assertIn("as of the last system scan", text)
+
+  def test_the_legend_dates_its_claim_to_the_scan(self):
+    """The rows are live and the marks are a snapshot, so an endpoint that
+    joined since the scan is listed unmarked - under a legend that must not
+    read as a present-tense "no issues here"."""
+    stamp = time.mktime((2026, 8, 24, 14, 30, 5, 0, 0, -1))
+    quiet = issue_marks.legend([None, None], stamp)
+    self.assertIn("14:30:05", quiet)
+    marked = issue_marks.legend([findings.Severity.ERROR, None], stamp)
+    self.assertIn("14:30:05", marked)
+
+  def test_a_failed_scan_costs_the_colour_and_not_the_list(self):
+    session = StubSession()
+    session.system_scan = mock.Mock(side_effect=RuntimeError("scan exploded"))
+    self.assertEqual(asyncio.run(issue_marks.marks_for(session)), {})
+
+  def test_a_supplied_snapshot_is_used_without_scanning_again(self):
+    """The topology screen these lists are reached from already scanned."""
+    session = StubSession()
+    session.system_scan = mock.Mock()
+    marks = asyncio.run(issue_marks.marks_for(
+        session, system_scan.SystemScanSnapshot(
+            captured_at=1.0, topology=TOPOLOGY,
+            issues=(issue_with(writer_keys=("w1",)),))))
+    self.assertEqual(set(marks), {"w1"})
+    session.system_scan.assert_not_called()
+
+  def test_the_fallback_scan_does_not_block_the_event_loop(self):
+    """A scan is O(endpoints^2); every other one in the TUI runs in a thread.
+
+    Asserted by identity: the scan must not run on the loop's own thread.
+    """
+    session = StubSession()
+    threads = []
+
+    def scan(captured_at=None, max_age=0.0):
+      threads.append(threading.current_thread())
+      return snapshot()
+
+    session.system_scan = scan
+
+    async def run():
+      loop_thread = threading.current_thread()
+      await issue_marks.marks_for(session)
+      return loop_thread
+
+    loop_thread = asyncio.run(run())
+    self.assertEqual(len(threads), 1)
+    self.assertIsNot(threads[0], loop_thread,
+                     "the scan ran on the event loop thread")
+
+  def _rows(self, screen):
+    """Rendered cell text and style for each row, in table order."""
+    rows = []
+    for row_key in screen.table.rows:
+      cells = screen.table.get_row(row_key)
+      rows.append([(str(cell), str(getattr(cell, "style", ""))) for cell in cells])
+    return rows
+
+  def _drive(self, screen):
+    async def run():
+      app = Harness(screen)
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+    asyncio.run(run())
+    return screen
+
+  class ListRegistry(StubRegistry):
+    """`StubRegistry` answers every lookup with an empty list, which renders an
+    empty table; these screens are only interesting with rows in them."""
+
+    def __init__(self, endpoints):
+      self.endpoints = dict(endpoints)
+
+    def expire_type_waits(self):
+      pass
+
+    def endpoints_for(self, participant_key):
+      return list(self.endpoints.values())
+
+    def endpoints_on_topic(self, topic_name):
+      return [endpoint for endpoint in self.endpoints.values()
+              if endpoint.topic_name == topic_name]
+
+    def participant_for(self, endpoint):
+      return None
+
+  def _session_with(self, endpoints, issues):
+    session = StubSession()
+    session.registry = self.ListRegistry(endpoints)
+    session.system_scan = lambda captured_at=None, max_age=0.0: (
+        system_scan.SystemScanSnapshot(captured_at=1.0, topology=TOPOLOGY,
+                                       issues=tuple(issues)))
+    return session
+
+  def test_the_participant_endpoint_list_paints_the_named_rows(self):
+    endpoints = {"w1": FakeEndpoint("w1", "Writer", topic_name="Telemetry"),
+                 "r1": FakeEndpoint("r1", "Reader", topic_name="Telemetry"),
+                 "w2": FakeEndpoint("w2", "Writer", topic_name="Quiet")}
+    session = self._session_with(
+        endpoints, [issue_with(writer_keys=("w1",), reader_keys=("r1",))])
+    participant = records.ParticipantRecord(key="p1", name="app")
+    screen = self._drive(browse.EndpointListScreen(session, participant))
+    styles = {row[0][0]: row[0][1] for row in self._rows(screen)}
+    self.assertEqual(styles.get("Quiet"), "")
+    self.assertEqual(set(styles) - {"Quiet"}, {"Telemetry"})
+    marked = [row for row in self._rows(screen)
+              if row[0][0] == "Telemetry"]
+    self.assertTrue(marked)
+    for row in marked:
+      self.assertEqual({style for _, style in row}, {issue_marks.STYLE})
+    self.assertIn("2 of 3", str(screen.legend.render()))
+
+  def test_the_topic_endpoint_list_paints_the_named_rows(self):
+    endpoints = {"w1": FakeEndpoint("w1", "Writer", topic_name="Telemetry"),
+                 "r1": FakeEndpoint("r1", "Reader", topic_name="Telemetry")}
+    session = self._session_with(endpoints, [issue_with(writer_keys=("w1",))])
+    screen = self._drive(
+        system_overview.TopicEndpointsScreen(session, "Telemetry"))
+    styles = {row[0][0]: row[0][1] for row in self._rows(screen)}
+    self.assertEqual(styles.get("Writer"), issue_marks.STYLE)
+    self.assertEqual(styles.get("Reader"), "")
+    self.assertIn("1 of 2", str(screen.legend.render()))
+
+
+class TestAPassiveReportCanBeProbedOnDemand(unittest.TestCase):
+  """`p` on a report that was opened without probing.
+
+  Passive entry is deliberate and stays the default - arriving on a screen must
+  not create DDS entities. But the operator who followed an issue to the writer
+  it names had no way to probe that writer at all: the issue path only ever
+  pushes a passive report, so the answer to "does anything actually flow here?"
+  meant leaving the issue and finding the same endpoint again by hand in Browse.
+  """
+
+  def drive(self, session, endpoint, steps, probe=False, participant=None):
+    collected = {}
+
+    async def run():
+      screen = report_screen.ReportScreen(
+          session, endpoint=endpoint, participant=participant, probe=probe)
+      app = Harness(screen)
+      with mock.patch.object(report_screen.wire, "capture_interfaces",
+                             return_value=((("1", "lo"), ("2", "eth0")), None)):
+        async with app.run_test() as pilot:
+          await pilot.pause()
+          await app.workers.wait_for_complete()
+          await steps(pilot, screen, collected)
+
+    asyncio.run(run())
+    return collected
+
+  async def press_probe(self, pilot, screen, out):
+    await pilot.press("p")
+    await pilot.app.workers.wait_for_complete()
+    await pilot.pause()
+    out["said"] = status_text(screen)
+    out["screen"] = pilot.app.screen
+
+  def test_the_passive_status_line_says_the_probe_is_available(self):
+    """The footer is one place to learn it; the line that says "nothing ran" is
+    the place the operator is already reading."""
+    async def steps(pilot, screen, out):
+      out["said"] = status_text(screen)
+
+    result = self.drive(CaptureStubSession("lo"),
+                        FakeEndpoint("w1", "Writer"), steps)
+    self.assertIn("Press p", result["said"])
+    self.assertIn("matching reader", result["said"])
+
+  def test_a_reader_target_is_told_a_writer_is_what_gets_created(self):
+    """Probing a reader means creating a WRITER, which is a different act."""
+    async def steps(pilot, screen, out):
+      out["said"] = status_text(screen)
+
+    result = self.drive(CaptureStubSession("lo"),
+                        FakeEndpoint("r1", "Reader"), steps)
+    self.assertIn("matching writer", result["said"])
+
+  def test_pressing_p_runs_the_probe_with_the_remembered_capture_answer(self):
+    session = CaptureStubSession("lo")
+    result = self.drive(session, FakeEndpoint("w1", "Writer"), self.press_probe)
+    probing = [call for call in session.calls if call["probe"]]
+    self.assertEqual(len(probing), 1)
+    self.assertEqual(probing[0]["endpoint"], "w1")
+    self.assertEqual(probing[0]["capture_interface"], "lo")
+    # And it publishes nothing: `p` is the read-only pass, `w` is the other one.
+    self.assertFalse(probing[0]["write_samples"])
+    self.assertIn("Full diagnostic complete", result["said"])
+
+  def test_pressing_p_with_no_capture_answer_yet_asks_before_probing(self):
+    """Same ordering as the probing entry path: tshark must precede the probe."""
+    session = CaptureStubSession()
+
+    async def steps(pilot, screen, out):
+      await pilot.press("p")
+      await pilot.pause()
+      out["screen"] = pilot.app.screen
+      out["probes"] = [call for call in session.calls if call["probe"]]
+
+    result = self.drive(session, FakeEndpoint("w1", "Writer"), steps)
+    self.assertIsInstance(result["screen"], report_screen.CaptureInterfaceScreen)
+    self.assertEqual(result["probes"], [])
+
+  def test_a_probe_from_an_issue_report_reaches_the_endpoint_the_issue_named(self):
+    """The whole point, end to end: issue -> report -> probe, one endpoint.
+
+    `_open_issue_report` is what the issue list and issue detail both route
+    through, so this drives the screen it actually pushes rather than one built
+    by hand.
+    """
+    session = CaptureStubSession()
+    # A remembered Skip, so this exercises the probe on its own rather than the
+    # combined probe+capture pass the test above covers.
+    session.record_capture_choice(None)
+    session.registry = StubRegistry()
+    session.registry.endpoints = {"w1": FakeEndpoint("w1", "Writer")}
+    router = mock.Mock()
+    system_overview._open_issue_report(
+        router, session, issue_with(writer_keys=("w1",)))
+    pushed = router.app.push_screen.call_args[0][0]
+    self.assertIsInstance(pushed, report_screen.ReportScreen)
+    self.assertFalse(pushed.probe, "the issue path must still open passively")
+
+    collected = {}
+
+    async def run():
+      app = Harness(pushed)
+      with mock.patch.object(report_screen.wire, "capture_interfaces",
+                             return_value=((("1", "lo"),), None)):
+        async with app.run_test() as pilot:
+          await pilot.pause()
+          await app.workers.wait_for_complete()
+          await self.press_probe(pilot, pushed, collected)
+
+    asyncio.run(run())
+    probing = [call for call in session.calls if call["probe"]]
+    self.assertEqual([call["endpoint"] for call in probing], ["w1"])
+    self.assertIn("Probe complete", collected["said"])
+
+  def test_the_key_is_not_offered_on_a_participant_report(self):
+    """A participant report has no endpoint to probe, so the footer must not
+    advertise a key that can only answer with a refusal."""
+    screen = report_screen.ReportScreen(
+        CaptureStubSession("lo"),
+        participant=records.ParticipantRecord(key="p1", name="app"))
+    self.assertFalse(screen.check_action("probe", None))
+    self.assertTrue(report_screen.ReportScreen(
+        CaptureStubSession("lo"),
+        endpoint=FakeEndpoint("w1", "Writer")).check_action("probe", None))
+
+  def test_a_pass_running_elsewhere_is_refused_rather_than_doubled(self):
+    session = CaptureStubSession("lo")
+    session.claim_pass(60.0)
+    result = self.drive(session, FakeEndpoint("w1", "Writer"), self.press_probe)
+    self.assertIn("another report", result["said"])
+    self.assertEqual([call for call in session.calls if call["probe"]], [])
+
+  def test_probing_unlocks_delivery_verification_on_a_reader_target(self):
+    """`w` is gated on this report probing, so `p` has to lift that gate too.
+
+    Otherwise a reader reached from an issue could be probed and still refuse
+    the one question a reader probe can answer with consent.
+    """
+    session = CaptureStubSession("lo")
+    endpoint = FakeEndpoint("r1", "Reader")
+    screen = report_screen.ReportScreen(session, endpoint=endpoint, probe=False)
+    self.assertFalse(screen.probe)
+
+    async def steps(pilot, target, out):
+      await pilot.press("p")
+      await pilot.app.workers.wait_for_complete()
+      await pilot.pause()
+      out["probe"] = target.probe
+
+    collected = {}
+
+    async def run():
+      app = Harness(screen)
+      with mock.patch.object(report_screen.wire, "capture_interfaces",
+                             return_value=((("1", "lo"),), None)):
+        async with app.run_test() as pilot:
+          await pilot.pause()
+          await app.workers.wait_for_complete()
+          await steps(pilot, screen, collected)
+
+    asyncio.run(run())
+    self.assertTrue(collected["probe"])
+    self.assertTrue(screen.check_action("verify_delivery", None))
+
+
+class TestTheDataTabShowsThePayload(unittest.TestCase):
+  """The Data tab prints the samples the probe's reader took, and nothing else.
+
+  The tab is the one place in the report that shows the payload rather than
+  describing it, so every case where there is no payload has to say which case
+  it is. "No probe was run", "no reader could be created", "the reader took
+  nothing" and "this target is a reader, so we published instead" are four
+  different facts, and a tab that rendered any of them as an empty body would
+  read as the writer sending nothing at all.
+  """
+
+  def sections(self, result):
+    return report.render_view_sections(report.ReportData(
+        domain_id=7, scope="topic 'Telemetry'", all_findings=[],
+        endpoint=FakeEndpoint("w1", "Writer"), probe_result=result))
+
+  def taken(self, texts, samples_taken=None):
+    result = probe.ProbeResult()
+    result.attempted = result.created = True
+    result.sample_texts = list(texts)
+    result.samples_taken = (len(texts) if samples_taken is None
+                            else samples_taken)
+    return result
+
+  def test_every_section_has_a_tab_to_render_it_in(self):
+    """`_update_sections` indexes the screen's bodies by section id.
+
+    A section with no TabPane is a KeyError on every report, and a TabPane with
+    no section is a permanently empty tab. Neither is reachable from a unit test
+    of either half alone, which is why this asserts the two sets are equal.
+    """
+    session = CaptureStubSession()
+    endpoint = FakeEndpoint("w1", "Writer")
+    screen = report_screen.ReportScreen(session, endpoint=endpoint, probe=False)
+    app = Harness(screen)
+
+    async def run():
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+    asyncio.run(run())
+    self.assertEqual(set(screen.bodies),
+                     set(report.render_view_sections(screen.data)))
+    self.assertIn("data", screen.bodies)
+
+  def test_it_prints_each_sample_it_received(self):
+    text = self.sections(self.taken(['{"id":1,"label":"one"}',
+                                     '{"id":2,"label":"two"}']))["data"]
+    self.assertIn("SAMPLE DATA", text)
+    self.assertIn("sample 1", text)
+    self.assertIn("sample 2", text)
+    self.assertIn('"label":"one"', text)
+    self.assertIn('"label":"two"', text)
+
+  def test_a_multi_line_sample_keeps_its_lines(self):
+    text = self.sections(self.taken(["{\n  id: 1\n}"]))["data"]
+    self.assertIn("  id: 1", text)
+
+  def test_a_capped_view_says_how_much_it_is_not_showing(self):
+    """The cap is a display limit, not an observation.
+
+    Printing 20 samples with no note reads as "the writer sent 20", which is a
+    claim about the system rather than about this tab.
+    """
+    text = self.sections(self.taken(["{}"] * 20, samples_taken=413))["data"]
+    self.assertIn("20 of 413", text)
+
+  def test_an_uncapped_view_does_not_pretend_to_be_capped(self):
+    text = self.sections(self.taken(["{}", "{}"]))["data"]
+    self.assertNotIn(" of ", text.split("oldest first")[0].splitlines()[-1])
+    self.assertIn("samples shown", text)
+
+  def test_a_created_reader_that_took_nothing_says_so(self):
+    result = probe.ProbeResult()
+    result.attempted = result.created = True
+    result.elapsed = 6.0
+    text = self.sections(result)["data"]
+    self.assertIn("no valid sample", text)
+    self.assertNotIn("sample 1", text)
+
+  def test_a_reader_that_was_never_created_names_the_reason(self):
+    result = probe.ProbeResult()
+    result.attempted = True
+    result.create_error = "no type information available, cannot create a reader"
+    text = self.sections(result)["data"]
+    self.assertIn("no type information available", text)
+
+  def test_a_reader_target_says_it_published_rather_than_received(self):
+    """A writer-probe has no incoming payload, and must not imply one."""
+    result = probe.ProbeResult()
+    result.attempted = result.created = True
+    result.probe_kind = "writer"
+    result.samples_written = 3
+    text = self.sections(result)["data"]
+    self.assertIn("created a WRITER", text)
+    self.assertIn("3", text)
+    self.assertNotIn("sample 1", text)
+
+  def test_a_report_opened_without_a_probe_claims_nothing(self):
+    text = self.sections(None)["data"]
+    self.assertIn("No probe was run", text)
 
 
 class TestPublishingNeedsApproval(unittest.TestCase):

@@ -31,6 +31,13 @@ class SystemIssue:
   explained_by: tuple = ()
 
 
+#: Seconds a snapshot may be reused when a screen is merely being opened. A
+#: scan is expensive and several screens each ask for one, so navigating between
+#: them otherwise pays for a full re-scan per screen. An explicit `r` refresh
+#: always re-scans.
+SCAN_REUSE_SECONDS = 3.0
+
+
 @dataclass(frozen=True)
 class SystemScanSnapshot:
   """One immutable passive scan used by Issues and system-report export."""

@@ -10,15 +10,14 @@ from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static
 
-from .. import findings as f, report
+from .. import findings as f, report, system_scan
+from . import issue_marks
 from .browse import EndpointListScreen
 from .report_screen import ReportScreen
 
-#: Seconds a snapshot may be reused when a screen is merely being opened. A
-#: scan is expensive and five screens each ask for one, so navigating between
-#: them otherwise pays for a full re-scan per screen. An explicit `r` refresh
-#: always re-scans.
-SCAN_REUSE_SECONDS = 3.0
+#: Re-exported so this module's screens keep reading it by the bare name; the
+#: policy itself belongs with the scan, which the endpoint lists share.
+SCAN_REUSE_SECONDS = system_scan.SCAN_REUSE_SECONDS
 
 
 def _issue_counts(snapshot):
@@ -733,11 +732,13 @@ class TopologyHealthScreen(Screen):
     if self.mode == "participants" and self.selected_key:
       participant = self.session.registry.participants.get(self.selected_key)
       if participant is not None:
-        self.app.push_screen(EndpointListScreen(self.session, participant))
+        self.app.push_screen(EndpointListScreen(self.session, participant,
+                                                snapshot=self.snapshot))
       return
     if self.mode == "topics" and self.selected_key:
       self.app.push_screen(TopicEndpointsScreen(
-          self.session, self.selected_key.removeprefix("topic:")))
+          self.session, self.selected_key.removeprefix("topic:"),
+          snapshot=self.snapshot))
       return
     endpoint = self._selected_endpoint()
     if endpoint is not None:
@@ -791,15 +792,23 @@ class TopicEndpointsScreen(Screen):
               ("o", "open_report", "Open report"),
               ("q", "quit_app", "Quit")]
 
-  def __init__(self, session, topic_name):
+  CSS = """
+  #topic_legend { padding: 0 2; }
+  """
+
+  def __init__(self, session, topic_name, snapshot=None):
     super().__init__()
     self.session = session
     self.topic_name = topic_name
+    self.snapshot = snapshot
     self.table = DataTable()
+    self.legend = None
     self.selected_key = None
 
   def compose(self):
     yield Header()
+    self.legend = Static("", id="topic_legend")
+    yield self.legend
     with Container(id="topic_endpoints"):
       yield self.table
     yield Footer()
@@ -808,13 +817,21 @@ class TopicEndpointsScreen(Screen):
     self.title = f"rti_doctor - topic {self.topic_name}"
     self.table.add_columns("Kind", "Participant", "Vendor", "Type")
     self.table.cursor_type = "row"
+    marks = await issue_marks.marks_for(self.session, self.snapshot)
+    shown = []
     for endpoint in sorted(self.session.registry.endpoints_on_topic(self.topic_name),
                            key=lambda item: (item.kind, item.key)):
       participant = self.session.registry.participant_for(endpoint)
-      self.table.add_row(endpoint.kind,
-                         participant.name if participant and participant.name else "(unnamed)",
-                         endpoint.vendor_name, endpoint.type_name or "(none)",
-                         key=endpoint.key)
+      severity = marks.get(endpoint.key)
+      shown.append(severity)
+      self.table.add_row(
+          *issue_marks.cells(
+              (endpoint.kind,
+               participant.name if participant and participant.name else "(unnamed)",
+               endpoint.vendor_name, endpoint.type_name or "(none)"), severity),
+          key=endpoint.key)
+    self.legend.update(issue_marks.legend(
+        shown, getattr(self.snapshot, "captured_at", None)))
     self.table.focus()
 
   async def on_data_table_row_highlighted(self, event):

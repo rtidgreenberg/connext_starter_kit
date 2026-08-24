@@ -13,6 +13,7 @@ from textual.containers import Container
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static
 
+from . import issue_marks
 from .report_screen import ReportScreen
 
 
@@ -28,14 +29,21 @@ class EndpointListScreen(Screen):
 
   CSS = """
   #directions { padding: 0 2; }
+  #endpoint_legend { padding: 0 2; }
   #endpoint_container { height: 1fr; border: solid $accent; }
   """
 
-  def __init__(self, session, participant):
+  def __init__(self, session, participant, snapshot=None):
     super().__init__()
     self.session = session
     self.participant = participant
+    # The caller normally has one already - the topology screen this is reached
+    # from scanned to build its own rows - so marking the rows costs nothing.
+    # Without one, `issue_marks` reuses a recent scan rather than forcing a new
+    # O(endpoints^2) pass just to colour a list.
+    self.snapshot = snapshot
     self.table = DataTable()
+    self.legend = None
     self.selected_key = None
 
   def compose(self):
@@ -47,6 +55,8 @@ class EndpointListScreen(Screen):
         "[bold green]o[/bold green] open report  "
         "[bold green]b[/bold green] back",
         id="directions")
+    self.legend = Static("", id="endpoint_legend")
+    yield self.legend
     with Container(id="endpoint_container"):
       yield self.table
     yield Footer()
@@ -58,14 +68,22 @@ class EndpointListScreen(Screen):
     self.session.registry.expire_type_waits()
     endpoints = sorted(self.session.registry.endpoints_for(self.participant.key),
                        key=lambda e: (e.topic_name, e.kind))
+    marks = await issue_marks.marks_for(self.session, self.snapshot)
+    shown = []
     for endpoint in endpoints:
+      severity = marks.get(endpoint.key)
+      shown.append(severity)
       self.table.add_row(
-          endpoint.topic_name or "(unnamed)",
-          endpoint.kind,
-          endpoint.type_name or "(none)",
-          endpoint.type_state,
+          *issue_marks.cells((
+              endpoint.topic_name or "(unnamed)",
+              endpoint.kind,
+              endpoint.type_name or "(none)",
+              endpoint.type_state,
+          ), severity),
           key=endpoint.key,
       )
+    self.legend.update(issue_marks.legend(
+        shown, getattr(self.snapshot, "captured_at", None)))
     self.table.focus()
 
   async def on_data_table_row_highlighted(self, event):

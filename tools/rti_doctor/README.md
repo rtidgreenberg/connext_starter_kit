@@ -17,6 +17,27 @@ you selected. It never changes remote configuration, and always closes what it
 created. It publishes user data in exactly one case, and only when you say so
 each time: see [Verifying Delivery to a Reader](#verifying-delivery-to-a-reader-w---write-samples).
 
+## Table of Contents
+
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+- [Deploy With an Activated Wheel](#deploy-with-an-activated-wheel)
+- [Deploying RTI Doctor as a PyInstaller Bundle](#deploying-rti-doctor-as-a-pyinstaller-bundle)
+- [Packet Capture](#packet-capture-is-something-you-ask-for)
+- [Verifying Delivery to a Reader](#verifying-delivery-to-a-reader-w---write-samples)
+- [Cross-Vendor Compatibility Matrix](#cross-vendor-compatibility-matrix-x)
+- [The Visibility Ladder](#the-visibility-ladder)
+- [CLI](#cli)
+- [Manual Scenarios](#manual-scenarios)
+- [The Shareable Report](#the-shareable-report)
+- [Reading a Verdict](#reading-a-verdict)
+- [Finding IDs](#finding-ids)
+- [Supported Connext Versions](#supported-connext-versions)
+- [XTypes Compliance Mask](#xtypes-compliance-mask)
+- [Limitations](#limitations)
+- [Testing](#testing)
+- [Relationship to rti_spy and rti_view](#relationship-to-rti_spy-and-rti_view)
+
 ## Requirements
 
 **Connext Python API** — the launcher uses the repository's shared Python
@@ -81,20 +102,22 @@ Capture provides wire evidence that discovery alone cannot: RTPS reliable
 handshake traffic, user-data representation, and a Fast DDS peer's product
 version when it advertises one.
 
-You'll be asked for a domain ID exactly as `rti_spy` asks, then get a system
-overview. Use `Up`/`Down` and `Enter` to choose Issues or DDS Topology & Health.
-The Issues menu shows Errors, Warnings, and Info with their current counts;
-selecting one shows only that severity. Keys:
+You'll be asked for a domain ID exactly as `rti_spy` asks, then get the system
+overview. Use `Up`/`Down` and `Enter` to choose **Findings** or **Topology**.
+The Findings menu groups Errors, Warnings, and Info observations by severity;
+selecting one shows only that severity. In Topology, `Enter` drills into the
+selected participant, topic, or endpoint, while `f` opens the linked Findings.
+
+Keys:
 
 | Key | Action |
 |---|---|
 | `Up` / `Down` / `Enter` | Select a menu item, drill into a participant/topic, or run the full diagnostic on an endpoint |
 | `1` / `2` / `3` / `4` | In Topology: participants, readers, writers, topics |
-| `o` | Open a report for the selected endpoint *without* probing or capturing — the cheap look |
-| `p` | On an endpoint report opened without probing: probe it now (offers a capture first) |
-| `i` | In Topology: the issues linked to the highlighted row |
-| `m` | Observed domain metrics |
-| `r` | Re-scan (every screen shows a snapshot, never a live feed) |
+| `f` | In Topology: show findings linked to the highlighted row |
+| `p` | On an endpoint report opened with `--no-probe-default`: probe it now (offers a capture first) |
+| `m` | On the system overview: observed domain metrics |
+| `r` | Refresh the current screen's snapshot |
 | `w` | On a **reader** report: publish synthetic samples to verify delivery — asks first, every time |
 | `x` | On a **non-RTI writer** report: run the isolated TypeObject/XTypes-mask compatibility matrix |
 | `s` | Save the current system or diagnostic report as a shareable text file |
@@ -103,6 +126,19 @@ selecting one shows only that severity. Keys:
 
 Every screen shows a *snapshot*, not a live view, so a reading never changes
 under you while you read it. `r` takes a new one.
+
+Endpoint reports run a diagnostic probe by default. Start Doctor with
+`--no-probe-default` when you want reports to remain passive until you press
+`p`. The capture choice is still separate: Doctor asks before the first probe,
+and `Skip` records a session-wide answer to probe without interface capture.
+
+For non-interactive system assessment or a single topic report, supply the
+domain explicitly:
+
+```bash
+./tools/rti_doctor/run_rti_doctor.sh --domain 1 --system
+./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData
+```
 
 **One deliberate exception:** a writer report's **Data** tab. Selecting it opens
 a reader on the type discovery supplied and streams samples as they arrive,
@@ -114,7 +150,7 @@ other screen, is still a snapshot. While a diagnostic pass is running the feed
 steps aside — an extra subscription is load the pass is trying to measure — and
 comes back when the pass finishes.
 
-The endpoint lists mark in **orange** any endpoint a system issue names at
+The endpoint lists mark in **orange** any endpoint a system finding names at
 WARNING or above, on both sides of a pair. Notes (INFO) are not marked: a
 healthy single-writer domain always reports `qos.no_counterpart` as a note, so
 marking those would paint a healthy system orange.
@@ -140,15 +176,52 @@ For later runs, omit both `RTI_PYTHON_SOURCE` and `RTI_PYTHON_WHEEL`; the defaul
 No separate `RTI_LICENSE_FILE` configuration is needed. When a native Connext
 installation is present, `auto` also finds its matching bundled activated wheel.
 
+## Deploying RTI Doctor as a PyInstaller Bundle
+
+Use the bundle flow to copy a standalone RTI Doctor archive to a compatible
+Linux target. The target does not need Python, pip, the source repository, or
+the RTI Python wheel.
+
+1. Install the build prerequisites for the wheel's Python version, including
+  its shared library. For example, a Connext 7.3 `cp39` wheel on Debian/Ubuntu
+  needs `python3.9`, `python3.9-venv`, and `libpython3.9`.
+
+2. Prepare the connected build environment with an activated RTI wheel:
+
+  ```bash
+  ./scripts/prepare_rti_doctor_bundle_env.sh \
+    --wheel "$NDDSHOME"/resource/python_api/rti_connext_activated-<version>-cp<python>-*.whl
+  ```
+
+3. Build the archive. This reuses the prepared environment and downloads
+  nothing:
+
+  ```bash
+  ./scripts/build_rti_doctor_bundle.sh
+  ```
+
+4. Copy and run it on the target:
+
+  ```bash
+  scp build/rti_doctor_bundle/rti_doctor-*.tar.gz target:/tmp/
+  ssh target 'cd /tmp && tar -xzf rti_doctor-*.tar.gz && ./rti_doctor/rti_doctor --help'
+  ```
+
+The bundle includes the activated Connext Python API, so it does not need a
+separate runtime license installation. The target still needs a compatible
+Linux architecture, glibc baseline, and DDS network access. `tshark` is not
+bundled: install it separately on the target when RTPS packet capture is needed,
+along with the capture permissions described above.
+
 ## Packet Capture Is Something You Ask For
 
-Opening a reader or writer report runs the full diagnostic in **one pass** —
+When an endpoint report probes, Doctor runs the full diagnostic in **one pass**:
 a probe and, if you consent to one, a packet capture. The first such report of
 a session asks where to capture, with `Skip` at the top of the list for "probe,
-but capture nothing". Both answers are remembered, so later reports run without
+but capture nothing". Both answers are remembered, so later probes run without
 asking, and `--capture-interface` gives the answer up front. The choice is made
-when an endpoint report opens and nowhere else: there is no key that re-opens
-the picker, so changing it means restarting the session.
+when the first endpoint probe begins and nowhere else: there is no key that
+re-opens the picker, so changing it means restarting the session.
 
 One pass, not two. A capture with nothing on the wire is an empty file, so a
 capture on a probed endpoint has to be the thing that drives the probe — when
@@ -163,9 +236,9 @@ off for the rest of the session rather than filing that refusal as the wire
 evidence of every later report. Nothing in the session turns it back on; fix
 the privileges or install `tshark`, then run again.
 
-Reports opened *passively* — `o`, or from an issue — probe nothing and capture
-nothing, and never prompt. There is no way to add evidence to one of those
-either: open the endpoint from Topology to get a probed report.
+With the default `--probe-default`, every endpoint report runs a full diagnostic
+and offers capture before probing. Use `--no-probe-default` when opening reports
+must remain passive; press `p` on an endpoint report to run the probe later.
 
 On exit, captures no saved report cites are removed; saving a report with `s`
 keeps the capture it names in Appendix C. `RTI_DOCTOR_KEEP_ARTIFACTS=1` keeps
@@ -330,8 +403,13 @@ system it was pointed at.
     --scan-timeout    Seconds to listen for active domains (default: 32.0)
     --no-domain-scan  Skip the active-domain scan before prompting
     --no-probe        Static checks only; create no endpoint of our own
+    --probe-default   In the TUI, probe endpoint reports automatically (default)
+    --no-probe-default
+              In the TUI, open endpoint reports passively until `p`
     --type-object-v1-only
           Advertise TypeObject v1 and disable TypeLookup v2 for an experiment
+    --xtypes-compliance {default,vendor}
+                      Observer XTypes compliance mask (default: vendor)
     --pcap PATH       Analyze RTPS user-data packets in an existing capture (with --topic)
     --capture-interface IFACE
               Interface for packet capture: captured while probing with --topic.
@@ -634,8 +712,8 @@ data-representation selector or a missing dynamic member ID.
 - **Wire observation is consented to and bounded.** `--pcap`,
   `--capture-interface` and the TUI's endpoint reports use `tshark` to count
   RTPS DATA/DATA_FRAG submessages and report the encapsulation IDs Wireshark
-  actually decodes. Nothing captures at startup, and nothing captures on a
-  report opened passively; an endpoint report captures on entry only after you
+  actually decodes. Nothing captures at startup, and nothing captures from a
+  passive endpoint report. A probing endpoint report captures only after you
   have chosen an interface, and `Skip` is an answer it remembers. A live capture
   applies
   a BPF filter for the selected domain's configured RTPS port range before packets
@@ -663,7 +741,8 @@ pip install -r tools/rti_doctor/requirements.txt \
 ```
 
 ```bash
-export VENV_PYTHON=$(ls -d connext_dds_env_*/bin/python | head -1)
+export VENV_PYTHON=$(printf '%s\n' connext_dds_env_*_py311/bin/python \
+  connext_dds_env_*/bin/python | head -1)
 ```
 
 Run the static gate with that environment:
@@ -677,19 +756,17 @@ license itself, keeps the whole run in `test_output/run_tests_<tier>.log`, and
 on a red run prints the failing test names and that path:
 
 ```bash
-./tools/rti_doctor/run_tests.sh          # unit (the default), ~500 tests
+./tools/rti_doctor/run_tests.sh          # unit (the default)
 ./tools/rti_doctor/run_tests.sh live     # unit + live domain: needs a license
 ./tools/rti_doctor/run_tests.sh vendor   # cross-vendor e2e: needs Docker images
 ./tools/rti_doctor/run_tests.sh all      # every configured test tier
 ```
 
 The tiers differ by what they need. `unit` creates no DDS entity, so it needs
-neither `NDDSHOME` nor a license — this is the tier CI runs, and it finishes in
-about twenty seconds. `live` re-runs those and adds real participants on a local
-domain, about six minutes. `vendor` additionally needs Docker and the
-Cyclone/Fast DDS images, and takes over ten minutes; its ~34 cases include
-declared expected failures, which are documented cross-vendor limitations rather
-than regressions.
+neither `NDDSHOME` nor a license and is the tier CI runs. `live` re-runs those
+and adds real participants on a local domain. `vendor` additionally needs Docker
+and the Cyclone/Fast DDS images; it includes declared expected failures that are
+documented cross-vendor limitations rather than regressions.
 
 To run one module — worth doing as a *diagnostic*, since several vendor
 failures are order-dependent and "green alone, red in a tier" is itself a
@@ -773,7 +850,8 @@ tools/rti_doctor/test/run_manual_scenario.sh \
 ```
 
 Available scenarios are `healthy`, `no-type-info`, `large-data`, `partition`,
-`bad-pair`, `rxo-compatible`, and `rxo-reliability-mismatch`. Cross-vendor
+`bad-pair`, `mixed-qos-topology`, `rxo-compatible`, and
+`rxo-reliability-mismatch`. Cross-vendor
 reliability controls are available in both directions as
 `connext-cyclone-compatible`, `connext-cyclone-reliability-mismatch`,
 `cyclone-connext-compatible`, `cyclone-connext-reliability-mismatch`,

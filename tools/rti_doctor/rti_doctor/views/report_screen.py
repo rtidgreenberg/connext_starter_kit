@@ -660,9 +660,9 @@ class ReportScreen(Screen):
     """Run the full diagnostic on entry, asking about capture the first time.
 
     The order matters. A participant report has nothing to probe or capture; a
-    report opened passively (`o`, or from an issue) asked for neither and must
-    stay a keypress-cheap screen; and an unanswered capture question is asked
-    before anything runs, because the capture has to start before the probe.
+    report opened with `probe=False` asks for neither and stays a
+    keypress-cheap screen; an unanswered capture question is asked before
+    anything runs, because the capture has to start before the probe.
     """
     if self.endpoint is None:
       self.status.update(

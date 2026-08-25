@@ -1,4 +1,4 @@
-"""System overview, passive issue list, and observed-topology metrics screens."""
+"""System overview, passive finding list, and observed-topology metrics screens."""
 
 import asyncio
 import logging
@@ -46,7 +46,7 @@ def _issue_endpoints(session, issue):
 
 
 def _issue_endpoint_navigation(session, issue):
-  """Detail text naming issue endpoints and the action that opens one."""
+  """Detail text naming finding endpoints and the action that opens one."""
   endpoints = _issue_endpoints(session, issue)
   lines = [f"{role}: {label}" for role, label, _ in endpoints]
   if not lines:
@@ -77,17 +77,17 @@ def _open_issue_report(screen, session, issue):
   which hides the reader-driven constraint the mismatch is usually about.
   """
   if issue is None:
-    screen.status.update("Select an issue first.")
+    screen.status.update("Select a finding first.")
     return
   choices = _issue_endpoints(session, issue)
   if not choices:
     screen.status.update(
-        "This issue names no endpoint still in discovery, so there is no "
+        "This finding names no endpoint still in discovery, so there is no "
         "targeted report to open.")
     return
   if len(choices) == 1:
     screen.app.push_screen(
-        ReportScreen(session, endpoint=choices[0][2], probe=False))
+        ReportScreen(session, endpoint=choices[0][2], probe=session.probe_default))
     return
   screen.app.push_screen(EndpointChoiceScreen(session, issue, choices))
 
@@ -156,10 +156,10 @@ async def _scan(screen, max_age=0.0, previous=None):
 
 
 class SystemOverviewScreen(Screen):
-  """The initial routing screen for issue-first and topology-first workflows."""
+  """The initial routing screen for findings-first and topology-first workflows."""
 
   BINDINGS = [("r", "refresh", "Refresh"), ("m", "metrics", "Metrics"),
-              ("s", "save", "Save report"), ("q", "quit_app", "Quit")]
+              ("s", "save", "Save system report"), ("q", "quit_app", "Quit")]
 
   def __init__(self, session):
     super().__init__()
@@ -185,9 +185,8 @@ class SystemOverviewScreen(Screen):
   async def on_mount(self):
     self.title = f"rti_doctor - domain {self.session.domain_id}"
     self.menu.add_columns("View", "Description")
-    self.menu.add_row("Issues", "Triage errors, warnings, and notes.", key="issues")
-    self.menu.add_row("DDS Topology & Health",
-                      "Browse participants and their discovered endpoints.", key="topology")
+    self.menu.add_row("Findings", "Review errors, warnings, and observations.", key="findings")
+    self.menu.add_row("Topology", "Browse participants and their discovered endpoints.", key="topology")
     self.menu.cursor_type = "row"
     self.menu.focus()
     await self.refresh_summary()
@@ -222,20 +221,20 @@ class SystemOverviewScreen(Screen):
     elif not metrics["participants"]:
       self.summary.update(
           f"[yellow]No DDS discovered on domain {self.session.domain_id}.[/yellow]\n"
-          f"Issues: {counts[f.Severity.ERROR]} Errors | "
+          f"Findings: {counts[f.Severity.ERROR]} Errors | "
           f"{counts[f.Severity.WARN]} Warnings | {counts[f.Severity.INFO]} Notes")
     else:
       self.summary.update(
           f"Observed: {metrics['participants']} participants | {metrics['readers']} readers | "
           f"{metrics['writers']} writers | {metrics['topic_count']} topics\n"
-          f"Issues: {counts[f.Severity.ERROR]} Errors | {counts[f.Severity.WARN]} Warnings | "
+          f"Findings: {counts[f.Severity.ERROR]} Errors | {counts[f.Severity.WARN]} Warnings | "
           f"{counts[f.Severity.INFO]} Notes")
     self.snapshot = snapshot
 
   async def on_data_table_row_selected(self, event):
     if event.row_key is None or self.snapshot is None:
       return
-    if event.row_key.value == "issues":
+    if event.row_key.value == "findings":
       self.app.push_screen(IssueSeverityScreen(self.session, self.snapshot))
     elif event.row_key.value == "topology":
       self.app.push_screen(TopologyHealthScreen(self.session))
@@ -262,7 +261,7 @@ class SystemOverviewScreen(Screen):
 
 
 class IssueSeverityScreen(Screen):
-  """Choose which severity of a passive issue snapshot to inspect."""
+  """Choose which severity of a passive finding snapshot to inspect."""
 
   BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
               ("r", "refresh", "Refresh"), ("q", "quit_app", "Quit")]
@@ -277,15 +276,15 @@ class IssueSeverityScreen(Screen):
 
   def compose(self):
     yield Header()
-    yield Static("Use Up/Down and Enter to select the issues to display.")
+    yield Static("Use Up/Down and Enter to select the findings to display.")
     with Container(id="issue_severity_menu"):
       yield self.table
-    self.status = Static("Collecting issue counts...", id="issue_severity_status")
+    self.status = Static("Collecting finding counts...", id="issue_severity_status")
     yield self.status
     yield Footer()
 
   async def on_mount(self):
-    self.title = f"rti_doctor - issue severity domain {self.session.domain_id}"
+    self.title = f"rti_doctor - finding severity domain {self.session.domain_id}"
     self.table.add_columns("Severity", "Count", "Description")
     self.table.cursor_type = "row"
     if self.snapshot is None:
@@ -314,7 +313,7 @@ class IssueSeverityScreen(Screen):
                ("info", f.Severity.INFO, "Info", "Advisory observations"))
     for key, severity, label, description in choices:
       self.table.add_row(label, str(counts[severity]), description, key=key)
-    self.status.update("Select a severity to show only issues at that level.")
+    self.status.update("Select a severity to show only findings at that level.")
 
   async def on_data_table_row_selected(self, event):
     if event.row_key is None:
@@ -339,11 +338,12 @@ class IssueSeverityScreen(Screen):
 
 
 class IssueListScreen(Screen):
-  """A stable passive issue snapshot, refreshed only by the operator."""
+  """A stable passive finding snapshot, refreshed only by the operator."""
 
   BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
-              ("r", "refresh", "Refresh"), ("m", "metrics", "Metrics"),
-              ("s", "save", "Save report"), ("o", "open_report", "Open report"),
+              ("r", "refresh", "Refresh"),
+              ("s", "save", "Save system report"),
+              ("o", "open_report", "Open report"),
               ("q", "quit_app", "Quit")]
 
   def __init__(self, session, snapshot=None, issue_keys=None, severity=None):
@@ -359,14 +359,14 @@ class IssueListScreen(Screen):
 
   def compose(self):
     yield Header()
-    self.status = Static("Building issue snapshot...", id="issue_status")
+    self.status = Static("Building finding snapshot...", id="issue_status")
     yield self.status
     with Container(id="issue_table"):
       yield self.table
     yield Footer()
 
   async def on_mount(self):
-    self.title = f"rti_doctor - issues domain {self.session.domain_id}"
+    self.title = f"rti_doctor - findings domain {self.session.domain_id}"
     self.table.add_columns("No.", "Severity", "Topic", "Finding", "State")
     self.table.cursor_type = "row"
     if self.snapshot is None:
@@ -412,9 +412,9 @@ class IssueListScreen(Screen):
       prefix = (f"No DDS discovered on domain {self.session.domain_id}; "
                 if not self.snapshot.topology["participants"] else "")
       self.status.update(
-          f"{prefix}{scope} issues, snapshot {stamp}: {counts[f.Severity.ERROR]} Errors | "
+          f"{prefix}{scope} findings, snapshot {stamp}: {counts[f.Severity.ERROR]} Errors | "
           f"{counts[f.Severity.WARN]} Warnings | {counts[f.Severity.INFO]} Notes. "
-          "Press r to refresh.")
+          "Press s to save the full system report, or r to refresh.")
     if previous and previous in {item.key for item in issues}:
       self.table.move_cursor(row=next(index for index, item in enumerate(issues)
                                        if item.key == previous))
@@ -435,9 +435,6 @@ class IssueListScreen(Screen):
     if self.snapshot is None or self.selected_key is None:
       return None
     return next((item for item in self._visible_issues() if item.key == self.selected_key), None)
-
-  def action_metrics(self):
-    self.app.push_screen(MetricsScreen(self.session))
 
   def action_save(self):
     if self.snapshot is None:
@@ -460,7 +457,7 @@ class IssueListScreen(Screen):
 
 
 class EndpointChoiceScreen(Screen):
-  """Pick which endpoint page of a multi-endpoint issue to open."""
+  """Pick which endpoint page of a multi-endpoint finding to open."""
 
   BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
               ("q", "quit_app", "Quit")]
@@ -475,7 +472,7 @@ class EndpointChoiceScreen(Screen):
   def compose(self):
     yield Header()
     yield Static(f"[bold]{escape(self.issue.title)}[/bold]")
-    yield Static("This issue involves more than one endpoint. Choose which one "
+    yield Static("This finding involves more than one endpoint. Choose which one "
                  "to open - each endpoint page describes one endpoint.")
     with Container(id="endpoint_choice"):
       yield self.table
@@ -493,10 +490,11 @@ class EndpointChoiceScreen(Screen):
     if event.row_key is None:
       return
     _, _, endpoint = self.choices[int(event.row_key.value)]
-    # Pop first: Back from the report should return to the issue, not to this
+    # Pop first: Back from the report should return to the finding, not to this
     # picker, which has nothing left to say once a side has been chosen.
     self.app.pop_screen()
-    self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=False))
+    self.app.push_screen(ReportScreen(
+      self.session, endpoint=endpoint, probe=self.session.probe_default))
 
   def action_back(self):
     self.app.pop_screen()
@@ -506,11 +504,11 @@ class EndpointChoiceScreen(Screen):
 
 
 class IssueDetailScreen(Screen):
-  """Evidence and relationships for one passive system issue."""
+  """Evidence and relationships for one passive system finding."""
 
   BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
               ("o", "open_report", "Open report"),
-              ("s", "save", "Save report"),
+              ("s", "save", "Save system report"),
               ("q", "quit_app", "Quit")]
 
   def __init__(self, session, snapshot, issue):
@@ -562,9 +560,7 @@ class TopologyHealthScreen(Screen):
 
   BINDINGS = [("1", "participants", "Participants"), ("2", "readers", "Readers"),
               ("3", "writers", "Writers"), ("4", "topics", "Topics"),
-              ("r", "refresh", "Refresh"), ("i", "issues", "Linked issues"),
-              ("o", "passive_report", "Open report"),
-              ("m", "metrics", "Metrics"), ("s", "save", "Save report"),
+              ("r", "refresh", "Refresh"), ("f", "findings", "Linked findings"),
               ("b", "back", "Back"),
               ("escape", "back", "Back"), ("q", "quit_app", "Quit")]
 
@@ -628,7 +624,7 @@ class TopologyHealthScreen(Screen):
       return
     self.table.clear(columns=True)
     if self.mode == "participants":
-      self.table.add_columns("Participant", "Vendor", "Readers", "Writers", "Topics", "Health")
+      self.table.add_columns("Participant", "Vendor", "Readers", "Writers", "Topics", "Findings")
       for participant in sorted(self.session.registry.participant_list(), key=lambda item: item.key):
         endpoints = self.session.registry.endpoints_for(participant.key)
         readers = sum(not item.is_writer for item in endpoints)
@@ -636,28 +632,29 @@ class TopologyHealthScreen(Screen):
         topics = len({item.topic_name for item in endpoints if item.topic_name})
         self.table.add_row(participant.name or "(unnamed)", participant.vendor_name,
                            str(readers), str(writers), str(topics),
-                           self._health(participant_key=participant.key), key=participant.key)
+                           self._finding_summary(participant_key=participant.key), key=participant.key)
     elif self.mode in ("readers", "writers"):
       writer = self.mode == "writers"
-      self.table.add_columns("Topic", "Participant", "Vendor", "Type", "Health")
+      self.table.add_columns("Topic", "Participant", "Vendor", "Type", "Findings")
       endpoints = self.session.registry.writers() if writer else self.session.registry.readers()
       for endpoint in sorted(endpoints, key=lambda item: (item.topic_name, item.key)):
         participant = self.session.registry.participant_for(endpoint)
         self.table.add_row(endpoint.topic_name or "(unnamed)",
                            participant.name if participant and participant.name else "(unnamed)",
                            endpoint.vendor_name, endpoint.type_name or "(none)",
-                           self._health(endpoint_key=endpoint.key), key=endpoint.key)
+                           self._finding_summary(endpoint_key=endpoint.key), key=endpoint.key)
     else:
-      self.table.add_columns("Topic", "Readers", "Writers", "Health")
+      self.table.add_columns("Topic", "Readers", "Writers", "Findings")
       for topic in self.session.registry.topic_names():
         endpoints = self.session.registry.endpoints_on_topic(topic)
         self.table.add_row(topic, str(sum(not item.is_writer for item in endpoints)),
                            str(sum(item.is_writer for item in endpoints)),
-                           self._health(topic_name=topic), key=f"topic:{topic}")
+                           self._finding_summary(topic_name=topic), key=f"topic:{topic}")
     self.status.update(f"View: {self.mode.title()} | 1 Participants  2 Readers  "
-                       "3 Writers  4 Topics | r refresh")
+               "3 Writers  4 Topics | Enter drills in | f linked findings | "
+               "r refresh")
 
-  def _health(self, participant_key=None, endpoint_key=None, topic_name=None):
+  def _finding_summary(self, participant_key=None, endpoint_key=None, topic_name=None):
     linked = []
     for issue in self.snapshot.issues:
       if participant_key and participant_key in issue.participant_keys:
@@ -669,7 +666,8 @@ class TopologyHealthScreen(Screen):
     if not linked:
       return "OK"
     worst = max(issue.severity for issue in linked)
-    return f"{worst.label} ({len(linked)})"
+    noun = "finding" if len(linked) == 1 else "findings"
+    return f"{len(linked)} {noun} (worst: {worst.label})"
 
   async def on_data_table_row_highlighted(self, event):
     self.selected_key = event.row_key.value if event.row_key else None
@@ -697,16 +695,13 @@ class TopologyHealthScreen(Screen):
   def action_refresh(self):
     _spawn(self, self._refresh())
 
-  def action_metrics(self):
-    self.app.push_screen(MetricsScreen(self.session))
-
-  def action_issues(self):
+  def action_findings(self):
     if self._without_snapshot():
       return
-    keys = self._linked_issue_keys()
+    keys = self._linked_finding_keys()
     self.app.push_screen(IssueListScreen(self.session, self.snapshot, keys))
 
-  def _linked_issue_keys(self):
+  def _linked_finding_keys(self):
     if self.selected_key is None:
       return {item.key for item in self.snapshot.issues}
     if self.mode == "participants":
@@ -724,11 +719,13 @@ class TopologyHealthScreen(Screen):
     return self.session.registry.endpoints.get(self.selected_key)
 
   def action_open_report(self):
-    """What Enter does: drill in, or open the full diagnostic on an endpoint.
+    """What Enter does: drill into the selected topology row.
 
     Not bound to a key - `on_data_table_row_selected` is its only caller, so
     what Enter means on a row stays defined in one place.
     """
+    if self._without_snapshot():
+      return
     if self.mode == "participants" and self.selected_key:
       participant = self.session.registry.participants.get(self.selected_key)
       if participant is not None:
@@ -742,41 +739,8 @@ class TopologyHealthScreen(Screen):
       return
     endpoint = self._selected_endpoint()
     if endpoint is not None:
-      self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=True))
-
-  def action_passive_report(self):
-    """`o`: static findings for one endpoint. No probe, no capture, no prompt.
-
-    `o` meant the same thing as Enter here and the opposite of `o` everywhere
-    else - `EndpointListScreen` and `TopicEndpointsScreen` have always used it
-    for the cheap look. So this screen, which is the one an operator skims
-    endpoints on, was the only endpoint list with no way into a report that
-    does not probe. That mattered less when Enter merely probed; it matters
-    more now that Enter also asks about capturing.
-    """
-    if self.mode not in ("readers", "writers"):
-      self.status.update(
-          "Open report applies to a reader or writer row. Press 2 or 3 for "
-          "those; Enter drills into a participant or topic.")
-      return
-    endpoint = self._selected_endpoint()
-    if endpoint is None:
-      self.status.update("Select a reader or writer row first.")
-      return
-    self.app.push_screen(ReportScreen(self.session, endpoint=endpoint,
-                                      probe=False))
-
-  def action_save(self):
-    # Guarded before open(): the raise used to happen after the file was
-    # created, leaving a zero-byte report an operator could mistake for output.
-    if self._without_snapshot():
-      return
-    path = os.path.abspath(report.system_filename(self.session.domain_id))
-    with open(path, "w", encoding="utf-8") as handle:
-      handle.write(report.render_system_text(
-          self.snapshot, self.session.domain_id,
-          type_lookup_settings=self.session.type_lookup_settings))
-    self.status.update(f"Saved system report to {path}")
+      self.app.push_screen(ReportScreen(
+          self.session, endpoint=endpoint, probe=self.session.probe_default))
 
   def action_back(self):
     self.app.pop_screen()
@@ -789,7 +753,6 @@ class TopicEndpointsScreen(Screen):
   """Readers and writers belonging to one selected topic."""
 
   BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
-              ("o", "open_report", "Open report"),
               ("q", "quit_app", "Quit")]
 
   CSS = """
@@ -844,15 +807,11 @@ class TopicEndpointsScreen(Screen):
   def _endpoint(self):
     return self.session.registry.endpoints.get(self.selected_key) if self.selected_key else None
 
-  def action_open_report(self):
-    endpoint = self._endpoint()
-    if endpoint is not None:
-      self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=False))
-
   def action_debug(self):
     endpoint = self._endpoint()
     if endpoint is not None:
-      self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=True))
+      self.app.push_screen(ReportScreen(
+          self.session, endpoint=endpoint, probe=self.session.probe_default))
 
   def action_back(self):
     self.app.pop_screen()
@@ -862,7 +821,7 @@ class TopicEndpointsScreen(Screen):
 
 
 class MetricsScreen(Screen):
-  """Live topology counters, explicitly separate from a saved issue snapshot."""
+  """Live topology counters, explicitly separate from a saved finding snapshot."""
 
   BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
               ("r", "refresh", "Refresh"), ("q", "quit_app", "Quit")]

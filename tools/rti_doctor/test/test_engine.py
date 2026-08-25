@@ -18,14 +18,19 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from rti_doctor import engine, records  # noqa: E402
 
 
-def bare_session(capture_interface=None):
+def bare_session(capture_interface=None, probe_default=True):
   """A Session with no DDS anything; enough for the bookkeeping under test."""
   return engine.Session(participant=None, registry=None, own_qos=None,
                         type_lookup_settings=None, domain_id=7,
-                        capture_interface=capture_interface)
+                        capture_interface=capture_interface,
+                        probe_default=probe_default)
 
 
 class TestTheCaptureQuestion(unittest.TestCase):
+
+  def test_probe_default_is_configurable_for_the_session(self):
+    self.assertTrue(bare_session().probe_default)
+    self.assertFalse(bare_session(probe_default=False).probe_default)
   """Who answered, what they answered, and whether it is still being asked.
 
   A report asks on entry only while the question is unanswered, so "no answer

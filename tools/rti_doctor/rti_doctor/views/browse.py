@@ -23,7 +23,6 @@ class EndpointListScreen(Screen):
   BINDINGS = [
       ("b", "back", "Back"),
       ("escape", "back", "Back"),
-      ("o", "open_report", "Open report"),
       ("q", "quit_app", "Quit"),
   ]
 
@@ -51,8 +50,7 @@ class EndpointListScreen(Screen):
     yield Static(
         f"[bold]{self.participant.name or '(unnamed)'}[/bold] "
         f"({self.participant.vendor_name})  -  "
-        "[bold green]Enter[/bold green] deep diagnose  "
-        "[bold green]o[/bold green] open report  "
+        "[bold green]Enter[/bold green] open endpoint report  "
         "[bold green]b[/bold green] back",
         id="directions")
     self.legend = Static("", id="endpoint_legend")
@@ -93,19 +91,13 @@ class EndpointListScreen(Screen):
     self.selected_key = event.row_key.value if event.row_key else None
     self.action_debug()
 
-  def action_open_report(self):
-    if self.selected_key is None:
-      return
-    endpoint = self.session.registry.endpoints.get(self.selected_key)
-    if endpoint is not None:
-      self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=False))
-
   def action_debug(self):
     if self.selected_key is None:
       return
     endpoint = self.session.registry.endpoints.get(self.selected_key)
     if endpoint is not None:
-      self.app.push_screen(ReportScreen(self.session, endpoint=endpoint, probe=True))
+      self.app.push_screen(ReportScreen(
+          self.session, endpoint=endpoint, probe=self.session.probe_default))
 
   def action_back(self):
     self.app.pop_screen()

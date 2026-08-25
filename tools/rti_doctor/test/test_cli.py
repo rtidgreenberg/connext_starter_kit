@@ -575,6 +575,10 @@ class TestArgumentValidation(unittest.TestCase):
     self.assertEqual(args.domain, 0)
     self.assertEqual(args.probe_timeout, 0)
 
+  def test_probe_default_is_enabled_unless_explicitly_disabled(self):
+    self.assertTrue(cli.parse_args(["-d", "0"]).probe_default)
+    self.assertFalse(cli.parse_args(["-d", "0", "--no-probe-default"]).probe_default)
+
 
 if __name__ == "__main__":
   unittest.main()

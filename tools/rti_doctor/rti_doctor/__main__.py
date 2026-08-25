@@ -135,6 +135,10 @@ def parse_args(argv=None):
                       help="Skip scanning for active domains before prompting")
   parser.add_argument("--no-probe", action="store_true",
                       help="Static checks only; never create a reader")
+  parser.add_argument("--probe-default", action=argparse.BooleanOptionalAction,
+                      default=True,
+                      help="Automatically probe endpoint reports opened in the TUI "
+                      "(default; use --no-probe-default for passive reports)")
   parser.add_argument("--type-object-v1-only", action="store_true",
                       help="Advertise inline TypeObject v1 and disable TypeLookup v2 "
                            "for an interoperability experiment")
@@ -348,6 +352,7 @@ def build_session(domain_id, args, active_domains=None, domain_scan_ran=False,
       domain_scan_ran=domain_scan_ran,
       capture_interface=args.capture_interface,
       network_capture=getattr(args, "network_capture_active", False),
+        probe_default=args.probe_default,
   ), participant
 
 

@@ -47,7 +47,7 @@ class Session:
   def __init__(self, participant, registry, own_qos, type_lookup_settings,
                domain_id, type_wait=5.0, probe_timeout=10.0, settle=3.0,
                active_domains=None, domain_scan_ran=False,
-               capture_interface=None, network_capture=False):
+               capture_interface=None, network_capture=False, probe_default=True):
     self.participant = participant
     self.registry = registry
     self.own_qos = own_qos
@@ -55,6 +55,9 @@ class Session:
     self.domain_id = domain_id
     self.type_wait = type_wait
     self.probe_timeout = probe_timeout
+    # The interactive default for every endpoint report, regardless of whether
+    # the operator reached it from Findings or Topology.
+    self.probe_default = probe_default
     # Carried only so a child process launched from the TUI can inherit the
     # operator's `--settle`; nothing in this session waits on it, because the
     # settle happened before the session existed.

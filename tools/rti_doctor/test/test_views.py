@@ -90,6 +90,7 @@ class StubSession:
   def __init__(self):
     self.domain_id = 7
     self.registry = StubRegistry()
+    self.probe_default = True
     self.fail = None
     self.calls = 0
 
@@ -126,6 +127,30 @@ def status_text(screen):
 
 class TestRefreshFailureIsVisible(unittest.TestCase):
 
+  def test_issue_list_labels_its_save_as_system_wide(self):
+    save_binding = next(binding for binding in system_overview.IssueListScreen.BINDINGS
+                        if binding[0] == "s")
+    self.assertEqual(save_binding[2], "Save system report")
+
+  def test_deep_navigation_screens_omit_redundant_global_controls(self):
+    issue_keys = {binding[0] for binding in system_overview.IssueListScreen.BINDINGS}
+    topology_keys = {binding[0] for binding in system_overview.TopologyHealthScreen.BINDINGS}
+    self.assertNotIn("m", issue_keys)
+    self.assertNotIn("m", topology_keys)
+    self.assertNotIn("s", topology_keys)
+
+  def test_topology_omits_the_redundant_open_report_key(self):
+    keys = {binding[0] for binding in system_overview.TopologyHealthScreen.BINDINGS}
+    self.assertNotIn("o", keys)
+
+  def test_topology_finding_summary_labels_count_and_worst_severity(self):
+    issue = mock.Mock(participant_keys=("p1",), writer_keys=(), reader_keys=(),
+                      topic_name=None, severity=findings.Severity.ERROR)
+    screen = system_overview.TopologyHealthScreen(StubSession())
+    screen.snapshot = mock.Mock(issues=(issue,))
+    self.assertEqual(screen._finding_summary(participant_key="p1"),
+                     "1 finding (worst: ERROR)")
+
   def test_empty_domain_with_active_issue_shows_its_error_count(self):
     """A discovery blind spot is the report, not an empty state."""
     session = StubSession()
@@ -151,6 +176,7 @@ class TestRefreshFailureIsVisible(unittest.TestCase):
     self.assertIn("1 Errors", collected["summary"])
     self.assertIn("No DDS discovered", collected["issues"])
     self.assertIn("1 Errors", collected["issues"])
+    self.assertIn("save the full system report", collected["issues"])
 
   def test_issue_screens_do_not_offer_deep_diagnosis(self):
     for screen_class in (system_overview.IssueListScreen,
@@ -293,33 +319,18 @@ class TestRefreshFailureIsVisible(unittest.TestCase):
                         for line in captured.output), captured.output)
 
 
-class TestOpenReportMeansOneThing(unittest.TestCase):
-  """`o` is the cheap look on every screen that has it; Enter is the full one.
-
-  On the topology screen `o` was bound to the same action `Enter` already
-  called, so it was both a duplicate and - uniquely - the *probing* one, while
-  `EndpointListScreen` and `TopicEndpointsScreen` have always used `o` for a
-  `probe=False` report. That left the one screen an operator skims endpoints on
-  with no way into a report that does not probe, which matters more now that
-  entering also asks about capturing.
-  """
+class TestEndpointNavigation(unittest.TestCase):
+  """Enter opens endpoint reports; Topology also links to Findings with f."""
 
   def bindings(self, screen_class):
     return {key: action for key, action, *_ in screen_class.BINDINGS}
 
-  def test_o_never_opens_a_probing_report(self):
-    for screen_class, action in (
-        (system_overview.TopologyHealthScreen, "passive_report"),
-        (system_overview.TopicEndpointsScreen, "open_report"),
-        (browse.EndpointListScreen, "open_report")):
+  def test_endpoint_lists_have_no_redundant_open_report_key(self):
+    for screen_class in (system_overview.TopologyHealthScreen,
+                         system_overview.TopicEndpointsScreen,
+                         browse.EndpointListScreen):
       with self.subTest(screen=screen_class.__name__):
-        self.assertEqual(self.bindings(screen_class).get("o"), action)
-
-  def test_o_and_enter_are_different_actions_on_the_topology_screen(self):
-    """The duplicate: `o` used to resolve to what row-selection already did."""
-    self.assertNotEqual(
-        self.bindings(system_overview.TopologyHealthScreen).get("o"),
-        "open_report")
+        self.assertNotIn("o", self.bindings(screen_class))
 
   def fake_app(self):
     """`Screen.app` is a read-only property, so it is patched on the class."""
@@ -331,39 +342,43 @@ class TestOpenReportMeansOneThing(unittest.TestCase):
     self.addCleanup(patcher.stop)
     return app
 
-  def test_o_opens_a_passive_report_for_a_selected_writer(self):
+  def test_finding_endpoint_choice_uses_the_session_probe_default(self):
+    session = StubSession()
+    session.probe_default = False
+    endpoint = FakeEndpoint("w1", "Writer")
+    chooser = system_overview.EndpointChoiceScreen(
+        session, issue_with(writer_keys=("w1",)),
+        [("Writer (offers)", "writer-app", endpoint)])
+    app = mock.Mock()
+    patcher = mock.patch.object(system_overview.EndpointChoiceScreen, "app",
+                                new_callable=mock.PropertyMock, return_value=app)
+    patcher.start()
+    self.addCleanup(patcher.stop)
+
+    with mock.patch.object(system_overview, "ReportScreen") as report_screen_cls:
+      asyncio.run(chooser.on_data_table_row_selected(
+          mock.Mock(row_key=mock.Mock(value="0"))))
+
+    report_screen_cls.assert_called_once_with(session, endpoint=endpoint,
+                                              probe=False)
+
+  def test_f_opens_linked_findings_for_a_topology_row(self):
     session = StubSession()
     session.registry = StubRegistry()
     endpoint = FakeEndpoint("w1", "Writer")
     session.registry.endpoints = {"w1": endpoint}
+    issue = issue_with(writer_keys=("w1",))
     screen = system_overview.TopologyHealthScreen(session)
     screen.mode = "writers"
     screen.selected_key = "w1"
+    screen.snapshot = mock.Mock(issues=(issue,))
     app = self.fake_app()
 
-    with mock.patch.object(system_overview, "ReportScreen") as report_screen_cls:
-      screen.action_passive_report()
+    screen.action_findings()
 
-    report_screen_cls.assert_called_once_with(session, endpoint=endpoint,
-                                              probe=False)
-    app.push_screen.assert_called_once()
-
-  def test_o_on_a_participant_or_topic_row_says_what_it_applies_to(self):
-    """Those rows are navigation, not endpoints; Enter still drills into them."""
-    app = self.fake_app()
-    for mode in ("participants", "topics"):
-      with self.subTest(mode=mode):
-        screen = system_overview.TopologyHealthScreen(StubSession())
-        screen.mode = mode
-        screen.selected_key = "p1"
-        screen.status = mock.Mock()
-
-        screen.action_passive_report()
-
-        app.push_screen.assert_not_called()
-        self.assertIn("reader or writer row",
-                      str(screen.status.update.call_args[0][0]))
-
+    pushed = app.push_screen.call_args.args[0]
+    self.assertIsInstance(pushed, system_overview.IssueListScreen)
+    self.assertEqual(pushed.issue_keys, {issue.key})
 
 class TestTopologyBeforeAFirstSuccessfulScan(unittest.TestCase):
   """H5: `snapshot is None` is a reachable, documented state on this screen.
@@ -409,19 +424,12 @@ class TestTopologyBeforeAFirstSuccessfulScan(unittest.TestCase):
         self.assertIn("No topology has been collected yet", result["status"])
         self.assertIn("Press r to retry", result["status"])
 
-  def test_linked_issues_does_not_push_an_empty_screen(self):
-    result = self._press(["i"])
+  def test_linked_findings_does_not_push_an_empty_screen(self):
+    result = self._press(["f"])
     self.assertIn("No topology has been collected yet", result["status"])
-    # Harness screen + the topology screen, and nothing pushed on top: an issue
+    # Harness screen + the topology screen, and nothing pushed on top: a finding
     # list built from no snapshot would be an empty list presented as a result.
     self.assertEqual(result["screens"], 2)
-
-  def test_save_writes_no_file_at_all(self):
-    with mock.patch("builtins.open", side_effect=AssertionError(
-        "a report was opened with no snapshot to write into it")) as opened:
-      result = self._press(["s"])
-    opened.assert_not_called()
-    self.assertIn("No topology has been collected yet", result["status"])
 
   def test_the_scan_error_is_still_named(self):
     """The operator needs the reason, not just that there is no data."""
@@ -2945,7 +2953,7 @@ class TestIssueEndpointsAreMarked(unittest.TestCase):
     text = issue_marks.legend([None, None])
     # Past tense and scoped: the marks come from a snapshot, the rows from the
     # live registry, so the claim is about when the scan ran.
-    self.assertIn("No system issue named any of these 2", text)
+    self.assertIn("No system finding named any of these 2", text)
     self.assertIn("as of the last system scan", text)
 
   def test_the_legend_dates_its_claim_to_the_scan(self):
@@ -3154,8 +3162,8 @@ class TestAPassiveReportCanBeProbedOnDemand(unittest.TestCase):
     self.assertIsInstance(result["screen"], report_screen.CaptureInterfaceScreen)
     self.assertEqual(result["probes"], [])
 
-  def test_a_probe_from_an_issue_report_reaches_the_endpoint_the_issue_named(self):
-    """The whole point, end to end: issue -> report -> probe, one endpoint.
+  def test_a_probe_from_a_finding_report_reaches_the_endpoint_named(self):
+    """The whole point, end to end: finding -> report -> probe, one endpoint.
 
     `_open_issue_report` is what the issue list and issue detail both route
     through, so this drives the screen it actually pushes rather than one built
@@ -3172,7 +3180,7 @@ class TestAPassiveReportCanBeProbedOnDemand(unittest.TestCase):
         router, session, issue_with(writer_keys=("w1",)))
     pushed = router.app.push_screen.call_args[0][0]
     self.assertIsInstance(pushed, report_screen.ReportScreen)
-    self.assertFalse(pushed.probe, "the issue path must still open passively")
+    self.assertTrue(pushed.probe, "the finding path uses the probe default")
 
     collected = {}
 
@@ -3183,7 +3191,7 @@ class TestAPassiveReportCanBeProbedOnDemand(unittest.TestCase):
         async with app.run_test() as pilot:
           await pilot.pause()
           await app.workers.wait_for_complete()
-          await self.press_probe(pilot, pushed, collected)
+          collected["said"] = status_text(pushed)
 
     asyncio.run(run())
     probing = [call for call in session.calls if call["probe"]]

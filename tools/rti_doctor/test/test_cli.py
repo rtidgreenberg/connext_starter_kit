@@ -580,5 +580,76 @@ class TestArgumentValidation(unittest.TestCase):
     self.assertFalse(cli.parse_args(["-d", "0", "--no-probe-default"]).probe_default)
 
 
+class TestInitialTheme(MainHarness):
+  """`--theme`, the same flag and the same startup contract as rti_spy's.
+
+  The name is validated on the command line rather than at `app.run()`, so a
+  typo costs nothing: Doctor exits before it joins a domain, and the operator
+  gets the list of names instead of a Textual traceback thirty seconds in.
+  """
+
+  def _run_tui_with_theme(self, argv):
+    """Run main() down the TUI path, returning the theme the app started with."""
+    started = {}
+
+    class FakeApp:
+      theme = "textual-dark"
+      # `--theme` is validated against the app class the TUI will actually
+      # build, so a stand-in for that class has to answer the same question.
+      available_themes = {"textual-dark": None, "textual-light": None}
+
+      def __init__(self, session, interval=2.0):
+        self.session = session
+
+      def run(self):
+        started["theme"] = self.theme
+
+    with contextlib.ExitStack() as stack:
+      for name, value in (
+          ("build_session",
+           lambda *a, **k: (FakeSession(), self.FakeParticipant())),
+          ("_wait_for_remote_participants", lambda *a, **k: True),
+          ("_write_ready_file", lambda *a, **k: None),
+          ("_settle", lambda session, seconds: None)):
+        stack.enter_context(mock.patch.object(cli, name, value))
+      stack.enter_context(mock.patch("rti_doctor.app.RTIDoctorApp", FakeApp))
+      stack.enter_context(mock.patch.object(
+          sys, "stdin", mock.Mock(isatty=lambda: True)))
+      stack.enter_context(redirect_stdout(io.StringIO()))
+      stack.enter_context(mock.patch.object(sys, "stderr", io.StringIO()))
+      code = cli.main(argv)
+    return started.get("theme"), code
+
+  def test_the_light_theme_is_applied_before_the_tui_runs(self):
+    theme, code = self._run_tui_with_theme(
+        ["--domain", "7", "--no-domain-scan", "--theme", "textual-light"])
+    self.assertEqual(code, 0)
+    self.assertEqual(theme, "textual-light")
+
+  def test_without_the_flag_the_app_keeps_its_own_theme(self):
+    theme, code = self._run_tui_with_theme(["--domain", "7", "--no-domain-scan"])
+    self.assertEqual(code, 0)
+    self.assertEqual(theme, "textual-dark")
+
+  def test_an_unknown_theme_is_rejected_before_any_dds_entity(self):
+    build_session = mock.Mock()
+    with mock.patch.object(cli, "build_session", build_session):
+      with redirect_stdout(io.StringIO()), mock.patch.object(sys, "stderr", io.StringIO()) as errors:
+        with self.assertRaises(SystemExit) as raised:
+          cli.main(["--domain", "7", "--no-domain-scan", "--theme", "not-a-theme"])
+      message = errors.getvalue()
+    self.assertEqual(raised.exception.code, cli.EXIT_CANNOT_START)
+    build_session.assert_not_called()
+    # The list, not just the rejection: a name the operator cannot guess is
+    # the whole reason this fails on the command line rather than at run().
+    self.assertIn("textual-light", message)
+
+  def test_the_documented_light_theme_name_exists(self):
+    """`--theme textual-light` is what both tools' docs tell people to type."""
+    from rti_doctor.app import available_theme_names
+
+    self.assertIn("textual-light", available_theme_names())
+
+
 if __name__ == "__main__":
   unittest.main()

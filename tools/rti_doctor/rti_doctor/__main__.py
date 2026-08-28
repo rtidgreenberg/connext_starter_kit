@@ -171,6 +171,10 @@ def parse_args(argv=None):
                            "the TUI, press w and confirm instead")
   parser.add_argument("-i", "--interval", type=float, default=2.0,
                       help="UI refresh interval in seconds (default: 2.0)")
+  parser.add_argument("--theme", default=None,
+                      help="Initial Textual theme name for the TUI, the same flag "
+                           "rti_spy takes (for example: textual-light). Ignored by "
+                           "the headless reports, which write plain text")
   parser.add_argument("--debug-log", default=os.environ.get("RTI_DOCTOR_DEBUG_LOG"),
                       help="Optional path for discovery/probe log output")
   parser.add_argument("--connext-log", default=None,
@@ -215,6 +219,16 @@ def parse_args(argv=None):
       parser.error(f"{flag} must not be negative")
   if args.interval <= 0:
     parser.error("--interval must be greater than zero")
+  # Imported here, not at module scope: the headless reports never build a TUI,
+  # and pulling Textual in for them would undo the lazy `.app` import that keeps
+  # them off it. Rejected here rather than at `app.run()` so an unknown name
+  # fails before a DDS participant exists, as it does in rti_spy.
+  if args.theme:
+    from .app import available_theme_names
+    names = available_theme_names()
+    if args.theme not in names:
+      parser.error(f"unknown theme '{args.theme}'. Available themes: "
+                   f"{', '.join(names)}")
   return args
 
 
@@ -602,7 +616,10 @@ def main(argv=None):
     from .app import RTIDoctorApp
     _settle(session, min(args.settle, 1.0))
     tui_ran = True
-    RTIDoctorApp(session, interval=args.interval).run()
+    app = RTIDoctorApp(session, interval=args.interval)
+    if args.theme:
+      app.theme = args.theme
+    app.run()
     return EXIT_OK
   except Exception as error:  # noqa: BLE001 - reported, not swallowed
     # An assessment that died is not an assessment that found errors, so this

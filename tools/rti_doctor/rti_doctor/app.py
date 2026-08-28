@@ -34,3 +34,14 @@ class RTIDoctorApp(App):
     """Poll participant discovery and expire type waits on a timer."""
     discovery.refresh_participants(self.session.participant, self.session.registry)
     self.session.registry.expire_type_waits()
+
+
+def available_theme_names():
+  """The theme names the installed Textual registers, for `--theme` validation.
+
+  Textual exposes its registry only on an App instance, and building one costs
+  nothing here because `__init__` never touches the session - so the CLI can
+  reject an unknown name before it creates a DDS participant, the same way
+  rti_spy does.
+  """
+  return sorted(RTIDoctorApp(None).available_themes)

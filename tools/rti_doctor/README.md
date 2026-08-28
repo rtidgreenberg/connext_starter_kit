@@ -427,6 +427,9 @@ system it was pointed at.
               Wait for N remote participants before proceeding (test hook)
     --ready-timeout   Seconds to wait for the above (default: 15.0)
 -i, --interval        UI refresh interval (default: 2.0)
+    --theme NAME      Initial Textual theme for the TUI, the same flag rti_spy
+              takes (for example: textual-light). An unknown name is
+              rejected before Doctor joins a domain, with the list
     --debug-log PATH  Discovery/probe log output
     --connext-log PATH
           Native Connext middleware diagnostics, including discovery parsing
@@ -443,6 +446,9 @@ number of writers and should be spent on the one you chose.
 ```bash
 # Stage one - the system: discovery, topology and our own configuration
 ./tools/rti_doctor/run_rti_doctor.sh --domain 1 --system -o system.txt
+
+# The TUI in a light palette, as rti_spy takes it
+./tools/rti_doctor/run_rti_doctor.sh --domain 1 --theme textual-light
 
 # Stage two - one topic, report to stdout
 ./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData

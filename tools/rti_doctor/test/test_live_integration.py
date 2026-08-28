@@ -428,10 +428,12 @@ class TestTui(LiveFixtureTest):
     `asyncio.to_thread`, and the whole suite stayed green - the screen would
     have raised NameError the first time an operator opened a report.
 
-    `o` on the topology screen opens a *probing* report, so it is also the
-    live check on the entry flow: the static findings are rendered before the
-    capture question is asked, the picker is what the operator lands on, and
-    dismissing it leaves a report rather than a dead end.
+    Enter on a topology row is the whole entry flow now, and what it costs is
+    `--probe-default`: off, it is the cheap passive look; on, it asks where to
+    capture first. This is the live check on both sides of that - the static
+    findings are rendered before the capture question is asked, the picker is
+    what the operator lands on, and dismissing it leaves a report rather than a
+    dead end.
     """
     import asyncio
 
@@ -451,16 +453,24 @@ class TestTui(LiveFixtureTest):
         await pilot.press("3")                 # writers
         await pilot.pause(0.4)
 
-        # `o` is the cheap look: a report, no probe, no capture, no question.
-        await pilot.press("o")
+        # The passive look. Since the findings workflow was simplified there is
+        # one way into a report from this screen - Enter on the row - and
+        # `--no-probe-default` is what makes it the cheap one: no probe, no
+        # capture, no question. The `o` this used to press is gone from the
+        # topology screen with `action_passive_report`.
+        self.session.probe_default = False
+        await pilot.press("enter")
         await pilot.pause(1.5)
         seen["passive"] = type(app.screen)
         seen["passive_body"] = str(app.screen.body.render())
         await pilot.press("escape")
         await pilot.pause(0.5)
 
-        # Enter is the full diagnostic, so it asks first - on top of a report
-        # whose static findings are already rendered.
+        # The same key under the default setting is the full diagnostic, so it
+        # asks first - on top of a report whose static findings are already
+        # rendered. Read at push time, so flipping it here is what an operator
+        # who did not pass --no-probe-default gets.
+        self.session.probe_default = True
         await pilot.press("enter")
         await pilot.pause(1.5)
         seen["asked"] = type(app.screen)

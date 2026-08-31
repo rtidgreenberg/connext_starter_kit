@@ -332,6 +332,28 @@ that the topic is carrying data at all.
 Isolation also narrows `--write-samples`: with the other readers on the topic
 ignored, a consenting write-probe reaches only the reader you selected.
 
+### The Data tab is isolated too
+
+The live feed behind the Data tab has the same problem and takes the same cure.
+Its own attribution — dropping samples whose publication handle is not the
+selected writer's — runs in `poll()`, which is **downstream** of ownership
+arbitration: a starved writer's samples are discarded inside the middleware and
+never reach `poll()` to be sorted. Measured against two EXCLUSIVE writers of
+equal strength, the un-isolated feed on the losing writer showed `0 received,
+54 from other writers` while 56 of its samples were dropped by ownership — an
+empty tab for a writer that was publishing fine, with another writer's traffic
+counted going past.
+
+So a feed inherits the session's `--isolate-probe` setting and runs on its own
+disposable participant, closed when you leave the tab. The `STREAMING` header
+says what it excluded, because the Data tab has no findings section in which to
+say it anywhere else.
+
+Ownership arbitration between equal-strength writers is arbitrary but stable
+*within* a run, so the un-isolated symptom is a coin flip rather than a constant:
+across three runs the starved writer received `0`, `0` and `36` samples.
+Isolated, the same writer received samples every time.
+
 ## Verifying Delivery to a Reader (`w`, `--write-samples`)
 
 Selecting a **writer** verifies delivery by reading what it already publishes —

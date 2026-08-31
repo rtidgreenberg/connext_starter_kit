@@ -1123,8 +1123,15 @@ class ReportScreen(Screen):
       self._render_live()
       return
     try:
-      self.live = livedata.LiveSubscription(self.session.participant,
-                                           self.endpoint)
+      # Same isolation setting as the probe, from the same session: the Data
+      # tab and the Probe tab describe one endpoint, and if one of them
+      # excluded the topic's other writers while the other did not, the two
+      # would disagree about whether that endpoint delivers anything.
+      self.live = livedata.LiveSubscription(
+          self.session.participant, self.endpoint,
+          isolate=self.session.isolate_probe,
+          domain_id=self.session.domain_id,
+          type_object_v1_only=self.session.type_object_v1_only)
     except Exception as error:
       logging.error(f"[ReportScreen] live feed could not start: {error}")
       self.live_note = f"The live feed could not create a reader: {error}"
@@ -1271,7 +1278,29 @@ class ReportScreen(Screen):
     if self.live.others:
       parts.append(f"{self.live.others} from other writers on this topic")
     return (f"STREAMING '{self.endpoint.topic_name}' - " + ", ".join(parts)
-            + scope)
+            + scope + self._live_isolation_text())
+
+  def _live_isolation_text(self):
+    """What the feed excluded, on the line that says what it is showing.
+
+    The Data tab has no findings section and no appendix, so this header is the
+    only place it can say that it narrowed the topic. An operator reading "0
+    sample(s) received" has to be able to tell "this writer is silent" from
+    "this writer is silent and we ignored the two that are not".
+    """
+    live = self.live
+    if not getattr(live, "isolation_requested", False):
+      return ""
+    if not getattr(live, "isolated", False):
+      return (f" (NOT ISOLATED: {live.isolation_error or 'unknown reason'} - "
+              f"every writer on this topic is delivering into this feed)")
+    ignored = len(getattr(live, "ignored", ()))
+    if not ignored:
+      return " (isolated: no other writer on this topic to ignore)"
+    failed = len(getattr(live, "ignore_failures", ()))
+    detail = f" ({failed} could NOT be ignored)" if failed else ""
+    return (f" (isolated: {ignored} other writer(s) on this topic ignored by "
+            f"this feed{detail})")
 
   def _update_sections(self):
     for tab_id, text in report_mod.render_view_sections(self.data).items():

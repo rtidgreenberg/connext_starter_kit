@@ -91,6 +91,10 @@ class StubSession:
     self.domain_id = 7
     self.registry = StubRegistry()
     self.probe_default = True
+    # The Data tab reads both when opening a feed, so every session stub needs
+    # them or `_start_live` fails as "the live feed could not create a reader".
+    self.isolate_probe = True
+    self.type_object_v1_only = False
     self.fail = None
     self.calls = 0
 
@@ -1397,9 +1401,15 @@ class StubLive:
 
   opened = []
 
-  def __init__(self, participant, endpoint):
+  def __init__(self, participant, endpoint, isolate=False, domain_id=None,
+               type_object_v1_only=False):
     self.participant = participant
     self.endpoint = endpoint
+    # What the view asked for, so a test can assert the session's setting
+    # reaches the feed rather than the feed quietly defaulting.
+    self.isolate_arg = isolate
+    self.domain_id_arg = domain_id
+    self.type_object_v1_only_arg = type_object_v1_only
     self.received = 0
     self.others = 0
     # Mirrors the real subscription's counters: the header reports what it is
@@ -1411,6 +1421,14 @@ class StubLive:
     self.applied_qos = {}
     self.errors = 0
     self.last_error = ""
+    # The isolation surface the header reads, mirroring the real subscription.
+    self.isolation_requested = bool(isolate)
+    self.isolated = bool(isolate)
+    self.isolation_error = None
+    self.isolation_elapsed = 0.0
+    self.isolation_target_seen = bool(isolate)
+    self.ignored = []
+    self.ignore_failures = []
     self.closes = 0
     self.batches = []
     StubLive.opened.append(self)
@@ -1502,6 +1520,25 @@ class TestTheDataTabStreamsWhileItIsOpen(unittest.TestCase):
     self.assertIsNotNone(result["timer"])
     self.assertEqual(len(StubLive.opened), 1)
     self.assertEqual(StubLive.opened[0].endpoint.key, "w1")
+
+  def test_the_feed_inherits_the_session_s_isolation_setting(self):
+    """The Data tab and the Probe tab describe one endpoint.
+
+    If one excluded the topic's other writers and the other did not, the two
+    would disagree about whether that endpoint delivers anything - which is the
+    contradiction this whole change exists to remove.
+    """
+    for isolate in (True, False):
+      StubLive.opened.clear()
+      session = CaptureStubSession("lo")
+      session.isolate_probe = isolate
+
+      async def steps(pilot, screen, out):
+        await self.select(pilot, screen, "data")
+
+      self.drive(self.screen(session=session), steps)
+      self.assertEqual(StubLive.opened[0].isolate_arg, isolate)
+      self.assertEqual(StubLive.opened[0].domain_id_arg, session.domain_id)
 
   def test_leaving_the_tab_closes_the_reader(self):
     async def steps(pilot, screen, out):
@@ -1807,6 +1844,25 @@ class TestTheFeedHeaderAccountsForEverySample(unittest.TestCase):
       dds.DynamicData.DataReader.return_value = reader
       return livedata.LiveSubscription(mock.Mock(), endpoint)
 
+  def isolated_subscription(self, reader, endpoint, participant):
+    """A real isolated `LiveSubscription` over a fake disposable participant.
+
+    Only `create_probe_participant` and the DDS constructors are stubbed, so the
+    isolation sweep, its bookkeeping and `close()`'s ownership of the
+    participant are the production ones.
+    """
+    with mock.patch.object(livedata, "dds") as dds, \
+         mock.patch.object(livedata.discovery, "create_probe_participant",
+                           return_value=participant), \
+         mock.patch.object(livedata.probe, "build_subscriber",
+                           return_value=(mock.Mock(), {})), \
+         mock.patch.object(livedata.probe, "build_reader_qos",
+                           return_value=(mock.Mock(), {})):
+      dds.DynamicData.Topic.return_value = mock.Mock()
+      dds.DynamicData.DataReader.return_value = reader
+      return livedata.LiveSubscription(mock.Mock(), endpoint, isolate=True,
+                                       domain_id=7)
+
   class FakeReader:
     """Only what `poll` touches: matched publications and `take`."""
 
@@ -1877,6 +1933,74 @@ class TestTheFeedHeaderAccountsForEverySample(unittest.TestCase):
     self.assertTrue(live.closed)
     live.close()  # idempotent: the view closes on tab change AND on unmount
 
+  class IsolationParticipant:
+    """A disposable participant that records what the feed ignored."""
+
+    def __init__(self, keys=(), topic_name="Telemetry"):
+      samples = []
+      for key in keys:
+        info = type("Info", (), {"valid": True, "instance_handle": f"h-{key}"})()
+        data = type("Data", (), {
+            "key": type("K", (), {"value": key})(),
+            "participant_key": type("K", (), {"value": "p1"})(),
+            "topic_name": topic_name, "type_name": "TelemetryType"})()
+        samples.append(type("S", (), {"info": info, "data": data})())
+      self.publication_reader = type("R", (), {"read": lambda _self: samples})()
+      self.ignored = []
+      self.closes = 0
+
+    def ignore_datawriter(self, handle):
+      self.ignored.append(handle)
+
+    def close(self):
+      self.closes += 1
+
+  def test_an_isolated_feed_ignores_the_other_writers_on_the_topic(self):
+    """The Data tab used to show nothing for a writer losing EXCLUSIVE ownership.
+
+    Its own correlation runs in `poll()`, downstream of ownership arbitration,
+    so the starved writer's samples were discarded by the middleware before the
+    feed could sort them. Ignoring the competitors is the only thing that fixes
+    it, and it is the same sweep the probe runs.
+    """
+    participant = self.IsolationParticipant(keys=("w1", "w2", "w3"))
+    live = self.isolated_subscription(
+        self.FakeReader([]), FakeEndpoint("w1", "Writer"), participant)
+    self.assertEqual(participant.ignored, ["h-w2", "h-w3"])
+    self.assertEqual([r["key"] for r in live.ignored], ["w2", "w3"])
+    self.assertTrue(live.isolated)
+    self.assertTrue(live.isolation_target_seen)
+    self.assertIsNone(live.isolation_error)
+
+  def test_closing_an_isolated_feed_releases_its_participant(self):
+    """The ignores last for the participant's life, so it must not outlive the tab."""
+    participant = self.IsolationParticipant(keys=("w1", "w2"))
+    live = self.isolated_subscription(
+        self.FakeReader([]), FakeEndpoint("w1", "Writer"), participant)
+    self.assertEqual(participant.closes, 0)
+    live.close()
+    self.assertEqual(participant.closes, 1)
+    live.close()  # idempotent, as every other close on this object is
+    self.assertEqual(participant.closes, 1)
+
+  def test_a_feed_that_cannot_isolate_still_streams_and_says_why(self):
+    """Same contract as the probe: never a silent downgrade to un-isolated."""
+    with mock.patch.object(livedata, "dds") as dds, \
+         mock.patch.object(livedata.discovery, "create_probe_participant",
+                           side_effect=RuntimeError("no participant")), \
+         mock.patch.object(livedata.probe, "build_subscriber",
+                           return_value=(mock.Mock(), {})), \
+         mock.patch.object(livedata.probe, "build_reader_qos",
+                           return_value=(mock.Mock(), {})):
+      dds.DynamicData.Topic.return_value = mock.Mock()
+      dds.DynamicData.DataReader.return_value = self.FakeReader([])
+      live = livedata.LiveSubscription(mock.Mock(), FakeEndpoint("w1", "Writer"),
+                                       isolate=True, domain_id=7)
+    self.assertTrue(live.isolation_requested)
+    self.assertFalse(live.isolated)
+    self.assertIn("no participant", live.isolation_error)
+    self.assertIsNotNone(live._reader, "the feed must still stream")
+
   def test_the_stub_mirrors_the_real_subscription(self):
     """Every attribute the view reads must exist on both.
 
@@ -1945,6 +2069,45 @@ class TestTheFeedHeaderAccountsForEverySample(unittest.TestCase):
     self.assertIn("4000 sample(s) received", header)
     self.assertIn("3960 arrived faster", header)
     self.assertIn("7 from other writers", header)
+
+  def _isolated_header(self, **fields):
+    screen = report_screen.ReportScreen(
+        CaptureStubSession("lo"), endpoint=FakeEndpoint("w1", "Writer"),
+        probe=False)
+    screen.live = StubLive(object(), screen.endpoint, isolate=True)
+    for name, value in fields.items():
+      setattr(screen.live, name, value)
+    return screen._live_header()
+
+  def test_the_header_says_what_the_feed_ignored(self):
+    """The Data tab has no findings section, so the header is the only place
+    it can admit that it narrowed the topic."""
+    header = self._isolated_header(ignored=[{"key": "w2"}, {"key": "w3"}])
+    self.assertIn("isolated: 2 other writer(s) on this topic ignored", header)
+
+  def test_ignoring_nothing_is_still_stated(self):
+    """Otherwise "0 received" cannot be told from "0 received, and we hid two"."""
+    self.assertIn("no other writer on this topic to ignore",
+                  self._isolated_header())
+
+  def test_a_feed_that_could_not_isolate_says_so_in_the_header(self):
+    header = self._isolated_header(isolated=False,
+                                   isolation_error="no participant")
+    self.assertIn("NOT ISOLATED", header)
+    self.assertIn("no participant", header)
+
+  def test_a_partial_isolation_is_not_reported_as_a_clean_one(self):
+    header = self._isolated_header(
+        ignored=[{"key": "w2"}],
+        ignore_failures=[{"key": "w3", "error": "refused"}])
+    self.assertIn("1 could NOT be ignored", header)
+
+  def test_an_unisolated_feed_adds_nothing_to_the_header(self):
+    screen = report_screen.ReportScreen(
+        CaptureStubSession("lo"), endpoint=FakeEndpoint("w1", "Writer"),
+        probe=False)
+    screen.live = StubLive(object(), screen.endpoint)
+    self.assertNotIn("isolated", screen._live_header())
 
 
 class TestTheFeedNoteDoesNotHideTheSnapshot(unittest.TestCase):

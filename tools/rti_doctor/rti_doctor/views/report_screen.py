@@ -1295,12 +1295,22 @@ class ReportScreen(Screen):
       return (f" (NOT ISOLATED: {live.isolation_error or 'unknown reason'} - "
               f"every writer on this topic is delivering into this feed)")
     ignored = len(getattr(live, "ignored", ()))
+    failed = len(getattr(live, "ignore_failures", ()))
+    error = getattr(live, "isolation_error", None)
+    # Before the count, not after it. Checking `ignored` first made the failure
+    # count unreachable whenever every ignore failed - the header then read
+    # "no other writer on this topic to ignore" about a topic whose other
+    # writers were all still delivering into this feed.
+    if failed or error:
+      shortfall = [f"{failed} could NOT be ignored"] if failed else []
+      if error:
+        shortfall.append("the sweep failed")
+      return (f" (isolation INCOMPLETE - {ignored} ignored, "
+              f"{'; '.join(shortfall)}: other writers may be live in this feed)")
     if not ignored:
       return " (isolated: no other writer on this topic to ignore)"
-    failed = len(getattr(live, "ignore_failures", ()))
-    detail = f" ({failed} could NOT be ignored)" if failed else ""
     return (f" (isolated: {ignored} other writer(s) on this topic ignored by "
-            f"this feed{detail})")
+            f"this feed)")
 
   def _update_sections(self):
     for tab_id, text in report_mod.render_view_sections(self.data).items():

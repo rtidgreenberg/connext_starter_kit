@@ -3415,6 +3415,55 @@ class TestProbeIsolationFinding(unittest.TestCase):
                   "discovery: no", result[0].observed)
     self.assertIn("--settle", result[0].remedy)
 
+  def test_ignoring_nothing_because_everything_failed_is_not_reported_as_alone(self):
+    """The exact false verdict this feature exists to remove.
+
+    An empty `ignored` list has two opposite causes - nothing was there, or
+    nothing could be excluded - and the finding branched on the list alone. With
+    every ignore refused it therefore announced that no other writer was
+    discovered and the selected endpoint was alone on the topic, while those
+    writers were live and competing for the whole probe.
+    """
+    result = probe_match.check_isolation(self._context(FakeProbe(
+        isolation_requested=True, isolated=True, isolation_target_seen=True,
+        ignore_failures=[{"kind": "writer", "key": "e2", "error": "refused"},
+                         {"kind": "writer", "key": "e3", "error": "refused"}])))
+    self.assertEqual(len(result), 1)
+    self.assertNotIn("alone on it", result[0].root_cause)
+    self.assertIn("NOT isolated", result[0].root_cause)
+    self.assertIn("topic-wide", result[0].root_cause)
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+
+  def test_a_sweep_that_dies_mid_probe_is_not_swallowed(self):
+    """`resweep` records the error and keeps `isolated` - someone must read it.
+
+    Nothing did: every consumer branched on `ignored` and `ignore_failures`, so
+    a sweep that raised partway through the probe window left a report claiming
+    a clean isolation.
+    """
+    result = probe_match.check_isolation(self._context(FakeProbe(
+        isolation_requested=True, isolated=True, isolation_target_seen=True,
+        isolation_error="AttributeError: gone",
+        ignored=[{"kind": "writer", "key": "e2"}])))
+    self.assertIn("AttributeError: gone", result[0].observed)
+    self.assertIn("incomplete", result[0].root_cause)
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+    self.assertEqual(result[0].evidence["isolation_error"],
+                     "AttributeError: gone")
+
+  def test_the_unseen_target_remedy_does_not_prescribe_settle(self):
+    """--settle settles the SESSION participant; the probe's is made later.
+
+    The remedy told the operator to re-run with a longer --settle, which cannot
+    widen the sweep's own fixed budget and so could only waste their time.
+    """
+    result = probe_match.check_isolation(self._context(FakeProbe(
+        isolation_requested=True, isolated=True, isolation_target_seen=False,
+        ignored=[{"kind": "writer", "key": "e2"}])))
+    self.assertIn("does not widen", result[0].remedy)
+    self.assertIn(f"{probe.ISOLATION_TIMEOUT:.0f}s", result[0].remedy)
+    self.assertNotIn("longer --settle", result[0].remedy)
+
   def test_a_reader_target_reports_readers(self):
     result = probe_match.check_isolation(self._context(
         FakeProbe(isolation_requested=True, isolated=True,
@@ -3441,6 +3490,22 @@ class TestIsolationScopeText(unittest.TestCase):
         isolation_target_seen=True, ignored=[{"key": "e2"}]))
     self.assertIn("topic-wide", text)
     self.assertIn("were ignored", text)
+
+  def test_the_scope_line_does_not_claim_alone_when_ignores_failed(self):
+    """Same false verdict, in the sentence stamped onto every match finding."""
+    text = probe_match._scope_text(FakeProbe(
+        isolation_requested=True, isolated=True, isolation_target_seen=True,
+        ignore_failures=[{"key": "e2", "error": "refused"}]))
+    self.assertNotIn("alone on it", text)
+    self.assertIn("incomplete", text)
+    self.assertIn("1 peer(s) could not be ignored", text)
+
+  def test_the_scope_line_reports_a_sweep_that_failed_mid_probe(self):
+    text = probe_match._scope_text(FakeProbe(
+        isolation_requested=True, isolated=True, isolation_target_seen=True,
+        isolation_error="boom", ignored=[{"key": "e2"}]))
+    self.assertIn("incomplete", text)
+    self.assertIn("the sweep failed during the probe", text)
 
   def test_a_failed_isolation_says_the_topic_was_shared(self):
     text = probe_match._scope_text(FakeProbe(
@@ -3507,6 +3572,14 @@ class TestIsolationInTheConfigurationAppendix(unittest.TestCase):
     listing = appendix.split("ignored, so this probe could not match them:", 1)[1]
     self.assertIn("writer e2", listing)
     self.assertIn("participant=p2", listing)
+
+  def test_a_sweep_failure_is_recorded_in_the_appendix_too(self):
+    """Appendix C is where a verdict's trustworthiness is judged."""
+    text = self._text(isolation_requested=True, isolated=True,
+                      isolation_target_seen=True, isolation_error="boom",
+                      ignored=[{"kind": "writer", "key": "e2"}])
+    self.assertIn("sweep failed during the probe",
+                  text.split("OWN CONFIGURATION", 1)[1])
 
   def test_a_failed_isolation_is_recorded_as_not_applied(self):
     text = self._text(isolation_requested=True, isolated=False,

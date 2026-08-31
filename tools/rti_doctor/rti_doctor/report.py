@@ -1377,6 +1377,11 @@ def _render_isolation_config(result):
   if failures:
     rows.append(("could not ignore",
                  f"{len(failures)} - those peers were live during the probe"))
+  # Recorded here too, not only in the finding. Appendix C is where an operator
+  # judges whether a verdict is trustworthy, and a sweep that died partway
+  # through the probe window is precisely the thing that makes it less so.
+  if getattr(result, "isolation_error", None):
+    rows.append(("sweep failed during the probe", result.isolation_error))
   for name, value in rows:
     lines.append(_table_row(name, value, gutter="    ", pad=TABLE_PAD - 2))
   # A heading of its own, and plain indented lines rather than table rows. An

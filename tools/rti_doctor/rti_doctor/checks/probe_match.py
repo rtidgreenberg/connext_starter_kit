@@ -1,6 +1,6 @@
 """Rung 4 checks: did the reader match, and if not, which policy blocked it?"""
 
-from .. import compat
+from .. import compat, probe as probe_mod
 from ..findings import RUNG_MATCH, Finding, Severity
 
 #: RxO rules in plain English, keyed by the substring Connext reports in
@@ -49,6 +49,26 @@ def _policy_rule(policy_text):
   return RXO_RULES[max(matches, key=len)]
 
 
+def _isolation_shortfall(probe):
+  """Why an APPLIED isolation still is not a clean one, or "" when it is.
+
+  Two ways a sweep that ran can still leave peers live, and neither shows up in
+  the `ignored` list - which is exactly why they need naming. A peer the
+  participant refused to ignore stays matched for the whole probe, and a sweep
+  that raised partway through the probe window (`resweep` records the error and
+  deliberately does not retract the isolation that already happened) may have
+  stopped catching late joiners. Both were previously invisible: nothing read
+  `isolation_error` on the isolated path at all.
+  """
+  reasons = []
+  failures = len(getattr(probe, "ignore_failures", ()))
+  if failures:
+    reasons.append(f"{failures} peer(s) could not be ignored")
+  if getattr(probe, "isolation_error", None):
+    reasons.append("the sweep failed during the probe")
+  return "; ".join(reasons)
+
+
 def _isolation_scope_text(probe):
   """The scope sentence isolation earns, or "" when it earned none.
 
@@ -66,6 +86,14 @@ def _isolation_scope_text(probe):
     return ("Isolation was requested and did not happen, so other endpoints on "
             "this topic were live for the whole probe.")
   ignored = len(getattr(probe, "ignored", ()))
+  # Checked BEFORE the count, because a sweep that ignored nothing because it
+  # FAILED and a sweep that ignored nothing because there was nothing there are
+  # opposite readings of the same empty list. Reporting the second when the
+  # first happened is the false certainty this whole feature exists to remove.
+  incomplete = _isolation_shortfall(probe)
+  if incomplete:
+    return (f"Isolation was incomplete ({incomplete}), so other endpoints on "
+            f"this topic may have been live for part or all of the probe.")
   if not getattr(probe, "isolation_target_seen", False):
     return (f"{ignored} other endpoint(s) on this topic were ignored, but the "
             f"selected endpoint never appeared in the probe participant's own "
@@ -190,10 +218,18 @@ def check_isolation(context):
                     f"(every key is in this finding's evidence)")
   for record in failures:
     observed.append("could NOT ignore " + _peer_line(record))
+  if getattr(probe, "isolation_error", None):
+    observed.append(f"the sweep failed during the probe window: "
+                    f"{probe.isolation_error}")
 
+  shortfall = _isolation_shortfall(probe)
+  claim = ("so the selected endpoint was the only peer this probe could match"
+           if not shortfall else
+           f"but the isolation was incomplete ({shortfall}), so the selected "
+           f"endpoint was NOT necessarily its only peer")
   root = (
-      f"rti_doctor asked its own participant to ignore those {peer}(s), so the "
-      f"selected endpoint was the only peer this probe could match. This is a "
+      f"rti_doctor asked its own participant to ignore those {peer}(s), {claim}. "
+      f"This is a "
       f"change rti_doctor made to what it could see, not a change to the system "
       f"under test: ignoring is local to our participant, the applications "
       f"involved are unaffected and still talking to each other, and the "
@@ -207,6 +243,10 @@ def check_isolation(context):
         "ownership_dropped_sample_count, and an un-isolated probe of the losing "
         "writer reports 'matched, but no samples were received' about a writer "
         "that is publishing perfectly well. ")
+  elif shortfall:
+    root += (f"Nothing was successfully ignored, so this probe was NOT isolated "
+             f"from the rest of '{topic}' - read every observation below as "
+             f"topic-wide. ")
   else:
     root += (f"Nothing was ignored because no other {peer} was discovered on "
              f"'{topic}', so the selected endpoint was alone on it. ")
@@ -215,20 +255,26 @@ def check_isolation(context):
       "reader's cache when its writer was ignored can still be taken afterwards.")
 
   remedy = ""
-  if failures:
-    remedy = (f"{len(failures)} peer(s) could not be ignored and were live "
+  if shortfall:
+    remedy = (f"Isolation was incomplete ({shortfall}), so peers were live "
               f"during the probe - treat any per-endpoint attribution below as "
-              f"topic-wide, and see the errors above.")
+              f"topic-wide, and see the errors above. Nothing needs fixing on "
+              f"the system under test.")
   elif not getattr(probe, "isolation_target_seen", False):
-    remedy = ("The selected endpoint never appeared in the probe participant's "
-              "own discovery within the isolation window, so a peer announced "
-              "after the sweep gave up may not have been ignored. If the "
-              "findings below look topic-wide, re-run with a longer --settle.")
+    remedy = (f"The selected endpoint never appeared in the probe participant's "
+              f"own discovery within its fixed "
+              f"{probe_mod.ISOLATION_TIMEOUT:.0f}s isolation window, so a peer "
+              f"announced after the sweep gave up may not have been ignored. "
+              f"--settle does not widen that window - it settles the session "
+              f"participant, while this one is created when the probe starts - "
+              f"so treat any per-endpoint attribution below as topic-wide, and "
+              f"re-run: discovery that was merely slow usually lands inside "
+              f"the window on a second attempt.")
 
   return [Finding(
       id="probe.isolated",
       rung=RUNG_MATCH,
-      severity=Severity.WARN if failures else Severity.INFO,
+      severity=Severity.WARN if shortfall else Severity.INFO,
       title=(f"Probe isolated the selected endpoint: {len(ignored)} other "
              f"{peer}(s) ignored"),
       observed="; ".join(observed),
@@ -237,6 +283,7 @@ def check_isolation(context):
       evidence={"ignored_count": len(ignored),
                 "ignored": [record.get("key") for record in ignored],
                 "ignore_failures": failures,
+                "isolation_error": getattr(probe, "isolation_error", None),
                 "isolation_seconds": round(elapsed, 2),
                 "target_seen_in_discovery": getattr(
                     probe, "isolation_target_seen", False),

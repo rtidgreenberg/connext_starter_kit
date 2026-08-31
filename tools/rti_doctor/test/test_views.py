@@ -2102,6 +2102,24 @@ class TestTheFeedHeaderAccountsForEverySample(unittest.TestCase):
         ignore_failures=[{"key": "w3", "error": "refused"}])
     self.assertIn("1 could NOT be ignored", header)
 
+  def test_the_header_does_not_claim_nothing_to_ignore_when_all_failed(self):
+    """`ignored` was checked first, so the failure count was unreachable.
+
+    With every ignore refused the header read "no other writer on this topic to
+    ignore" while those writers were still delivering into this very feed.
+    """
+    header = self._isolated_header(
+        ignore_failures=[{"key": "w2", "error": "refused"}])
+    self.assertNotIn("no other writer on this topic to ignore", header)
+    self.assertIn("INCOMPLETE", header)
+    self.assertIn("1 could NOT be ignored", header)
+
+  def test_the_header_reports_a_sweep_that_failed_mid_feed(self):
+    header = self._isolated_header(ignored=[{"key": "w2"}],
+                                   isolation_error="boom")
+    self.assertIn("INCOMPLETE", header)
+    self.assertIn("the sweep failed", header)
+
   def test_an_unisolated_feed_adds_nothing_to_the_header(self):
     screen = report_screen.ReportScreen(
         CaptureStubSession("lo"), endpoint=FakeEndpoint("w1", "Writer"),

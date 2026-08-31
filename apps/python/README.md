@@ -48,6 +48,10 @@ apps/python/
 │   ├── downsampled_reader.py
 │   ├── run.sh              # Run script
 │   └── README.md           # Documentation
+├── incompatible_qos_listener/  # Participant-level QoS mismatch listener
+│   ├── incompatible_qos_listener.py
+│   ├── run.sh              # Run script
+│   └── README.md           # Documentation
 ├── README.md               # This file
 ├── install.sh              # Installation script (called by run.sh if needed)
 └── requirements.txt        # Common dependencies
@@ -66,6 +70,17 @@ connext_dds_env/            # Shared virtual environment (at repository root)
   - qos_profiles.ASSIGNER profile usage
   - Distributed logger integration
   - Cross-language communication with C++ apps
+
+### incompatible_qos_listener
+
+- **Subscribes to:** Position messages (deliberately mismatched QoS)
+- **Publishes:** Position messages (deliberately mismatched QoS)
+- **Features:**
+  - `on_requested_incompatible_qos` handled at the **DomainParticipant** level
+  - `NoOpDomainParticipantListener` subclassing with an explicit `StatusMask`
+  - Status propagation DataReader -> Subscriber -> DomainParticipant
+  - Selectable mismatch: reliability, durability, deadline, or ownership
+  - Self-checking reproducer: exits 0 when the callback fires, 1 otherwise
 
 ---
 

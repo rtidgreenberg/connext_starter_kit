@@ -57,6 +57,14 @@ Dynamic partition modification for environment isolation:
 - **Terminal Input**: Interactive partition switching
 - **Self-Ignore Pattern**: Filters own publications using dds::sub::ignore()
 
+### [`incompatible_qos_listener/`](./incompatible_qos_listener/) - Participant-Level QoS Mismatch Listener
+Reproducer for handling `on_requested_incompatible_qos` on the DomainParticipant:
+- **Participant-Level Callback**: `NoOpDomainParticipantListener` with an explicit `StatusMask`
+- **Status Propagation**: DataReader -> Subscriber -> DomainParticipant
+- **AnyDataReader Signature**: The participant-level override takes `dds::sub::AnyDataReader&`
+- **Selectable Mismatch**: reliability, durability, deadline, or ownership
+- **Self-Checking**: Exits 0 when the callback fires, 1 otherwise
+
 ### [`parameter_app/`](./parameter_app/) - ROS2-Style Parameter Management
 DDS-based parameter server/client using RTI Request-Reply:
 - **Server Mode**: Loads parameters from YAML, serves get/set/list requests

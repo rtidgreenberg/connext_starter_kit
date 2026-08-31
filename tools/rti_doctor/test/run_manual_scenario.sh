@@ -45,6 +45,9 @@ Options:
   -t, --topic NAME            Topic for single-fixture scenarios (default: DoctorManual).
   -p, --topic-prefix PREFIX   Topic prefix for RxO scenarios (default: ManualRxO).
       --duration SECONDS      Fixture lifetime (default: 300).
+      --mixed-seed N          mixed-qos-topology: replay a previous run's
+                              scenario. Omitted, the fixture draws a fresh seed
+                              and prints it.
   -h, --help                  Show this help.
 EOF
 }
@@ -54,6 +57,11 @@ domain=42
 topic="DoctorManual"
 topic_prefix="ManualRxO"
 duration=300
+# Empty means "let the fixture draw one and print it". A randomized scenario is
+# only usable if a run that found something can be replayed, and this scenario
+# is the main way anyone runs the mixed_qos fixture by hand - so the passthrough
+# has to exist here or the printed seed is unusable.
+mixed_seed=""
 fastdds_image="${RTI_DOCTOR_FASTDDS_IMAGE:-rti-doctor-fastdds-e2e:3.6.2}"
 # Every Connext participant these scenarios start is named from this prefix, so
 # the Doctor report and the topology table say which endpoint is which instead
@@ -139,6 +147,10 @@ while (($#)); do
             ;;
         -p|--topic-prefix)
             topic_prefix="${2:?missing topic prefix}"
+            shift 2
+            ;;
+        --mixed-seed)
+            mixed_seed="$2"
             shift 2
             ;;
         --duration)
@@ -278,16 +290,23 @@ run_mixed_qos_topology() {
     cat <<EOF
 Mixed QoS topology started: domain=${domain}, topics=${topic_prefix}_01 through ${topic_prefix}_06
 Participants: ${MANUAL_PARTICIPANT_PREFIX}_app_1 through ${MANUAL_PARTICIPANT_PREFIX}_app_5
-Each topic has two writers and two readers: the compatible writer matches both
-readers; the other writer mismatches both readers on two seeded QoS policies.
+The scenario is drawn fresh per run. Every topic carries one writer offering
+exactly what its readers request and one or two weakened on two QoS policies,
+with the endpoint counts and the hosting applications varying per topic. At
+least one topic always leaves OWNERSHIP EXCLUSIVE on two or more writers, which
+is the case where the losing writer's samples are dropped at every reader.
+The fixture prints each topic's shape below, and its seed last: pass that back
+as --mixed-seed to replay this exact scenario.
 In another terminal, run:
     ./tools/rti_doctor/run_rti_doctor.sh --domain ${domain}
-Inspect any ${topic_prefix}_NN topic. Expected result: two compatible writer-reader
-pairs and two qos.rxo_mismatch findings naming the printed QoS policies.
+Inspect any ${topic_prefix}_NN topic. Expected result: matching writer-reader
+pairs alongside qos.rxo_mismatch findings naming the policies printed for that
+topic.
 EOF
     PYTHONPATH="$TOOL_DIR${PYTHONPATH:+:$PYTHONPATH}" \
         python "$SCRIPT_DIR/fixture_publisher.py" --mode mixed_qos \
         --domain "$domain" --topic "$topic_prefix" --duration "$duration" \
+        ${mixed_seed:+--mixed-seed "$mixed_seed"} \
         --participant-name "$MANUAL_PARTICIPANT_PREFIX"
 }
 

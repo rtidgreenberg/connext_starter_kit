@@ -252,6 +252,18 @@ if(BUILD_CXX_TYPES_LIBRARY AND GENERATE_CXX11_TYPES)
     target_link_libraries(dds_typesupport
         PUBLIC RTIConnextDDS::cpp2_api
     )
+
+    # The apps include Definitions.hpp, which the header-only cxx_definitions
+    # target generates. Definitions.idl is deliberately excluded from
+    # TYPE_SUPPORT_IDL_FILES above, so that header is no longer produced as a
+    # side effect of compiling this library's own sources, and nothing ordered
+    # it against the app targets: building a single app from a clean tree failed
+    # with "fatal error: Definitions.hpp: No such file or directory", and a
+    # parallel full build could race. Every app links dds_typesupport, so
+    # declaring the dependency here restores the ordering for all of them.
+    if(TARGET cxx_definitions)
+        add_dependencies(dds_typesupport cxx_definitions)
+    endif()
     
     # Compiler settings
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")

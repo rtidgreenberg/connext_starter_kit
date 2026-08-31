@@ -24,6 +24,7 @@ each time: see [Verifying Delivery to a Reader](#verifying-delivery-to-a-reader-
 - [Deploy With an Activated Wheel](#deploy-with-an-activated-wheel)
 - [Deploying RTI Doctor as a PyInstaller Bundle](#deploying-rti-doctor-as-a-pyinstaller-bundle)
 - [Packet Capture](#packet-capture-is-something-you-ask-for)
+- [The Probe Talks Only to the Selected Endpoint](#the-probe-talks-only-to-the-selected-endpoint---no-isolate-probe)
 - [Verifying Delivery to a Reader](#verifying-delivery-to-a-reader-w---write-samples)
 - [Cross-Vendor Compatibility Matrix](#cross-vendor-compatibility-matrix-x)
 - [The Visibility Ladder](#the-visibility-ladder)
@@ -287,6 +288,50 @@ both for Doctor's own participant; `tshark` parses the resulting PCAP. An
 interface capture remains useful for traffic among other participants, but it
 cannot observe same-host shared-memory traffic.
 
+## The Probe Talks Only to the Selected Endpoint (`--no-isolate-probe`)
+
+A topic usually carries more than one endpoint, and the probe creates a single
+reader (or writer) on the topic rather than on the endpoint you selected. Left
+alone, it therefore talks to every writer on that topic, not just the one the
+report is about — and on a topic whose writers offer `OWNERSHIP EXCLUSIVE`, that
+is not merely noisy, it is wrong. Writers of equal ownership strength arbitrate
+per instance; the loser's samples are discarded at the reader as
+`ownership_dropped_sample_count`, and probing the losing writer reported
+**"matched, but no samples were received"** about a writer that was publishing
+perfectly well.
+
+So by default each probe runs on its own **disposable participant** and calls
+`ignore_datawriter` (or `ignore_datareader`, for a reader target) on every other
+endpoint on the topic, **before** creating anything of its own. The selected
+endpoint is then the only peer the probe can match.
+
+Three properties make this safe:
+
+- **It changes nothing in the system under test.** Ignoring is local to
+  rti_doctor's participant. The applications involved never learn about it and
+  keep talking to each other exactly as before.
+- **The ignores expire.** DDS has no un-ignore — the effect lasts for the life
+  of the participant — so it is only ever applied to one that is closed when the
+  probe ends. Doing this on the session participant would hide the ignored
+  writers from discovery for the rest of the run, so that probing the *other*
+  writer on the same topic afterwards would report `match.none` because of
+  something rti_doctor did earlier.
+- **It says exactly what it did.** Every probe reports a `probe.isolated`
+  finding naming each ignored endpoint, and Appendix C repeats it under
+  `probe isolation`, beside the QoS the probe applied — the block whose purpose
+  is judging a verdict against how it was measured. If isolation is requested
+  and fails, `probe.isolation_failed` says so and disclaims the narrower scope
+  rather than implying it.
+
+Use `--no-isolate-probe` to observe the topic as it actually is, with every
+writer on it delivering into the probe. That is the right choice when the
+question is about the topic rather than about one endpoint — and it is how
+`samples arrived from OTHER writers on this topic` becomes available as evidence
+that the topic is carrying data at all.
+
+Isolation also narrows `--write-samples`: with the other readers on the topic
+ignored, a consenting write-probe reaches only the reader you selected.
+
 ## Verifying Delivery to a Reader (`w`, `--write-samples`)
 
 Selecting a **writer** verifies delivery by reading what it already publishes —
@@ -403,6 +448,11 @@ system it was pointed at.
     --scan-timeout    Seconds to listen for active domains (default: 32.0)
     --no-domain-scan  Skip the active-domain scan before prompting
     --no-probe        Static checks only; create no endpoint of our own
+    --isolate-probe   Probe on a disposable participant that ignores every other
+                      endpoint on the target topic (default)
+    --no-isolate-probe
+                      Probe the topic as it is, sharing it with every other
+                      endpoint on it
     --probe-default   In the TUI, probe endpoint reports automatically (default)
     --no-probe-default
               In the TUI, open endpoint reports passively until `p`

@@ -46,6 +46,7 @@ class FakeSession:
     self.type_wait = 0.0
     self.probe_timeout = 0.0
     self.capture_interface = None
+    self.isolate_probe = True
     self.capture_choice_made = False
     self.capture_off_reason = None
     self.pass_deadline = 0.0
@@ -243,7 +244,8 @@ class TestSessionSurface(unittest.TestCase):
     instance_attributes = {"registry", "domain_id", "active_domains",
                            "domain_scan_ran", "type_lookup_settings",
                            "participant", "own_qos", "type_wait",
-                           "capture_interface", "network_capture"}
+                           "capture_interface", "network_capture",
+                           "isolate_probe"}
     self.assertEqual([name for name in missing if name not in instance_attributes],
                      [])
 

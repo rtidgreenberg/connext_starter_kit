@@ -55,6 +55,14 @@ def check_silent(context):
               f"received_gap_count = {compat.na_text() if gaps is None else gaps}"]
   if other:
     observed.append(f"{other} sample(s) arrived from OTHER writers on this topic")
+  # Silence means something different on an isolated probe, and the difference
+  # has to be on the line rather than left to the reader: we ignored the rest of
+  # the topic, so this says the SELECTED writer sent nothing, and says nothing
+  # at all about whether the topic is carrying data.
+  ignored = len(getattr(probe, "ignored", ()))
+  if getattr(probe, "isolated", False) and ignored:
+    observed.append(f"{ignored} other writer(s) on this topic were ignored by "
+                    f"this probe, so this silence is the selected writer's alone")
 
   if other:
     # samples_taken is scoped to the selected writer; received_sample_count is a

@@ -8,8 +8,8 @@ import logging
 import os
 import time
 
-from . import (checks, findings as f, netcapture, paths, probe as probe_mod,
-               report, system_scan, topology, wire)
+from . import (checks, discovery, findings as f, netcapture, paths,
+               probe as probe_mod, report, system_scan, topology, wire)
 from .checks import CheckContext
 
 #: How long a capture runs when no probe is bounding it - a reader report, or a
@@ -47,7 +47,8 @@ class Session:
   def __init__(self, participant, registry, own_qos, type_lookup_settings,
                domain_id, type_wait=5.0, probe_timeout=10.0, settle=3.0,
                active_domains=None, domain_scan_ran=False,
-               capture_interface=None, network_capture=False, probe_default=True):
+               capture_interface=None, network_capture=False, probe_default=True,
+               isolate_probe=True, type_object_v1_only=False):
     self.participant = participant
     self.registry = registry
     self.own_qos = own_qos
@@ -71,6 +72,18 @@ class Session:
     # question. A report asks on entry only while this is False, so one answer
     # covers the session and navigating between reports does not re-prompt.
     self.capture_choice_made = capture_interface is not None
+    # Whether each probe runs on its own disposable participant with every other
+    # endpoint on the topic ignored. On by default: without it the probe's
+    # entity is one of several on the topic, and a competing writer that wins
+    # EXCLUSIVE ownership starves the selected one, which the report can only
+    # describe as "matched, but no samples were received" - a true sentence that
+    # points at the wrong system. See `discovery.create_probe_participant` for
+    # why the participant has to be disposable.
+    self.isolate_probe = isolate_probe
+    # Carried so the disposable probe participant is configured the way the
+    # session participant was; discovering types one way and probing another
+    # would make the probe's own type resolution incomparable to the report's.
+    self.type_object_v1_only = type_object_v1_only
     # RTI Network Capture, enabled at startup or not at all - `enable()` has to
     # precede every other Connext call, so unlike the tshark capture this can
     # never be turned on from a keypress. When it is on, every probed endpoint
@@ -356,6 +369,26 @@ class Session:
           reader_entity_id=(wire.endpoint_entity_id(endpoint)
                             if not endpoint.is_writer else None),
           duration=capture_seconds + CAPTURE_DURATION_MARGIN)
+    # The probe's own participant, and the reason it may differ from ours.
+    # `ignore_datawriter` / `ignore_datareader` have no inverse and last for the
+    # life of the participant, so isolation is only ever applied to one we are
+    # about to throw away. If it cannot be created the probe still runs - on the
+    # shared participant, un-isolated - and `isolation_error` is what makes the
+    # report say that rather than imply an isolation it never got.
+    probe_participant = self.participant
+    scoped_participant = None
+    isolation_error = None
+    if probe and self.isolate_probe:
+      try:
+        scoped_participant = discovery.create_probe_participant(
+            self.domain_id, type_object_v1_only=self.type_object_v1_only)
+        probe_participant = scoped_participant
+      except Exception as error:
+        isolation_error = (f"could not create the disposable probe participant, "
+                           f"so nothing was ignored: "
+                           f"{type(error).__name__}: {error}")
+        logging.error(f"[engine] {isolation_error}")
+
     # Runs whenever there is a probe to observe, without an interface, an
     # interface prompt or capture privileges: it instruments our own
     # participant rather than a device. A passively opened report still probes
@@ -363,8 +396,12 @@ class Session:
     if self.network_capture and probe:
       participant_destination = self.participant_capture_path()
       self.capture_artifacts.append(participant_destination)
+      # `probe_participant`, not `self.participant`. Network Capture is scoped
+      # to one participant, and once the probe moved onto a disposable one this
+      # file would otherwise hold the session participant's discovery chatter
+      # and none of the conversation the report is about.
       participant_capture = netcapture.ParticipantCapture(
-          self.participant, participant_destination)
+          probe_participant, participant_destination)
 
     if probe or capture is not None:
       try:
@@ -375,8 +412,10 @@ class Session:
         if probe:
           logging.info(f"[engine] probing topic '{endpoint.topic_name}'")
           probe_result = probe_mod.probe_endpoint(
-            self.participant, endpoint, timeout=self.probe_timeout,
-            write_samples=write_samples)
+            probe_participant, endpoint, timeout=self.probe_timeout,
+            write_samples=write_samples,
+            isolate=scoped_participant is not None,
+            isolation_error=isolation_error)
         elif capture is not None:
           # Nothing else is holding this capture open, so it needs its own
           # window; finishing immediately would report an empty capture as the
@@ -417,6 +456,17 @@ class Session:
           # whether or not this parse ran.
           discovery_evidence = capture.finish_discovery()
           self.record_wire_discovery(discovery_evidence)
+        # Last, and after `participant_capture.finish()` above: that call stops
+        # a Network Capture scoped to this very participant. Closing it is also
+        # what makes the probe's ignores expire, so nothing here may skip it -
+        # a leaked probe participant would keep ignoring the peers it isolated
+        # for the rest of the session, which is the exact failure the
+        # disposable participant exists to prevent.
+        if scoped_participant is not None:
+          try:
+            scoped_participant.close()
+          except Exception as error:
+            logging.error(f"[engine] error closing the probe participant: {error}")
 
     context = self._context(endpoint=endpoint,
                             participant_record=participant_record,

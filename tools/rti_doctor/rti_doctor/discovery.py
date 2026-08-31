@@ -352,6 +352,47 @@ def create_participant(domain_id, name="RTI DOCTOR", registry=None,
   return participant, type_lookup_settings
 
 
+#: The name the disposable probe participant announces itself under. Distinct
+#: from the session participant's, because both are on the domain at once and an
+#: operator watching discovery from a third tool has to be able to tell which of
+#: rti_doctor's two participants they are looking at.
+PROBE_PARTICIPANT_NAME = "RTI DOCTOR probe"
+
+
+def create_probe_participant(domain_id, type_object_v1_only=False):
+  """A participant for ONE probe, to be closed as soon as that probe is done.
+
+  This exists so the probe can call `ignore_datawriter` / `ignore_datareader`.
+  Those are irreversible and participant-wide: DDS has no un-ignore, so ignoring
+  a peer on the long-lived session participant would hide it from discovery for
+  the rest of the run. An operator who probed one writer on a two-writer topic
+  would then find the other writer unprobeable, reported as `match.none`, with
+  the cause being something rti_doctor itself did an hour earlier. Scoping the
+  ignores to a participant that dies with the probe is what makes them safe, and
+  it is the ONLY reason this is not just `self.participant`.
+
+  Built from a fresh `DomainParticipantQos` configured the way `create_participant`
+  configures the session participant - deliberately NOT a copy of that
+  participant's applied QoS. Applied QoS carries resolved identity: the
+  participant index, and the RTPS host/app/instance ids. Reusing it was measured
+  on 2026-08-31 to fail two different ways - first
+  "Participant index 1 is in use or led to an invalid port calculation", and
+  then, once the index was reset, remote peers rejecting both participants with
+  "compare immutable remote participant ... config RW" because the two claimed
+  the same RTPS identity. The probe reader matched nothing at all. A fresh QoS
+  object still picks up any XML/env profile the operator configured, because
+  that is what Connext defaults a new QoS object to.
+
+  No registry listeners: nothing needs to record what this participant
+  discovers, and its builtin readers still collect discovery data without one,
+  which is what the isolation sweep reads.
+  """
+  participant, _ = create_participant(
+      domain_id, name=PROBE_PARTICIPANT_NAME, registry=None,
+      type_object_v1_only=type_object_v1_only)
+  return participant
+
+
 # --- Builtin listeners -------------------------------------------------------
 
 def _endpoint_from_data(data, kind):

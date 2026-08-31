@@ -139,6 +139,15 @@ def parse_args(argv=None):
                       default=True,
                       help="Automatically probe endpoint reports opened in the TUI "
                       "(default; use --no-probe-default for passive reports)")
+  parser.add_argument("--isolate-probe", action=argparse.BooleanOptionalAction,
+                      default=True,
+                      help="Run each probe on a disposable participant that ignores "
+                           "every other endpoint on the target topic, so the probe "
+                           "talks only to the selected one (default). This is what "
+                           "keeps a competing EXCLUSIVE-ownership writer from "
+                           "starving the selected writer and making it look silent. "
+                           "Use --no-isolate-probe to observe the topic as it is, "
+                           "with every writer on it delivering to the probe")
   parser.add_argument("--type-object-v1-only", action="store_true",
                       help="Advertise inline TypeObject v1 and disable TypeLookup v2 "
                            "for an interoperability experiment")
@@ -367,6 +376,8 @@ def build_session(domain_id, args, active_domains=None, domain_scan_ran=False,
       capture_interface=args.capture_interface,
       network_capture=getattr(args, "network_capture_active", False),
         probe_default=args.probe_default,
+      isolate_probe=getattr(args, "isolate_probe", True),
+      type_object_v1_only=args.type_object_v1_only,
   ), participant
 
 
@@ -466,6 +477,11 @@ def run_headless_topic(session, args):
   if args.write_samples and not endpoint.is_writer:
     print(f"--write-samples: PUBLISHING synthetic samples to '{args.topic}'. The "
           f"subscribed application will receive them as ordinary data.",
+          file=sys.stderr)
+  if not args.no_probe and session.isolate_probe:
+    print(f"Isolating the probe: every other endpoint on '{args.topic}' will be "
+          f"ignored by rti_doctor's own participant, so the probe talks only to "
+          f"the selected one. Use --no-isolate-probe to observe the whole topic.",
           file=sys.stderr)
   data = session.diagnose_endpoint(endpoint, probe=not args.no_probe,
                                    capture_interface=args.capture_interface,

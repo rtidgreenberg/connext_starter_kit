@@ -1327,6 +1327,73 @@ def _render_config_appendix(data):
       # Nested a level under its heading, so the value column matches the rows
       # above it: two more of indent against two less of pad.
       lines.append(_table_row(key, value, gutter="    ", pad=TABLE_PAD - 2))
+  lines += _render_isolation_config(result)
   lines.append("")
+  return lines
+
+
+def _render_isolation_config(result):
+  """What the probe ignored, in the section that says how it measured.
+
+  This belongs here and not only in the findings. Appendix C's contract is
+  "settings rti_doctor applied to its own participant, so that any finding above
+  can be judged against how it was measured", and ignoring part of the topic is
+  the single largest thing rti_doctor does to what it is able to see. An
+  operator checking whether a verdict is trustworthy reads this block; the
+  finding is what they read to understand one probe.
+  """
+  if result is None or not getattr(result, "isolation_requested", False):
+    return []
+  peer = "reader(s)" if getattr(result, "probe_kind", "reader") == "writer" \
+      else "writer(s)"
+  lines = ["", "  probe isolation (--isolate-probe):"]
+
+  if not getattr(result, "isolated", False):
+    lines.append(_table_row(
+        "requested", "yes, and NOT applied - see probe.isolation_failed",
+        gutter="    ", pad=TABLE_PAD - 2))
+    lines.append(_table_row("error", getattr(result, "isolation_error", None)
+                            or "unknown", gutter="    ", pad=TABLE_PAD - 2))
+    lines.append(_table_row(
+        "effect", "none; the probe shared the topic with every other endpoint "
+        "on it", gutter="    ", pad=TABLE_PAD - 2))
+    return lines
+
+  ignored = list(getattr(result, "ignored", ()))
+  failures = list(getattr(result, "ignore_failures", ()))
+  rows = [
+      ("requested", "yes"),
+      ("participant", "a disposable one, closed with the probe, so the ignores "
+                      "do not outlive it"),
+      ("ignored", f"{len(ignored)} other {peer} on this topic, before the probe "
+                  f"created its own entity"),
+      ("target seen in own discovery",
+       "yes" if getattr(result, "isolation_target_seen", False) else
+       "no - peers announced after the sweep may not have been ignored"),
+      ("isolation window",
+       f"{getattr(result, 'isolation_elapsed', 0.0):.1f}s, spent before the "
+       f"probe window and not counted in it"),
+  ]
+  if failures:
+    rows.append(("could not ignore",
+                 f"{len(failures)} - those peers were live during the probe"))
+  for name, value in rows:
+    lines.append(_table_row(name, value, gutter="    ", pad=TABLE_PAD - 2))
+  # A heading of its own, and plain indented lines rather than table rows. An
+  # endpoint key renders as a 50-character Uint32Seq and a table row folds a
+  # value that long onto the line below its name - so peer rows written as
+  # rows came out indistinguishable from the folded value of whichever row
+  # preceded them, and the list read as a continuation of "isolation window".
+  if ignored:
+    lines.append("    ignored, so this probe could not match them:")
+    for record in ignored:
+      lines.append(f"      {record.get('kind', 'endpoint')} "
+                   f"{record.get('key', '?')}")
+      detail = [f"{label}={record[field]}"
+                for label, field in (("participant", "participant_key"),
+                                     ("type", "type_name"))
+                if record.get(field)]
+      if detail:
+        lines.append("        " + "  ".join(detail))
   return lines
 

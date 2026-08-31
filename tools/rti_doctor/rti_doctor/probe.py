@@ -145,6 +145,27 @@ class ProbeResult:
     self.acknowledged = None
     self.elapsed = 0.0
     self.listener_events = []
+    # Isolation: the peers this probe asked its participant to ignore, so that
+    # the only endpoint it can talk to is the selected one. Recorded in full
+    # rather than as a count, because ignoring a peer changes what every
+    # observation below means and the report has to be able to say exactly what
+    # was excluded, not merely how many.
+    #
+    # `isolation_requested` is "we were asked to", `isolated` is "we did".
+    # They differ whenever `isolation_error` is set, and the report must not
+    # collapse them: "isolated, nothing to ignore" and "isolation failed, other
+    # writers were live the whole time" are opposite readings of the same
+    # `ignored == []`.
+    self.isolation_requested = False
+    self.isolated = False
+    self.isolation_error = None
+    self.isolation_elapsed = 0.0
+    # Whether the SELECTED endpoint appeared in the probe participant's own
+    # discovery. False means the sweep timed out without seeing it, so peers
+    # that had not been announced yet may never have been ignored.
+    self.isolation_target_seen = False
+    self.ignored = []
+    self.ignore_failures = []
 
   @property
   def matched(self):
@@ -537,8 +558,164 @@ def collect_sample_text(result, data):
     result.sample_texts_capped = True
 
 
+#: How long the isolation sweep waits for the probe participant's own discovery
+#: to produce the selected endpoint. It is a separate budget from the probe
+#: window and is spent before it, so isolating cannot eat the observation time
+#: the report cites. Three seconds is well past the sub-second SPDP/SEDP
+#: round trip measured on a local domain, and short enough that a target which
+#: never appears does not double the length of the pass.
+ISOLATION_TIMEOUT = 3.0
+ISOLATION_POLL = 0.1
+
+
+def _builtin_endpoint_reader(participant, is_writer):
+  """The builtin reader announcing the peers that could compete with the target.
+
+  A WRITER target competes with other writers, so the peers to enumerate are
+  publications; a READER target competes for nothing, but the probe creates a
+  writer, and ignoring the other readers is what keeps a consenting
+  `--write-samples` injection from reaching an application that was never
+  selected.
+  """
+  return compat.get(participant,
+                    "publication_reader" if is_writer else "subscription_reader",
+                    None)
+
+
+def _ignore_peer(participant, is_writer, handle):
+  """Ignore one discovered peer, permanently, on THIS participant.
+
+  Named for what it costs. There is no un-ignore in DDS: the effect lasts for
+  the life of the participant, which is why `probe_endpoint` refuses to do this
+  unless its caller has said the participant is disposable.
+  """
+  name = "ignore_datawriter" if is_writer else "ignore_datareader"
+  method = compat.get(participant, name, None)
+  if not callable(method):
+    raise AttributeError(f"this Connext binding has no {name}()")
+  method(handle)
+
+
+def isolation_sweep(participant, endpoint, result, seen):
+  """Ignore every peer on the target topic that is not the target.
+
+  Scoped to the target TOPIC on purpose. The probe creates exactly one entity on
+  one topic, so a peer on any other topic cannot match it, cannot take exclusive
+  ownership from it and cannot receive an injected sample - ignoring those would
+  be a no-op that filled the report's "what we did" list with hundreds of
+  irrelevant lines on a system of any size. The report says the scope out loud
+  rather than implying it covers everything.
+
+  `seen` carries across calls so each peer is ignored once and the sweep can be
+  re-run cheaply during the probe window to catch a late joiner. Returns whether
+  the selected endpoint itself has been seen in discovery yet.
+
+  Raises only if the peers cannot be enumerated at all; a failure to ignore one
+  peer is recorded and the sweep continues, because isolating three of four
+  writers is a materially different (and reportable) outcome from isolating none.
+  """
+  reader = _builtin_endpoint_reader(participant, endpoint.is_writer)
+  if reader is None:
+    kind = "publication" if endpoint.is_writer else "subscription"
+    raise AttributeError(
+        f"this Connext binding exposes no builtin {kind} reader, so the peers "
+        f"on this topic cannot be enumerated")
+
+  for sample in reader.read():
+    info = compat.get(sample, "info", None)
+    if not compat.get(info, "valid", False):
+      # Includes the peers this sweep has already ignored: Connext disposes
+      # their builtin instances, so they come back invalid from here on.
+      continue
+    data = compat.get(sample, "data", None)
+    if compat.get(data, "topic_name", None) != endpoint.topic_name:
+      continue
+    key = str(compat.get(compat.get(data, "key", None), "value", "") or "")
+    if not key or key in seen:
+      continue
+    seen.add(key)
+    if key == endpoint.key:
+      result.isolation_target_seen = True
+      continue
+    record = {
+        "kind": "writer" if endpoint.is_writer else "reader",
+        "key": key,
+        "topic": endpoint.topic_name,
+        "type_name": compat.get(data, "type_name", "") or "",
+        "participant_key": str(compat.get(
+            compat.get(data, "participant_key", None), "value", "") or ""),
+    }
+    try:
+      _ignore_peer(participant, endpoint.is_writer,
+                   compat.get(info, "instance_handle", None))
+    except Exception as error:
+      result.ignore_failures.append(
+          dict(record, error=f"{type(error).__name__}: {error}"))
+      logging.error(f"[probe] could not ignore {record['kind']} {key}: {error}")
+      continue
+    result.ignored.append(record)
+    logging.info(f"[probe] ignored {record['kind']} {key} on "
+                 f"'{endpoint.topic_name}' to isolate the selected endpoint")
+  return result.isolation_target_seen
+
+
+def isolate_endpoint(participant, endpoint, result, timeout=ISOLATION_TIMEOUT,
+                     poll=ISOLATION_POLL):
+  """Ignore the target's competitors BEFORE the probe creates its own entity.
+
+  Order is the whole point. Ignoring after the probe's reader already matched a
+  competing writer works - Connext unmatches it and re-arbitrates ownership -
+  but samples the competitor had already put in the reader cache are still
+  delivered afterwards, so the report has to caveat its own sample counts.
+  Sweeping first was measured on 2026-08-31 against two EXCLUSIVE writers of
+  equal strength on one instance: pre-ignored, the selected writer delivered 21
+  samples with `ownership_dropped_sample_count = 0` and no tail from the
+  ignored one; ignoring after the match instead left a sample from the ignored
+  writer still to be taken.
+
+  Never raises. A failure here must leave a probe that still runs and a report
+  that says isolation did not happen, not no report at all.
+
+  Returns the set of peer keys already handled, for reuse by later sweeps.
+  """
+  start = time.monotonic()
+  seen = set()
+  try:
+    deadline = start + max(0.0, timeout)
+    while True:
+      if isolation_sweep(participant, endpoint, result, seen):
+        break
+      if time.monotonic() >= deadline:
+        break
+      time.sleep(poll)
+    result.isolated = True
+  except Exception as error:
+    result.isolation_error = f"{type(error).__name__}: {error}"
+    logging.error(f"[probe] isolation failed on '{endpoint.topic_name}': {error}")
+  finally:
+    result.isolation_elapsed = time.monotonic() - start
+  return seen
+
+
+def resweep(participant, endpoint, result, seen):
+  """Re-run the sweep after the fact, for a peer that joined late.
+
+  Public because the live Data feed calls it too: it is open for as long as an
+  operator watches, so a writer joining later is ordinary there rather than a
+  corner case.
+
+  Best-effort by construction: the pre-probe sweep is what the report's
+  guarantees rest on, and a failure here must not retract an isolation that
+  already happened, so it records the error and leaves `isolated` alone.
+  """
+  try:
+    isolation_sweep(participant, endpoint, result, seen)
+  except Exception as error:
+    result.isolation_error = f"{type(error).__name__}: {error}"
+
+
 def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1,
-                   write_samples=False):
+                   write_samples=False, isolate=False, isolation_error=None):
   """Create a reader for `endpoint`, observe it for `timeout`, then tear down.
 
   Never raises: any failure is recorded on the result so the report can explain
@@ -547,20 +724,42 @@ def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1,
   `write_samples` only reaches the reader-target path, where the probe creates a
   writer. A writer target is observed by reading what it already publishes, so
   nothing is ever injected there.
+
+  `isolate` asks the probe to ignore every other endpoint on this topic, so the
+  selected one is the only peer it can talk to. It defaults to OFF here and is
+  turned on by the caller, and that split is the safety rule rather than a
+  style choice: ignoring is irreversible and lasts for the life of the
+  participant, so only a caller that knows the participant is disposable may ask
+  for it. `engine.Session` owns that knowledge - it creates the throwaway
+  participant - and this function never decides it for itself.
+
+  `isolation_error` is how that caller reports a disposable participant it could
+  not create. The probe then runs un-isolated on the shared participant, and the
+  report says so instead of quietly claiming an isolation that never happened.
   """
   result = ProbeResult()
   result.attempted = True
+  result.isolation_requested = bool(isolate) or isolation_error is not None
+  result.isolation_error = isolation_error
 
   if not endpoint.is_writer:
     return probe_reader_endpoint(participant, endpoint, timeout, poll,
-                                 write_samples=write_samples)
+                                 write_samples=write_samples, isolate=isolate,
+                                 isolation_error=isolation_error)
   if endpoint.type is None:
     result.create_error = "no type information available, cannot create a reader"
     return result
 
   subscriber = topic = reader = None
+  isolation_seen = set()
   start = time.monotonic()
   try:
+    if isolate:
+      isolation_seen = isolate_endpoint(participant, endpoint, result)
+      # The observation window starts after the sweep. `elapsed` is quoted in
+      # findings as how long the probe watched for a match and for data, and
+      # time spent waiting on our own discovery is not that.
+      start = time.monotonic()
     topic = dds.DynamicData.Topic(participant, endpoint.topic_name, endpoint.type)
     subscriber, sub_applied = build_subscriber(participant, endpoint)
     reader_qos, qos_applied = build_reader_qos(endpoint)
@@ -576,6 +775,12 @@ def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1,
 
     deadline = start + timeout
     while time.monotonic() < deadline:
+      if isolate and result.isolated:
+        # A writer that joins mid-probe would otherwise be matched, and on an
+        # EXCLUSIVE topic could take ownership away from the selected one
+        # partway through the window - producing a report whose sample count
+        # silently describes two different systems.
+        resweep(participant, endpoint, result, isolation_seen)
       target_handles = _correlate(reader, endpoint, result)
       if target_handles is None:
         matched = compat.get_int(reader.subscription_matched_status, "current_count")
@@ -623,7 +828,8 @@ def probe_endpoint(participant, endpoint, timeout=10.0, poll=0.1,
 
 
 def probe_reader_endpoint(participant, endpoint, timeout=10.0, poll=0.1,
-                          write_samples=False):
+                          write_samples=False, isolate=False,
+                          isolation_error=None):
   """Create a matching DataWriter for a discovered reader and observe the match.
 
   `write_samples` is off by default and is the difference between an observer
@@ -638,17 +844,30 @@ def probe_reader_endpoint(participant, endpoint, timeout=10.0, poll=0.1,
   acknowledging, which is the reliable handshake seen from the side that can
   actually observe it. What it cannot do is prove delivery, and
   `wrote_samples=False` is what keeps the report from claiming otherwise.
+
+  `isolate` matters more on this path than on the reader one. Ignoring the other
+  READERS on the topic means a consenting `--write-samples` run reaches only the
+  reader the operator selected: without it, every application subscribed to the
+  topic receives the synthetic samples and cannot tell them from production
+  data. Isolation therefore narrows the blast radius of the one thing rti_doctor
+  does that is not read-only.
   """
   result = ProbeResult()
   result.attempted = True
   result.probe_kind = "writer"
+  result.isolation_requested = bool(isolate) or isolation_error is not None
+  result.isolation_error = isolation_error
   if endpoint.type is None:
     result.create_error = "no type information available, cannot create a writer"
     return result
 
   publisher = topic = writer = None
+  isolation_seen = set()
   start = time.monotonic()
   try:
+    if isolate:
+      isolation_seen = isolate_endpoint(participant, endpoint, result)
+      start = time.monotonic()
     topic = dds.DynamicData.Topic(participant, endpoint.topic_name, endpoint.type)
     publisher, publisher_applied = build_publisher(participant, endpoint)
     writer_qos, qos_applied = build_writer_qos(endpoint)
@@ -658,6 +877,11 @@ def probe_reader_endpoint(participant, endpoint, timeout=10.0, poll=0.1,
 
     deadline = start + timeout
     while time.monotonic() < deadline:
+      if isolate and result.isolated:
+        # Re-swept for the same reason as on the reader path, and for one more:
+        # a reader that joins after the sweep and before `_write_probe_samples`
+        # would receive the injected samples despite never being selected.
+        resweep(participant, endpoint, result, isolation_seen)
       target_handles = _correlate_subscriptions(writer, endpoint, result)
       if target_handles is None:
         matched = compat.get_int(writer.publication_matched_status, "current_count")

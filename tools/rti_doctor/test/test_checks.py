@@ -811,6 +811,10 @@ class FakeProbe:
     self.attempted = True
     self.created = True
     self.create_error = None
+    # A post-creation failure, as on the real ProbeResult. Absent here until the
+    # first test rendered a whole report from a FakeProbe, which is the only
+    # path that reads it - `report.ReportData.outcome`.
+    self.error = None
     self.matched_count = 1
     self.samples_taken = 1
     self.walk = None
@@ -839,6 +843,15 @@ class FakeProbe:
     self.wrote_samples = False
     self.samples_written = 0
     self.acknowledged = None
+    # Isolation, defaulting to "nobody asked" so every pre-existing test keeps
+    # describing an un-isolated probe and the isolation finding stays silent.
+    self.isolation_requested = False
+    self.isolated = False
+    self.isolation_error = None
+    self.isolation_elapsed = 0.0
+    self.isolation_target_seen = False
+    self.ignored = []
+    self.ignore_failures = []
     self.__dict__.update(kwargs)
 
   @property
@@ -3193,6 +3206,324 @@ class TestReliablePath(unittest.TestCase):
     self.assertEqual(
         reliable_path.check_wire_disagrees(
             self._context(probe, wire_evidence={"heartbeats": 9})), [])
+
+
+# --- Probe isolation ---------------------------------------------------------
+
+class FakeBuiltinSample:
+  """One builtin publication/subscription sample, shaped like the binding's."""
+
+  def __init__(self, key, topic_name="T", type_name="MyType",
+               participant_key="p9", valid=True, handle=None):
+    self.info = type("Info", (), {
+        "valid": valid,
+        "instance_handle": handle if handle is not None else f"h-{key}",
+    })()
+    self.data = type("Data", (), {
+        "key": type("Key", (), {"value": key})(),
+        "participant_key": type("Key", (), {"value": participant_key})(),
+        "topic_name": topic_name,
+        "type_name": type_name,
+    })()
+
+
+class FakeBuiltinReader:
+  def __init__(self, samples):
+    self._samples = list(samples)
+
+  def read(self):
+    return list(self._samples)
+
+
+class FakeIsolationParticipant:
+  """A participant that records what it was asked to ignore.
+
+  No DDS. The value of the sweep is entirely in WHICH peers it picks and which
+  it leaves alone, and that is decidable from discovery records - so it is
+  tested where it can be tested exhaustively rather than only against a live
+  domain that can show one topology per run.
+  """
+
+  def __init__(self, publications=(), subscriptions=(), fail_on=()):
+    self.publication_reader = FakeBuiltinReader(publications)
+    self.subscription_reader = FakeBuiltinReader(subscriptions)
+    self.ignored_writers = []
+    self.ignored_readers = []
+    self._fail_on = set(fail_on)
+
+  def ignore_datawriter(self, handle):
+    if handle in self._fail_on:
+      raise RuntimeError("refused")
+    self.ignored_writers.append(handle)
+
+  def ignore_datareader(self, handle):
+    if handle in self._fail_on:
+      raise RuntimeError("refused")
+    self.ignored_readers.append(handle)
+
+
+class TestProbeIsolationSweep(unittest.TestCase):
+  """What the probe ignores, and - more importantly - what it does not."""
+
+  def _writer_target(self):
+    return endpoint_record(key="e1", kind="Writer", topic_name="T")
+
+  def test_other_writers_on_the_topic_are_ignored_and_the_target_is_not(self):
+    participant = FakeIsolationParticipant(publications=[
+        FakeBuiltinSample("e1"), FakeBuiltinSample("e2"), FakeBuiltinSample("e3")])
+    result = probe.ProbeResult()
+    probe.isolate_endpoint(participant, self._writer_target(), result, timeout=0.0)
+    self.assertEqual(participant.ignored_writers, ["h-e2", "h-e3"])
+    self.assertEqual([r["key"] for r in result.ignored], ["e2", "e3"])
+    self.assertTrue(result.isolated)
+    self.assertTrue(result.isolation_target_seen)
+    self.assertIsNone(result.isolation_error)
+
+  def test_writers_on_other_topics_are_left_alone(self):
+    """Scoped to the topic on purpose - see isolation_sweep's docstring.
+
+    A peer on another topic cannot match the probe's single entity, so ignoring
+    it would be a no-op that buries the real exclusions in noise.
+    """
+    participant = FakeIsolationParticipant(publications=[
+        FakeBuiltinSample("e1"), FakeBuiltinSample("e2", topic_name="Other")])
+    result = probe.ProbeResult()
+    probe.isolate_endpoint(participant, self._writer_target(), result, timeout=0.0)
+    self.assertEqual(participant.ignored_writers, [])
+    self.assertEqual(result.ignored, [])
+    self.assertTrue(result.isolated)
+
+  def test_disposed_peers_are_skipped(self):
+    participant = FakeIsolationParticipant(publications=[
+        FakeBuiltinSample("e1"), FakeBuiltinSample("e2", valid=False)])
+    result = probe.ProbeResult()
+    probe.isolate_endpoint(participant, self._writer_target(), result, timeout=0.0)
+    self.assertEqual(participant.ignored_writers, [])
+
+  def test_one_refusal_does_not_stop_the_others(self):
+    """Isolating three of four is a different report from isolating none."""
+    participant = FakeIsolationParticipant(
+        publications=[FakeBuiltinSample("e1"), FakeBuiltinSample("e2"),
+                      FakeBuiltinSample("e3")],
+        fail_on=("h-e2",))
+    result = probe.ProbeResult()
+    probe.isolate_endpoint(participant, self._writer_target(), result, timeout=0.0)
+    self.assertEqual(participant.ignored_writers, ["h-e3"])
+    self.assertEqual([r["key"] for r in result.ignored], ["e3"])
+    self.assertEqual([r["key"] for r in result.ignore_failures], ["e2"])
+    self.assertIn("refused", result.ignore_failures[0]["error"])
+    self.assertTrue(result.isolated)
+
+  def test_a_peer_is_ignored_once_across_repeated_sweeps(self):
+    participant = FakeIsolationParticipant(publications=[
+        FakeBuiltinSample("e1"), FakeBuiltinSample("e2")])
+    result = probe.ProbeResult()
+    endpoint = self._writer_target()
+    seen = probe.isolate_endpoint(participant, endpoint, result, timeout=0.0)
+    probe.isolation_sweep(participant, endpoint, result, seen)
+    probe.isolation_sweep(participant, endpoint, result, seen)
+    self.assertEqual(participant.ignored_writers, ["h-e2"])
+    self.assertEqual(len(result.ignored), 1)
+
+  def test_a_reader_target_ignores_readers_not_writers(self):
+    """The write-probe path: only the selected reader may receive an injection."""
+    participant = FakeIsolationParticipant(subscriptions=[
+        FakeBuiltinSample("r1"), FakeBuiltinSample("r2")])
+    result = probe.ProbeResult()
+    endpoint = endpoint_record(key="r1", kind="Reader", topic_name="T")
+    probe.isolate_endpoint(participant, endpoint, result, timeout=0.0)
+    self.assertEqual(participant.ignored_readers, ["h-r2"])
+    self.assertEqual(participant.ignored_writers, [])
+    self.assertEqual(result.ignored[0]["kind"], "reader")
+
+  def test_a_binding_without_builtin_readers_records_the_failure(self):
+    """Never raises: a probe that cannot isolate must still run and report."""
+    class Bare:
+      pass
+    result = probe.ProbeResult()
+    probe.isolate_endpoint(Bare(), self._writer_target(), result, timeout=0.0)
+    self.assertFalse(result.isolated)
+    self.assertIn("builtin publication reader", result.isolation_error)
+
+  def test_a_binding_without_ignore_records_a_failure_per_peer(self):
+    class NoIgnore(FakeIsolationParticipant):
+      ignore_datawriter = None
+    participant = NoIgnore(publications=[FakeBuiltinSample("e1"),
+                                         FakeBuiltinSample("e2")])
+    result = probe.ProbeResult()
+    probe.isolate_endpoint(participant, self._writer_target(), result, timeout=0.0)
+    self.assertTrue(result.isolated)
+    self.assertEqual(result.ignored, [])
+    self.assertIn("ignore_datawriter", result.ignore_failures[0]["error"])
+
+
+class TestProbeIsolationFinding(unittest.TestCase):
+  """"What we did" has to be in the report whatever the outcome was."""
+
+  def _context(self, probe_result, endpoint=None):
+    return CheckContext(probe=probe_result,
+                        endpoint=endpoint or endpoint_record(topic_name="T"))
+
+  def test_an_unisolated_probe_says_nothing(self):
+    self.assertEqual(
+        probe_match.check_isolation(self._context(FakeProbe())), [])
+
+  def test_what_was_ignored_is_named_not_just_counted(self):
+    result = probe_match.check_isolation(self._context(FakeProbe(
+        isolation_requested=True, isolated=True, isolation_target_seen=True,
+        ignored=[{"kind": "writer", "key": "e2", "topic": "T",
+                  "type_name": "MyType", "participant_key": "p2"}])))
+    self.assertEqual(len(result), 1)
+    self.assertEqual(result[0].id, "probe.isolated")
+    self.assertEqual(result[0].severity, f.Severity.INFO)
+    self.assertIn("e2", result[0].observed)
+    self.assertIn("p2", result[0].observed)
+    self.assertIn("EXCLUSIVE", result[0].root_cause)
+    self.assertEqual(result[0].evidence["ignored"], ["e2"])
+
+  def test_ignoring_nothing_is_still_reported(self):
+    """Silence would leave the operator unable to tell it from not running."""
+    result = probe_match.check_isolation(self._context(FakeProbe(
+        isolation_requested=True, isolated=True, isolation_target_seen=True)))
+    self.assertEqual(len(result), 1)
+    self.assertIn("0 other writer(s)", result[0].title)
+    self.assertIn("alone on it", result[0].root_cause)
+
+  def test_a_failed_isolation_is_a_warning_that_disclaims_the_scope(self):
+    result = probe_match.check_isolation(self._context(FakeProbe(
+        isolation_requested=True, isolated=False,
+        isolation_error="no disposable participant")))
+    self.assertEqual(result[0].id, "probe.isolation_failed")
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+    self.assertIn("no disposable participant", result[0].observed)
+    self.assertIn("topic-wide", result[0].root_cause)
+
+  def test_a_partial_isolation_warns_and_names_the_survivors(self):
+    result = probe_match.check_isolation(self._context(FakeProbe(
+        isolation_requested=True, isolated=True, isolation_target_seen=True,
+        ignored=[{"kind": "writer", "key": "e2"}],
+        ignore_failures=[{"kind": "writer", "key": "e3", "error": "refused"}])))
+    self.assertEqual(result[0].severity, f.Severity.WARN)
+    self.assertIn("could NOT ignore", result[0].observed)
+    self.assertIn("e3", result[0].observed)
+
+  def test_an_unseen_target_is_flagged_as_an_incomplete_sweep(self):
+    result = probe_match.check_isolation(self._context(FakeProbe(
+        isolation_requested=True, isolated=True, isolation_target_seen=False,
+        ignored=[{"kind": "writer", "key": "e2"}])))
+    self.assertIn("selected endpoint seen in the probe participant's own "
+                  "discovery: no", result[0].observed)
+    self.assertIn("--settle", result[0].remedy)
+
+  def test_a_reader_target_reports_readers(self):
+    result = probe_match.check_isolation(self._context(
+        FakeProbe(isolation_requested=True, isolated=True,
+                  isolation_target_seen=True,
+                  ignored=[{"kind": "reader", "key": "r2"}]),
+        endpoint=endpoint_record(key="r1", kind="Reader", topic_name="T")))
+    self.assertIn("reader(s) ignored", result[0].title)
+
+
+class TestIsolationScopeText(unittest.TestCase):
+  """Isolation narrows the scope sentence without weakening its caveats."""
+
+  def test_isolation_is_appended_to_the_correlated_scope(self):
+    text = probe_match._scope_text(FakeProbe(
+        isolation_requested=True, isolated=True, isolation_target_seen=True,
+        ignored=[{"key": "e2"}]))
+    self.assertIn("correlated by publication handle", text)
+    self.assertIn("1 other endpoint(s) on this topic were ignored", text)
+
+  def test_the_uncorrelated_caveat_survives_isolation(self):
+    """Isolation does not make a topic-wide reading writer-scoped."""
+    text = probe_match._scope_text(FakeProbe(
+        correlated=False, isolation_requested=True, isolated=True,
+        isolation_target_seen=True, ignored=[{"key": "e2"}]))
+    self.assertIn("topic-wide", text)
+    self.assertIn("were ignored", text)
+
+  def test_a_failed_isolation_says_the_topic_was_shared(self):
+    text = probe_match._scope_text(FakeProbe(
+        isolation_requested=True, isolated=False))
+    self.assertIn("did not happen", text)
+
+  def test_an_unisolated_probe_adds_nothing(self):
+    self.assertNotIn("ignored", probe_match._scope_text(FakeProbe()))
+
+
+class TestSilenceOnAnIsolatedProbe(unittest.TestCase):
+
+  def test_silence_is_scoped_to_the_selected_writer(self):
+    """Without this line "no data" reads as a claim about the whole topic."""
+    result = probe_payload.check_silent(CheckContext(
+        endpoint=endpoint_record(topic_name="T"),
+        probe=FakeProbe(samples_taken=0, isolation_requested=True,
+                        isolated=True, isolation_target_seen=True,
+                        ignored=[{"key": "e2"}, {"key": "e3"}])))
+    self.assertIn("2 other writer(s) on this topic were ignored",
+                  result[0].observed)
+    self.assertIn("selected writer's alone", result[0].observed)
+
+
+class TestIsolationInTheConfigurationAppendix(unittest.TestCase):
+  """The Configuration tab is where an operator judges how a report was measured.
+
+  Ignoring part of the topic is the largest thing rti_doctor does to what it can
+  see, so it belongs in the block whose stated contract is "settings rti_doctor
+  applied to its own participant, so that any finding above can be judged
+  against how it was measured" - not only in a finding they may have scrolled
+  past.
+  """
+
+  def _text(self, **probe_fields):
+    """Render a whole report from a REAL ProbeResult.
+
+    Not a FakeProbe: this renders every appendix, so the fake would have to
+    model the entire result surface, and a field the fake happened to omit
+    would fail here as an AttributeError rather than as the rendering question
+    the test is asking.
+    """
+    from rti_doctor import report as report_module
+    result = probe.ProbeResult()
+    result.attempted = True
+    result.created = True
+    for name, value in probe_fields.items():
+      setattr(result, name, value)
+    return report_module.render_text(report_module.ReportData(
+        domain_id=7, scope="topic 'T'", all_findings=[], probe_result=result))
+
+  def test_the_ignored_peers_are_listed_under_own_configuration(self):
+    text = self._text(
+        isolation_requested=True, isolated=True, isolation_target_seen=True,
+        isolation_elapsed=0.4,
+        ignored=[{"kind": "writer", "key": "e2", "participant_key": "p2"}])
+    appendix = text.split("OWN CONFIGURATION", 1)[1]
+    self.assertIn("probe isolation (--isolate-probe)", appendix)
+    self.assertIn("disposable", appendix)
+    self.assertIn("1 other writer(s) on this topic", appendix)
+    # Under a heading of their own, so a long key cannot read as the folded
+    # value of the row above it.
+    self.assertIn("ignored, so this probe could not match them:", appendix)
+    listing = appendix.split("ignored, so this probe could not match them:", 1)[1]
+    self.assertIn("writer e2", listing)
+    self.assertIn("participant=p2", listing)
+
+  def test_a_failed_isolation_is_recorded_as_not_applied(self):
+    text = self._text(isolation_requested=True, isolated=False,
+                      isolation_error="no disposable participant")
+    appendix = text.split("OWN CONFIGURATION", 1)[1]
+    self.assertIn("NOT applied", appendix)
+    self.assertIn("no disposable participant", appendix)
+
+  def test_the_reader_target_probe_names_readers(self):
+    text = self._text(probe_kind="writer", isolation_requested=True,
+                      isolated=True, isolation_target_seen=True,
+                      ignored=[{"kind": "reader", "key": "r2"}])
+    self.assertIn("1 other reader(s) on this topic",
+                  text.split("OWN CONFIGURATION", 1)[1])
+
+  def test_an_unisolated_run_adds_no_isolation_block(self):
+    self.assertNotIn("probe isolation", self._text())
 
 
 if __name__ == "__main__":

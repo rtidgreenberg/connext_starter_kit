@@ -49,6 +49,34 @@ def _policy_rule(policy_text):
   return RXO_RULES[max(matches, key=len)]
 
 
+def _isolation_scope_text(probe):
+  """The scope sentence isolation earns, or "" when it earned none.
+
+  Isolation changes the scope by construction rather than by inference: with
+  every other endpoint on the topic ignored before the probe's entity existed,
+  there is no other writer whose sample or whose status could be attributed to
+  the selected one. That is a stronger claim than publication-handle
+  correlation, and it is only true when the sweep both ran and saw the target -
+  a sweep that timed out before the target appeared may have missed peers that
+  were announced after it gave up.
+  """
+  if not getattr(probe, "isolation_requested", False):
+    return ""
+  if not getattr(probe, "isolated", False):
+    return ("Isolation was requested and did not happen, so other endpoints on "
+            "this topic were live for the whole probe.")
+  ignored = len(getattr(probe, "ignored", ()))
+  if not getattr(probe, "isolation_target_seen", False):
+    return (f"{ignored} other endpoint(s) on this topic were ignored, but the "
+            f"selected endpoint never appeared in the probe participant's own "
+            f"discovery, so peers announced later may not have been.")
+  if not ignored:
+    return ("Isolation was applied and found no other endpoint on this topic to "
+            "ignore, so the selected one was alone on it.")
+  return (f"{ignored} other endpoint(s) on this topic were ignored before the "
+          f"probe created anything, so nothing else could match it.")
+
+
 def _scope_text(probe):
   """What the probe's observations actually describe.
 
@@ -56,11 +84,18 @@ def _scope_text(probe):
   it reports is topic-wide until the selected writer is identified among the
   reader's matched publications. Stating the scope keeps a topic-wide reading
   from being read as a fact about one writer.
+
+  Isolation is appended rather than substituted. It narrows what could have
+  produced an observation, but `requested_incompatible_qos` and the protocol
+  counters are still reader-side aggregates, so the correlation caveat stays
+  exactly as strong as it was.
   """
+  isolation = _isolation_scope_text(probe)
+  suffix = f" {isolation}" if isolation else ""
   if not probe.correlated:
     return ("Scope: topic-wide - the selected writer could not be identified "
             "among the reader's matched publications, so this reading covers "
-            "every writer on the topic.")
+            "every writer on the topic." + suffix)
   extra = []
   if probe.matched_other_count:
     extra.append(f"{probe.matched_other_count} other writer(s) on this topic "
@@ -70,9 +105,143 @@ def _scope_text(probe):
                  f"could not be resolved to a writer")
   if extra:
     return ("Scope: the selected writer, correlated by publication handle; "
-            + "; ".join(extra) + ".")
+            + "; ".join(extra) + "." + suffix)
   return ("Scope: the selected writer, correlated by publication handle; it is "
-          "the only writer this reader matched.")
+          "the only writer this reader matched." + suffix)
+
+
+#: How many ignored peers the finding lists individually before summarising.
+#: The list is the whole point of this finding - "we excluded these specific
+#: endpoints" is not a claim an operator can check against a count - but a
+#: scale topic can carry dozens, and a finding that fills a screen stops being
+#: read. Past this, the count and the evidence dict still carry every key.
+ISOLATION_LIST_LIMIT = 8
+
+
+def _peer_line(record):
+  """One ignored peer, identified the way the rest of the report identifies one."""
+  parts = [f"{record.get('kind', 'endpoint')} {record.get('key', '?')}"]
+  if record.get("participant_key"):
+    parts.append(f"participant={record['participant_key']}")
+  if record.get("type_name"):
+    parts.append(f"type={record['type_name']}")
+  if record.get("error"):
+    parts.append(f"ERROR={record['error']}")
+  return "; ".join(parts)
+
+
+def check_isolation(context):
+  """Exactly what the probe ignored, and what that does to everything below.
+
+  Always reported when isolation was asked for, including when it ignored
+  nothing. That is deliberate: the probe deliberately excluded part of the
+  system under test, and every count, status and sample in this report was
+  measured against what was left. An operator who cannot see that this happened
+  cannot judge any of it, and "nothing was ignored" is a finding about the
+  topic - it says the selected endpoint was alone on it - rather than an absence
+  worth staying silent about.
+  """
+  probe = context.probe
+  if probe is None or not getattr(probe, "isolation_requested", False):
+    return []
+
+  endpoint = context.endpoint
+  topic = getattr(endpoint, "topic_name", None) or "this topic"
+  peer = "writer" if getattr(endpoint, "is_writer", True) else "reader"
+  ignored = list(getattr(probe, "ignored", ()))
+  failures = list(getattr(probe, "ignore_failures", ()))
+  elapsed = getattr(probe, "isolation_elapsed", 0.0) or 0.0
+
+  if not getattr(probe, "isolated", False):
+    return [Finding(
+        id="probe.isolation_failed",
+        rung=RUNG_MATCH,
+        severity=Severity.WARN,
+        title="The probe could not isolate the selected endpoint",
+        observed=(getattr(probe, "isolation_error", None)
+                  or "isolation did not run and gave no reason"),
+        root_cause=(
+            f"The probe was asked to ignore every other {peer} on '{topic}' so "
+            f"that the selected one was its only peer, and could not. The probe "
+            f"still ran, on a topic it shares with whatever else is publishing "
+            f"or subscribing there, so every observation below is topic-wide in "
+            f"the ordinary way and the correlation caveats on each finding "
+            f"apply in full."),
+        remedy=("Nothing needs fixing on the system under test. Re-run to try "
+                "again; if it fails the same way, this is an rti_doctor "
+                "limitation on this Connext version - report it with the error "
+                "above, and read this report as an un-isolated one."),
+        evidence={"isolation_error": getattr(probe, "isolation_error", None),
+                  "isolated": False},
+    )]
+
+  # What we did, in the order it happened.
+  observed = [
+      f"ran a disposable participant for this probe and ignored {len(ignored)} "
+      f"other {peer}(s) on '{topic}' before creating anything",
+      f"selected endpoint seen in the probe participant's own discovery: "
+      f"{'yes' if getattr(probe, 'isolation_target_seen', False) else 'no'}",
+      f"isolation took {elapsed:.1f}s, and is not counted in the probe window",
+  ]
+  for record in ignored[:ISOLATION_LIST_LIMIT]:
+    observed.append("ignored " + _peer_line(record))
+  if len(ignored) > ISOLATION_LIST_LIMIT:
+    observed.append(f"...and {len(ignored) - ISOLATION_LIST_LIMIT} more "
+                    f"(every key is in this finding's evidence)")
+  for record in failures:
+    observed.append("could NOT ignore " + _peer_line(record))
+
+  root = (
+      f"rti_doctor asked its own participant to ignore those {peer}(s), so the "
+      f"selected endpoint was the only peer this probe could match. This is a "
+      f"change rti_doctor made to what it could see, not a change to the system "
+      f"under test: ignoring is local to our participant, the applications "
+      f"involved are unaffected and still talking to each other, and the "
+      f"participant is closed at the end of the probe so the ignores expire "
+      f"with it. ")
+  if ignored:
+    root += (
+        "It matters most where the topic has several writers and OWNERSHIP is "
+        "EXCLUSIVE: writers of equal strength arbitrate for each instance, the "
+        "loser's samples are discarded at the reader as "
+        "ownership_dropped_sample_count, and an un-isolated probe of the losing "
+        "writer reports 'matched, but no samples were received' about a writer "
+        "that is publishing perfectly well. ")
+  else:
+    root += (f"Nothing was ignored because no other {peer} was discovered on "
+             f"'{topic}', so the selected endpoint was alone on it. ")
+  root += (
+      "The one thing it does not do is rewrite history: a sample already in the "
+      "reader's cache when its writer was ignored can still be taken afterwards.")
+
+  remedy = ""
+  if failures:
+    remedy = (f"{len(failures)} peer(s) could not be ignored and were live "
+              f"during the probe - treat any per-endpoint attribution below as "
+              f"topic-wide, and see the errors above.")
+  elif not getattr(probe, "isolation_target_seen", False):
+    remedy = ("The selected endpoint never appeared in the probe participant's "
+              "own discovery within the isolation window, so a peer announced "
+              "after the sweep gave up may not have been ignored. If the "
+              "findings below look topic-wide, re-run with a longer --settle.")
+
+  return [Finding(
+      id="probe.isolated",
+      rung=RUNG_MATCH,
+      severity=Severity.WARN if failures else Severity.INFO,
+      title=(f"Probe isolated the selected endpoint: {len(ignored)} other "
+             f"{peer}(s) ignored"),
+      observed="; ".join(observed),
+      root_cause=root,
+      remedy=remedy,
+      evidence={"ignored_count": len(ignored),
+                "ignored": [record.get("key") for record in ignored],
+                "ignore_failures": failures,
+                "isolation_seconds": round(elapsed, 2),
+                "target_seen_in_discovery": getattr(
+                    probe, "isolation_target_seen", False),
+                "topic": topic},
+  )]
 
 
 def check_probe_error(context):
@@ -306,6 +475,10 @@ def check_partition_overlap(context):
 
 
 CHECKS = (
+    # First: what rti_doctor did to the observation comes before what the
+    # observation showed. Every finding after this one was measured against a
+    # topic this check says we narrowed.
+    check_isolation,
     check_probe_error,
     check_probe_incomplete,
     check_incompatible_qos,

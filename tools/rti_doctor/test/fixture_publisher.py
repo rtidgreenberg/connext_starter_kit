@@ -20,7 +20,9 @@ Modes:
 """
 
 import argparse
+import collections
 import glob
+import itertools
 import os
 import random
 import sys
@@ -32,6 +34,27 @@ MODES = ("healthy", "best_effort", "no_type_info", "type_conflict",
          "large_data", "partition", "bad_pair", "scale", "mixed_qos")
 
 MIXED_QOS_POLICIES = ("reliability", "durability", "deadline", "ownership")
+
+#: Every distinct pair of policies a weakened writer can break. Dealt as a deck
+#: rather than sampled per topic - see `_deal_policy_pairs`.
+POLICY_PAIRS = tuple(itertools.combinations(MIXED_QOS_POLICIES, 2))
+
+#: Inclusive bounds on a topic's endpoint counts, so topics are lopsided and
+#: differ from each other.
+#:
+#: The writer floor is 2, not 1, and that is the scenario's contract rather than
+#: an arbitrary choice: the first writer on a topic always offers exactly what
+#: the readers request and the rest are weakened, so a floor of 2 is what makes
+#: every topic carry BOTH a matching pair and a QoS error. A ceiling of 3 is
+#: what puts two weakened writers on some topics, which is where EXCLUSIVE
+#: ownership is contended three ways instead of two.
+MIXED_WRITERS_PER_TOPIC = (2, 3)
+MIXED_READERS_PER_TOPIC = (1, 3)
+
+#: One topic's shape. `writer_apps[0]` is the healthy writer; the rest are
+#: weakened on `policies`. Apps are indices into the participant list.
+TopicPlan = collections.namedtuple(
+    "TopicPlan", "name policies writer_apps reader_apps")
 
 
 def configure_rti_environment():
@@ -170,11 +193,106 @@ def run_scale(args):
   return 0
 
 
-def mixed_qos_plan(topic_count, seed):
-  """Two reproducibly chosen incompatible QoS policies for every topic."""
+def _deal_policy_pairs(topic_count, chooser):
+  """`topic_count` policy pairs, dealt from a reshuffled deck of all six.
+
+  This used to be an independent `sample(MIXED_QOS_POLICIES, 2)` per topic,
+  which made duplicates and gaps ordinary rather than exceptional: with the old
+  fixed seed of 42 the six topics came out as RELIABILITY in all six and
+  DURABILITY in exactly one, with topics 04 and 05 identical - so a scenario
+  named "mixed QoS" spent five sixths of itself on one policy, and the run that
+  was supposed to exercise the matrix exercised a corner of it.
+
+  Dealing from a shuffled deck gives every distinct pair once before any pair
+  repeats. At the default six topics that is all six pairs exactly once and
+  every policy in exactly three topics.
+  """
+  dealt = []
+  while len(dealt) < topic_count:
+    deck = list(POLICY_PAIRS)
+    chooser.shuffle(deck)
+    dealt.extend(deck)
+  return dealt[:topic_count]
+
+
+def _contends_for_ownership(topic):
+  """Whether this topic puts two EXCLUSIVE writers in competition.
+
+  Two things have to be true. There must be more than one writer, and OWNERSHIP
+  must NOT be one of the broken policies - a writer weakened to SHARED never
+  competes with an EXCLUSIVE one for ownership of an instance, because the two
+  do not match the same reader at all.
+  """
+  return len(topic.writer_apps) > 1 and "ownership" not in topic.policies
+
+
+def _guarantee_ownership_contention(plan, chooser):
+  """Force at least one topic where equal-strength EXCLUSIVE writers contend.
+
+  This is the case that motivated the probe's isolation, and it is worth
+  spending a topic on deliberately: writers of equal ownership strength
+  arbitrate per instance, the loser's samples are dropped at every reader as
+  `ownership_dropped_sample_count`, and a diagnostic pointed at the losing
+  writer sees silence from a writer that is publishing perfectly well. Which
+  writer loses is arbitrary but stable within a run, so the symptom is a coin
+  flip and not a constant - all the more reason the scenario must always contain
+  it rather than contain it on average.
+
+  An unconstrained shuffle can miss it: `ownership` is in half the pairs, so a
+  short run can draw only pairs that break it.
+  """
+  if any(_contends_for_ownership(topic) for topic in plan):
+    return plan
+  candidates = [index for index, topic in enumerate(plan)
+                if len(topic.writer_apps) > 1]
+  if not candidates:
+    # No topic has two writers to contend, so there is nothing to force.
+    return plan
+  index = chooser.choice(candidates)
+  keep_ownership = [pair for pair in POLICY_PAIRS if "ownership" not in pair]
+  plan[index] = plan[index]._replace(policies=chooser.choice(keep_ownership))
+  return plan
+
+
+def mixed_qos_plan(topic_count, seed, participant_count=5,
+                   topic_prefix="DoctorTopic"):
+  """The whole shape of one mixed_qos run: which policies break, and where.
+
+  Randomized in three ways and fixed in a fourth. The policy pairs are dealt
+  evenly, the endpoint counts vary per topic, and which application hosts each
+  endpoint is a fresh shuffle per topic - so no two topics have the same shape
+  and no two runs have the same scenario. What is NOT randomized is the QoS
+  values themselves: every weakening is the same constant it always was, because
+  the point of the fixture is that a diagnostic names the right policy, and a
+  deadline of 2.7s rather than 3s tests nothing extra while making a failure
+  harder to read.
+
+  Reproducible from `seed` alone. The caller prints the seed it used, so a run
+  that turned up something interesting can be replayed exactly.
+  """
   chooser = random.Random(seed)
-  return [tuple(chooser.sample(MIXED_QOS_POLICIES, 2))
-          for _ in range(topic_count)]
+  pairs = _deal_policy_pairs(topic_count, chooser)
+  plan = []
+  for index in range(topic_count):
+    writers = chooser.randint(*MIXED_WRITERS_PER_TOPIC)
+    readers = chooser.randint(*MIXED_READERS_PER_TOPIC)
+    # A fresh shuffle per topic, then readers taken from the tail: readers land
+    # in different applications from the writers wherever there are enough to
+    # go round, which is what makes a mismatch a cross-application fault rather
+    # than one inside a single process. With more endpoints than applications
+    # the wrap is honest overlap rather than a failure.
+    apps = list(range(participant_count))
+    chooser.shuffle(apps)
+    # Tuples, so a TopicPlan is hashable and comparable: a plan is a
+    # description of a run, and tests compare and de-duplicate whole plans to
+    # assert that two seeds differ and that one seed replays.
+    writer_apps = tuple(apps[i % participant_count] for i in range(writers))
+    reader_apps = tuple(apps[(writers + i) % participant_count]
+                        for i in range(readers))
+    plan.append(TopicPlan(name=f"{topic_prefix}_{index + 1:02d}",
+                          policies=pairs[index], writer_apps=writer_apps,
+                          reader_apps=reader_apps))
+  return _guarantee_ownership_contention(plan, chooser)
 
 
 def _mixed_reader_qos():
@@ -205,62 +323,76 @@ def _mixed_writer_qos(incompatible_policies=()):
 
 
 def run_mixed_qos(args):
-  """Five applications and six topics with two good and two bad pairs each.
+  """Applications and topics carrying both matching and incompatible pairs.
 
-  Every topic has two writers and two readers. The compatible writer offers the
-  QoS both readers request, so it matches twice. The other writer is weakened
-  on two selected policies, so it mismatches both readers. This produces the
-  useful $2 \times 2$ matrix: two matching pairs and two QoS errors per topic.
+  Every topic gets one healthy writer offering exactly what the readers request,
+  one or two writers weakened on two policies, and one to three readers - so
+  each topic yields matching pairs AND QoS errors, while the shape of each topic
+  and of each run differs. `mixed_qos_plan` decides all of it from a seed, and
+  the seed is printed: a run that turned up something interesting replays
+  exactly with `--mixed-seed`.
   """
   dynamic_type = build_rich_type(args.type_name)
-  participants, held, topics = [], [], {}
-  plan = mixed_qos_plan(args.mixed_topics, args.mixed_seed)
+  seed = (args.mixed_seed if args.mixed_seed is not None
+          else random.randrange(1, 2 ** 31))
+  plan = mixed_qos_plan(args.mixed_topics, seed, args.mixed_participants,
+                        args.topic)
 
+  participants, publishers, subscribers, topics = [], [], [], {}
+  held = []
   for index in range(args.mixed_participants):
     qos = dds.DomainParticipantQos()
     qos.participant_name.name = f"{args.participant_name}_app_{index + 1}"
     participant = dds.DomainParticipant(args.domain, qos=qos)
     participants.append(participant)
+    publishers.append(dds.Publisher(participant))
+    subscribers.append(dds.Subscriber(participant))
     topics[index] = {}
-    held += [dds.Publisher(participant), dds.Subscriber(participant)]
+  held += publishers + subscribers
 
-  def topic_for(participant_index, topic_name):
-    topic = topics[participant_index].get(topic_name)
+  def topic_for(app, topic_name):
+    """One Topic per (application, name). A participant may hold only one."""
+    topic = topics[app].get(topic_name)
     if topic is None:
-      topic = dds.DynamicData.Topic(participants[participant_index], topic_name,
-                                    dynamic_type)
-      topics[participant_index][topic_name] = topic
+      topic = dds.DynamicData.Topic(participants[app], topic_name, dynamic_type)
+      topics[app][topic_name] = topic
       held.append(topic)
     return topic
 
-  writers = []
-  for index, incompatible_policies in enumerate(plan):
-    topic_name = f"{args.topic}_{index + 1:02d}"
-    good_writer_index = index % args.mixed_participants
-    bad_writer_index = (index + 1) % args.mixed_participants
-    reader_indices = ((index + 2) % args.mixed_participants,
-                      (index + 3) % args.mixed_participants)
-    good_publisher = held[good_writer_index * 2]
-    bad_publisher = held[bad_writer_index * 2]
-    writers.append(dds.DynamicData.DataWriter(
-        good_publisher, topic_for(good_writer_index, topic_name),
-        _mixed_writer_qos()))
-    writers.append(dds.DynamicData.DataWriter(
-        bad_publisher, topic_for(bad_writer_index, topic_name),
-        _mixed_writer_qos(incompatible_policies)))
-    held += writers[-2:]
-    for reader_index in reader_indices:
-      subscriber = held[reader_index * 2 + 1]
-      reader = dds.DynamicData.DataReader(
-          subscriber, topic_for(reader_index, topic_name), _mixed_reader_qos())
-      held.append(reader)
-    print(f"mixed QoS topic={topic_name}: 2 matching pairs; 2 incompatible "
-          f"pairs ({', '.join(incompatible_policies).upper()})", flush=True)
+  writers, endpoints = [], 0
+  for entry in plan:
+    for position, app in enumerate(entry.writer_apps):
+      # Position 0 is the healthy writer, always. Every other writer on the
+      # topic is weakened on the same pair, which is what lets a topic carry
+      # two competing EXCLUSIVE writers without also carrying two different
+      # QoS faults to explain.
+      qos = (_mixed_writer_qos() if position == 0
+             else _mixed_writer_qos(entry.policies))
+      writer = dds.DynamicData.DataWriter(
+          publishers[app], topic_for(app, entry.name), qos)
+      writers.append(writer)
+      held.append(writer)
+    for app in entry.reader_apps:
+      held.append(dds.DynamicData.DataReader(
+          subscribers[app], topic_for(app, entry.name), _mixed_reader_qos()))
+    endpoints += len(entry.writer_apps) + len(entry.reader_apps)
+    contention = ("; EXCLUSIVE ownership contended by "
+                  f"{len(entry.writer_apps)} writers"
+                  if _contends_for_ownership(entry) else "")
+    print(f"mixed QoS topic={entry.name}: "
+          f"{len(entry.writer_apps)} writer(s) "
+          f"(1 matching, {len(entry.writer_apps) - 1} weakened on "
+          f"{', '.join(entry.policies).upper()}), "
+          f"{len(entry.reader_apps)} reader(s) in apps "
+          f"{[a + 1 for a in entry.reader_apps]}{contention}", flush=True)
 
   print(f"publishing mode=mixed_qos domain={args.domain} "
         f"participants={args.mixed_participants} topics={args.mixed_topics} "
-      f"endpoints={args.mixed_topics * 4} "
-        f"seed={args.mixed_seed}", flush=True)
+        f"endpoints={endpoints} seed={seed}", flush=True)
+  # On its own line and last, because it is the one thing an operator needs off
+  # this output after a run that found something: without it a randomized
+  # scenario is not reproducible, and the bug is not either.
+  print(f"REPLAY THIS EXACT SCENARIO WITH: --mixed-seed {seed}", flush=True)
   deadline, counter = time.monotonic() + args.duration, 0
   try:
     while time.monotonic() < deadline:
@@ -297,9 +429,14 @@ def main():
   parser.add_argument("--mixed-participants", type=int, default=5,
                       help="mixed_qos mode: named applications to create")
   parser.add_argument("--mixed-topics", type=int, default=6,
-                      help="mixed_qos mode: topics with two good and two bad pairs")
-  parser.add_argument("--mixed-seed", type=int, default=42,
-                      help="mixed_qos mode: reproducible QoS-policy selection")
+                      help="mixed_qos mode: topics, each with one matching "
+                           "writer and one or two weakened ones")
+  parser.add_argument("--mixed-seed", type=int, default=None,
+                      help="mixed_qos mode: seed for the policy, endpoint-count "
+                           "and application-assignment draw. Omitted, a fresh "
+                           "seed is drawn per run and printed, so successive "
+                           "runs cover different scenarios; pass the printed "
+                           "seed back to replay one exactly")
   args = parser.parse_args()
 
   configure_rti_environment()
@@ -318,8 +455,15 @@ def main():
   if args.mode == "scale":
     return run_scale(args)
   if args.mode == "mixed_qos":
-    if args.mixed_participants != 5 or args.mixed_topics != 6:
-      parser.error("mixed_qos requires exactly 5 participants and 6 topics")
+    # Minimums rather than the exact 5-and-6 this used to demand. That check
+    # made sense when the scenario was one fixed shape; now that the shape is
+    # drawn per run, pinning the counts would forbid the only two dials that
+    # still say how big the run is.
+    if args.mixed_participants < 2:
+      parser.error("mixed_qos needs at least 2 participants, so a writer and a "
+                   "reader can land in different applications")
+    if args.mixed_topics < 1:
+      parser.error("mixed_qos needs at least 1 topic")
     return run_mixed_qos(args)
 
   participant = dds.DomainParticipant(args.domain, qos=participant_qos)

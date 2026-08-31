@@ -30,6 +30,7 @@ UNIT=(
     test_wire
     test_wire_discovery
     test_findings
+    test_fixture_plan
     test_system_scan
     test_views
     test_topology

@@ -610,6 +610,16 @@ def isolation_sweep(participant, endpoint, result, seen):
   re-run cheaply during the probe window to catch a late joiner. Returns whether
   the selected endpoint itself has been seen in discovery yet.
 
+  `take()`, not `read()`, and the difference is what makes re-sweeping cheap
+  enough to do on a timer. `read()` returns every publication in the domain on
+  every call, so a sweep repeated at 10 Hz by the probe and 5 Hz by the Data
+  tab's event loop re-copied the entire discovery cache each tick - measured at
+  20 records per tick against 20 writers, where `take()` costs 20 once and 0
+  thereafter. It is safe only because this participant is disposable and nobody
+  else consumes its builtin readers: `create_probe_participant` passes
+  `registry=None` precisely so no listener is installed on them. Do not give
+  that participant a registry without revisiting this.
+
   Raises only if the peers cannot be enumerated at all; a failure to ignore one
   peer is recorded and the sweep continues, because isolating three of four
   writers is a materially different (and reportable) outcome from isolating none.
@@ -621,11 +631,11 @@ def isolation_sweep(participant, endpoint, result, seen):
         f"this Connext binding exposes no builtin {kind} reader, so the peers "
         f"on this topic cannot be enumerated")
 
-  for sample in reader.read():
+  for sample in reader.take():
     info = compat.get(sample, "info", None)
     if not compat.get(info, "valid", False):
       # Includes the peers this sweep has already ignored: Connext disposes
-      # their builtin instances, so they come back invalid from here on.
+      # their builtin instances, so they arrive invalid from here on.
       continue
     data = compat.get(sample, "data", None)
     if compat.get(data, "topic_name", None) != endpoint.topic_name:

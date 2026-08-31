@@ -3228,11 +3228,25 @@ class FakeBuiltinSample:
 
 
 class FakeBuiltinReader:
+  """A builtin reader whose `take()` CONSUMES, as the real one does.
+
+  Modelling the consumption rather than handing back the same list forever is
+  the point of this fake. The sweep depends on it - taking is what keeps a
+  re-sweep on a 5 Hz UI timer from re-copying the whole discovery cache - so a
+  fake that behaved like `read()` would let a regression back to `read()` pass
+  every test here.
+  """
+
   def __init__(self, samples):
     self._samples = list(samples)
 
-  def read(self):
-    return list(self._samples)
+  def take(self):
+    taken, self._samples = self._samples, []
+    return taken
+
+  def announce(self, *samples):
+    """A peer (re-)announcing itself after an earlier sweep."""
+    self._samples.extend(samples)
 
 
 class FakeIsolationParticipant:
@@ -3314,16 +3328,37 @@ class TestProbeIsolationSweep(unittest.TestCase):
     self.assertIn("refused", result.ignore_failures[0]["error"])
     self.assertTrue(result.isolated)
 
-  def test_a_peer_is_ignored_once_across_repeated_sweeps(self):
+  def test_a_peer_that_re_announces_is_not_ignored_twice(self):
+    """What the `seen` set is for, now that `take()` consumes.
+
+    Consumption alone would dedupe a peer that is announced once. A writer that
+    announces again - a QoS change, or a rediscovery - produces a fresh builtin
+    sample for a key already handled, and ignoring it a second time would
+    double-count it in everything the report says we did.
+    """
     participant = FakeIsolationParticipant(publications=[
         FakeBuiltinSample("e1"), FakeBuiltinSample("e2")])
     result = probe.ProbeResult()
     endpoint = self._writer_target()
     seen = probe.isolate_endpoint(participant, endpoint, result, timeout=0.0)
-    probe.isolation_sweep(participant, endpoint, result, seen)
+    participant.publication_reader.announce(FakeBuiltinSample("e2"),
+                                            FakeBuiltinSample("e1"))
     probe.isolation_sweep(participant, endpoint, result, seen)
     self.assertEqual(participant.ignored_writers, ["h-e2"])
     self.assertEqual(len(result.ignored), 1)
+
+  def test_a_peer_appearing_only_after_the_first_sweep_is_still_ignored(self):
+    """The late joiner `resweep` exists for - it must not be lost to `take()`."""
+    participant = FakeIsolationParticipant(publications=[
+        FakeBuiltinSample("e1"), FakeBuiltinSample("e2")])
+    result = probe.ProbeResult()
+    endpoint = self._writer_target()
+    seen = probe.isolate_endpoint(participant, endpoint, result, timeout=0.0)
+    self.assertEqual(participant.ignored_writers, ["h-e2"])
+    participant.publication_reader.announce(FakeBuiltinSample("e3"))
+    probe.resweep(participant, endpoint, result, seen)
+    self.assertEqual(participant.ignored_writers, ["h-e2", "h-e3"])
+    self.assertEqual([r["key"] for r in result.ignored], ["e2", "e3"])
 
   def test_a_reader_target_ignores_readers_not_writers(self):
     """The write-probe path: only the selected reader may receive an injection."""

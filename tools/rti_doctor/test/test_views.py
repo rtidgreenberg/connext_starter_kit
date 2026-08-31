@@ -1945,7 +1945,12 @@ class TestTheFeedHeaderAccountsForEverySample(unittest.TestCase):
             "participant_key": type("K", (), {"value": "p1"})(),
             "topic_name": topic_name, "type_name": "TelemetryType"})()
         samples.append(type("S", (), {"info": info, "data": data})())
-      self.publication_reader = type("R", (), {"read": lambda _self: samples})()
+      # `take()`, consuming, as the real builtin reader does - see
+      # test_checks.FakeBuiltinReader for why the fake models the consumption.
+      def take(_self, box=samples):
+        taken, box[:] = list(box), []
+        return taken
+      self.publication_reader = type("R", (), {"take": take})()
       self.ignored = []
       self.closes = 0
 

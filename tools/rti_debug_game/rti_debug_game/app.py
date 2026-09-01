@@ -2,7 +2,7 @@
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, Footer, Header, Static
+from textual.widgets import Button, Footer, Header, Select, Static
 
 from .generator import generate
 from .levels import CATALOG
@@ -28,6 +28,12 @@ class DebugGameApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
+        yield Select(
+            [(f"{scenario.level_id}: {scenario.title}", scenario.level_id)
+             for scenario in CATALOG.values()],
+            value=self.level.level_id,
+            id="level",
+        )
         yield Static(self._mission_text(), id="mission")
         with Horizontal():
             yield Button("Generate scripts", id="generate", variant="primary")
@@ -51,13 +57,20 @@ class DebugGameApp(App):
         elif event.button.id == "reset":
             self.action_reset_level()
 
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id != "level" or event.value is Select.BLANK:
+            return
+        self.level = CATALOG[event.value]
+        self.query_one("#mission", Static).update(self._mission_text())
+        self.query_one("#status", Static).update(f"Selected {self.level.level_id}. Generate its scripts to begin.")
+
     def action_generate(self):
         root = generate(self.level)
         self.query_one("#status", Static).update(f"Generated editable scripts in {root}.")
 
     def action_reset_level(self):
         root = generate(self.level, reset=True)
-        self.query_one("#status", Static).update(f"Restored initial L01 fault in {root}.")
+        self.query_one("#status", Static).update(f"Restored the initial {self.level.level_id} fault in {root}.")
 
     def action_run_level(self):
         self.query_one("#status", Static).update("Running one verification round on domain 42...")

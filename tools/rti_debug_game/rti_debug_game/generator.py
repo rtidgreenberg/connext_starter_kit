@@ -18,11 +18,25 @@ def run_root() -> Path:
     return game_root() / "run"
 
 
+def endpoint_stem(topic: str) -> str:
+    """Convert a DDS topic name to the generated QoS factory name."""
+    return "".join(f"_{character.lower()}" if character.isupper() else character
+                   for character in topic).lstrip("_")
+
+
 def _participant_source(scenario: Scenario, participant) -> str:
     writes = repr(participant.writes)
     reads = repr(participant.reads)
-    broken_reliability = participant.process_id == scenario.expected_writer
+    stem = endpoint_stem(scenario.topic)
+    broken_reliability = (scenario.fault == "reliability"
+                          and participant.process_id == scenario.expected_writer)
     reliability = "dds.ReliabilityKind.BEST_EFFORT" if broken_reliability else "dds.ReliabilityKind.RELIABLE"
+    topic_name = (f"{scenario.topic}Outbound" if scenario.fault == "topic_name"
+                  and participant.process_id == scenario.expected_writer else scenario.topic)
+    publisher_partition = ("alerts" if scenario.fault == "partition"
+                           and participant.process_id == scenario.expected_writer else "operations")
+    subscriber_partition = ("telemetry" if scenario.fault == "partition"
+                            and participant.process_id == scenario.expected_reader else "operations")
     return f'''"""Editable configuration for {participant.name}."""
 
 import rti.connextdds as dds
@@ -31,6 +45,7 @@ PROCESS_ID = {participant.process_id!r}
 PARTICIPANT_NAME = {participant.name!r}
 WRITES = {writes}
 READS = {reads}
+TOPIC_NAME = {topic_name!r}
 
 
 class ParticipantQos:
@@ -48,25 +63,29 @@ class EndpointQos:
 
     @staticmethod
     def publisher() -> dds.PublisherQos:
-        return dds.PublisherQos()
+        qos = dds.PublisherQos()
+        qos.partition.name = [{publisher_partition!r}]
+        return qos
 
     @staticmethod
     def subscriber() -> dds.SubscriberQos:
-        return dds.SubscriberQos()
+        qos = dds.SubscriberQos()
+        qos.partition.name = [{subscriber_partition!r}]
+        return qos
 
     @staticmethod
-    def vehicle_command_topic() -> dds.TopicQos:
+    def {stem}_topic() -> dds.TopicQos:
         return dds.TopicQos()
 
     @staticmethod
-    def vehicle_command_writer() -> dds.DataWriterQos:
+    def {stem}_writer() -> dds.DataWriterQos:
         qos = dds.DataWriterQos()
         qos.reliability.kind = {reliability}
         qos.history.depth = 20
         return qos
 
     @staticmethod
-    def vehicle_command_reader() -> dds.DataReaderQos:
+    def {stem}_reader() -> dds.DataReaderQos:
         qos = dds.DataReaderQos()
         qos.reliability.kind = dds.ReliabilityKind.RELIABLE
         return qos
@@ -82,6 +101,10 @@ class DataModel:
 
 def generate(scenario: Scenario, reset: bool = False) -> Path:
     root = run_root()
+    expected_path = root / "expected.json"
+    if root.exists() and expected_path.exists() and not reset:
+        previous = json.loads(expected_path.read_text(encoding="ascii"))
+        reset = previous.get("level") != scenario.level_id
     if root.exists() and reset:
         shutil.rmtree(root)
     root.mkdir(parents=True, exist_ok=True)

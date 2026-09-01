@@ -9,6 +9,7 @@ from pathlib import Path
 import rti.connextdds as dds
 
 from . import SCENARIO_DOMAIN
+from .generator import endpoint_stem
 from .levels import Scenario
 
 
@@ -34,6 +35,7 @@ def run_once(scenario: Scenario, run_directory: Path, duration: float = 4.0) -> 
     entities = []
     readers = []
     writers = []
+    endpoint_name = endpoint_stem(scenario.topic)
     try:
         for participant_spec in scenario.participants:
             module = load_player_module(run_directory / f"participant_{participant_spec.process_id}.py")
@@ -41,17 +43,17 @@ def run_once(scenario: Scenario, run_directory: Path, duration: float = 4.0) -> 
             publisher = dds.Publisher(participant, qos=module.EndpointQos.publisher())
             subscriber = dds.Subscriber(participant, qos=module.EndpointQos.subscriber())
             dynamic_type = _build_type(module.DataModel.registered_type_name)
-            topic = dds.DynamicData.Topic(participant, scenario.topic, dynamic_type,
-                                          module.EndpointQos.vehicle_command_topic())
+            topic = dds.DynamicData.Topic(participant, module.TOPIC_NAME, dynamic_type,
+                                          getattr(module.EndpointQos, f"{endpoint_name}_topic")())
             entities.extend((participant, publisher, subscriber, topic))
             if scenario.topic in module.WRITES:
                 writer = dds.DynamicData.DataWriter(
-                    publisher, topic, module.EndpointQos.vehicle_command_writer())
+                    publisher, topic, getattr(module.EndpointQos, f"{endpoint_name}_writer")())
                 writers.append((participant_spec.process_id, writer, dynamic_type))
                 entities.append(writer)
             if scenario.topic in module.READS:
                 reader = dds.DynamicData.DataReader(
-                    subscriber, topic, module.EndpointQos.vehicle_command_reader())
+                    subscriber, topic, getattr(module.EndpointQos, f"{endpoint_name}_reader")())
                 readers.append((participant_spec.process_id, reader))
                 entities.append(reader)
         deadline = time.monotonic() + duration

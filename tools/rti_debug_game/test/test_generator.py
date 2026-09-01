@@ -6,9 +6,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from rti_debug_game.generator import generate
-from rti_debug_game.levels import L01, L02, L03
+from rti_debug_game.levels import L01, L02, L03, L04
 from rti_debug_game.app import DebugGameApp
 from rti_debug_game.control import ParticipantState, summarize
+from rti_debug_game.runtime import _build_type
 
 
 class GeneratorTests(unittest.TestCase):
@@ -60,6 +61,22 @@ class GeneratorTests(unittest.TestCase):
             reader = (root / "participant_helios_motion_controller.py").read_text(encoding="ascii")
             self.assertIn("TOPIC_NAME = 'VehicleCommandOutbound'", writer)
             self.assertIn("TOPIC_NAME = 'VehicleCommand'", reader)
+
+    def test_generates_l04_wrong_writer_registered_type_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "run"
+            with patch("rti_debug_game.generator.run_root", return_value=root):
+                generate(L04, reset=True)
+            writer = (root / "participant_sable_radar_tracker.py").read_text(encoding="ascii")
+            reader = (root / "participant_orion_lidar_fusion.py").read_text(encoding="ascii")
+            self.assertIn("registered_type_name = 'perception::TrackedObjectsV2'", writer)
+            self.assertIn("registered_type_name = 'perception::TrackedObjects'", reader)
+
+    def test_l04_alternate_registered_type_has_an_incompatible_sequence_member(self):
+        expected = _build_type("perception::TrackedObjects")
+        alternate = _build_type("perception::TrackedObjectsV2")
+        self.assertNotEqual(str(expected.member("sequence").type),
+                            str(alternate.member("sequence").type))
 
     def test_app_briefing_uses_the_selected_level(self):
         mission = DebugGameApp("L03")._mission_text()

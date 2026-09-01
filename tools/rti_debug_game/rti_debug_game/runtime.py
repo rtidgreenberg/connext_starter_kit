@@ -26,9 +26,12 @@ def load_player_module(path: Path):
 def _build_type(type_name: str):
     dynamic_type = dds.StructType(type_name)
     dynamic_type.add_member(dds.Member("writer_id", dds.StringType(64)))
-    dynamic_type.add_member(dds.Member("sequence", dds.Int32Type()))
+    sequence_type = dds.StringType(16) if type_name.endswith("V2") else dds.Int32Type()
+    dynamic_type.add_member(dds.Member("sequence", sequence_type))
     dynamic_type.add_member(dds.Member("instance_key", dds.Int32Type(), is_key=True))
     dynamic_type.add_member(dds.Member("region", dds.StringType(16)))
+    if type_name.endswith("V2"):
+        dynamic_type.extensibility_kind = dds.ExtensibilityKind.FINAL
     return dynamic_type
 
 
@@ -57,7 +60,8 @@ def run_once(scenario: Scenario, run_directory: Path, duration: float = 4.0) -> 
             if scenario.topic in module.WRITES:
                 writer = dds.DynamicData.DataWriter(
                     publisher, topic, getattr(module.EndpointQos, f"{endpoint_name}_writer")())
-                writers.append((participant_spec.process_id, writer, dynamic_type))
+                writers.append((participant_spec.process_id, writer, dynamic_type,
+                                module.DataModel.registered_type_name.endswith("V2")))
                 entities.append(writer)
             if scenario.topic in module.READS:
                 reader = dds.DynamicData.DataReader(
@@ -66,9 +70,9 @@ def run_once(scenario: Scenario, run_directory: Path, duration: float = 4.0) -> 
                 entities.append(reader)
         deadline = time.monotonic() + duration
         while time.monotonic() < deadline and any(writer.publication_matched_status.current_count == 0
-                                                   for _, writer, _ in writers):
+                                                   for _, writer, _, _ in writers):
             time.sleep(0.05)
-        for process_id, writer, _ in writers:
+        for process_id, writer, _, _ in writers:
             reporter = next(item for item in control_reporters if item.process_id == process_id)
             states.append(reporter.publish("matched", writer.publication_matched_status.current_count))
         received = {reader_id: set() for reader_id, _ in readers}
@@ -79,11 +83,11 @@ def run_once(scenario: Scenario, run_directory: Path, duration: float = 4.0) -> 
                     if sample.info.valid:
                         received[reader_id].add((sample.data["writer_id"], sample.data["sequence"]))
 
-        for writer_id, writer, dynamic_type in writers:
+        for writer_id, writer, dynamic_type, writes_string_sequence in writers:
             for sequence in range(1, scenario.samples_per_round + 1):
                 sample = dds.DynamicData(dynamic_type)
                 sample["writer_id"] = writer_id
-                sample["sequence"] = sequence
+                sample["sequence"] = str(sequence) if writes_string_sequence else sequence
                 sample["instance_key"] = 1
                 sample["region"] = "west"
                 writer.write(sample)

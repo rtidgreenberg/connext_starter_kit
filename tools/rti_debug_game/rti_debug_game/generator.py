@@ -33,6 +33,8 @@ def _participant_source(scenario: Scenario, participant) -> str:
     reliability = "dds.ReliabilityKind.BEST_EFFORT" if broken_reliability else "dds.ReliabilityKind.RELIABLE"
     topic_name = (f"{scenario.topic}Outbound" if scenario.fault == "topic_name"
                   and participant.process_id == scenario.expected_writer else scenario.topic)
+    type_name = (f"{scenario.type_name}V2" if scenario.fault == "type_name"
+                 and participant.process_id == scenario.expected_writer else scenario.type_name)
     publisher_partition = ("alerts" if scenario.fault == "partition"
                            and participant.process_id == scenario.expected_writer else "operations")
     subscriber_partition = ("telemetry" if scenario.fault == "partition"
@@ -94,7 +96,7 @@ class EndpointQos:
 class DataModel:
     """Type metadata. The shared runtime owns the fixed DynamicData fields."""
 
-    registered_type_name = {scenario.type_name!r}
+    registered_type_name = {type_name!r}
     extensibility = dds.ExtensibilityKind.EXTENSIBLE
 '''
 

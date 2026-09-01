@@ -75,5 +75,21 @@ L03 = Scenario(
     ),
 )
 
+L04 = Scenario(
+    level_id="L04",
+    title="Perception type cannot be resolved",
+    difficulty=2,
+    issue_categories=("Type identity", "XTypes"),
+    topic="TrackedObjects",
+    type_name="perception::TrackedObjects",
+    expected_writer="sable_radar_tracker",
+    expected_reader="orion_lidar_fusion",
+    fault="type_name",
+    participants=(
+        Participant("sable_radar_tracker", "SableRadarTracker", writes=("TrackedObjects",)),
+        Participant("orion_lidar_fusion", "OrionLidarFusion", reads=("TrackedObjects",)),
+    ),
+)
 
-CATALOG = {scenario.level_id: scenario for scenario in (L01, L02, L03)}
+
+CATALOG = {scenario.level_id: scenario for scenario in (L01, L02, L03, L04)}

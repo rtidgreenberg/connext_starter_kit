@@ -138,6 +138,37 @@ for (auto& subscriber : subscribers) {
 `offered_incompatible_qos_status()` cover the writer side. Enumeration finds the *implicit*
 publisher and subscriber too, so this works even if you never created one explicitly.
 
+**That loop only works if every reader is the same type.** `dds::sub::AnyDataReader` exposes
+`qos()`, `topic_name()`, `type_name()`, `subscriber()` and `get<T>()` — but **no status
+accessor**, so the status can only be reached by retyping. And `get<T>()` *throws*
+`dds::core::InvalidDowncastError` on a reader of a different type rather than returning null,
+so one hardcoded type across a mixed participant fails on the first foreign reader.
+
+For a genuinely type-agnostic sweep, go through the untyped handle. `AnyDataReader::operator->()`
+yields an `rti::sub::UntypedDataReader`, whose `native_reader()` needs no type parameter, and
+the C status call is untyped:
+
+```cpp
+DDS_RequestedIncompatibleQosStatus status =
+    DDS_RequestedIncompatibleQosStatus_INITIALIZER;
+DDS_DataReader_get_requested_incompatible_qos_status(
+    any_reader->native_reader(), &status);
+// status.total_count, status.total_count_change, status.last_policy_id
+```
+
+Measured over one participant holding a `Position` reader and a `Command` reader, both
+mismatched:
+
+| Approach | `Position` reader | `Command` reader |
+| --- | --- | --- |
+| `get<Position>()` on every reader | `total_count=1` | **throws `InvalidDowncastError`** |
+| `->native_reader()` + C API | `total_count=1` | `total_count=1`, `last_policy_id=11` |
+
+Use the typed form when the participant is single-type or you can dispatch on `type_name()`;
+use the untyped form for a general participant-wide sweep. Note the C struct exposes
+`policies` as a `DDS_QosPolicyCountSeq`, which needs the C sequence accessors rather than
+range-based iteration.
+
 **Reading a status consumes its delta.** `total_count` keeps accumulating, but
 `total_count_change` counts only what happened since the status was last read — and a
 listener callback counts as a read. Measured on the same mismatch:

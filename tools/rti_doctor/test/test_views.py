@@ -332,10 +332,12 @@ class TestEndpointNavigation(unittest.TestCase):
 
   def test_endpoint_lists_have_no_redundant_open_report_key(self):
     for screen_class in (system_overview.TopologyHealthScreen,
-                         system_overview.TopicEndpointsScreen,
                          browse.EndpointListScreen):
       with self.subTest(screen=screen_class.__name__):
         self.assertNotIn("o", self.bindings(screen_class))
+
+  def test_topic_endpoint_list_offers_an_endpoint_chooser(self):
+    self.assertIn("o", self.bindings(system_overview.TopicEndpointsScreen))
 
   def fake_app(self):
     """`Screen.app` is a read-only property, so it is patched on the class."""

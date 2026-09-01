@@ -51,10 +51,10 @@ POLICY_PAIRS = tuple(itertools.combinations(MIXED_QOS_POLICIES, 2))
 MIXED_WRITERS_PER_TOPIC = (2, 3)
 MIXED_READERS_PER_TOPIC = (1, 3)
 
-#: One topic's shape. `writer_apps[0]` is the healthy writer; the rest are
-#: weakened on `policies`. Apps are indices into the participant list.
+#: One topic's shape. Apps are indices into the participant list. `health`
+#: selects a compatible, type-warning, or QoS-incompatible topology.
 TopicPlan = collections.namedtuple(
-    "TopicPlan", "name policies writer_apps reader_apps")
+  "TopicPlan", "name health policies writer_apps reader_apps")
 
 
 def configure_rti_environment():
@@ -272,6 +272,9 @@ def mixed_qos_plan(topic_count, seed, participant_count=5,
   """
   chooser = random.Random(seed)
   pairs = _deal_policy_pairs(topic_count, chooser)
+  healths = ["green", "yellow", "red"]
+  topic_healths = [healths[index % len(healths)] for index in range(topic_count)]
+  chooser.shuffle(topic_healths)
   plan = []
   for index in range(topic_count):
     writers = chooser.randint(*MIXED_WRITERS_PER_TOPIC)
@@ -290,7 +293,8 @@ def mixed_qos_plan(topic_count, seed, participant_count=5,
     reader_apps = tuple(apps[(writers + i) % participant_count]
                         for i in range(readers))
     plan.append(TopicPlan(name=f"{topic_prefix}_{index + 1:02d}",
-                          policies=pairs[index], writer_apps=writer_apps,
+                health=topic_healths[index], policies=pairs[index],
+                writer_apps=writer_apps,
                           reader_apps=reader_apps))
   return _guarantee_ownership_contention(plan, chooser)
 
@@ -366,7 +370,7 @@ def run_mixed_qos(args):
       # topic is weakened on the same pair, which is what lets a topic carry
       # two competing EXCLUSIVE writers without also carrying two different
       # QoS faults to explain.
-      qos = (_mixed_writer_qos() if position == 0
+      qos = (_mixed_writer_qos() if entry.health != "red" or position == 0
              else _mixed_writer_qos(entry.policies))
       writer = dds.DynamicData.DataWriter(
           publishers[app], topic_for(app, entry.name), qos)
@@ -376,17 +380,33 @@ def run_mixed_qos(args):
       held.append(dds.DynamicData.DataReader(
           subscribers[app], topic_for(app, entry.name), _mixed_reader_qos()))
     endpoints += len(entry.writer_apps) + len(entry.reader_apps)
+    if entry.health == "yellow":
+      disabled_qos = dds.DomainParticipantQos()
+      disabled_qos.participant_name.name = (
+          f"{args.participant_name}_type_disabled_{entry.name}")
+      disabled_qos.resource_limits.type_object_max_serialized_length = 0
+      disabled_participant = dds.DomainParticipant(args.domain, qos=disabled_qos)
+      disabled_publisher = dds.Publisher(disabled_participant)
+      alternate_type = build_rich_type(f"{args.type_name}_{entry.name}_alternate")
+      disabled_topic = dds.DynamicData.Topic(disabled_participant, entry.name,
+                                              alternate_type)
+      disabled_writer = dds.DynamicData.DataWriter(
+          disabled_publisher, disabled_topic, _mixed_writer_qos())
+      participants.append(disabled_participant)
+      writers.append(disabled_writer)
+      held += [disabled_publisher, disabled_topic, disabled_writer]
+      endpoints += 1
     contention = ("; EXCLUSIVE ownership contended by "
                   f"{len(entry.writer_apps)} writers"
                   if _contends_for_ownership(entry) else "")
-    print(f"mixed QoS topic={entry.name}: "
+    print(f"random mixed topology topic={entry.name} health={entry.health}: "
           f"{len(entry.writer_apps)} writer(s) "
-          f"(1 matching, {len(entry.writer_apps) - 1} weakened on "
+          f"(1 matching, {len(entry.writer_apps) - 1 if entry.health == 'red' else 0} weakened on "
           f"{', '.join(entry.policies).upper()}), "
           f"{len(entry.reader_apps)} reader(s) in apps "
           f"{[a + 1 for a in entry.reader_apps]}{contention}", flush=True)
 
-  print(f"publishing mode=mixed_qos domain={args.domain} "
+  print(f"publishing mode=random_mixed_topology domain={args.domain} "
         f"participants={args.mixed_participants} topics={args.mixed_topics} "
         f"endpoints={endpoints} seed={seed}", flush=True)
   # On its own line and last, because it is the one thing an operator needs off

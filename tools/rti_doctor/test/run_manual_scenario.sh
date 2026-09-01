@@ -22,7 +22,7 @@ Scenarios:
   large-data                  Fragmented Connext samples; expect INFO fragmentation.
   partition                   Writer in a named partition; Doctor mirrors it.
   bad-pair                    Writer plus incompatible Connext reader; expect RxO ERROR.
-    mixed-qos-topology          Five apps, six topics; two matching and two incompatible pairs each.
+    mixed-qos-topology          Random mixed topology: green, yellow, and red topics.
   rxo-compatible              Connext writer/reader with compatible RELIABILITY.
   rxo-reliability-mismatch    BEST_EFFORT writer and RELIABLE reader; expect RxO ERROR.
     connext-cyclone-compatible  Connext writer and Cyclone reader with compatible RELIABILITY.
@@ -288,13 +288,12 @@ run_mixed_qos_topology() {
         topic_prefix="DoctorManualMixed"
     fi
     cat <<EOF
-Mixed QoS topology started: domain=${domain}, topics=${topic_prefix}_01 through ${topic_prefix}_06
+Random mixed topology started: domain=${domain}, topics=${topic_prefix}_01 through ${topic_prefix}_06
 Participants: ${MANUAL_PARTICIPANT_PREFIX}_app_1 through ${MANUAL_PARTICIPANT_PREFIX}_app_5
-The scenario is drawn fresh per run. Every topic carries one writer offering
-exactly what its readers request and one or two weakened on two QoS policies,
-with the endpoint counts and the hosting applications varying per topic. At
-least one topic always leaves OWNERSHIP EXCLUSIVE on two or more writers, which
-is the case where the losing writer's samples are dropped at every reader.
+The scenario is drawn fresh per run. It contains compatible green topics,
+yellow topics with disabled type propagation and a different type name, and
+red topics with weakened writer QoS. Endpoint counts and hosting applications
+vary per run. At least one topic leaves OWNERSHIP EXCLUSIVE on two or more writers.
 The fixture prints each topic's shape below, and its seed last: pass that back
 as --mixed-seed to replay this exact scenario.
 In another terminal, run:

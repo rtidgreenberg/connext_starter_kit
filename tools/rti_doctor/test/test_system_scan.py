@@ -60,6 +60,40 @@ def registry_with_fastdds_peers():
 
 class TestSystemScan(unittest.TestCase):
 
+  def test_topic_relationship_groups_compatible_endpoints(self):
+    registry = registry_with_reliability_fault()
+    for endpoint in registry.endpoint_list():
+      endpoint.type_state = records.TYPE_RESOLVED
+    snapshot = system_scan.SystemScanSnapshot(
+        captured_at=123.0, topology={}, issues=())
+    with mock.patch("rti_doctor.checks.qos_match.compare_endpoints",
+                    return_value=((), ())):
+      relationship = system_scan.topic_relationship(registry, snapshot, "Telemetry")
+
+    self.assertEqual(relationship.severity, f.Severity.OK)
+    self.assertEqual(len(relationship.groups), 1)
+    self.assertEqual(relationship.groups[0].writer.key, "writer-guid")
+    self.assertEqual([item.key for item in relationship.groups[0].readers],
+                     ["reader-guid"])
+    self.assertEqual(relationship.unmatched_writers, ())
+    self.assertEqual(relationship.unmatched_readers, ())
+
+  def test_topic_relationship_lists_incompatible_endpoints_as_unmatched(self):
+    registry = registry_with_reliability_fault()
+    for endpoint in registry.endpoint_list():
+      endpoint.type_state = records.TYPE_RESOLVED
+    snapshot = system_scan.SystemScanSnapshot(
+        captured_at=123.0, topology={}, issues=())
+    with mock.patch("rti_doctor.checks.qos_match.compare_endpoints",
+                    return_value=(({"policy": "RELIABILITY"},), ())):
+      relationship = system_scan.topic_relationship(registry, snapshot, "Telemetry")
+
+    self.assertEqual(relationship.groups, ())
+    self.assertEqual(relationship.unmatched_writers[0].reason,
+                     "incompatible: RELIABILITY")
+    self.assertEqual(relationship.unmatched_readers[0].reason,
+                     "incompatible: RELIABILITY")
+
   def test_rxo_fault_has_one_identity_bearing_issue(self):
     snapshot = system_scan.scan(
         registry_with_reliability_fault(), own_qos=None,

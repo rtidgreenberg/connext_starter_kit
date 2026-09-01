@@ -96,7 +96,7 @@ class TestOwnershipContentionIsGuaranteed(unittest.TestCase):
   def test_contention_needs_both_two_writers_and_an_intact_ownership(self):
     """The predicate itself, since everything above rests on it."""
     def topic(policies, writers):
-      return fixture.TopicPlan("T_01", policies, list(range(writers)), [0])
+      return fixture.TopicPlan("T_01", "red", policies, list(range(writers)), [0])
     self.assertTrue(fixture._contends_for_ownership(
         topic(("reliability", "deadline"), 2)))
     self.assertFalse(fixture._contends_for_ownership(
@@ -108,6 +108,12 @@ class TestOwnershipContentionIsGuaranteed(unittest.TestCase):
 
 
 class TestTheTopologyVaries(unittest.TestCase):
+
+  def test_default_plan_has_green_yellow_and_red_topics(self):
+    for seed, plan in zip(SEEDS, plans()):
+      with self.subTest(seed=seed):
+        self.assertEqual({topic.health for topic in plan},
+                         {"green", "yellow", "red"})
 
   def test_endpoint_counts_stay_within_their_bounds(self):
     low_w, high_w = fixture.MIXED_WRITERS_PER_TOPIC

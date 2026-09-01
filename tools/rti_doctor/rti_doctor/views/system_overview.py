@@ -187,6 +187,7 @@ class SystemOverviewScreen(Screen):
     self.menu.add_columns("View", "Description")
     self.menu.add_row("Findings", "Review errors, warnings, and observations.", key="findings")
     self.menu.add_row("Topology", "Browse participants and their discovered endpoints.", key="topology")
+    self.menu.add_row("Topics", "Browse topic health and endpoint relationships.", key="topics")
     self.menu.cursor_type = "row"
     self.menu.focus()
     await self.refresh_summary()
@@ -239,6 +240,8 @@ class SystemOverviewScreen(Screen):
       self.app.push_screen(IssueSeverityScreen(self.session, self.snapshot))
     elif event.row_key.value == "topology":
       self.app.push_screen(TopologyHealthScreen(self.session))
+    elif event.row_key.value == "topics":
+      self.app.push_screen(TopicListScreen(self.session, self.snapshot))
 
   def action_refresh(self):
     _spawn(self, self.refresh_summary())
@@ -478,9 +481,13 @@ class EndpointChoiceScreen(Screen):
 
   def compose(self):
     yield Header()
-    yield Static(f"[bold]{escape(self.issue.title)}[/bold]")
-    yield Static("This finding involves more than one endpoint. Choose which one "
-                 "to open - each endpoint page describes one endpoint.")
+    if self.issue is None:
+      yield Static("[bold]Topic endpoints[/bold]")
+      yield Static("Choose an endpoint to open its direct report.")
+    else:
+      yield Static(f"[bold]{escape(self.issue.title)}[/bold]")
+      yield Static("This finding involves more than one endpoint. Choose which one "
+                   "to open - each endpoint page describes one endpoint.")
     with Container(id="endpoint_choice"):
       yield self.table
     yield Footer()
@@ -765,6 +772,8 @@ class TopicEndpointsScreen(Screen):
   """Readers and writers belonging to one selected topic."""
 
   BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
+              ("f", "findings", "Linked findings"),
+              ("o", "open_report", "Choose endpoint report"),
               ("q", "quit_app", "Quit")]
 
   CSS = """
@@ -790,24 +799,41 @@ class TopicEndpointsScreen(Screen):
 
   async def on_mount(self):
     self.title = f"rti_doctor - topic {self.topic_name}"
-    self.table.add_columns("Kind", "Participant", "Vendor", "Type")
+    self.table.add_columns("Kind", "Participant", "Vendor", "Type", "Details")
     self.table.cursor_type = "row"
+    relationship = system_scan.topic_relationship(
+      self.session.registry, self.snapshot, self.topic_name)
     marks = await issue_marks.marks_for(self.session, self.snapshot)
     shown = []
-    for endpoint in sorted(self.session.registry.endpoints_on_topic(self.topic_name),
-                           key=lambda item: (item.kind, item.key)):
-      participant = self.session.registry.participant_for(endpoint)
-      severity = marks.get(endpoint.key)
-      shown.append(severity)
-      self.table.add_row(
-          *issue_marks.cells(
-              (endpoint.kind,
-               participant.name if participant and participant.name else "(unnamed)",
-               endpoint.vendor_name, endpoint.type_name or "(none)"), severity),
-          key=endpoint.key)
-    self.legend.update(issue_marks.legend(
-        shown, getattr(self.snapshot, "captured_at", None)))
+    for group in relationship.groups:
+      self._add_endpoint("Compatible group", group.writer, "writer",
+                         marks.get(group.writer.key))
+      shown.append(marks.get(group.writer.key))
+      for reader in group.readers:
+        self._add_endpoint("  matched reader", reader, "compatible by discovery",
+                           marks.get(reader.key))
+        shown.append(marks.get(reader.key))
+    for unmatched in relationship.unmatched_writers:
+      self._add_endpoint("Unmatched writer", unmatched.endpoint, unmatched.reason,
+                         marks.get(unmatched.endpoint.key))
+      shown.append(marks.get(unmatched.endpoint.key))
+    for unmatched in relationship.unmatched_readers:
+      self._add_endpoint("Unmatched reader", unmatched.endpoint, unmatched.reason,
+                         marks.get(unmatched.endpoint.key))
+      shown.append(marks.get(unmatched.endpoint.key))
+    self.legend.update(
+        f"{relationship.severity.label}: observed compatibility, not live association\n"
+        + issue_marks.legend(shown, getattr(self.snapshot, "captured_at", None)))
     self.table.focus()
+
+  def _add_endpoint(self, section, endpoint, detail, severity):
+    participant = self.session.registry.participant_for(endpoint)
+    self.table.add_row(*issue_marks.cells(
+      (endpoint.kind,
+         participant.name if participant and participant.name else "(unnamed)",
+       endpoint.vendor_name, endpoint.type_name or "(none)",
+       f"{section}: {detail}"), severity),
+        key=endpoint.key)
 
   async def on_data_table_row_highlighted(self, event):
     self.selected_key = event.row_key.value if event.row_key else None
@@ -824,6 +850,94 @@ class TopicEndpointsScreen(Screen):
     if endpoint is not None:
       self.app.push_screen(ReportScreen(
           self.session, endpoint=endpoint, probe=self.session.probe_default))
+
+  def action_findings(self):
+    issues = {item.key for item in getattr(self.snapshot, "issues", ())
+              if item.topic_name == self.topic_name}
+    self.app.push_screen(IssueListScreen(self.session, self.snapshot, issues))
+
+  def action_open_report(self):
+    choices = []
+    for endpoint in sorted(self.session.registry.endpoints_on_topic(self.topic_name),
+                           key=lambda item: (item.kind, item.key)):
+      participant = self.session.registry.participant_for(endpoint)
+      label = participant.name if participant and participant.name else endpoint.key
+      choices.append((endpoint.kind, label, endpoint))
+    if choices:
+      self.app.push_screen(EndpointChoiceScreen(self.session, None, choices))
+
+  def action_back(self):
+    self.app.pop_screen()
+
+  def action_quit_app(self):
+    self.app.exit()
+
+
+class TopicListScreen(Screen):
+  """Topic-first navigation with passive health rollups."""
+
+  BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
+              ("r", "refresh", "Refresh"), ("q", "quit_app", "Quit")]
+
+  def __init__(self, session, snapshot=None):
+    super().__init__()
+    self.session = session
+    self.snapshot = snapshot
+    self.table = DataTable()
+    self.status = None
+    self.selected_key = None
+    self.scan_error = None
+
+  def compose(self):
+    yield Header()
+    self.status = Static("Collecting topics...", id="topic_list_status")
+    yield self.status
+    with Container(id="topic_list"):
+      yield self.table
+    yield Footer()
+
+  async def on_mount(self):
+    self.title = f"rti_doctor - topics domain {self.session.domain_id}"
+    self.table.add_columns("Topic", "Writers", "Readers", "Health")
+    self.table.cursor_type = "row"
+    if self.snapshot is None:
+      await self._refresh(max_age=SCAN_REUSE_SECONDS)
+    else:
+      self._render_table()
+    self.table.focus()
+
+  async def _refresh(self, max_age=0.0):
+    snapshot = await _scan(self, max_age, self.snapshot)
+    if snapshot is None:
+      return
+    self.snapshot = snapshot
+    self._render_table()
+
+  def _render_table(self):
+    self.table.clear()
+    rows = []
+    for topic_name in self.session.registry.topic_names():
+      endpoints = self.session.registry.endpoints_on_topic(topic_name)
+      severity = system_scan.topic_severity(self.snapshot, topic_name, endpoints)
+      rows.append((severity, topic_name, endpoints))
+    for severity, topic_name, endpoints in sorted(rows, key=lambda item: (-int(item[0]), item[1])):
+      self.table.add_row(topic_name, str(sum(item.is_writer for item in endpoints)),
+                         str(sum(not item.is_writer for item in endpoints)),
+                         issue_marks.severity_text(severity.label, severity),
+                         key=topic_name)
+    self.status.update("Topics by observed health | Enter opens relationships | r refresh")
+
+  async def on_data_table_row_highlighted(self, event):
+    self.selected_key = event.row_key.value if event.row_key else None
+
+  async def on_data_table_row_selected(self, event):
+    self.selected_key = event.row_key.value if event.row_key else None
+    if self.selected_key:
+      self.app.push_screen(TopicEndpointsScreen(
+          self.session, self.selected_key, snapshot=self.snapshot))
+
+  def action_refresh(self):
+    _spawn(self, self._refresh())
 
   def action_back(self):
     self.app.pop_screen()

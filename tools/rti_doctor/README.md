@@ -98,7 +98,9 @@ handshake traffic, user-data representation, and a Fast DDS peer's product
 version when it advertises one.
 
 You'll be asked for a domain ID exactly as `rti_spy` asks, then get the system
-overview. Use `Up`/`Down` and `Enter` to choose **Findings** or **Topology**.
+overview. Use `Up`/`Down` and `Enter` to choose **Findings**, **Topology**, or
+**Topics**. Topics provides a topic-first view of health and observed
+writer-reader relationships.
 The Findings menu groups Errors, Warnings, and Info observations by severity;
 selecting one shows only that severity. In Topology, `Enter` drills into the
 selected participant, topic, or endpoint, while `f` opens the linked Findings.
@@ -110,6 +112,7 @@ Keys:
 | `Up` / `Down` / `Enter` | Select a menu item, drill into a participant/topic, or run the full diagnostic on an endpoint |
 | `1` / `2` / `3` / `4` | In Topology: participants, readers, writers, topics |
 | `f` | In Topology: show findings linked to the highlighted row |
+| `o` | In a topic detail: choose any topic endpoint to open its direct report |
 | `p` | On an endpoint report opened with `--no-probe-default`: probe it now |
 | `m` | On the system overview: observed domain metrics |
 | `r` | Refresh the current screen's snapshot |

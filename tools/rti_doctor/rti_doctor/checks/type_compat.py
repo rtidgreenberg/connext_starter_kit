@@ -113,7 +113,7 @@ def check_type_state(context):
   return [Finding(
       id="type.no_type_info",
       rung=RUNG_TYPE,
-      severity=Severity.ERROR,
+      severity=Severity.WARN,
       title=f"No type information available for this {role}",
       observed=(f"Topic '{endpoint.topic_name}' type name '{endpoint.type_name}' is "
                 f"visible on this {role}, but no DynamicType arrived within "

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 import time
 
-from . import compat, findings as f, topology, wire
+from . import compat, findings as f, records, topology, wire
 from .checks import CheckContext, run_checks
 from .checks import blind_spots, qos_match, static_discovery, type_compat
 
@@ -46,6 +46,109 @@ class SystemScanSnapshot:
   topology: object
   issues: tuple
   fastdds_product_versions: tuple = ()
+
+
+@dataclass(frozen=True)
+class TopicWriterGroup:
+  """One writer and readers compatible with it by observed discovery data."""
+
+  writer: object
+  readers: tuple
+
+
+@dataclass(frozen=True)
+class TopicUnmatchedEndpoint:
+  """A topic endpoint with no compatible counterpart and the observed reason."""
+
+  endpoint: object
+  reason: str
+
+
+@dataclass(frozen=True)
+class TopicRelationship:
+  """Passive compatibility view for one topic; never a live-match assertion."""
+
+  topic_name: str
+  severity: f.Severity
+  groups: tuple
+  unmatched_writers: tuple
+  unmatched_readers: tuple
+
+
+def topic_relationship(registry, snapshot, topic_name):
+  """Classify discovered endpoints on one topic for the topic-first UI.
+
+  A compatible pair means no incompatibility was observable in the passive
+  discovery data. It intentionally does not claim the remote middleware has
+  formed a live association.
+  """
+  endpoints = sorted(registry.endpoints_on_topic(topic_name), key=lambda item: item.key)
+  writers = [item for item in endpoints if item.is_writer]
+  readers = [item for item in endpoints if not item.is_writer]
+  compatible = {writer.key: [] for writer in writers}
+  writer_reasons = {writer.key: [] for writer in writers}
+  reader_reasons = {reader.key: [] for reader in readers}
+
+  from .checks import qos_match
+  for writer in writers:
+    for reader in readers:
+      try:
+        mismatches, unevaluated = qos_match.compare_endpoints(writer, reader)
+      except AttributeError:
+        # A discovery adapter may not expose every QoS policy. It is incomplete
+        # evidence, never a reason to crash the topic browser or claim a match.
+        mismatches, unevaluated = (), (object(),)
+      if mismatches:
+        reason = ", ".join(item["policy"] for item in mismatches)
+        writer_reasons[writer.key].append(f"incompatible: {reason}")
+        reader_reasons[reader.key].append(f"incompatible: {reason}")
+      elif _pair_has_incomplete_type(writer, reader):
+        reason = "type information unavailable or pending"
+        writer_reasons[writer.key].append(reason)
+        reader_reasons[reader.key].append(reason)
+      elif unevaluated:
+        reason = "incomplete QoS evidence"
+        writer_reasons[writer.key].append(reason)
+        reader_reasons[reader.key].append(reason)
+      else:
+        compatible[writer.key].append(reader)
+
+  groups = tuple(TopicWriterGroup(writer, tuple(compatible[writer.key]))
+                 for writer in writers if compatible[writer.key])
+  unmatched_writers = tuple(TopicUnmatchedEndpoint(
+      writer, _unmatched_reason(readers, writer_reasons[writer.key]))
+      for writer in writers if not compatible[writer.key])
+  compatible_reader_keys = {reader.key for group in groups for reader in group.readers}
+  unmatched_readers = tuple(TopicUnmatchedEndpoint(
+      reader, _unmatched_reason(writers, reader_reasons[reader.key]))
+      for reader in readers if reader.key not in compatible_reader_keys)
+  return TopicRelationship(
+      topic_name=topic_name,
+      severity=topic_severity(snapshot, topic_name, endpoints),
+      groups=groups,
+      unmatched_writers=unmatched_writers,
+      unmatched_readers=unmatched_readers)
+
+
+def topic_severity(snapshot, topic_name, endpoints=()):
+  """Return the worst issue linked to a topic or one of its endpoints."""
+  endpoint_keys = {item.key for item in endpoints}
+  linked = [issue.severity for issue in getattr(snapshot, "issues", ())
+            if issue.topic_name == topic_name or endpoint_keys.intersection(
+                tuple(issue.writer_keys) + tuple(issue.reader_keys))]
+  return max(linked, default=f.Severity.OK)
+
+
+def _pair_has_incomplete_type(writer, reader):
+  return (writer.type_state != records.TYPE_RESOLVED or
+          reader.type_state != records.TYPE_RESOLVED)
+
+
+def _unmatched_reason(counterparts, reasons):
+  if not counterparts:
+    return "no counterpart discovered"
+  unique = tuple(dict.fromkeys(reasons))
+  return "; ".join(unique) if unique else "no compatible counterpart observed"
 
 
 def scan(registry, own_qos, type_lookup_settings, domain_id, active_domains=(),

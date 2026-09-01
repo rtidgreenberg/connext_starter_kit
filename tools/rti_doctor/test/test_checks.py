@@ -433,12 +433,12 @@ class TestTypeState(unittest.TestCase):
     self.assertEqual(result[0].severity, f.Severity.INFO)
     self.assertIn("still in flight", result[0].title)
 
-  def test_unavailable_is_an_error_and_lists_causes(self):
+  def test_unavailable_is_a_warning_and_lists_causes(self):
     endpoint = endpoint_record(type_state=records.TYPE_UNAVAILABLE)
     context = CheckContext(endpoint=endpoint, type_wait=5.0,
                            type_lookup_settings={"request_types_filter": "*"})
     result = type_compat.check_type_state(context)
-    self.assertEqual(result[0].severity, f.Severity.ERROR)
+    self.assertEqual(result[0].severity, f.Severity.WARN)
     self.assertEqual(result[0].id, "type.no_type_info")
     self.assertIn("TypeLookup", result[0].root_cause)
 

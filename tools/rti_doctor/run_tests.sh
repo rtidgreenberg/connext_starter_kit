@@ -37,7 +37,8 @@ UNIT=(
     test_domains
     test_doctor_e2e
 )
-LIVE=(test_live_integration test_scale test_data_representation_spike)
+LIVE=(test_live_integration test_scale test_data_representation_spike
+    test_ownership_ignore_spike)
 VENDOR=(
     test_fault_vendor_e2e
     test_fastdds_representation_spike

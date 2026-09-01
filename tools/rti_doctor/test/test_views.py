@@ -152,8 +152,9 @@ class TestRefreshFailureIsVisible(unittest.TestCase):
                       topic_name=None, severity=findings.Severity.ERROR)
     screen = system_overview.TopologyHealthScreen(StubSession())
     screen.snapshot = mock.Mock(issues=(issue,))
-    self.assertEqual(screen._finding_summary(participant_key="p1"),
-                     "1 finding (worst: ERROR)")
+    summary = screen._finding_summary(participant_key="p1")
+    self.assertEqual(str(summary), "1 finding (worst: ERROR)")
+    self.assertEqual(str(summary.spans[0].style), "bold red")
 
   def test_empty_domain_with_active_issue_shows_its_error_count(self):
     """A discovery blind spot is the report, not an empty state."""
@@ -606,20 +607,16 @@ class TestPairedIssueOpensAReport(unittest.TestCase):
 
 
 class CaptureStubSession(StubSession):
-  """Records what a report asked of it; creates no DDS entity and no tshark.
+  """Records automatic probe and RTI Network Capture requests."""
 
-  `capture_interface` is the answered-up-front case (`--capture-interface`);
-  leaving it None is the unanswered case, where a report opening will ask.
-  """
-
-  def __init__(self, capture_interface=None, network_capture=False):
+  def __init__(self, capture_interface=None, network_capture=True):
     super().__init__()
     self.probe_timeout = 10.0
     self.type_wait = 5.0
     self.settle = 3.0
+    # Retained only for old test fixtures that construct this stub with the
+    # removed option. Production Session has no interface capture state.
     self.capture_interface = capture_interface
-    self.capture_choice_made = capture_interface is not None
-    self.capture_off_reason = None
     # RTI Network Capture is a launch-time answer, so a stub models it as a
     # constructor argument rather than something a screen can change.
     self.network_capture = network_capture
@@ -629,16 +626,6 @@ class CaptureStubSession(StubSession):
     self.calls = []
     self.wire_evidence = {"source": "/tmp/rti_doctor_captures/one.pcapng",
                           "packets": 12}
-
-  def record_capture_choice(self, interface):
-    self.capture_interface = interface
-    self.capture_choice_made = True
-    self.capture_off_reason = None
-
-  def disable_capture(self, reason):
-    self.capture_off_reason = reason
-    self.capture_interface = None
-    self.capture_choice_made = True
 
   def retain_capture(self, path):
     if path:
@@ -653,24 +640,13 @@ class CaptureStubSession(StubSession):
   def pass_in_flight(self):
     return time.monotonic() < self.pass_deadline
 
-  def capture_path(self, timestamp=None):
-    return "/tmp/rti_doctor_captures/one.pcapng"
-
-  def diagnose_endpoint(self, endpoint, probe=True, capture_interface=None,
-                        capture_seconds=None, capture_path=None,
-                        write_samples=False):
+  def diagnose_endpoint(self, endpoint, probe=True, write_samples=False):
     self.calls.append({"endpoint": endpoint.key, "probe": probe,
-                       "capture_interface": capture_interface,
-                       "capture_seconds": capture_seconds,
-                       "capture_path": capture_path,
                        "write_samples": write_samples})
-    if capture_interface:
-      self.capture_artifacts.append(capture_path)
     return report.ReportData(
         domain_id=7, scope=f"topic '{endpoint.topic_name}'", all_findings=[],
         endpoint=endpoint,
-        wire_evidence=self.wire_evidence if capture_interface else None,
-        capture_interface=capture_interface)
+        participant_evidence=self.wire_evidence if probe else None)
 
 
 class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
@@ -690,16 +666,10 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     async def run():
       screen = report_screen.ReportScreen(session, endpoint=endpoint, probe=probe)
       app = Harness(screen)
-      # The picker can now open during on_mount, and it enumerates through
-      # `tshark -D`. Patched for every test in this class so none of them
-      # shells out, and so the ones that never reach the picker cannot start
-      # doing so silently.
-      with mock.patch.object(report_screen.wire, "capture_interfaces",
-                             return_value=((("1", "lo"), ("2", "eth0")), None)):
-        async with app.run_test() as pilot:
-          await pilot.pause()
-          await app.workers.wait_for_complete()
-          await steps(pilot, screen, collected)
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await steps(pilot, screen, collected)
 
     asyncio.run(run())
     return collected
@@ -720,52 +690,41 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     out["said"] = status_text(screen)
     out["screen"] = pilot.app.screen
 
-  def test_opening_a_report_asks_before_capturing_anything(self):
-    """The consent, before any tshark: a report with no answer yet must ask."""
+  def test_opening_a_report_records_its_probe_automatically(self):
+    """An endpoint report starts its probe without choosing an interface."""
     session = CaptureStubSession()
 
-    async def steps(pilot, screen, out):
-      out["screen"] = pilot.app.screen
+    self.drive(session, FakeEndpoint("w1", "Writer"), self._settle)
+    self.assertEqual([call["probe"] for call in session.calls], [False, True])
 
-    result = self.drive(session, FakeEndpoint("w1", "Writer"), steps)
-    self.assertIsInstance(result["screen"], report_screen.CaptureInterfaceScreen)
-    # Only the static pass ran while the question is still open - and it wrote
-    # nothing, which the static pass could never do anyway.
-    self.assertEqual(session.calls,
-                     [{"endpoint": "w1", "probe": False,
-                       "capture_interface": None, "capture_seconds": None,
-                       "capture_path": None, "write_samples": False}])
-
-  def test_an_answered_report_captures_on_entry_in_one_pass(self):
-    """The point of the change: one pass, and it carries both halves.
-
-    Capture used to be a second `diagnose_endpoint` with `probe=True`, because
-    a capture with nothing on the wire is an empty file - so the full report
-    cost two probes, one on mount and one under the capture.
-    """
-    session = CaptureStubSession(capture_interface="eth0")
+  def test_a_report_probes_on_entry_in_one_pass(self):
+    session = CaptureStubSession()
     result = self.drive(session, FakeEndpoint("w1", "Writer"), self._settle)
     probing = [call for call in session.calls if call["probe"]]
     self.assertEqual(len(probing), 1)
-    self.assertEqual(probing[0]["capture_interface"], "eth0")
-    self.assertEqual(probing[0]["capture_seconds"], 10.0)
-    # The file named on screen is the file the capture is told to write.
-    self.assertEqual(probing[0]["capture_path"],
-                     os.path.abspath("/tmp/rti_doctor_captures/one.pcapng"))
-    self.assertIn("Full diagnostic complete", result["said"])
-    self.assertIn("12 matching frames", result["said"])
+    self.assertIn("Probe complete", result["said"])
 
-  def test_the_entry_announcement_names_what_is_about_to_run(self):
-    """Said before tshark is spawned: where, for how long, and onto what disk.
+  def test_probe_completion_names_exclusive_writer_isolation(self):
+    endpoint = FakeEndpoint("w1", "Writer")
+    endpoint.ownership = type("Ownership", (), {
+      "kind": type("Kind", (), {"name": "EXCLUSIVE"})()})()
+    screen = report_screen.ReportScreen(CaptureStubSession(), endpoint=endpoint)
+    probe_result = probe.ProbeResult()
+    probe_result.isolated = True
+    probe_result.ignored = [{"kind": "writer", "key": "w2"}]
+    screen.data = report.ReportData(
+      domain_id=7, scope="topic 'Telemetry'", all_findings=[], endpoint=endpoint,
+      probe_result=probe_result,
+      participant_evidence={"source": "p.pcap", "packets": 1})
+    self.assertIn("ignoring 1 competing writer(s) to avoid EXCLUSIVE ownership "
+            "arbitration, so it was probed exclusively",
+            screen._pass_result_text(True))
 
-    A pure helper rather than an intercepted widget: this text is written
-    during `on_mount`, before a test could install a recorder on the status.
-    """
-    session = CaptureStubSession("eth0")
+  def test_the_entry_announcement_names_network_capture(self):
+    session = CaptureStubSession()
     screen = report_screen.ReportScreen(session, endpoint=FakeEndpoint("w1", "Writer"))
-    said = screen._pass_announcement("eth0", True, 10.0, "/tmp/one.pcapng")
-    for expected in ("eth0", "/tmp/one.pcapng", "10s", ".tshark.log",
-                     "privileges", "probing"):
+    said = screen._pass_announcement(True, 10.0)
+    for expected in ("10s", "probing", "RTI Network Capture", "shared memory"):
       self.assertIn(expected, said)
 
   def test_a_reader_report_probes_on_entry_too(self):
@@ -776,15 +735,14 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     `is_writer` gate on this screen was the only thing in the way. A reader
     probe answers what no static check can - does anything match this reader.
     """
-    session = CaptureStubSession("lo")
+    session = CaptureStubSession()
 
     async def steps(pilot, screen, out):
-      out["said"] = screen._pass_announcement("lo", True, 10.0, "/x")
+      out["said"] = screen._pass_announcement(True, 10.0)
 
     result = self.drive(session, FakeEndpoint("r1", "Reader"), steps)
     probing = [call for call in session.calls if call["probe"]]
     self.assertEqual(len(probing), 1)
-    self.assertEqual(probing[0]["capture_interface"], "lo")
     # A reader probe creates a writer that never publishes, so the copy must
     # not promise user data the Wire tab will then contradict.
     self.assertIn("creating a writer", result["said"])
@@ -990,6 +948,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     self.assertNotRegex(text, r"vendor-v1: -{5,}")
     self.assertIn(f"vendor-v1: {data.verdict}", text)
 
+  @unittest.skip("interface capture was removed")
   def test_a_capture_that_never_started_turns_capture_off_for_the_session(self):
     """One tshark refusal, not one per report.
 
@@ -1013,6 +972,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
                      [None, None])
     self.assertTrue([call for call in session.calls if call["probe"]])
 
+  @unittest.skip("interface capture was removed")
   def test_a_capture_that_ran_and_then_failed_stays_this_report_s_problem(self):
     """The opposite mistake: one bad ending must not disable a working host.
 
@@ -1081,10 +1041,9 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
 
     result = self.drive(session, FakeEndpoint("w1", "Writer"), steps, probe=False)
     self.assertIsInstance(result["screen"], report_screen.ReportScreen)
-    # Passive reports stay read-only and do not offer a capture rerun.
-    requested = [call for call in session.calls if call["capture_interface"]]
-    self.assertEqual(requested, [])
+    self.assertEqual([call["probe"] for call in session.calls], [False])
 
+  @unittest.skip("interface capture was removed")
   def test_choosing_an_interface_remembers_it_and_runs_the_pass(self):
     """CAP-2's acceptance: capture on `lo` from a TUI launched with no flags."""
     session = CaptureStubSession()
@@ -1105,6 +1064,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     self.assertEqual([call["capture_interface"] for call in session.calls
                       if call["probe"]], ["lo"])
 
+  @unittest.skip("interface capture was removed")
   def test_skip_is_an_answer_and_is_remembered(self):
     """Skip means probe without capturing - and stops the asking."""
     session = CaptureStubSession()
@@ -1127,6 +1087,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     self.assertIsInstance(result["screen"], report_screen.ReportScreen)
     self.assertEqual([call["probe"] for call in session.calls], [False, True])
 
+  @unittest.skip("interface capture was removed")
   def test_dismissing_the_picker_probes_and_asks_again_next_time(self):
     """Escape is not an answer; remembering it would make the Skip row a lie."""
     session = CaptureStubSession()
@@ -1156,6 +1117,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     self.assertIsInstance(result["screen"],
                           report_screen.CaptureInterfaceScreen)
 
+  @unittest.skip("interface capture was removed")
   def test_the_picker_offers_skip_first_and_any_last(self):
     """N3, both ends: the reflexive Enter must land on the least privileged row.
 
@@ -1174,6 +1136,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     self.assertEqual([iface for _, _, _, iface in screen._choices()],
                      [None, "lo", "any"])
 
+  @unittest.skip("interface capture was removed")
   def test_the_picker_still_offers_any_when_tshark_cannot_enumerate(self):
     """A picker that cannot list must not become a dead end."""
     session = CaptureStubSession()
@@ -1182,6 +1145,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     self.assertEqual([label for _, label, _, _ in screen._choices()],
                      [report_screen.SKIP_CAPTURE, "any"])
 
+  @unittest.skip("interface capture was removed")
   def test_the_picker_does_not_enumerate_on_the_event_loop(self):
     """`tshark -D` runs extcap helpers, so it must not block construction.
 
@@ -1219,7 +1183,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
         domain_id=7, scope="topic 'Telemetry'", all_findings=[],
         endpoint=FakeEndpoint("w1", "Writer")))
     self.assertIn(report.CAPTURE_PLACEHOLDER, sections["wire"])
-    self.assertIn("selected when an endpoint report is opened", sections["wire"])
+    self.assertIn("Run a diagnostic probe", sections["wire"])
 
   def test_the_overview_tab_shows_what_a_capture_produced(self):
     """The operator who pressed `c` is the one who must see the result.
@@ -1232,7 +1196,7 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
     sections = report.render_view_sections(report.ReportData(
         domain_id=7, scope="topic 'Telemetry'", all_findings=[],
         endpoint=FakeEndpoint("w1", "Writer"),
-        wire_evidence={"source": "c.pcapng", "packets": 0, "data_packets": 0},
+        participant_evidence={"source": "p.pcap", "packets": 0, "data_packets": 0},
         discovery_evidence={"fastdds_product_versions": ["3.6.2.0"]}))
     self.assertIn("CAPTURE EVIDENCE", sections["overview"])
     self.assertIn("3.6.2.0", sections["overview"])
@@ -1256,17 +1220,26 @@ class TestReportCaptureIsAnOperatorAction(unittest.TestCase):
   def test_capture_headline_names_the_representation_it_parsed(self):
     headline = report.capture_headline(report.ReportData(
         domain_id=7, scope="topic 'T'", all_findings=[],
-        wire_evidence={"source": "c.pcapng", "packets": 4, "data_packets": 4,
-                       "encapsulation_ids": ["0x0001"]},
+        participant_evidence={"source": "p.pcap", "packets": 4, "data_packets": 4,
+                  "encapsulation_ids": ["0x0001"]},
         discovery_evidence={"fastdds_product_versions": []}))
     self.assertIn("representation XCDR1", headline)
     self.assertIn("no Fast DDS version advertised", headline)
     self.assertIn("4 matching frames", headline)
 
+  def test_capture_headline_uses_network_capture_not_offline_pcap(self):
+    headline = report.capture_headline(report.ReportData(
+        domain_id=7, scope="topic 'T'", all_findings=[],
+        wire_evidence={"source": "c.pcapng", "packets": 0, "data_packets": 0},
+        participant_evidence={"source": "p.pcap", "packets": 34,
+                              "data_packets": 34}))
+    self.assertIn("no user DATA", headline)
+    self.assertNotIn("offline PCAP", headline)
+
   def test_capture_headline_singularizes_one_frame(self):
     headline = report.capture_headline(report.ReportData(
         domain_id=7, scope="topic 'T'", all_findings=[],
-        wire_evidence={"source": "c.pcapng", "packets": 1}))
+        participant_evidence={"source": "p.pcap", "packets": 1}))
     self.assertIn("1 matching frame;", headline + ";")
     self.assertNotIn("1 matching frames", headline)
 
@@ -1789,6 +1762,13 @@ class TestPayloadIsNeverParsedAsMarkup(unittest.TestCase):
     body = str(screen.bodies["data"].render())
     self.assertIn("[/]", body)
     self.assertIn("[red]hidden", body, "markup ate part of the payload")
+
+  def test_report_sections_style_status_without_parsing_markup(self):
+    plain = "[ERROR] rung 4  match.none\n[WARN] rung 3  type.partial\n"
+    styled = report_screen.ReportScreen._styled_section_text("findings", plain)
+    self.assertEqual(str(styled), plain)
+    self.assertEqual([str(span.style) for span in styled.spans],
+                     ["bold red", "bold yellow"])
 
   def test_the_live_feed_takes_its_samples_literally(self):
     screen = report_screen.ReportScreen(
@@ -2737,6 +2717,7 @@ class TestTheSixthReviewRound(unittest.TestCase):
     self.assertIn(self.HOSTILE, shown)
     self.assertNotIn("\\[", shown, "the operator was shown escape characters")
 
+  @unittest.skip("interface capture was removed")
   def test_p_during_the_capture_question_does_not_stack_a_second_picker(self):
     """`probing` and `capturing` are both False while the picker waits, so the
     entry offer and `p` could each push one - and the discarded answer still
@@ -2769,6 +2750,7 @@ class TestTheSixthReviewRound(unittest.TestCase):
     self.assertEqual(pushed, [1, 1], "`p` stacked a second capture picker")
     self.assertIn("Answer the capture question first", said)
 
+  @unittest.skip("interface capture was removed")
   def test_the_entry_offer_does_not_stack_a_picker_over_an_open_one(self):
     """The other half, and the one the race actually goes through.
 
@@ -2804,6 +2786,7 @@ class TestTheSixthReviewRound(unittest.TestCase):
     return len([screen for screen in app.screen_stack
                 if isinstance(screen, report_screen.CaptureInterfaceScreen)])
 
+  @unittest.skip("interface capture was removed")
   def test_answering_the_picker_reopens_the_asking_window(self):
     """`asking` must not latch, or a declined pass locks the key out."""
     session = CaptureStubSession()
@@ -3286,12 +3269,10 @@ class TestAPassiveReportCanBeProbedOnDemand(unittest.TestCase):
       screen = report_screen.ReportScreen(
           session, endpoint=endpoint, participant=participant, probe=probe)
       app = Harness(screen)
-      with mock.patch.object(report_screen.wire, "capture_interfaces",
-                             return_value=((("1", "lo"), ("2", "eth0")), None)):
-        async with app.run_test() as pilot:
-          await pilot.pause()
-          await app.workers.wait_for_complete()
-          await steps(pilot, screen, collected)
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await steps(pilot, screen, collected)
 
     asyncio.run(run())
     return collected
@@ -3323,6 +3304,7 @@ class TestAPassiveReportCanBeProbedOnDemand(unittest.TestCase):
                         FakeEndpoint("r1", "Reader"), steps)
     self.assertIn("matching writer", result["said"])
 
+  @unittest.skip("interface capture was removed")
   def test_pressing_p_runs_the_probe_with_the_remembered_capture_answer(self):
     session = CaptureStubSession("lo")
     result = self.drive(session, FakeEndpoint("w1", "Writer"), self.press_probe)
@@ -3334,6 +3316,7 @@ class TestAPassiveReportCanBeProbedOnDemand(unittest.TestCase):
     self.assertFalse(probing[0]["write_samples"])
     self.assertIn("Full diagnostic complete", result["said"])
 
+  @unittest.skip("interface capture was removed")
   def test_pressing_p_with_no_capture_answer_yet_asks_before_probing(self):
     """Same ordering as the probing entry path: tshark must precede the probe."""
     session = CaptureStubSession()
@@ -3356,9 +3339,6 @@ class TestAPassiveReportCanBeProbedOnDemand(unittest.TestCase):
     by hand.
     """
     session = CaptureStubSession()
-    # A remembered Skip, so this exercises the probe on its own rather than the
-    # combined probe+capture pass the test above covers.
-    session.record_capture_choice(None)
     session.registry = StubRegistry()
     session.registry.endpoints = {"w1": FakeEndpoint("w1", "Writer")}
     router = mock.Mock()
@@ -3372,12 +3352,10 @@ class TestAPassiveReportCanBeProbedOnDemand(unittest.TestCase):
 
     async def run():
       app = Harness(pushed)
-      with mock.patch.object(report_screen.wire, "capture_interfaces",
-                             return_value=((("1", "lo"),), None)):
-        async with app.run_test() as pilot:
-          await pilot.pause()
-          await app.workers.wait_for_complete()
-          collected["said"] = status_text(pushed)
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        collected["said"] = status_text(pushed)
 
     asyncio.run(run())
     probing = [call for call in session.calls if call["probe"]]
@@ -3423,12 +3401,10 @@ class TestAPassiveReportCanBeProbedOnDemand(unittest.TestCase):
 
     async def run():
       app = Harness(screen)
-      with mock.patch.object(report_screen.wire, "capture_interfaces",
-                             return_value=((("1", "lo"),), None)):
-        async with app.run_test() as pilot:
-          await pilot.pause()
-          await app.workers.wait_for_complete()
-          await steps(pilot, screen, collected)
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await steps(pilot, screen, collected)
 
     asyncio.run(run())
     self.assertTrue(collected["probe"])
@@ -3553,12 +3529,10 @@ class TestPublishingNeedsApproval(unittest.TestCase):
     async def run():
       screen = report_screen.ReportScreen(session, endpoint=endpoint, probe=probe)
       app = Harness(screen)
-      with mock.patch.object(report_screen.wire, "capture_interfaces",
-                             return_value=((("1", "lo"),), None)):
-        async with app.run_test() as pilot:
-          await pilot.pause()
-          await app.workers.wait_for_complete()
-          await steps(pilot, screen, collected)
+      async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await steps(pilot, screen, collected)
 
     asyncio.run(run())
     return collected

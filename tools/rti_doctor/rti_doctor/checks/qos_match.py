@@ -585,7 +585,8 @@ def check_rxo_pairs(context):
           id="qos.rxo_mismatch",
           rung=RUNG_MATCH,
           severity=Severity.ERROR,
-          title=f"QoS incompatible ({policies}): {writer_label} -> {reader_label}",
+          title=(f"Reader {index} of {len(peers)} has incompatible QoS "
+             f"({policies}): {reader_label} <- {writer_label}"),
           observed=_rxo_mismatch_text(writer_participant_name,
                                       reader_participant_name, rxo,
                                       unevaluated, census),

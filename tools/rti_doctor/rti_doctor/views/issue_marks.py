@@ -28,6 +28,29 @@ STYLE = "orange1"
 #: healthy system orange and leave the colour saying nothing.
 FLOOR = f.Severity.WARN
 
+SEVERITY_STYLE = {
+    f.Severity.ERROR: "bold red",
+    f.Severity.WARN: "bold yellow",
+    f.Severity.INFO: "bold cyan",
+    f.Severity.OK: "bold green",
+}
+
+
+def severity_text(value, severity):
+  """A severity-coloured cell without parsing its value as Rich markup."""
+  return Text(str(value), style=SEVERITY_STYLE.get(severity, ""))
+
+
+def severity_summary(counts):
+  """Trusted Rich markup for the three finding counts shown in status lines."""
+  parts = []
+  for severity, label in ((f.Severity.ERROR, "Errors"),
+                          (f.Severity.WARN, "Warnings"),
+                          (f.Severity.INFO, "Notes")):
+    style = SEVERITY_STYLE[severity]
+    parts.append(f"[{style}]{counts[severity]} {label}[/{style}]")
+  return " | ".join(parts)
+
 
 def severity_by_endpoint(snapshot, floor=FLOOR):
   """Worst finding severity at or above `floor`, per endpoint key.

@@ -155,15 +155,8 @@ def parse_args(argv=None):
                       default="vendor", help="Observer XTypes compliance mask "
                       "(default: vendor; compatibility child processes may use "
                       "default)")
-  packet_group = parser.add_mutually_exclusive_group()
-  packet_group.add_argument("--pcap", default=None,
-                            help="Analyze RTPS user-data packets in an existing PCAP/PCAPNG")
-  packet_group.add_argument("--capture-interface", default=None,
-                            help="Interface for packet capture: captured while probing "
-                                 "with --topic. In the TUI it answers the capture "
-                                 "question up front, so every endpoint report captures "
-                                 "on entry without asking (no default: the TUI asks, "
-                                 "and Skip is an answer)")
+  parser.add_argument("--pcap", default=None,
+                      help="Analyze RTPS user-data packets in an existing PCAP/PCAPNG")
   parser.add_argument("--network-capture", action="store_true", default=True,
                       help="Record rti_doctor's own participant with RTI Network "
                            "Capture while probing (default; use --no-network-capture "
@@ -204,13 +197,6 @@ def parse_args(argv=None):
     parser.error("--topic and --system are mutually exclusive")
   if args.pcap and not args.topic:
     parser.error("--pcap requires --topic")
-  # --capture-interface no longer implies --topic: it is also how the TUI's
-  # explicit capture action is pointed at an interface other than "any". It
-  # still has no meaning for the passive system assessment, which creates no
-  # DDS entities and captures nothing.
-  if args.capture_interface and args.system:
-    parser.error("--capture-interface is not used by --system; capture during "
-                 "a --topic diagnosis, or from an endpoint report in the TUI")
   if args.ready_after_participants < 0 or args.ready_timeout <= 0:
     parser.error("--ready-after-participants must be non-negative and --ready-timeout positive")
   # argparse's type=int/float accepts negatives, and float() accepts "nan" and
@@ -373,7 +359,6 @@ def build_session(domain_id, args, active_domains=None, domain_scan_ran=False,
       settle=args.settle,
       active_domains=active_domains or set(),
       domain_scan_ran=domain_scan_ran,
-      capture_interface=args.capture_interface,
       network_capture=getattr(args, "network_capture_active", False),
         probe_default=args.probe_default,
       isolate_probe=getattr(args, "isolate_probe", True),
@@ -462,12 +447,6 @@ def run_headless_topic(session, args):
             "--topic for the system assessment.", file=sys.stderr)
     return EXIT_TARGET_ABSENT
 
-  # The capture is the engine's, not a second one built here: one code path
-  # decides where a capture writes, how long it may run and how its file is
-  # read, so the CLI and the TUI cannot drift into capturing differently.
-  if args.capture_interface:
-    print(f"Capturing RTPS packets on interface '{args.capture_interface}' while "
-          f"diagnosing '{args.topic}'.", file=sys.stderr)
   if session.network_capture:
     print("Recording rti_doctor's own participant with RTI Network Capture "
           "(includes shared memory).", file=sys.stderr)
@@ -484,7 +463,6 @@ def run_headless_topic(session, args):
           f"the selected one. Use --no-isolate-probe to observe the whole topic.",
           file=sys.stderr)
   data = session.diagnose_endpoint(endpoint, probe=not args.no_probe,
-                                   capture_interface=args.capture_interface,
                                    write_samples=args.write_samples)
   if args.pcap:
     # Filtered by the endpoint's ACTUAL kind, the same way
@@ -611,9 +589,7 @@ def main(argv=None):
   # is gone with it, because that path now leaves through the same `finally` as
   # every other.
   # Set once the TUI owns the session, so the capture sweep in `finally` knows
-  # whether there was a TUI session to sweep after. A plain flag rather than
-  # "did it write any artifacts": headless `--topic --capture-interface` writes
-  # one too, and that operator asked for it on the command line.
+  # whether there was a TUI session to sweep after.
   tui_ran = False
   try:
     session.type_lookup_settings.update(connext_logging)
@@ -658,8 +634,7 @@ def _sweep_captures(session):
   nothing removed them (N2). A saved report cites its capture in Appendix C and
   keeps it; everything else was scaffolding for a report that is already gone.
 
-  TUI only. A headless `--capture-interface` run named the interface on the
-  command line and wants the file it asked for.
+  TUI only. Headless reports write their Network Capture artifact directly.
   """
   removed = session.sweep_capture_artifacts()
   if removed:

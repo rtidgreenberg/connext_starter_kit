@@ -1,10 +1,4 @@
-"""Unit tests for `engine.Session` state that needs no DDS entities.
-
-The capture question and the capture-artifact retention policy are both plain
-session bookkeeping, so they are tested against a `Session` built with `None` for
-everything DDS - the methods under test never reach for the participant or the
-registry.
-"""
+"""Unit tests for `engine.Session` state that needs no DDS entities."""
 
 import os
 import sys
@@ -18,75 +12,21 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from rti_doctor import engine, records  # noqa: E402
 
 
-def bare_session(capture_interface=None, probe_default=True):
+def bare_session(probe_default=True):
   """A Session with no DDS anything; enough for the bookkeeping under test."""
   return engine.Session(participant=None, registry=None, own_qos=None,
                         type_lookup_settings=None, domain_id=7,
-                        capture_interface=capture_interface,
                         probe_default=probe_default)
 
 
-class TestTheCaptureQuestion(unittest.TestCase):
-
+class TestProbeDefaults(unittest.TestCase):
   def test_probe_default_is_configurable_for_the_session(self):
     self.assertTrue(bare_session().probe_default)
     self.assertFalse(bare_session(probe_default=False).probe_default)
-  """Who answered, what they answered, and whether it is still being asked.
-
-  A report asks on entry only while the question is unanswered, so "no answer
-  yet" and "answered Skip" have to be distinguishable - both leave
-  `capture_interface` None.
-  """
-
-  def test_a_fresh_session_has_not_answered(self):
-    session = bare_session()
-    self.assertFalse(session.capture_choice_made)
-    self.assertIsNone(session.capture_interface)
-    self.assertIsNone(session.capture_off_reason)
-
-  def test_the_command_line_flag_answers_it_up_front(self):
-    """`--capture-interface` is the non-interactive answer, so nothing asks."""
-    session = bare_session("eth0")
-    self.assertTrue(session.capture_choice_made)
-    self.assertEqual(session.capture_interface, "eth0")
-
-  def test_skip_is_an_answer_not_the_absence_of_one(self):
-    session = bare_session()
-    session.record_capture_choice(None)
-    self.assertTrue(session.capture_choice_made)
-    self.assertIsNone(session.capture_interface)
-
-  def test_a_failure_turns_capture_off_without_reopening_the_question(self):
-    session = bare_session("lo")
-    session.disable_capture("you don't have permission to capture")
-    self.assertIsNone(session.capture_interface)
-    self.assertTrue(session.capture_choice_made)
-    self.assertIn("permission", session.capture_off_reason)
-
-  def test_choosing_again_is_what_turns_capture_back_on(self):
-    """`C` is the re-enable gesture: a new choice retires the old reason."""
-    session = bare_session("lo")
-    session.disable_capture("tshark was not found on PATH")
-    session.record_capture_choice("eth0")
-    self.assertIsNone(session.capture_off_reason)
-    self.assertEqual(session.capture_interface, "eth0")
 
 
 class TestTheDiagnosticPassClaimExpires(unittest.TestCase):
-  """Single-flight that cannot be left held.
-
-  Only one probe+capture pass may run at a time: two on one topic would each
-  observe the other's traffic. The claim has to outlive the screen that took it,
-  because `asyncio.to_thread` cannot be cancelled and a popped report leaves
-  tshark running - so it cannot simply be released when a screen goes away.
-
-  That makes "the holder never comes back" the failure to design for. It is
-  reachable: a worker cancelled between being scheduled and first running
-  executes neither its own `finally` nor the thread's, and a flag left set that
-  way dead-ends every later report, `c` and `C` included, for the life of the
-  session. So the claim is a deadline, like the `-a duration:` ceiling that
-  stops an abandoned tshark.
-  """
+  """Single-flight that cannot be left held across a cancelled worker."""
 
   def test_a_claim_holds_for_its_window(self):
     session = bare_session()
@@ -119,29 +59,12 @@ class TestTheDiagnosticPassClaimExpires(unittest.TestCase):
                            return_value=time.monotonic() + 31.0):
       self.assertFalse(session.pass_in_flight())
 
-  def test_the_window_outlives_the_capture_it_protects(self):
-    """Expiring early would let a second pass overlap a live tshark.
-
-    The claim is taken for the probe window plus the same margin tshark's own
-    ceiling gets, so the claim cannot lapse while a capture it was protecting
-    is still running.
-    """
-    session = bare_session()
-    probe_window = 10.0
-    session.claim_pass(probe_window + engine.CAPTURE_DURATION_MARGIN)
-
-    with mock.patch.object(engine.time, "monotonic",
-                           return_value=time.monotonic() + probe_window + 1.0):
-      self.assertTrue(session.pass_in_flight())
-
-
 class TestTypeInformationObservedIsThreeValued(unittest.TestCase):
   """"Nobody looked" is not "the peer did not advertise it".
 
   The finding records this in its evidence, so `False` where no capture ran
   puts a claim about the peer into a saved report that nothing supports. It is
-  the common case, not a corner: a passively opened report, a `Skip`, or any
-  headless run without `--capture-interface`.
+  the common case, not a corner: a passively opened report or a headless run.
   """
 
   def endpoint(self):
@@ -193,24 +116,21 @@ class TestCaptureArtifactsAreBounded(unittest.TestCase):
     os.environ.pop("RTI_DOCTOR_KEEP_ARTIFACTS", None)
 
   def capture(self, name):
-    """A written capture and the tshark log beside it, as a real one leaves."""
+    """Create a written RTI Network Capture artifact."""
     path = os.path.join(self.directory, name)
-    for candidate in (path, f"{path}.tshark.log"):
-      with open(candidate, "w", encoding="utf-8") as handle:
-        handle.write("x")
+    with open(path, "w", encoding="utf-8") as handle:
+      handle.write("x")
     return path
 
-  def test_an_unsaved_capture_and_its_log_are_removed_together(self):
-    """The log is only readable against its capture, so it goes with it."""
+  def test_an_unsaved_capture_is_removed(self):
     session = bare_session()
     path = self.capture("one.pcapng")
     session.capture_artifacts.append(path)
 
     removed = session.sweep_capture_artifacts()
 
-    self.assertEqual(sorted(removed), sorted([path, f"{path}.tshark.log"]))
+    self.assertEqual(removed, [path])
     self.assertFalse(os.path.exists(path))
-    self.assertFalse(os.path.exists(f"{path}.tshark.log"))
 
   def test_a_capture_a_saved_report_cites_survives(self):
     """Appendix C names the capture; sweeping it would break the citation."""
@@ -222,7 +142,6 @@ class TestCaptureArtifactsAreBounded(unittest.TestCase):
     session.sweep_capture_artifacts()
 
     self.assertTrue(os.path.exists(kept))
-    self.assertTrue(os.path.exists(f"{kept}.tshark.log"))
     self.assertFalse(os.path.exists(swept))
 
   def test_retention_matches_on_the_resolved_path(self):
@@ -248,8 +167,8 @@ class TestCaptureArtifactsAreBounded(unittest.TestCase):
   def test_a_missing_artifact_is_not_an_error(self):
     """This runs on the way out; a failed unlink must not become the exit code.
 
-    A capture that tshark never managed to write still gets recorded, because
-    the path is taken before the capture runs.
+    A capture that never produced a file still gets recorded, because the path
+    is taken before capture starts.
     """
     session = bare_session()
     session.capture_artifacts.append(

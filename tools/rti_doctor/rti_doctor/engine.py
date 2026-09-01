@@ -12,27 +12,14 @@ from . import (checks, discovery, findings as f, netcapture, paths,
                probe as probe_mod, report, system_scan, topology, wire)
 from .checks import CheckContext
 
-#: How long a capture runs when no probe is bounding it - a reader report, or a
-#: writer diagnosed with probing off. Short enough that an operator waits for it
-#: rather than wondering whether the screen has hung.
-DEFAULT_CAPTURE_SECONDS = 8.0
-
-#: Slack between the window a capture is asked to cover and the hard
-#: ``-a duration:`` ceiling tshark applies to itself: the one-second startup
-#: settle, the four-second settle in `LiveCapture.finish()`, and room for a probe
-#: that overruns its timeout. The ceiling is there to end an abandoned capture,
-#: not a normal one, so it is deliberately well clear of the expected window.
-CAPTURE_DURATION_MARGIN = 15.0
-
-
 def _type_information_observed(endpoint, discovery_evidence):
   """Whether the capture saw PID_TYPE_INFORMATION from this endpoint's peer.
 
   Three-valued, and the third value is the point: `None` means no capture
   produced discovery evidence to look in. `False` would say the peer did not
   advertise TypeInformation, which is a claim about the peer - and a report
-  saved after `Skip`, or a headless run without `--capture-interface`, would be
-  making it having never looked. Both remain falsy, so the remedy text this
+  saved without a probe, or a headless run, would be making it having never
+  looked. Both remain falsy, so the remedy text this
   gates is unaffected; only what the finding records about itself changes.
   """
   if not discovery_evidence or discovery_evidence.get("error"):
@@ -46,8 +33,8 @@ class Session:
 
   def __init__(self, participant, registry, own_qos, type_lookup_settings,
                domain_id, type_wait=5.0, probe_timeout=10.0, settle=3.0,
-               active_domains=None, domain_scan_ran=False,
-               capture_interface=None, network_capture=False, probe_default=True,
+               active_domains=None, domain_scan_ran=False, network_capture=False,
+               probe_default=True,
                isolate_probe=True, type_object_v1_only=False):
     self.participant = participant
     self.registry = registry
@@ -65,13 +52,6 @@ class Session:
     self.settle = settle
     self.active_domains = active_domains or set()
     self.domain_scan_ran = domain_scan_ran
-    # Where a capture listens. Once `capture_choice_made` is set, `None` means
-    # "nowhere" - a recorded Skip - rather than "not asked yet".
-    self.capture_interface = capture_interface
-    # Whether the operator (or `--capture-interface`) has answered the capture
-    # question. A report asks on entry only while this is False, so one answer
-    # covers the session and navigating between reports does not re-prompt.
-    self.capture_choice_made = capture_interface is not None
     # Whether each probe runs on its own disposable participant with every other
     # endpoint on the topic ignored. On by default: without it the probe's
     # entity is one of several on the topic, and a competing writer that wins
@@ -85,14 +65,9 @@ class Session:
     # would make the probe's own type resolution incomparable to the report's.
     self.type_object_v1_only = type_object_v1_only
     # RTI Network Capture, enabled at startup or not at all - `enable()` has to
-    # precede every other Connext call, so unlike the tshark capture this can
-    # never be turned on from a keypress. When it is on, every probed endpoint
+    # precede every other Connext call. When it is on, every probed endpoint
     # report records the probe participant's own frames, shared memory included.
     self.network_capture = network_capture
-    # Set by the first capture that fails, which turns capture off for the rest
-    # of the session: on a host without capture privileges, every later report
-    # would otherwise carry tshark's refusal as its wire evidence.
-    self.capture_off_reason = None
     # Single-flight across screens, as a deadline rather than a flag. See
     # `claim_pass`.
     self.pass_deadline = 0.0
@@ -116,14 +91,12 @@ class Session:
     mid-pass leaves tshark running and a probe sampling. Two passes on one
     topic would each observe the other's traffic.
 
-    A deadline rather than a flag, for the same reason `LiveCapture` takes
-    tshark's own ``-a duration:`` ceiling: the holder is not guaranteed to come
+    A deadline rather than a flag because the holder is not guaranteed to come
     back and release it. A worker cancelled between being scheduled and first
     running executes neither its own `finally` nor the thread's, and a claim
     left set that way would dead-end every later report for the life of the
-    session. `release_pass` is still the normal end; the ceiling is the
-    backstop, and it is the same ceiling that stops the abandoned tshark - past
-    it, there is nothing left running to protect.
+    session. `release_pass` is still the normal end; the deadline is the
+    backstop.
     """
     self.pass_deadline = time.monotonic() + seconds
 
@@ -133,31 +106,6 @@ class Session:
 
   def pass_in_flight(self):
     return time.monotonic() < self.pass_deadline
-
-  # --- The capture question --------------------------------------------------
-
-  def record_capture_choice(self, interface):
-    """Remember an answer to the capture question: an interface, or Skip.
-
-    `interface=None` is Skip - probe without capturing - and is as much an
-    answer as a name is, so it stops the asking too. Also the re-enable path
-    after `disable_capture`: choosing again is how an operator says the reason
-    no longer applies.
-    """
-    self.capture_interface = interface
-    self.capture_choice_made = True
-    self.capture_off_reason = None
-
-  def disable_capture(self, reason):
-    """Turn capture off for the session after one failed attempt.
-
-    The harm is report *content*, not the status line: a failed capture attaches
-    `wire_evidence={"error": ...}` to every report that tries, which renders as
-    a wire-evidence error in reports nobody asked to include one in.
-    """
-    self.capture_off_reason = reason
-    self.capture_interface = None
-    self.capture_choice_made = True
 
   # --- Capture artifacts (CAP-1) ---------------------------------------------
 
@@ -169,8 +117,7 @@ class Session:
   def sweep_capture_artifacts(self):
     """Delete captures no saved report cites; return what was removed.
 
-    Capture is now offered on entry to every endpoint report, so a session spent
-    browsing leaves one PCAPNG and one tshark log per report opened (N2/CAP-1).
+    Every probed endpoint report records one participant PCAP.
     `RTI_DOCTOR_KEEP_ARTIFACTS` opts out, matching the fault artifacts in HAR-3.
     Never raises: this runs on the way out, where an unlink that fails must not
     replace the run's real exit code.
@@ -181,9 +128,7 @@ class Session:
     for path in self.capture_artifacts:
       if os.path.abspath(path) in self.retained_artifacts:
         continue
-      # The tshark log is written beside the capture and is only readable
-      # against it, so it goes with it rather than outliving it.
-      for candidate in (path, f"{path}.tshark.log"):
+      for candidate in (path,):
         try:
           os.remove(candidate)
           removed.append(candidate)
@@ -298,19 +243,10 @@ class Session:
         topology=self._topology(),
     )
 
-  def capture_path(self, timestamp=None):
-    """Where a capture requested now would write its PCAPNG."""
-    stamp = timestamp or time.strftime("%Y%m%d_%H%M%S")
-    return paths.test_output_path(
-        "rti_doctor_captures",
-        f"rti_doctor_domain{self.domain_id}_{stamp}.pcapng")
-
   def participant_capture_path(self, timestamp=None):
     """Where an RTI Network Capture of our own participant would land.
 
-    A distinct name from `capture_path`, not just a distinct extension: the two
-    can run in the same pass over the same endpoint, and a report that cited one
-    path for two different files would make its own evidence unresolvable.
+    One network capture is produced for each probe.
     """
     stamp = timestamp or time.strftime("%Y%m%d_%H%M%S")
     return paths.test_output_path(
@@ -318,19 +254,11 @@ class Session:
         f"rti_doctor_participant_domain{self.domain_id}_{stamp}"
         f"{netcapture.CAPTURE_SUFFIX}")
 
-  def diagnose_endpoint(self, endpoint, probe=True, capture_interface=None,
-                        capture_seconds=None, capture_path=None,
-                        write_samples=False):
+  def diagnose_endpoint(self, endpoint, probe=True, write_samples=False):
     """Full rungs 0-5 for one endpoint, probing unless told not to.
 
-    Capturing packets is a separate request from probing, not a consequence of
-    it. A reader report has nothing to probe and is still a legitimate target
-    for wire evidence, and a probe must be able to run without spawning a
-    privileged capture the operator never asked for - which is what navigating
-    to any writer report used to do. `capture_interface` is therefore the only
-    thing that starts tshark, and it is only ever passed when someone asked.
-
-    `write_samples` is the same principle one step further out. It reaches only
+    A probe records its own traffic through RTI Network Capture when enabled.
+    `write_samples` reaches only
     the reader-target probe, where verifying delivery means publishing into a
     topic a real application consumes, and it defaults to off so that opening a
     report can never inject data.
@@ -339,36 +267,8 @@ class Session:
     participant_record = self.registry.participant_for(endpoint)
 
     probe_result = None
-    wire_evidence = None
-    discovery_evidence = None
     participant_evidence = None
-    capture = None
     participant_capture = None
-    if capture_seconds is None:
-      capture_seconds = self.probe_timeout if probe else DEFAULT_CAPTURE_SECONDS
-    if capture_interface:
-      # A caller that told the operator where the capture would land passes
-      # that path in, so the file named on screen is the file written.
-      destination = capture_path or self.capture_path()
-      # Recorded before the capture runs, not after: a capture that fails still
-      # leaves a tshark log, and one that is abandoned still leaves a file.
-      self.capture_artifacts.append(destination)
-      capture = wire.LiveCapture(
-          capture_interface,
-          destination,
-          wire.capture_filter(
-              self.domain_id, endpoint, self.own_qos,
-              # An endpoint that advertises no locators of its own inherits its
-              # participant's defaults, which is where Cyclone's user-traffic
-              # port is (WIRE-2).
-              owner=self.registry.participants.get(endpoint.participant_key)),
-          writer_entity_id=(wire.endpoint_entity_id(endpoint)
-                            if endpoint.is_writer else None),
-          writer_guid_prefix=(wire.endpoint_guid_prefix(endpoint)
-                              if endpoint.is_writer else None),
-          reader_entity_id=(wire.endpoint_entity_id(endpoint)
-                            if not endpoint.is_writer else None),
-          duration=capture_seconds + CAPTURE_DURATION_MARGIN)
     # The probe's own participant, and the reason it may differ from ours.
     # `ignore_datawriter` / `ignore_datareader` have no inverse and last for the
     # life of the participant, so isolation is only ever applied to one we are
@@ -403,10 +303,8 @@ class Session:
       participant_capture = netcapture.ParticipantCapture(
           probe_participant, participant_destination)
 
-    if probe or capture is not None:
+    if probe:
       try:
-        if capture is not None:
-          capture.start()
         if participant_capture is not None:
           participant_capture.start()
         if probe:
@@ -416,11 +314,6 @@ class Session:
             write_samples=write_samples,
             isolate=scoped_participant is not None,
             isolation_error=isolation_error)
-        elif capture is not None:
-          # Nothing else is holding this capture open, so it needs its own
-          # window; finishing immediately would report an empty capture as the
-          # endpoint's wire evidence.
-          time.sleep(capture_seconds)
       finally:
         if participant_capture is not None:
           # Filtered by the SELECTED endpoint's ids, exactly as the tshark
@@ -432,30 +325,6 @@ class Session:
                                 if endpoint.is_writer else None),
               reader_entity_id=(wire.endpoint_entity_id(endpoint)
                                 if not endpoint.is_writer else None))
-        if capture is not None:
-          wire_evidence = capture.finish()
-          # The same file, read for discovery metadata: Fast DDS advertises its
-          # product version in SPDP and nothing else can observe it. One
-          # capture answers both questions, so asking for wire evidence is not
-          # also a reason to run a second tshark.
-          #
-          # Run for EVERY peer, including RTI. Skipping it on an RTI peer was
-          # tried and reverted: this pass is scoped to the capture, not to the
-          # selected endpoint, so it is also what supplies the domain-wide Fast
-          # DDS version notes in `system_scan._fastdds_version_notes` (about
-          # OTHER participants, which an RTI-peer report is as able to observe
-          # as any other), Appendix C's announcement block, and the
-          # TypeInformation evidence behind `type_information_observed`.
-          # Skipping it discarded all three to save two tshark reads.
-          #
-          # The misattribution that motivated the skip - a Connext report led
-          # with a neighbouring Fast DDS participant's version - is a RENDERING
-          # question, and it is fixed where it belongs, in
-          # `report._peer_fastdds_versions`: the vendor gate and the GUID-prefix
-          # narrowing mean an RTI peer's report shows no Fast DDS line at all,
-          # whether or not this parse ran.
-          discovery_evidence = capture.finish_discovery()
-          self.record_wire_discovery(discovery_evidence)
         # Last, and after `participant_capture.finish()` above: that call stops
         # a Network Capture scoped to this very participant. Closing it is also
         # what makes the probe's ignores expire, so nothing here may skip it -
@@ -471,9 +340,7 @@ class Session:
     context = self._context(endpoint=endpoint,
                             participant_record=participant_record,
                 probe_result=probe_result,
-                type_information_observed=_type_information_observed(
-                    endpoint, discovery_evidence),
-                wire_evidence=wire_evidence,
+                type_information_observed=None,
                 participant_evidence=participant_evidence)
     # Two passes, not one concatenated list, so each finding is stamped with
     # whose reader it is about. They must stay separable all the way to the
@@ -502,9 +369,7 @@ class Session:
         endpoint=endpoint,
         participant=participant_record,
         type_lookup_settings=self.type_lookup_settings,
-        topology=self._topology(), wire_evidence=wire_evidence,
-        discovery_evidence=discovery_evidence,
-        capture_interface=capture_interface,
+        topology=self._topology(),
         participant_evidence=participant_evidence,
     )
 

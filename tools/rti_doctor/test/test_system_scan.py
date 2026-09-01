@@ -117,8 +117,7 @@ class TestSystemScan(unittest.TestCase):
     def fail(*args, **kwargs):
       self.fail("the system scan ran tshark")
 
-    with mock.patch.object(engine.wire, "LiveCapture", fail), \
-         mock.patch.object(engine.wire, "inspect_discovery_pcap", fail):
+    with mock.patch.object(engine.wire, "inspect_discovery_pcap", fail):
       snapshot = session.system_scan(captured_at=123.0)
     self.assertEqual(snapshot.fastdds_product_versions, ())
 
@@ -306,7 +305,7 @@ class TestSystemScan(unittest.TestCase):
         "connext": "7.7.0", "nddshome": "/opt/rti", "python": "3.x"})
     self.assertIn("FAST DDS VERSION EVIDENCE", text)
     self.assertIn(report.CAPTURE_PLACEHOLDER, text)
-    self.assertIn("choose a capture interface", text)
+    self.assertIn("Run a diagnostic probe for the endpoint", text)
 
   def test_an_observed_version_replaces_the_placeholder(self):
     registry, peers = registry_with_fastdds_peers()

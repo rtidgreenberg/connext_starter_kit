@@ -45,7 +45,6 @@ class FakeSession:
     self.own_qos = None
     self.type_wait = 0.0
     self.probe_timeout = 0.0
-    self.capture_interface = None
     self.isolate_probe = True
     self.capture_choice_made = False
     self.capture_off_reason = None
@@ -244,7 +243,7 @@ class TestSessionSurface(unittest.TestCase):
     instance_attributes = {"registry", "domain_id", "active_domains",
                            "domain_scan_ran", "type_lookup_settings",
                            "participant", "own_qos", "type_wait",
-                           "capture_interface", "network_capture",
+                           "network_capture",
                            "isolate_probe"}
     self.assertEqual([name for name in missing if name not in instance_attributes],
                      [])
@@ -357,18 +356,6 @@ class TestNothingIsCapturedWithoutBeingAsked(MainHarness):
   at exit whose result was discarded.
   """
 
-  def test_starting_up_creates_no_capture(self):
-    captures = []
-
-    class Recorded:
-      def __init__(self, *args, **kwargs):
-        captures.append((args, kwargs))
-
-    with mock.patch.object(cli.wire, "LiveCapture", Recorded):
-      _session, _participant, code = self._run()
-    self.assertEqual(code, 0)
-    self.assertEqual(captures, [])
-
   def test_the_interactive_startup_neither_prompts_nor_captures(self):
     """The TUI path is the one that used to do both.
 
@@ -377,12 +364,7 @@ class TestNothingIsCapturedWithoutBeingAsked(MainHarness):
     on this path may run tshark or ask about it now: capture is a `c` away, on
     an endpoint report, or not at all.
     """
-    captures = []
     output = io.StringIO()
-
-    class Recorded:
-      def __init__(self, *args, **kwargs):
-        captures.append((args, kwargs))
 
     class FakeApp:
       def __init__(self, session, interval=2.0):
@@ -399,7 +381,6 @@ class TestNothingIsCapturedWithoutBeingAsked(MainHarness):
           ("_write_ready_file", lambda *a, **k: None),
           ("_settle", lambda session, seconds: None)):
         stack.enter_context(mock.patch.object(cli, name, value))
-      stack.enter_context(mock.patch.object(cli.wire, "LiveCapture", Recorded))
       stack.enter_context(mock.patch("rti_doctor.app.RTIDoctorApp", FakeApp))
       stack.enter_context(mock.patch.object(
           sys, "stdin", mock.Mock(isatty=lambda: True)))
@@ -408,7 +389,6 @@ class TestNothingIsCapturedWithoutBeingAsked(MainHarness):
       code = cli.main(["--domain", "7", "--no-domain-scan"])
 
     self.assertEqual(code, 0)
-    self.assertEqual(captures, [])
     self.assertNotIn("Capture interface", output.getvalue())
     self.assertNotIn("capture", output.getvalue().lower())
 
@@ -459,23 +439,13 @@ class TestNothingIsCapturedWithoutBeingAsked(MainHarness):
     self.assertEqual(session.swept, 1)
 
   def test_a_headless_run_sweeps_nothing(self):
-    """`--topic --capture-interface` wrote the file that operator asked for."""
     session, _participant, _code = self._run()
     self.assertEqual(session.swept, 0)
 
-  def test_a_capture_interface_is_accepted_without_a_topic(self):
-    """It selects the TUI's capture interface; it does not start a capture."""
-    args = cli.parse_args(["-d", "1", "--capture-interface", "lo"])
-    self.assertEqual(args.capture_interface, "lo")
-
-  def test_a_capture_interface_is_rejected_for_the_system_assessment(self):
+  def test_the_removed_capture_interface_option_is_rejected(self):
     with self.assertRaises(SystemExit):
       with redirect_stdout(io.StringIO()), mock.patch.object(sys, "stderr", io.StringIO()):
-        cli.parse_args(["-d", "1", "--system", "--capture-interface", "lo"])
-
-  def test_the_session_carries_the_requested_interface(self):
-    session, _participant, _code = self._run()
-    self.assertIsNone(session.capture_interface)
+        cli.parse_args(["-d", "1", "--capture-interface", "lo"])
 
 
 class TestExitContract(MainHarness):

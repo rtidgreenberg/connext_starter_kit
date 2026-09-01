@@ -1223,6 +1223,7 @@ class TestRxO(unittest.TestCase):
         {"reliability": self._policy("RELIABLE")})
     result = qos_match.check_rxo_pairs(CheckContext(endpoint=writer, registry=registry))
     self.assertEqual(ids(result), ["qos.rxo_mismatch"])
+    self.assertIn("Reader 1 of 1", result[0].title)
     self.assertIn("RELIABILITY", result[0].title)
     self.assertIn("POLICY", result[0].observed)
     self.assertIn("WRITER OFFERS", result[0].observed)
@@ -3124,7 +3125,7 @@ class TestReliablePath(unittest.TestCase):
     result = reliable_path.check_reliable_handshake(self._context(probe))
     self.assertEqual(result[0].id, "reliable.not_measured")
     self.assertEqual(result[0].severity, f.Severity.INFO)
-    self.assertIn("Open an endpoint report", result[0].remedy)
+    self.assertIn("Run a diagnostic probe", result[0].remedy)
 
   def test_a_failed_capture_is_not_read_as_a_quiet_wire(self):
     probe = FakeProbe(samples_taken=0, protocol={})
@@ -3292,6 +3293,27 @@ class TestProbeIsolationSweep(unittest.TestCase):
     self.assertTrue(result.isolated)
     self.assertTrue(result.isolation_target_seen)
     self.assertIsNone(result.isolation_error)
+
+  def test_pre_probe_sweep_keeps_looking_after_the_target_is_seen(self):
+    """A competitor can announce immediately after the selected writer."""
+    class StagedReader(FakeBuiltinReader):
+      def __init__(self):
+        super().__init__(())
+        self.batches = [[FakeBuiltinSample("e1")], [FakeBuiltinSample("e2")]]
+
+      def take(self):
+        return self.batches.pop(0) if self.batches else []
+
+    participant = FakeIsolationParticipant()
+    participant.publication_reader = StagedReader()
+    result = probe.ProbeResult()
+    with mock.patch.object(probe.time, "monotonic",
+                           side_effect=(0.0, 0.1, 0.2, 0.3)), \
+         mock.patch.object(probe.time, "sleep"):
+      probe.isolate_endpoint(participant, self._writer_target(),
+                             result, timeout=0.2, poll=0.0)
+    self.assertTrue(result.isolation_target_seen)
+    self.assertEqual(participant.ignored_writers, ["h-e2"])
 
   def test_writers_on_other_topics_are_left_alone(self):
     """Scoped to the topic on purpose - see isolation_sweep's docstring.

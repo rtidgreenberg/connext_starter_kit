@@ -118,12 +118,7 @@ def _params():
 
 
 class ParticipantCapture:
-  """One participant-scoped capture, shaped like `wire.LiveCapture`.
-
-  Deliberately the same shape - `start()` / `finish()` returning a summary dict
-  with a `source` and an `error` - so the engine drives both the same way and
-  the report renders both through one appendix path.
-  """
+  """One participant-scoped capture with a summary suitable for reports."""
 
   def __init__(self, participant, output_path):
     self.participant = participant
@@ -167,7 +162,7 @@ class ParticipantCapture:
 
   def finish(self, writer_entity_id=None, writer_guid_prefix=None,
              reader_entity_id=None):
-    """Stop, then parse. Same summary shape as a tshark capture.
+    """Stop, then parse the participant's PCAP.
 
     The entity filters are the probe's own, not the peer's: this file contains
     only rti_doctor's participant's frames, so filtering by the SELECTED

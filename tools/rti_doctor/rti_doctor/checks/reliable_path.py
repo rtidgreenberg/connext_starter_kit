@@ -11,9 +11,8 @@ Two independent sources, deliberately both:
   * The middleware's own counters, from whichever entity the probe created.
     Exact and per-entity, but they only ever describe *our* side of the
     conversation, and a binding that does not expose them yields nothing.
-  * The packet capture, when the operator ran one. Vendor-neutral and describes
-    both sides, but it is frame-scoped rather than writer-scoped and only exists
-    if someone pressed `c`.
+  * RTI Network Capture from the diagnostic probe. Vendor-neutral and scoped to
+    rti_doctor's participant, including every transport the probe uses.
 
 They are reported together and compared. Agreement is worth stating; a
 disagreement is a finding in its own right, because it means one of the two is
@@ -70,7 +69,8 @@ def _wire(context, key):
   is scoped to rti_doctor's own participant, so for the probe's own conversation
   - which is the only conversation this check judges - it is the more precise of
   the two, and it is the ONLY one that exists when the pair is talking over
-  shared memory. An interface capture is the fallback.
+  shared memory. Offline PCAP evidence is used when participant evidence is
+  unavailable.
 
   None and 0 must stay distinct: no capture is not the same claim as a capture
   that saw none, and this check reports the difference rather than defaulting.
@@ -218,10 +218,9 @@ def check_reliable_handshake(context):
         root_cause=(
             "This pair is RELIABLE, so RTPS requires a heartbeat/acknowledgment "
             "exchange between them - but neither source could report one. The "
-            "middleware counters were unavailable on this binding, and no "
-            "packet capture was run for this endpoint."),
-        remedy=("Open an endpoint report and select packet capture when it "
-          "opens. The "
+            "middleware counters were unavailable on this binding, and no RTI "
+            "Network Capture evidence was available for this endpoint."),
+          remedy=("Run a diagnostic probe for this endpoint. The "
                 "handshake is visible in the packets regardless of vendor, and "
                 "regardless of which counters the bindings expose."),
         evidence={"wire_heartbeats": wire_heartbeats,

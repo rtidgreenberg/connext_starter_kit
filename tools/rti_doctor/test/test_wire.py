@@ -521,6 +521,19 @@ class TestTsharkFields(unittest.TestCase):
         wire_evidence={"source": "c.pcapng", "packets": 0, "data_packets": 0})
     self.assertNotIn("RTI Network Capture", text)
 
+  def test_network_capture_data_explains_an_empty_offline_pcap(self):
+    """Same-host SHMEM delivery cannot appear in an offline network PCAP."""
+    text = self._capture_report(
+        wire_evidence={"source": "c.pcapng", "packets": 0, "data_packets": 0},
+        participant_evidence={"source": "p.pcap", "packets": 34,
+                              "data_packets": 34})
+    summary = " ".join(
+      text.split("CAPTURE EVIDENCE", 1)[1].split("PEER", 1)[0].split())
+    self.assertIn("offline PCAP saw no user DATA", summary)
+    self.assertIn("SHARED MEMORY transport", summary)
+    self.assertIn("probe conversation", summary)
+    self.assertNotIn("No user DATA from the selected endpoint", summary)
+
   def test_the_wire_appendix_reports_the_reliable_handshake(self):
     text = self._capture_report(
         wire_evidence={"source": "c.pcapng", "packets": 9, "data_packets": 4,
@@ -636,181 +649,6 @@ class TestTsharkFields(unittest.TestCase):
     self.assertIn("agrees with the advertised XCDR2", text)
     self.assertNotIn("disagrees", text)
 
-  def test_capture_filter_prefers_selected_writer_locator(self):
-    endpoint = self.Endpoint([self.Locator("192.0.2.5", 7411)])
-    actual = wire.capture_filter(7, endpoint, self.Qos())
-    self.assertEqual(actual, "udp and (portrange 9150-9399 or port 7411)")
-
-  def test_capture_filter_falls_back_to_domain_port_range(self):
-    actual = wire.capture_filter(7, self.Endpoint([]), self.Qos())
-    self.assertEqual(actual, "udp and (portrange 9150-9399)")
-
-  def test_capture_filter_uses_participant_locators_when_the_endpoint_has_none(self):
-    """WIRE-2: Cyclone advertises its data port only at participant level.
-
-    Measured 2026-08-12 against a real Cyclone writer: its endpoint's
-    `unicast_locators` is empty, its participant advertises one UDPv4 locator,
-    and that port is outside the domain's RTPS range - so the range term alone
-    excluded every user DATA frame it sent, and the capture reported "none
-    observed" after seeing none of it. An endpoint inheriting its
-    participant's default locators is legal RTPS, not a Cyclone quirk.
-    """
-    owner = self.Owner([self.Locator("192.0.2.9", 41050)])
-    actual = wire.capture_filter(7, self.Endpoint([]), self.Qos(), owner=owner)
-    self.assertEqual(actual, "udp and (portrange 9150-9399 or port 41050)")
-
-  def test_capture_filter_prefers_endpoint_locators_over_participant_defaults(self):
-    """The fallback must not widen the filter when the endpoint is specific.
-
-    Connext and Fast DDS both name endpoint locators. Adding participant
-    defaults on top would broaden every capture to fix the one vendor that
-    needs it, so the participant list is consulted only when the endpoint's is
-    empty.
-    """
-    owner = self.Owner([self.Locator("192.0.2.9", 41050)])
-    endpoint = self.Endpoint([self.Locator("192.0.2.5", 7411)])
-    actual = wire.capture_filter(7, endpoint, self.Qos(), owner=owner)
-    self.assertEqual(actual, "udp and (portrange 9150-9399 or port 7411)")
-
-  def test_capture_filter_without_an_owner_is_unchanged(self):
-    """`owner` is optional, and omitting it must behave as it did before."""
-    self.assertEqual(wire.capture_filter(7, self.Endpoint([]), self.Qos()),
-                     wire.capture_filter(7, self.Endpoint([]), self.Qos(),
-                                         owner=None))
-
-  def test_live_capture_kills_a_tshark_process_that_ignores_terminate(self):
-    class Process:
-      def __init__(self):
-        self.returncode = None
-        self.killed = False
-        self.calls = 0
-      def poll(self):
-        return self.returncode
-      def terminate(self):
-        pass
-      def kill(self):
-        self.killed = True
-        self.returncode = -9
-      def wait(self, timeout=None):
-        self.calls += 1
-        if self.calls == 1:
-          raise subprocess.TimeoutExpired("tshark", timeout)
-        return self.returncode
-
-    capture = wire.LiveCapture("lo", "capture.pcapng", "udp", tshark_path="tshark")
-    capture.process = Process()
-    evidence = capture.finish()
-    self.assertTrue(capture.process.killed)
-    self.assertIn("was killed", evidence["error"])
-
-  def test_live_capture_reports_a_tshark_that_died_mid_capture(self):
-    """An already-exited tshark must not be reported as an empty success.
-
-    The status check used to sit inside `if poll() is None`, so a tshark that
-    died after start()'s one-second window - interface removed, permission
-    revoked, disk full - skipped it entirely and the resulting empty file was
-    summarized as a successful capture of zero packets.
-    """
-    class Process:
-      returncode = 2
-      def poll(self):
-        return self.returncode
-
-    capture = wire.LiveCapture("lo", "capture.pcapng", "udp", tshark_path="tshark")
-    capture.process = Process()
-    evidence = capture.finish()
-    self.assertIn("tshark exited with 2", evidence["error"])
-    self.assertNotIn("packets", evidence)
-
-  @mock.patch("rti_doctor.wire.os.path.isfile", return_value=False)
-  def test_live_capture_explains_when_tshark_creates_no_file(self, _isfile):
-    class Process:
-      returncode = 0
-      def poll(self):
-        return self.returncode
-
-    capture = wire.LiveCapture("lo", "capture.pcapng", "udp", tshark_path="tshark")
-    capture.process = Process()
-    evidence = capture.finish()
-    self.assertIn("without creating a capture file", evidence["error"])
-
-  def test_a_capture_bounds_itself_with_a_duration(self):
-    """H9: nothing may run tshark without a stop condition of its own.
-
-    `finish()` is the normal end, but an owner that never reaches it - a popped
-    screen, a killed interpreter - used to leave tshark writing until something
-    else stopped it. The ceiling is tshark's own, so it survives losing us.
-    """
-    commands = []
-
-    class Process:
-      def poll(self):
-        return None
-
-    def record(command, **kwargs):
-      commands.append(command)
-      return Process()
-
-    capture = wire.LiveCapture("lo", "capture.pcapng", "udp", tshark_path="tshark",
-                               duration=23.4)
-    with mock.patch("rti_doctor.wire.subprocess.Popen", record), \
-         mock.patch("rti_doctor.wire.time.sleep", lambda seconds: None), \
-         mock.patch("rti_doctor.wire.os.makedirs"), \
-         mock.patch("builtins.open", mock.mock_open()):
-      capture.start()
-    self.assertIsNone(capture.error)
-    self.assertIn("-a", commands[0])
-    self.assertEqual(commands[0][commands[0].index("-a") + 1], "duration:23")
-
-  def test_a_capture_without_a_duration_asks_for_none(self):
-    """`-a duration:0` means "no limit" to tshark, so 0 must not be emitted."""
-    commands = []
-
-    class Process:
-      def poll(self):
-        return None
-
-    capture = wire.LiveCapture("lo", "capture.pcapng", "udp", tshark_path="tshark")
-    with mock.patch("rti_doctor.wire.subprocess.Popen",
-                    lambda command, **kwargs: commands.append(command) or Process()), \
-         mock.patch("rti_doctor.wire.time.sleep", lambda seconds: None), \
-         mock.patch("rti_doctor.wire.os.makedirs"), \
-         mock.patch("builtins.open", mock.mock_open()):
-      capture.start()
-    self.assertNotIn("-a", commands[0])
-
-  def test_one_capture_can_be_read_as_user_data_and_as_discovery(self):
-    """The two questions share one file, so only the first read stops tshark."""
-    class Process:
-      def __init__(self):
-        self.returncode = None
-        self.terminates = 0
-
-      def poll(self):
-        return self.returncode
-
-      def terminate(self):
-        self.terminates += 1
-        self.returncode = -15
-
-      def wait(self, timeout=None):
-        return self.returncode
-
-    capture = wire.LiveCapture("lo", "capture.pcapng", "udp", tshark_path="tshark")
-    capture.process = Process()
-    with mock.patch("rti_doctor.wire.os.path.isfile", return_value=True), \
-         mock.patch("rti_doctor.wire.inspect_pcap",
-                    return_value={"packets": 3}) as user_data, \
-         mock.patch("rti_doctor.wire.inspect_discovery_pcap",
-                    return_value={"fastdds_product_versions": ["3.5.4.0"]}) as meta:
-      packets = capture.finish()
-      discovery_evidence = capture.finish_discovery()
-    self.assertEqual(capture.process.terminates, 1)
-    self.assertEqual(user_data.call_count, 1)
-    self.assertEqual(meta.call_count, 1)
-    self.assertEqual(packets["packets"], 3)
-    self.assertEqual(discovery_evidence["fastdds_product_versions"], ["3.5.4.0"])
-
   def test_report_includes_packet_evidence(self):
     data = report.ReportData(
         domain_id=7,
@@ -847,7 +685,6 @@ class TestTsharkFields(unittest.TestCase):
     """
     data = report.ReportData(
         domain_id=7, scope="topic 'Sample'", all_findings=[],
-        capture_interface="eth0",
         wire_evidence={"source": "capture.pcapng", "packets": 1,
                        "data_packets": 1, "data_fragments": 0,
                        "encapsulation_ids": ["0x0007"],
@@ -856,8 +693,6 @@ class TestTsharkFields(unittest.TestCase):
         discovery_evidence={"fastdds_product_versions": ["3.5.4.0"],
                             "participants": 2, "topics": ["Sample"]})
     text = report.render_text(data)
-    self.assertIn("Capture interface", text)
-    self.assertIn("eth0", text)
     self.assertIn("RTPS discovery observed in the same capture", text)
     self.assertIn("3.5.4.0", text)
 
@@ -865,7 +700,6 @@ class TestTsharkFields(unittest.TestCase):
                                             stdout=text, stderr="")
     parsed = doctor_e2e.parse_report(completed)["wire_observation"]
     self.assertEqual(parsed["source"], "capture.pcapng")
-    self.assertEqual(parsed["capture_interface"], "eth0")
     self.assertEqual(parsed["fastdds_product_versions"], ["3.5.4.0"])
 
   def test_a_failed_capture_still_reports_what_discovery_it_read(self):

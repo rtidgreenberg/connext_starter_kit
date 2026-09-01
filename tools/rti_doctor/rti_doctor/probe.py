@@ -693,8 +693,7 @@ def isolate_endpoint(participant, endpoint, result, timeout=ISOLATION_TIMEOUT,
   try:
     deadline = start + max(0.0, timeout)
     while True:
-      if isolation_sweep(participant, endpoint, result, seen):
-        break
+      isolation_sweep(participant, endpoint, result, seen)
       if time.monotonic() >= deadline:
         break
       time.sleep(poll)

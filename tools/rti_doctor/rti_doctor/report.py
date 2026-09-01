@@ -44,12 +44,10 @@ CAPTURE_PLACEHOLDER = "Run capture to ascertain"
 #: value against the label rather than wrapping it.
 CAPTURE_LABEL_PAD = 24
 
-#: How to ascertain it, stated wherever the placeholder appears. Opening an
-#: endpoint report for diagnosis offers a capture, but a report can reach here
-#: having been opened passively or with Skip as the answer, so name the key too.
-CAPTURE_HINT = ("Open an endpoint report for diagnosis and choose a capture "
-                "interface when it opens to capture RTPS packets for that "
-                "endpoint.")
+#: How to ascertain it, stated wherever the placeholder appears. A passive
+#: report has no probe participant and therefore no Network Capture evidence.
+CAPTURE_HINT = ("Run a diagnostic probe for the endpoint to record its RTI "
+                "Network Capture evidence.")
 
 
 def _section(title):
@@ -354,8 +352,7 @@ class ReportData:
   def __init__(self, domain_id, scope, all_findings, probe_result=None,
                endpoint=None, participant=None, type_lookup_settings=None,
                environment=None, generated_at=None, wire_evidence=None,
-               topology=None, discovery_evidence=None, capture_interface=None,
-               participant_evidence=None):
+               topology=None, discovery_evidence=None, participant_evidence=None):
     self.domain_id = domain_id
     self.scope = scope
     self.findings = f.rank(f.link_causes(list(all_findings)))
@@ -370,12 +367,8 @@ class ReportData:
     # carries the packet-only facts - Fast DDS product versions above all -
     # that no DDS-level observation can supply.
     self.discovery_evidence = discovery_evidence
-    self.capture_interface = capture_interface
     # RTI Network Capture of rti_doctor's OWN participant. Kept separate from
-    # `wire_evidence` rather than merged into it because the two have different
-    # scopes and a merged number would belong to neither: an interface capture
-    # sees every participant on the wire and no shared memory at all, while this
-    # sees one participant on every transport.
+    # offline `wire_evidence` because they describe different observations.
     self.participant_evidence = participant_evidence
     self.topology = topology
 
@@ -448,7 +441,8 @@ def render_view_sections(data):
   overview += _render_topology(data)
   return {
       "overview": "\n".join(overview),
-      "findings": "\n".join(_render_findings(data)),
+      "findings": "\n".join(_render_findings(data, problems=True)),
+      "verified": "\n".join(_render_findings(data, problems=False)),
       "type": "\n".join(_render_type_appendix(data)),
       "probe": "\n".join(_render_counter_appendix(data)),
       "data": "\n".join(_render_data_appendix(data)),
@@ -463,12 +457,12 @@ def _wire_placeholder(data):
   The old text advertised a Fast DDS version on every endpoint, so on a Connext
   peer it offered the one thing a capture there cannot produce.
   """
-  lines = ["No direct RTPS packet capture was requested.", ""]
+  lines = ["No RTI Network Capture evidence is available for this report.", ""]
   if _peer_may_have_fastdds_version(data):
     lines.append(f"Fast DDS version: {CAPTURE_PLACEHOLDER}.")
   lines += [
       f"RTPS reliable handshake (HEARTBEAT/ACKNACK/GAP): {CAPTURE_PLACEHOLDER}.",
-      "Packet capture is selected when an endpoint report is opened.", ""]
+      "Run a diagnostic probe to record this participant-scoped evidence.", ""]
   return lines
 
 
@@ -481,7 +475,8 @@ def render_text(data):
   lines += _render_capture_summary(data)
   lines += _render_peer(data)
   lines += _render_topology(data)
-  lines += _render_findings(data)
+  lines += _render_findings(data, problems=True)
+  lines += _render_findings(data, problems=False)
   lines += _render_type_appendix(data)
   lines += _render_counter_appendix(data)
   lines += _render_wire_appendix(data)
@@ -533,7 +528,17 @@ def _render_capture_summary(data):
 
   data_frames = ((wire_evidence or {}).get("data_packets", 0)
                  + (wire_evidence or {}).get("data_fragments", 0))
-  if wire_evidence is not None and not wire_error and not data_frames:
+  participant_data_frames = ((data.participant_evidence or {}).get("data_packets", 0)
+                             + (data.participant_evidence or {}).get("data_fragments", 0))
+  if (wire_evidence is not None and not wire_error and not data_frames
+      and participant_data_frames):
+    unchanged.append(
+        "The offline PCAP saw no user DATA, but RTI Network Capture "
+        "recorded user DATA from rti_doctor's probe. This is consistent with "
+        "SHARED MEMORY transport, which never reaches a network interface; "
+        "it proves only the probe conversation, not traffic between the "
+        "application endpoints.")
+  elif wire_evidence is not None and not wire_error and not data_frames:
     unchanged.append(
         "No user DATA from the selected endpoint was captured. That is what a "
         "writer with no matched reader looks like, and it is also what an "
@@ -639,7 +644,7 @@ def _representation_agreement(endpoint, observed):
 
 
 def capture_headline(data):
-  """One line naming what a capture actually parsed, for the TUI status bar.
+  """One line naming RTI Network Capture evidence for the TUI status bar.
 
   The status line used to report only a frame count, so the commonest real
   result - "0 matching frames" - said nothing about whether the two facts a
@@ -651,7 +656,7 @@ def capture_headline(data):
   Kept beside `_render_capture_summary` so the headline and the report section
   cannot drift into disagreeing about the same capture.
   """
-  wire_evidence = data.wire_evidence or {}
+  evidence = data.participant_evidence or {}
   discovery = data.discovery_evidence or {}
   parts = []
 
@@ -667,7 +672,7 @@ def capture_headline(data):
     else:
       parts.append("no Fast DDS version advertised")
 
-  encapsulations = wire_evidence.get("encapsulation_ids") or []
+  encapsulations = evidence.get("encapsulation_ids") or []
   if encapsulations:
     parts.append(f"representation {wire.encapsulation_text(encapsulations)}")
   else:
@@ -679,12 +684,12 @@ def capture_headline(data):
   # The reliable handshake, when there was any of it. This is what the version
   # line used to occupy on a Connext peer, and it is the fact an operator is
   # actually after: heartbeats answered by ACKNACKs is a working reliable path.
-  heartbeats = wire_evidence.get("heartbeats", 0)
-  acknacks = wire_evidence.get("acknacks", 0)
+  heartbeats = evidence.get("heartbeats", 0)
+  acknacks = evidence.get("acknacks", 0)
   if heartbeats or acknacks:
     parts.append(f"{heartbeats} HEARTBEAT / {acknacks} ACKNACK")
 
-  frames = wire_evidence.get("packets", 0)
+  frames = evidence.get("packets", 0)
   parts.append(f"{frames} matching frame{'' if frames == 1 else 's'}")
   return "; ".join(parts)
 
@@ -818,8 +823,8 @@ def _render_one_finding(finding):
   return lines
 
 
-def _render_findings(data):
-  """Findings in scoped blocks: the observed system first, the probe after.
+def _render_findings(data, *, problems):
+  """Render either actionable findings or verified evidence in scoped blocks.
 
   The system comes first deliberately. It is what the operator came to find out,
   and it is true whether or not rti_doctor ran; the probe is this tool's own
@@ -829,11 +834,14 @@ def _render_findings(data):
   report's parser ends a section at the next `---`, so an underlined sub-header
   here would truncate the findings section and silently drop everything below it.
   """
-  findings = list(data.findings)
-  lines = _section(f"FINDINGS  ({_severity_summary(findings)})")
+  findings = [finding for finding in data.findings
+              if finding.is_problem is problems]
+  heading = "FINDINGS" if problems else "VERIFIED"
+  empty = "No issues found." if problems else "No verified checks."
+  lines = _section(f"{heading}  ({_severity_summary(findings)})")
 
   if not findings:
-    lines += ["No findings.", ""]
+    lines += [empty, ""]
     return lines
 
   # The system first, since that is what the operator came to find out, then what
@@ -1134,18 +1142,14 @@ WIRE_LABEL_PAD = 38
 
 def _render_wire_appendix(data):
   evidence = data.wire_evidence
-  # Either mechanism alone earns the appendix. RTI Network Capture needs no
-  # interface and no capture privileges, so a run can produce participant
-  # evidence and no interface evidence at all - and gating the whole appendix on
-  # `wire_evidence` would then discard the only packet evidence there was.
+  # Either source alone earns the appendix, so participant evidence is not lost
+  # on reports with no offline `--pcap` evidence.
   if evidence is None:
     if data.participant_evidence is None:
       return []
     return (_section("APPENDIX C - DIRECT RTPS PACKET OBSERVATION")
             + _render_participant_evidence(data))
   lines = _section("APPENDIX C - DIRECT RTPS PACKET OBSERVATION")
-  if data.capture_interface:
-    lines.append(_kv("Capture interface", data.capture_interface, WIRE_LABEL_PAD))
   lines.append(_kv("Capture", evidence.get("source", "unknown"), WIRE_LABEL_PAD))
   if evidence.get("capture_filter"):
     lines.append(_kv("Capture filter", evidence["capture_filter"], WIRE_LABEL_PAD))

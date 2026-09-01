@@ -30,139 +30,13 @@ import subprocess
 import time
 
 from rich.markup import escape
+from rich.text import Text
 from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static, TabbedContent, TabPane
 
 from .. import (engine as engine_mod, livedata, paths, probe as probe_mod,
-                report as report_mod, vendors, wire)
-
-#: Shown for the Skip row. Skip is an answer - "probe, but capture nothing" -
-#: and is remembered like any other, so it is worth naming rather than leaving
-#: as the absence of a choice.
-SKIP_CAPTURE = "Skip"
-
-#: A tshark refusal can be several lines. The status bar repeats it on every
-#: later report, so it is truncated there - the untruncated reason is what the
-#: failing report itself said.
-_REASON_CHARS = 60
-
-
-def _short(reason):
-  reason = " ".join(str(reason).split())
-  return (reason if len(reason) <= _REASON_CHARS
-          else reason[:_REASON_CHARS - 1] + "…")
-
-
-class CaptureInterfaceScreen(Screen):
-  """Choose which interface a capture runs on, or Skip capturing (CAP-2).
-
-  Before this, the interface came from `--capture-interface` or defaulted to
-  `any`, so choosing one meant quitting and relaunching - and `any` needs the
-  broadest capture privileges of any choice, making the default the most
-  privileged one (N3). An operator on a host where they may capture `lo` and
-  nothing else had no way to say so.
-
-  The choice is remembered on the session, so this asks once per session rather
-  than on every report. `--capture-interface` still wins outright and skips it.
-  """
-
-  BINDINGS = [("b", "back", "Back"), ("escape", "back", "Back"),
-              ("q", "quit_app", "Quit")]
-
-  def __init__(self, session, on_chosen, on_dismiss=None):
-    super().__init__()
-    self.session = session
-    self.on_chosen = on_chosen
-    # Dismissal has to do something now that this can open on entry: without
-    # it, `b` would leave a report showing static findings, no probe, and a
-    # status line still asking a question nothing will answer.
-    self.on_dismiss = on_dismiss
-    self.table = DataTable()
-    # Not enumerated here. `tshark -D` runs extcap helpers - third-party
-    # binaries - so it is a subprocess of unbounded duration, and __init__ runs
-    # on the Textual event loop where it would freeze the whole TUI. Same
-    # reason the probe runs in a worker, per this module's docstring.
-    self.interfaces, self.error = (), None
-    self.notice = None
-
-  def compose(self):
-    yield Header()
-    yield Static("[bold]Capture interface[/bold]")
-    self.notice = Static("Listing capture interfaces...")
-    yield self.notice
-    yield Static("Pick the interface to capture RTPS packets on, or Skip to "
-                 "probe without capturing. The choice is remembered for this "
-                 "session. Capturing needs packet-capture privileges on "
-                 f"whichever you choose, and '{wire.ANY_INTERFACE}' needs the "
-                 "broadest of all.")
-    with Container(id="capture_interface_choice"):
-      yield self.table
-    yield Footer()
-
-  def _choices(self):
-    """Skip first, enumerated interfaces, `any` last and never duplicated.
-
-    Rows are `(number, label, description, interface)`: what is shown and what
-    is handed to tshark are separate, so Skip can be a row without becoming a
-    sentinel string that some later caller passes to `-i`.
-
-    Skip sits under the cursor for the same reason `any` is pushed to the
-    bottom (N3): the reflexive Enter must land on the least privileged and
-    least surprising option, not the most.
-    """
-    choices = [("", SKIP_CAPTURE,
-                "no packet capture - probe only, remembered for this session",
-                None)]
-    for number, description in self.interfaces:
-      name = wire.interface_name(description)
-      if name and name != wire.ANY_INTERFACE:
-        choices.append((number, name, description, name))
-    choices.append(("", wire.ANY_INTERFACE,
-                    "every interface - needs the broadest privileges",
-                    wire.ANY_INTERFACE))
-    return choices
-
-  async def on_mount(self):
-    self.title = f"rti_doctor - capture interface domain {self.session.domain_id}"
-    self.table.add_columns("#", "Interface", "Description")
-    self.table.cursor_type = "row"
-    self.interfaces, self.error = await asyncio.to_thread(wire.capture_interfaces)
-    if self.error:
-      # A picker that cannot enumerate is still useful: `any` remains valid, and
-      # the reason belongs on screen rather than swallowed.
-      self.notice.update(f"Could not list interfaces: {escape(self.error)}. "
-                         f"'{wire.ANY_INTERFACE}' is still offered below.")
-    else:
-      self.notice.update(f"{len(self.interfaces)} interface(s) reported by tshark.")
-    self.choices = self._choices()
-    for index, (number, label, description, _) in enumerate(self.choices):
-      self.table.add_row(number, label, description, key=str(index))
-    self.table.focus()
-
-  async def on_data_table_row_selected(self, event):
-    if event.row_key is None:
-      return
-    _, _, _, interface = self.choices[int(event.row_key.value)]
-    self.session.record_capture_choice(interface)
-    # Pop before starting the pass, so the report screen is what the operator
-    # watches it run on.
-    self.app.pop_screen()
-    self.on_chosen(interface)
-
-  def action_back(self):
-    """Leave without answering. Dismissal is not an answer.
-
-    Nothing is recorded, so the next report asks again. Remembering a dismissal
-    would make the explicit Skip row decoration, and would silently opt out for
-    the session an operator who pressed Escape out of habit.
-    """
-    self.app.pop_screen()
-    if self.on_dismiss is not None:
-      self.on_dismiss()
-
-  def action_quit_app(self):
-    self.app.exit()
+                report as report_mod, vendors)
 
 
 class PublishConsentScreen(Screen):
@@ -219,7 +93,8 @@ class PublishConsentScreen(Screen):
          "the subscribed application receives them as ordinary data", True),
     ]
     for index, (label, description, _) in enumerate(self.choices):
-      self.table.add_row(label, description, key=str(index))
+      style = "bold green" if index == 0 else "bold yellow"
+      self.table.add_row(Text(label, style=style), description, key=str(index))
     self.table.focus()
 
   async def on_data_table_row_selected(self, event):
@@ -334,9 +209,22 @@ class CompatibilityMatrixScreen(Screen):
     self.run_worker(self._run_matrix(), exit_on_error=False)
 
   def _render_progress(self):
-    lines = ["Profile       Status"]
-    lines.extend(f"{name:<13} {state}" for name, state in self.states.items())
-    self.progress.update("\n".join(lines))
+    progress = Text("Profile       Status\n", style="bold")
+    for name, state in self.states.items():
+      progress.append(f"{name:<13} ")
+      progress.append(state, style=self._progress_style(state))
+      progress.append("\n")
+    self.progress.update(progress)
+
+  @staticmethod
+  def _progress_style(state):
+    if "ERROR" in state:
+      return "bold red"
+    if state == "complete" or state.startswith("no ERROR"):
+      return "bold green"
+    if state == "running":
+      return "bold cyan"
+    return "dim"
 
   @staticmethod
   def _next_text(lines, index):
@@ -511,6 +399,15 @@ class ReportScreen(Screen):
       padding: 0 2;
       color: $warning;
   }
+    #verified {
+      color: $success;
+    }
+      #--content-tab-findings {
+        color: $error;
+      }
+      #--content-tab-verified {
+        color: $success;
+      }
   """
 
   def __init__(self, session, endpoint=None, participant=None, probe=True):
@@ -544,6 +441,38 @@ class ReportScreen(Screen):
     # The header as last drawn, so a poll that brings nothing can still tell
     # whether anything it would say has changed.
     self.live_shown = ""
+
+  @staticmethod
+  def _styled_section_text(tab_id, plain):
+    """Color report structure without parsing peer text as Rich markup."""
+    styled = Text(plain)
+    if tab_id == "verified":
+      styled.stylize("green")
+      return styled
+
+    line_start = 0
+    for line in plain.splitlines(keepends=True):
+      visible = line.rstrip("\n")
+      line_end = line_start + len(visible)
+      if visible.startswith("[ERROR]"):
+        styled.stylize("bold red", line_start, line_end)
+      elif visible.startswith("[WARN]"):
+        styled.stylize("bold yellow", line_start, line_end)
+      elif ("  (" in visible and visible == visible.upper()
+            and not visible.startswith("[")):
+        styled.stylize("bold cyan", line_start, line_end)
+      line_start += len(line)
+
+    if tab_id == "overview":
+      verdict_start = plain.find("VERDICT\n")
+      if verdict_start >= 0:
+        verdict_start = plain.find("\n", verdict_start + len("VERDICT\n")) + 1
+        verdict_end = plain.find("\n", verdict_start)
+        verdict = plain[verdict_start:verdict_end]
+        color = ("red" if "ERROR" in verdict or "NOT " in verdict else
+                 "yellow" if "WARN" in verdict else "green")
+        styled.stylize(f"bold {color}", verdict_start, verdict_end)
+    return styled
 
   def check_action(self, action, parameters):
     """Hide inapplicable controls from the footer and keymap.
@@ -595,7 +524,8 @@ class ReportScreen(Screen):
       # Data sits next to Probe because it is what the probe received. Every
       # id here must have a section in `render_view_sections`, and vice versa:
       # `_update_sections` indexes `bodies` by that function's keys.
-      for tab_id, title in (("overview", "Overview"), ("findings", "Findings"),
+      for tab_id, title in (("overview", "Overview"), ("findings", "Issues"),
+                ("verified", "Verified"),
                             ("type", "Type"), ("probe", "Probe"),
                             ("data", "Data"), ("wire", "Wire"),
                             ("config", "Configuration")):
@@ -615,8 +545,7 @@ class ReportScreen(Screen):
               else f"participant '{getattr(self.participant, 'name', '')}'")
     self.title = f"rti_doctor - {target}"
 
-    # Static pass first so something useful is on screen immediately, and so a
-    # Skip or a dismissal still leaves a usable report behind the picker.
+    # Static pass first so something useful is on screen immediately.
     await self._render_static()
     # `_render_static` awaited a thread, and `b` works while it does. Without
     # this the picker would be pushed on top of whatever screen the operator
@@ -626,10 +555,8 @@ class ReportScreen(Screen):
     if not self.is_current:
       return
     # `p` is live while the static pass above is awaited, so the operator may
-    # already have started their own pass - or be answering its capture picker.
-    # Offering again here would report their pass as "started from another
-    # report" and overwrite its announcement, or stack a second picker.
-    if self.probing or self.capturing or self.asking:
+    # already have started their own pass.
+    if self.probing:
       return
     self._offer_full_pass()
 
@@ -657,13 +584,7 @@ class ReportScreen(Screen):
             "vendor/V2, and vendor/V1 compatibility profiles.")
 
   def _offer_full_pass(self):
-    """Run the full diagnostic on entry, asking about capture the first time.
-
-    The order matters. A participant report has nothing to probe or capture; a
-    report opened with `probe=False` asks for neither and stays a
-    keypress-cheap screen; an unanswered capture question is asked before
-    anything runs, because the capture has to start before the probe.
-    """
+    """Run the full diagnostic on entry when probing was requested."""
     if self.endpoint is None:
       self.status.update(
           "Static checks complete (participant report: no probe, no packet "
@@ -675,45 +596,21 @@ class ReportScreen(Screen):
       self.status.update(
           "Static checks complete (opened without probing, so nothing has "
           f"touched the system). Press p to probe this endpoint: it creates a "
-          f"matching {created}, samples its statuses, and offers a packet "
-          "capture first." + compatibility_hint)
+          f"matching {created}, samples its statuses, and records its own "
+          "traffic." + compatibility_hint)
       return
     if self.session.pass_in_flight():
       self.status.update(
           "A diagnostic pass started from another report is still finishing. "
           "Press p to probe once it has." + compatibility_hint)
       return
-    if self.session.capture_off_reason:
-      self._begin_pass(None)
-      return
-    if not self.session.capture_choice_made:
-      if self.asking:
-        return
-      self.asking = True
-      self.status.update(
-          "Choose where to capture RTPS packets for the full diagnostic, or "
-          f"{SKIP_CAPTURE} to probe without capturing.")
-      self.app.push_screen(CaptureInterfaceScreen(
-          self.session, self._answer_capture,
-          on_dismiss=lambda: self._answer_capture(None, dismissed=True)))
-      return
-    # An answer already exists, which may be a remembered Skip (None).
-    self._begin_pass(self.session.capture_interface)
+    self._begin_pass()
 
-  def _answer_capture(self, interface, dismissed=False):
-    """The picker's answer, which is also what closes the asking window."""
-    self.asking = False
-    self._begin_pass(interface, dismissed=dismissed)
-
-  def _begin_pass(self, interface, dismissed=False, write_samples=False):
-    """Start one combined probe+capture pass. The only path that runs either."""
-    # The picker is a screen, so it can outlive the report that pushed it, and
-    # a pass can have started elsewhere while it was open. `is_current` rather
-    # than `is_mounted`: this is also reached from `on_mount`, where a screen
-    # does not yet count as mounted.
+  def _begin_pass(self, write_samples=False):
+    """Start the one probe pass used by every active endpoint diagnosis."""
     if not self.is_current:
       return
-    if not self._capture_allowed():
+    if not self._pass_allowed():
       return
     # The request becomes the capability here, at the one place a pass starts.
     if self.probe_requested:
@@ -724,24 +621,16 @@ class ReportScreen(Screen):
       # the screen is rebuilt.
       self.refresh_bindings()
     probing = self.probe and self.endpoint is not None
-    if not probing and not interface:
-      self.status.update("Nothing to run: this report does not probe, and no "
-                         "capture interface was chosen.")
+    if not probing:
+      self.status.update("Nothing to run: this report does not probe.")
       return
-    seconds = (self.session.probe_timeout if probing
-               else engine_mod.DEFAULT_CAPTURE_SECONDS)
-    destination = (os.path.abspath(self.session.capture_path())
-                   if interface else None)
-    # Said before tshark is spawned, not after it returns: what is being
-    # collected, from where, for how long, and what it leaves on disk.
-    self.status.update(
-        self._pass_announcement(interface, probing, seconds, destination,
-                                dismissed, write_samples))
+    seconds = self.session.probe_timeout
+    self.status.update(self._pass_announcement(probing, seconds, write_samples))
     # One subscription at a time on this topic. A live feed running through a
     # probe is load the probe is trying to measure, and its frames would land in
     # that pass's capture as if they were the application's.
     self._stop_live()
-    self.probing, self.capturing = probing, bool(interface)
+    self.probing = probing
     # The feed was closed above so the pass has the topic to itself. Say which
     # of the two it is: `_stop_live` leaves "select this tab again to reopen",
     # which is wrong for the whole length of a pass that will hand the feed back
@@ -750,19 +639,15 @@ class ReportScreen(Screen):
       self.live_note = ("This report's diagnostic pass is running. The live "
                         "feed starts when it finishes.")
       self._render_live()
-    # Claimed for the window tshark itself is bounded by, so a claim nobody
-    # releases expires no later than the capture it was protecting.
-    self.session.claim_pass(seconds + engine_mod.CAPTURE_DURATION_MARGIN)
+    self.session.claim_pass(seconds)
     # run_worker, not asyncio.create_task: a bare task is only weakly
     # referenced by the loop and nothing cancels it when the screen is popped,
     # so a pass left running would write into unmounted widgets seconds after
     # the operator navigated away.
-    self.run_worker(self._run_pass(probing, seconds, destination, interface,
-                                   write_samples),
+    self.run_worker(self._run_pass(probing, write_samples),
                     exit_on_error=False)
 
-  def _pass_announcement(self, interface, probing, seconds, destination,
-                         dismissed=False, write_samples=False):
+  def _pass_announcement(self, probing, seconds, write_samples=False):
     """What is about to run, said before it runs. Pure, so it can be tested.
 
     The result text can be intercepted on the status widget, but the entry
@@ -785,38 +670,14 @@ class ReportScreen(Screen):
     if self.session.network_capture:
       probe_text += (", with RTI Network Capture recording this participant's "
                      "own frames including shared memory")
-    if interface:
-      return (f"Full diagnostic on '{topic}': capturing RTPS packets on "
-              f"'{interface}' for {seconds:.0f}s, writing {destination} (and a "
-              f".tshark.log beside it)"
-              + (f", while {probe_text}. " if probing else ". ")
-              + "Capture needs packet-capture privileges on this host.")
-    if self.session.capture_off_reason:
-      return (f"Packet capture is off for this session: "
-              f"{_short(self.session.capture_off_reason)}. Now {probe_text} on "
-              f"'{topic}'.")
-    if dismissed:
-      return (f"No interface chosen, so nothing is being captured. Now "
-              f"{probe_text} on '{topic}'. The next report will ask again; "
-              "choose an interface when opening it.")
-    return (f"Full diagnostic on '{topic}' without packet capture "
-            f"({SKIP_CAPTURE} is remembered for this session): {probe_text}. "
-          "The capture choice remains in effect for this session.")
+    return f"Full diagnostic on '{topic}': {probe_text}."
 
-  async def _run_pass(self, probing, seconds, destination, interface,
-                      write_samples=False):
-    """One `diagnose_endpoint` call for both halves.
-
-    The engine already starts the capture before the probe, which is the whole
-    reason these cannot be two calls: a capture on a probed endpoint has
-    nothing to observe unless it is the thing that drives the probe.
-    """
+  async def _run_pass(self, probing, write_samples=False):
+    """Run the probe and collect its participant-scoped traffic evidence."""
     def work():
       try:
-        return self.session.diagnose_endpoint(
-            self.endpoint, probe=probing, capture_interface=interface,
-            capture_seconds=seconds, capture_path=destination,
-            write_samples=write_samples)
+        return self.session.diagnose_endpoint(self.endpoint, probe=probing,
+                            write_samples=write_samples)
       finally:
         # Released from the thread, not only the coroutine: `asyncio.to_thread`
         # cannot be cancelled, so a worker killed by navigation would otherwise
@@ -826,12 +687,12 @@ class ReportScreen(Screen):
     try:
       self.data = await asyncio.to_thread(work)
       self._update_sections()
-      self.status.update(self._pass_result_text(interface, probing))
+      self.status.update(self._pass_result_text(probing))
     except Exception as e:
       logging.error(f"[ReportScreen] diagnostic pass failed: {e}")
       self.status.update(f"Diagnostic pass failed: {e}")
     finally:
-      self.probing = self.capturing = False
+      self.probing = False
       # Released here as well as in the thread: the thread covers a cancelled
       # worker, and this covers a coroutine entered but cancelled before
       # `to_thread` dispatches. Both are idempotent, and the claim's own
@@ -843,38 +704,35 @@ class ReportScreen(Screen):
       # a live stream is often the most useful thing left.
       self._start_live_if_active()
 
-  def _pass_result_text(self, interface, probing):
-    """What the pass produced - and the one place capture turns itself off."""
-    if not interface:
-      return f"Probe complete. {self.data.verdict}"
-    evidence = self.data.wire_evidence or {}
-    source = evidence.get("source", "the capture file")
+  def _pass_result_text(self, probing):
+    """Summarize the probe and its participant-scoped capture evidence."""
+    evidence = self.data.participant_evidence or {}
+    source = evidence.get("source")
     if evidence.get("error"):
-      lead = "Probe complete, but the capture" if probing else "The capture"
-      reason = (f"{lead} on '{interface}' produced no packet evidence: "
-                f"{evidence['error']}.")
-      tail = f" {self.data.verdict}" if probing else ""
-      # Only a capture that never started says anything about the next one.
-      # "No tshark" and "no capture privileges" are properties of the host and
-      # would otherwise attach a wire-evidence error to every later report,
-      # which is the harm; a capture that ran and then ended badly - killed
-      # after termination, a truncated file - is this report's problem alone,
-      # and disabling the session for it would be the opposite mistake.
-      #
-      # An exception from `diagnose_endpoint` deliberately does not land here:
-      # the engine funnels tshark failures into `wire_evidence["error"]`, so an
-      # exception is a bug, not a privilege problem, and stays per-report.
-      if evidence.get("error_stage") == "start":
-        self.session.disable_capture(evidence["error"])
-        return f"{reason} Packet capture is now off for this session.{tail}"
-      return f"{reason}{tail}"
-    # Name what was parsed, not just how many frames matched. A capture can
-    # yield the peer's product version while matching zero user-data frames,
-    # and the count alone reported that as nothing.
-    return (f"{'Full diagnostic' if probing else 'Capture'} complete: "
-            f"{report_mod.capture_headline(self.data)}. Written to {source}. "
-            f"See Overview for what the capture added, Wire for the full "
-            f"counts. {self.data.verdict}")
+      return f"Probe complete, but RTI Network Capture was unavailable: {evidence['error']}. {self.data.verdict}"
+    capture_text = report_mod.capture_headline(self.data)
+    written = f" Written to {source}." if source else ""
+    isolation = self._writer_isolation_hint()
+    return (f"Probe complete: {capture_text}.{written}{isolation} See Overview for what "
+            f"the capture added, Wire for the full counts. {self.data.verdict}")
+
+  def _writer_isolation_hint(self):
+    """Name actual writer isolation, including its ownership rationale."""
+    probe_result = self.data.probe_result
+    if (not getattr(self.endpoint, "is_writer", False)
+        or not getattr(probe_result, "isolated", False)):
+      return ""
+    ownership = getattr(self.endpoint, "ownership", None)
+    ownership_kind = getattr(ownership, "kind", ownership)
+    ownership_name = getattr(ownership_kind, "name", str(ownership_kind))
+    ignored_writers = [record for record in getattr(probe_result, "ignored", ())
+                       if record.get("kind") == "writer"]
+    if not ignored_writers:
+      return ""
+    rationale = (" to avoid EXCLUSIVE ownership arbitration"
+                 if "EXCLUSIVE" in str(ownership_name).upper() else "")
+    return (f" Isolated the selected writer by ignoring {len(ignored_writers)} "
+            f"competing writer(s){rationale}, so it was probed exclusively.")
 
   def action_probe(self):
     """Probe an endpoint whose report was opened without probing.
@@ -888,22 +746,17 @@ class ReportScreen(Screen):
     issue names could not be probed at all without first finding it again by
     hand in Browse.
 
-    This runs the same single pass the probing entry path runs, capture question
-    included: the question comes first because a capture has to be recording
-    before the probe it exists to observe.
+    This runs the same single pass the probing entry path runs.
     """
     if self.endpoint is None:
       self.status.update("Probing needs an endpoint; this is a participant "
                          "report.")
       return
-    if self.probing or self.capturing:
+    if self.probing:
       # This report's own pass, which `_offer_full_pass` would have reported as
       # "started from another report" - and it would have overwritten the
       # announcement naming the interface, the duration and the capture file.
       self.status.update("This report's diagnostic pass is already running.")
-      return
-    if self.asking:
-      self.status.update("Answer the capture question first.")
       return
     # `probe` is set by `_begin_pass`, where a pass actually starts - not here.
     # `_offer_full_pass` can still refuse (another report's pass), and setting
@@ -1008,15 +861,11 @@ class ReportScreen(Screen):
           "Declined - nothing was published. The report still shows the match "
           "and the reliable handshake from the probe writer's own counters.")
       return
-    self._begin_pass(self.session.capture_interface, write_samples=True)
+    self._begin_pass(write_samples=True)
 
-  def _capture_allowed(self):
+  def _pass_allowed(self):
     if self.endpoint is None:
-      self.status.update("Packet capture needs an endpoint; this is a "
-                         "participant report.")
-      return False
-    if self.capturing:
-      self.status.update("A capture is already running for this endpoint.")
+      self.status.update("Probing needs an endpoint; this is a participant report.")
       return False
     if self.probing:
       # Two probes on one topic at once would each report the other's traffic.
@@ -1314,7 +1163,7 @@ class ReportScreen(Screen):
 
   def _update_sections(self):
     for tab_id, text in report_mod.render_view_sections(self.data).items():
-      self.bodies[tab_id].update(text)
+      self.bodies[tab_id].update(self._styled_section_text(tab_id, text))
     # The feed owns the Data body only while it is OPEN, or while a refusal has
     # something to say about why it is not. Deferring to it for kept samples
     # alone put a closed feed's older arrivals over a fresher probe snapshot -

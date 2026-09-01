@@ -40,7 +40,6 @@ _WIRE_FIELDS = (
     # Before "Capture filter" and "Capture" for the same reason they are
     # ordered against each other: a shorter label is a prefix of a longer one.
     ("  Fast DDS versions advertised", "fastdds_product_versions", list),
-    ("Capture interface", "capture_interface", str),
     ("Reassembled bytes in matching frames", "reassembled_bytes", int),
     ("Serialized bytes in matching frames", "payload_bytes", int),
     ("Encapsulation IDs in matching frames", "encapsulation_ids", list),
@@ -59,7 +58,7 @@ _WIRE_FIELDS = (
 
 
 def command(domain, topic, *, settle, type_wait, no_probe=False,
-            probe_timeout=None, capture_interface=None, ready_file=None,
+            probe_timeout=None, ready_file=None,
             ready_after_participants=None, ready_timeout=None,
             connext_log=None, connext_verbosity=None):
   """Build a headless Doctor command and its isolated Python environment."""
@@ -74,8 +73,6 @@ def command(domain, topic, *, settle, type_wait, no_probe=False,
     doctor_command.append("--no-probe")
   if probe_timeout is not None:
     doctor_command.extend(("--probe-timeout", str(probe_timeout)))
-  if capture_interface is not None:
-    doctor_command.extend(("--capture-interface", capture_interface))
   if ready_file is not None:
     doctor_command.extend(("--ready-file", ready_file))
   if ready_after_participants is not None:
@@ -156,32 +153,33 @@ def _verdict(lines):
 
 
 def _findings(lines):
-  """Every finding in the FINDINGS section, in the order it was rendered."""
-  body = _section(lines, "FINDINGS")
-  if body is None:
-    return []
+  """Every finding in issue and verified sections, in rendered order."""
   found = []
-  field = None
-  for line in body:
-    header = _FINDING.match(line)
-    if header:
-      found.append({"id": header.group("id"),
-                    "severity": header.group("severity"),
-                    "rung": int(header.group("rung")),
-                    "title": "", "observed": "", "root_cause": "",
-                    "remedy": "", "explained_by": "", "refs": []})
-      field = "title"
+  for title in ("FINDINGS", "VERIFIED"):
+    body = _section(lines, title)
+    if body is None:
       continue
-    if not found:
-      continue
-    labelled = _FIELD_LINE.match(line)
-    if labelled:
-      field = _FINDING_FIELDS[labelled.group(1)]
-      _append(found[-1], field, labelled.group(2))
-      continue
-    continuation = _CONTINUATION.match(line)
-    if continuation and field is not None:
-      _append(found[-1], field, continuation.group(1))
+    field = None
+    for line in body:
+      header = _FINDING.match(line)
+      if header:
+        found.append({"id": header.group("id"),
+                      "severity": header.group("severity"),
+                      "rung": int(header.group("rung")),
+                      "title": "", "observed": "", "root_cause": "",
+                      "remedy": "", "explained_by": "", "refs": []})
+        field = "title"
+        continue
+      if not found:
+        continue
+      labelled = _FIELD_LINE.match(line)
+      if labelled:
+        field = _FINDING_FIELDS[labelled.group(1)]
+        _append(found[-1], field, labelled.group(2))
+        continue
+      continuation = _CONTINUATION.match(line)
+      if continuation and field is not None:
+        _append(found[-1], field, continuation.group(1))
   return found
 
 
@@ -220,14 +218,13 @@ def _wire_observation(lines):
 
 
 def run(domain, topic, *, settle, type_wait, timeout, no_probe=False,
-        probe_timeout=None, capture_interface=None, ready_file=None,
+  probe_timeout=None, ready_file=None,
   ready_after_participants=None, ready_timeout=None,
   connext_log=None, connext_verbosity=None):
   """Run headless Doctor and return its completed process and parsed report."""
   doctor_command, environment = command(
       domain, topic, settle=settle, type_wait=type_wait, no_probe=no_probe,
-      probe_timeout=probe_timeout, capture_interface=capture_interface,
-      ready_file=ready_file,
+      probe_timeout=probe_timeout, ready_file=ready_file,
       ready_after_participants=ready_after_participants,
       ready_timeout=ready_timeout, connext_log=connext_log,
       connext_verbosity=connext_verbosity)

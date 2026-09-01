@@ -22,7 +22,7 @@ class TestDoctorE2E(unittest.TestCase):
   def test_command_configures_a_headless_environment(self):
     command, environment = doctor_e2e.command(
         17, "Telemetry", settle=2, type_wait=4, no_probe=True,
-        probe_timeout=5, capture_interface="lo", ready_file="ready",
+        probe_timeout=5, ready_file="ready",
       ready_after_participants=2, ready_timeout=7,
         connext_log="connext.log", connext_verbosity="silent")
 
@@ -32,7 +32,6 @@ class TestDoctorE2E(unittest.TestCase):
     # --format is gone: the text report is the only output Doctor produces.
     self.assertNotIn("--format", command)
     self.assertIn("--no-probe", command)
-    self.assertIn("--capture-interface", command)
     self.assertIn("--ready-file", command)
     self.assertIn("--ready-after-participants", command)
     self.assertIn("--ready-timeout", command)
@@ -99,6 +98,21 @@ class TestParseTextReport(unittest.TestCase):
     self.assertEqual(mismatch["remedy"], self.MISMATCH.remedy)
     self.assertEqual(mismatch["refs"], self.MISMATCH.refs)
     self.assertEqual(by_id["type.resolved"]["severity"], "OK")
+
+  def test_issues_and_verified_checks_are_rendered_separately(self):
+    note = findings.Finding(
+        id="probe.not_measured", rung=4, severity=findings.Severity.INFO,
+        title="Probe was not run")
+    text = report.render_text(report.ReportData(
+        domain_id=17, scope="topic 'Telemetry'",
+        all_findings=[self.MISMATCH, self.RESOLVED, note]))
+    lines = text.splitlines()
+    issues = doctor_e2e._section(lines, "FINDINGS")
+    verified = doctor_e2e._section(lines, "VERIFIED")
+    self.assertIn("qos.rxo_mismatch", "\n".join(issues))
+    self.assertNotIn("type.resolved", "\n".join(issues))
+    self.assertIn("type.resolved", "\n".join(verified))
+    self.assertIn("probe.not_measured", "\n".join(verified))
 
   def test_a_report_with_no_wire_capture_carries_no_wire_observation(self):
     parsed = doctor_e2e.parse_report(self._completed([self.RESOLVED]))

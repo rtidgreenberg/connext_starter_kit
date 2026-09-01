@@ -51,19 +51,13 @@ on every launch. 7.3 uses `connext_dds_env_7.3/`; 7.7 uses
 `connext_dds_env/` for Python 3.10 or `connext_dds_env_7.7_py<python>/` for a
 newer supported Python version.
 
-**tshark — optional, and only for wire evidence.** Doctor runs fully without it:
-`--pcap`, `--capture-interface` and the TUI's capture step are the only things
-that use it, and when it is missing they turn themselves off and say so in the
-report rather than failing the run. Install it if you want RTPS packet evidence:
+**tshark — optional, and only for packet analysis.** Doctor runs fully without
+it: RTI Network Capture and `--pcap` use it to analyze existing PCAP files. Install
+it if you want RTPS packet evidence:
 
 ```bash
 sudo apt install tshark          # Debian/Ubuntu
 ```
-
-Capturing also needs the privilege to open an interface — on Debian/Ubuntu that
-is `sudo dpkg-reconfigure wireshark-common` plus membership of the `wireshark`
-group, and a re-login. Without it Doctor reports "no capture privileges" and
-continues.
 
 Wire observation is developed and measured against **Wireshark/tshark 4.4.9**,
 which is what the RTPS dissector behaviour in `wire.py` is written for. Nothing
@@ -116,7 +110,7 @@ Keys:
 | `Up` / `Down` / `Enter` | Select a menu item, drill into a participant/topic, or run the full diagnostic on an endpoint |
 | `1` / `2` / `3` / `4` | In Topology: participants, readers, writers, topics |
 | `f` | In Topology: show findings linked to the highlighted row |
-| `p` | On an endpoint report opened with `--no-probe-default`: probe it now (offers a capture first) |
+| `p` | On an endpoint report opened with `--no-probe-default`: probe it now |
 | `m` | On the system overview: observed domain metrics |
 | `r` | Refresh the current screen's snapshot |
 | `w` | On a **reader** report: publish synthetic samples to verify delivery — asks first, every time |
@@ -130,8 +124,7 @@ under you while you read it. `r` takes a new one.
 
 Endpoint reports run a diagnostic probe by default. Start Doctor with
 `--no-probe-default` when you want reports to remain passive until you press
-`p`. The capture choice is still separate: Doctor asks before the first probe,
-and `Skip` records a session-wide answer to probe without interface capture.
+`p`.
 
 For non-interactive system assessment or a single topic report, supply the
 domain explicitly:
@@ -214,36 +207,21 @@ Linux architecture, glibc baseline, and DDS network access. `tshark` is not
 bundled: install it separately on the target when RTPS packet capture is needed,
 along with the capture permissions described above.
 
-## Packet Capture Is Something You Ask For
+## Packet Evidence
 
-When an endpoint report probes, Doctor runs the full diagnostic in **one pass**:
-a probe and, if you consent to one, a packet capture. The first such report of
-a session asks where to capture, with `Skip` at the top of the list for "probe,
-but capture nothing". Both answers are remembered, so later probes run without
-asking, and `--capture-interface` gives the answer up front. The choice is made
-when the first endpoint probe begins and nowhere else: there is no key that
-re-opens the picker, so changing it means restarting the session.
+When an endpoint report probes, Doctor records the probe participant with RTI
+Network Capture in the same diagnostic pass. The capture is participant scoped,
+covers every transport the probe uses, and is written under
+`tools/rti_doctor/test_output/rti_doctor_captures/`. Captures not cited by a
+saved report are removed on exit; `RTI_DOCTOR_KEEP_ARTIFACTS=1` retains them.
 
-One pass, not two. A capture with nothing on the wire is an empty file, so a
-capture on a probed endpoint has to be the thing that drives the probe — when
-capture was a separate keystroke, a full report cost two probes.
+`tshark` parses those PCAP files and files provided through `--pcap`. It does
+not perform a live interface capture, so Doctor needs neither an interface
+selection nor packet-capture privileges.
 
-Before anything starts, the screen states the interface, the file it will write
-(under `tools/rti_doctor/test_output/rti_doctor_captures/`, with a
-`.tshark.log` beside it) and how long it will run; the capture is bounded by
-tshark's own `-a duration:`, so one that is abandoned still stops. If a capture
-fails — no capture privileges on this host, no `tshark` — capture turns itself
-off for the rest of the session rather than filing that refusal as the wire
-evidence of every later report. Nothing in the session turns it back on; fix
-the privileges or install `tshark`, then run again.
-
-With the default `--probe-default`, every endpoint report runs a full diagnostic
-and offers capture before probing. Use `--no-probe-default` when opening reports
-must remain passive; press `p` on an endpoint report to run the probe later.
-
-On exit, captures no saved report cites are removed; saving a report with `s`
-keeps the capture it names in Appendix C. `RTI_DOCTOR_KEEP_ARTIFACTS=1` keeps
-everything, matching the fault-injection artifacts.
+With the default `--probe-default`, every endpoint report runs a full diagnostic.
+Use `--no-probe-default` when opening reports must remain passive; press `p` on
+an endpoint report to run the probe later.
 
 A few facts are observable **only** in RTPS packets — the RTPS reliable
 handshake, and a Fast DDS peer's product version — and reports render those as
@@ -264,7 +242,7 @@ writer would lead with that writer's version as though it were its own.
 
 RTI's `nddsnetworkcapture` instruments the **participant** and writes a standard
 PCAP of rti_doctor's own probe traffic on every transport it used, including UDP
-and **shared memory**, which no interface capture can observe. Doctor then uses
+and **shared memory**. Doctor then uses
 `tshark` to parse that generated PCAP as ordinary RTPS. Verified on this host:
 81 RTPS frames with 15 HEARTBEAT and 14 ACKNACK, carrying no IP layer at all.
 
@@ -272,21 +250,16 @@ Two properties follow from how it works, and both are stated in every report:
 
 * **It starts by default, before any DDS call.** The binding requires `enable()`
   before *any* other Connext call, so `--no-network-capture` must be supplied at
-  launch to disable it. The TUI asks for an interface before the first endpoint
-  diagnostic and keeps that choice for the session; restart Doctor to choose a
-  different interface.
+  launch to disable it.
 * **It is scoped to one participant — ours.** It shows rti_doctor's conversation
-  with the peer in both directions and nothing else. It can never show traffic
-  between two other participants, which is exactly what an interface capture is
-  good at. The two are complements; Appendix C reports them separately.
+  with the peer in both directions and nothing else. Current diagnoses only need
+  that probe-to-endpoint evidence.
 
 ### rti_doctor uses Connext's default transports
 
 rti_doctor leaves `transport_builtin.mask` unchanged, so its participant uses
 Connext's default UDPv4 and shared-memory transports. RTI Network Capture records
-both for Doctor's own participant; `tshark` parses the resulting PCAP. An
-interface capture remains useful for traffic among other participants, but it
-cannot observe same-host shared-memory traffic.
+both for Doctor's own participant; `tshark` parses the resulting PCAP.
 
 ## The Probe Talks Only to the Selected Endpoint (`--no-isolate-probe`)
 
@@ -483,11 +456,6 @@ system it was pointed at.
     --xtypes-compliance {default,vendor}
                       Observer XTypes compliance mask (default: vendor)
     --pcap PATH       Analyze RTPS user-data packets in an existing capture (with --topic)
-    --capture-interface IFACE
-              Interface for packet capture: captured while probing with --topic.
-              In the TUI it answers the capture question up front, so every
-              endpoint report captures on entry without asking (no default:
-              the TUI asks, and Skip is an answer)
     --network-capture Record our own participant with RTI Network Capture
           (default)
     --no-network-capture
@@ -527,9 +495,6 @@ number of writers and should be spent on the one you chose.
 
 # Inspect direct RTPS packet evidence from a saved capture
 ./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData --pcap session.pcapng
-
-# Capture during one topic probe (writes tools/rti_doctor/test_output/rti_doctor_captures/*.pcapng)
-./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData --capture-interface lo
 
 # Preserve native Connext discovery/TypeLookup diagnostics for later parsing.
 # status-all includes the Fast DDS TypeInformation deserialization failure.
@@ -787,20 +752,13 @@ data-representation selector or a missing dynamic member ID.
   self-inflicted blindness but cannot see the peer's configuration.
 - **The domain scan is best-effort**: it relies on RTI's default domain
   announcements, so an empty result is not proof that no other domain is active.
-- **Wire observation is consented to and bounded.** `--pcap`,
-  `--capture-interface` and the TUI's endpoint reports use `tshark` to count
-  RTPS DATA/DATA_FRAG submessages and report the encapsulation IDs Wireshark
-  actually decodes. Nothing captures at startup, and nothing captures from a
-  passive endpoint report. A probing endpoint report captures only after you
-  have chosen an interface, and `Skip` is an answer it remembers. A live capture
-  applies
-  a BPF filter for the selected domain's configured RTPS port range before packets
-  are written; discovered writer ports outside that range are added explicitly.
-  The resulting observations are then limited to the selected endpoint's RTPS
-  source GUID prefix. No observed selected-peer user-data packet means only that
+- **Packet evidence is scoped.** RTI Network Capture records Doctor's probe
+  participant during an endpoint probe; `--pcap` analyzes an existing file.
+  `tshark` counts RTPS DATA/DATA_FRAG submessages and reports the encapsulation
+  IDs it decodes. No observed selected-peer user-data packet means only that
   none was present in that capture interval; it does not establish a selected
-  representation. DDS Security payload encryption can also prevent user data from
-  being decoded.
+  representation. DDS Security payload encryption can also prevent user data
+  from being decoded.
 - **DDS Security is flagged, not diagnosed.**
 - **OpenDDS and OpenSplice** are recognized by vendor id and carry advisory notes,
   but are not in the validation matrix. OpenDDS is only visible at all if it was

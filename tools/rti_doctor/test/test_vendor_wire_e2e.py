@@ -26,7 +26,6 @@ CYCLONE_SUBSCRIBER = os.path.join(VENDORS_DIR, "cyclone_subscriber.py")
 FASTDDS_DIR = os.path.join(VENDORS_DIR, "fastdds")
 FASTDDS_IMAGE = os.environ.get("RTI_DOCTOR_FASTDDS_IMAGE",
                                "rti-doctor-fastdds-e2e:3.6.2")
-CAPTURE_INTERFACE = os.environ.get("RTI_DOCTOR_TEST_CAPTURE_INTERFACE", "any")
 DOCTOR_SETTLE = 3
 # Cyclone DDS's default RTPS port mapping cannot represent domains above 232.
 # Keep this vendor-only range below that limit while avoiding the usual examples.
@@ -82,7 +81,7 @@ class VendorWireE2E(unittest.TestCase):
   def run_doctor(self):
     command, environment = doctor_e2e.command(
         self.domain, self.topic, settle=DOCTOR_SETTLE, type_wait=5,
-        probe_timeout=4, capture_interface=CAPTURE_INTERFACE)
+        probe_timeout=4)
     for attempt in range(3):
       completed = subprocess.run(
           command, text=True, capture_output=True, env=environment,

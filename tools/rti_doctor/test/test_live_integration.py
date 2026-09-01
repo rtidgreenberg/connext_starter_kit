@@ -141,16 +141,17 @@ class TestHealthy(LiveFixtureTest):
 
   def test_report_contains_required_sections(self):
     text = report.render_text(self.diagnose())
-    for heading in ("RTI DOCTOR INTEROP REPORT", "VERDICT", "PEER", "FINDINGS",
+    for heading in ("RTI DOCTOR INTEROP REPORT", "VERDICT", "PEER", "FINDINGS", "VERIFIED",
                     "APPENDIX A", "APPENDIX B", "APPENDIX C"):
       self.assertIn(heading, text)
 
   def test_interactive_report_sections_are_split_by_concern(self):
     sections = report.render_view_sections(self.diagnose())
-    self.assertEqual(set(sections), {"overview", "findings", "type", "probe",
+    self.assertEqual(set(sections), {"overview", "findings", "verified", "type", "probe",
                                      "data", "wire", "config"})
     self.assertIn("VERDICT", sections["overview"])
     self.assertIn("FINDINGS", sections["findings"])
+    self.assertIn("VERIFIED", sections["verified"])
     self.assertIn("DISCOVERED TYPE", sections["type"])
 
   def test_selecting_the_data_tab_streams_live_samples_and_closes_the_reader(self):
@@ -419,7 +420,7 @@ class TestTui(LiveFixtureTest):
         f"navigation went off course: {[c.__name__ for c in seen]}")
     self.assertEqual(self.selected_issue_severity, f.Severity.ERROR)
 
-  def test_opening_a_report_renders_it_and_asks_before_capturing(self):
+  def test_opening_a_report_renders_and_runs_network_capture(self):
     """Drill all the way to ReportScreen and confirm it renders.
 
     The navigation test stops at EndpointListScreen, so nothing exercised
@@ -429,16 +430,14 @@ class TestTui(LiveFixtureTest):
     have raised NameError the first time an operator opened a report.
 
     Enter on a topology row is the whole entry flow now, and what it costs is
-    `--probe-default`: off, it is the cheap passive look; on, it asks where to
-    capture first. This is the live check on both sides of that - the static
-    findings are rendered before the capture question is asked, the picker is
-    what the operator lands on, and dismissing it leaves a report rather than a
-    dead end.
+    `--probe-default`: off, it is the cheap passive look; on, it runs the
+    diagnostic probe and its participant-scoped Network Capture on entry. This
+    is the live check on both sides: static findings render first, then the
+    report remains usable while the diagnostic pass runs.
     """
     import asyncio
 
-    from rti_doctor.views.report_screen import (CaptureInterfaceScreen,
-                                                ReportScreen)
+    from rti_doctor.views.report_screen import ReportScreen
 
     from rti_doctor.app import RTIDoctorApp
 
@@ -466,26 +465,19 @@ class TestTui(LiveFixtureTest):
         await pilot.press("escape")
         await pilot.pause(0.5)
 
-        # The same key under the default setting is the full diagnostic, so it
-        # asks first - on top of a report whose static findings are already
-        # rendered. Read at push time, so flipping it here is what an operator
-        # who did not pass --no-probe-default gets.
+        # The same key under the default setting starts the full diagnostic on
+        # the report itself. Read at push time, so flipping it here is what an
+        # operator who did not pass --no-probe-default gets.
         self.session.probe_default = True
         await pilot.press("enter")
         await pilot.pause(1.5)
-        seen["asked"] = type(app.screen)
-        seen["body_behind_the_picker"] = str(app.screen_stack[-2].body.render())
-        await pilot.press("escape")            # dismissal is not an answer
-        await pilot.pause(0.5)
-        seen["screen"] = type(app.screen)
-        seen["answered"] = self.session.capture_choice_made
+        seen["diagnostic"] = type(app.screen)
+        seen["diagnostic_body"] = str(app.screen.body.render())
 
     asyncio.run(drive())
     self.assertIs(seen["passive"], ReportScreen)
-    self.assertIs(seen["asked"], CaptureInterfaceScreen)
-    self.assertIs(seen["screen"], ReportScreen)
-    self.assertFalse(seen["answered"])
-    for body in (seen["passive_body"], seen["body_behind_the_picker"]):
+    self.assertIs(seen["diagnostic"], ReportScreen)
+    for body in (seen["passive_body"], seen["diagnostic_body"]):
       self.assertIn("RTI DOCTOR INTEROP REPORT", body)
       self.assertIn("VERDICT", body)
       self.assertNotIn("Static checks failed", body)

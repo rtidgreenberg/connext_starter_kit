@@ -221,14 +221,15 @@ class SystemOverviewScreen(Screen):
     elif not metrics["participants"]:
       self.summary.update(
           f"[yellow]No DDS discovered on domain {self.session.domain_id}.[/yellow]\n"
-          f"Findings: {counts[f.Severity.ERROR]} Errors | "
-          f"{counts[f.Severity.WARN]} Warnings | {counts[f.Severity.INFO]} Notes")
+          f"Findings: {issue_marks.severity_summary(counts)}")
     else:
+      finding_summary = ("[bold green]No active issues found.[/bold green]"
+                         if not any(counts.values()) else
+                         f"Findings: {issue_marks.severity_summary(counts)}")
       self.summary.update(
           f"Observed: {metrics['participants']} participants | {metrics['readers']} readers | "
           f"{metrics['writers']} writers | {metrics['topic_count']} topics\n"
-          f"Findings: {counts[f.Severity.ERROR]} Errors | {counts[f.Severity.WARN]} Warnings | "
-          f"{counts[f.Severity.INFO]} Notes")
+          f"{finding_summary}")
     self.snapshot = snapshot
 
   async def on_data_table_row_selected(self, event):
@@ -312,7 +313,9 @@ class IssueSeverityScreen(Screen):
                ("warning", f.Severity.WARN, "Warnings", "Potential interoperability risk"),
                ("info", f.Severity.INFO, "Info", "Advisory observations"))
     for key, severity, label, description in choices:
-      self.table.add_row(label, str(counts[severity]), description, key=key)
+      self.table.add_row(issue_marks.severity_text(label, severity),
+                         issue_marks.severity_text(counts[severity], severity),
+                         description, key=key)
     self.status.update("Select a severity to show only findings at that level.")
 
   async def on_data_table_row_selected(self, event):
@@ -397,8 +400,10 @@ class IssueListScreen(Screen):
     self.table.clear()
     issues = self._visible_issues()
     for number, issue in enumerate(issues, 1):
-      self.table.add_row(str(number), issue.severity.label, issue.topic_name or "(domain)",
-                         ", ".join(issue.finding_ids), "observed", key=issue.key)
+      self.table.add_row(str(number),
+                         issue_marks.severity_text(issue.severity.label, issue.severity),
+                         issue.topic_name or "(domain)", ", ".join(issue.finding_ids),
+                         issue_marks.severity_text("OBSERVED", issue.severity), key=issue.key)
     counts = {severity: sum(issue.severity == severity for issue in issues)
               for severity in (f.Severity.ERROR, f.Severity.WARN, f.Severity.INFO)}
     stamp = time.strftime("%H:%M:%S", time.localtime(self.snapshot.captured_at))
@@ -411,9 +416,11 @@ class IssueListScreen(Screen):
     else:
       prefix = (f"No DDS discovered on domain {self.session.domain_id}; "
                 if not self.snapshot.topology["participants"] else "")
+      finding_summary = ("[bold green]No active issues found.[/bold green]"
+                         if not any(counts.values()) else
+                         issue_marks.severity_summary(counts))
       self.status.update(
-          f"{prefix}{scope} findings, snapshot {stamp}: {counts[f.Severity.ERROR]} Errors | "
-          f"{counts[f.Severity.WARN]} Warnings | {counts[f.Severity.INFO]} Notes. "
+          f"{prefix}{scope} findings, snapshot {stamp}: {finding_summary}. "
           "Press s to save the full system report, or r to refresh.")
     if previous and previous in {item.key for item in issues}:
       self.table.move_cursor(row=next(index for index, item in enumerate(issues)
@@ -521,7 +528,9 @@ class IssueDetailScreen(Screen):
   def compose(self):
     yield Header()
     with VerticalScroll(id="issue_detail"):
-      lines = [f"[bold]{self.issue.severity.label}: {self.issue.title}[/bold]", "",
+      style = issue_marks.SEVERITY_STYLE.get(self.issue.severity, "bold")
+      lines = [f"[{style}]{self.issue.severity.label}: "
+               f"{escape(self.issue.title)}[/{style}]", "",
                f"Finding: {', '.join(self.issue.finding_ids)}",
                f"Scope: {self.issue.scope}",
                f"Topic: {self.issue.topic_name or '(domain-wide)'}", "",
@@ -664,10 +673,13 @@ class TopologyHealthScreen(Screen):
       elif topic_name and issue.topic_name == topic_name:
         linked.append(issue)
     if not linked:
-      return "OK"
+      return issue_marks.severity_text("OK", f.Severity.OK)
     worst = max(issue.severity for issue in linked)
     noun = "finding" if len(linked) == 1 else "findings"
-    return f"{len(linked)} {noun} (worst: {worst.label})"
+    summary = issue_marks.severity_text(f"{len(linked)} {noun} (worst: ", worst)
+    summary.append(worst.label, style=issue_marks.SEVERITY_STYLE[worst])
+    summary.append(")")
+    return summary
 
   async def on_data_table_row_highlighted(self, event):
     self.selected_key = event.row_key.value if event.row_key else None

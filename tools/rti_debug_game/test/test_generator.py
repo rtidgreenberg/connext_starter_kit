@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from rti_debug_game.generator import generate
-from rti_debug_game.levels import L01, L02, L03, L04
+from rti_debug_game.levels import L01, L02, L03, L04, L05
 from rti_debug_game.app import DebugGameApp
 from rti_debug_game.control import ParticipantState, summarize
 from rti_debug_game.runtime import _build_type
@@ -71,6 +71,17 @@ class GeneratorTests(unittest.TestCase):
             reader = (root / "participant_orion_lidar_fusion.py").read_text(encoding="ascii")
             self.assertIn("registered_type_name = 'perception::TrackedObjectsV2'", writer)
             self.assertIn("registered_type_name = 'perception::TrackedObjects'", reader)
+
+    def test_generates_l05_shallow_writer_history_for_late_join_fault(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "run"
+            with patch("rti_debug_game.generator.run_root", return_value=root):
+                generate(L05, reset=True)
+            writer = (root / "participant_pioneer_map_service.py").read_text(encoding="ascii")
+            self.assertIn("qos.durability.kind = dds.DurabilityKind.TRANSIENT_LOCAL", writer)
+            self.assertIn("qos.history.kind = dds.HistoryKind.KEEP_LAST", writer)
+            self.assertIn("qos.history.depth = 1", writer)
+            self.assertEqual(5, L05.historical_samples)
 
     def test_l04_alternate_registered_type_has_an_incompatible_sequence_member(self):
         expected = _build_type("perception::TrackedObjects")

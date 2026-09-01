@@ -40,6 +40,7 @@ def run_once(scenario: Scenario, run_directory: Path, duration: float = 4.0) -> 
     entities = []
     readers = []
     writers = []
+    deferred_readers = []
     control_reporters = []
     states = []
     run_id = uuid.uuid4().hex
@@ -64,9 +65,26 @@ def run_once(scenario: Scenario, run_directory: Path, duration: float = 4.0) -> 
                                 module.DataModel.registered_type_name.endswith("V2")))
                 entities.append(writer)
             if scenario.topic in module.READS:
-                reader = dds.DynamicData.DataReader(
-                    subscriber, topic, getattr(module.EndpointQos, f"{endpoint_name}_reader")())
-                readers.append((participant_spec.process_id, reader))
+                reader_qos = getattr(module.EndpointQos, f"{endpoint_name}_reader")()
+                if scenario.historical_samples:
+                    deferred_readers.append((participant_spec.process_id, subscriber, topic, reader_qos))
+                else:
+                    reader = dds.DynamicData.DataReader(subscriber, topic, reader_qos)
+                    readers.append((participant_spec.process_id, reader))
+                    entities.append(reader)
+        if scenario.historical_samples:
+            for writer_id, writer, dynamic_type, writes_string_sequence in writers:
+                for sequence in range(1, scenario.historical_samples + 1):
+                    sample = dds.DynamicData(dynamic_type)
+                    sample["writer_id"] = writer_id
+                    sample["sequence"] = str(sequence) if writes_string_sequence else sequence
+                    sample["instance_key"] = 1
+                    sample["region"] = "west"
+                    writer.write(sample)
+            time.sleep(0.1)
+            for reader_id, subscriber, topic, reader_qos in deferred_readers:
+                reader = dds.DynamicData.DataReader(subscriber, topic, reader_qos)
+                readers.append((reader_id, reader))
                 entities.append(reader)
         deadline = time.monotonic() + duration
         while time.monotonic() < deadline and any(writer.publication_matched_status.current_count == 0
@@ -84,7 +102,7 @@ def run_once(scenario: Scenario, run_directory: Path, duration: float = 4.0) -> 
                         received[reader_id].add((sample.data["writer_id"], sample.data["sequence"]))
 
         for writer_id, writer, dynamic_type, writes_string_sequence in writers:
-            for sequence in range(1, scenario.samples_per_round + 1):
+            for sequence in range(scenario.historical_samples + 1, scenario.samples_per_round + 1):
                 sample = dds.DynamicData(dynamic_type)
                 sample["writer_id"] = writer_id
                 sample["sequence"] = str(sequence) if writes_string_sequence else sequence

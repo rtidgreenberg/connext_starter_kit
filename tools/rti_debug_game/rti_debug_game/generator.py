@@ -39,6 +39,11 @@ def _participant_source(scenario: Scenario, participant) -> str:
                            and participant.process_id == scenario.expected_writer else "operations")
     subscriber_partition = ("telemetry" if scenario.fault == "partition"
                             and participant.process_id == scenario.expected_reader else "operations")
+    writer_history_kind = ("dds.HistoryKind.KEEP_LAST" if scenario.fault == "history"
+                           and participant.process_id == scenario.expected_writer else "dds.HistoryKind.KEEP_ALL")
+    writer_history_depth = 1 if scenario.fault == "history" and participant.process_id == scenario.expected_writer else 20
+    reader_durability = ("dds.DurabilityKind.TRANSIENT_LOCAL" if scenario.historical_samples
+                         else "dds.DurabilityKind.VOLATILE")
     return f'''"""Editable configuration for {participant.name}."""
 
 import rti.connextdds as dds
@@ -83,13 +88,17 @@ class EndpointQos:
     def {stem}_writer() -> dds.DataWriterQos:
         qos = dds.DataWriterQos()
         qos.reliability.kind = {reliability}
-        qos.history.depth = 20
+        qos.durability.kind = dds.DurabilityKind.TRANSIENT_LOCAL
+        qos.history.kind = {writer_history_kind}
+        qos.history.depth = {writer_history_depth}
         return qos
 
     @staticmethod
     def {stem}_reader() -> dds.DataReaderQos:
         qos = dds.DataReaderQos()
         qos.reliability.kind = dds.ReliabilityKind.RELIABLE
+        qos.durability.kind = {reader_durability}
+        qos.history.kind = dds.HistoryKind.KEEP_ALL
         return qos
 
 

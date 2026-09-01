@@ -25,6 +25,7 @@ class Scenario:
     expected_reader: str
     fault: str
     samples_per_round: int = 10
+    historical_samples: int = 0
 
 
 L01 = Scenario(
@@ -91,5 +92,22 @@ L04 = Scenario(
     ),
 )
 
+L05 = Scenario(
+    level_id="L05",
+    title="Map replay misses the late joiner",
+    difficulty=3,
+    issue_categories=("Durability", "History"),
+    topic="MapUpdate",
+    type_name="mapping::MapUpdate",
+    expected_writer="pioneer_map_service",
+    expected_reader="navi_route_planner",
+    fault="history",
+    historical_samples=5,
+    participants=(
+        Participant("pioneer_map_service", "PioneerMapService", writes=("MapUpdate",)),
+        Participant("navi_route_planner", "NaviRoutePlanner", reads=("MapUpdate",)),
+    ),
+)
 
-CATALOG = {scenario.level_id: scenario for scenario in (L01, L02, L03, L04)}
+
+CATALOG = {scenario.level_id: scenario for scenario in (L01, L02, L03, L04, L05)}

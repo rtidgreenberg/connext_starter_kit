@@ -111,3 +111,17 @@ Produces a shareable plain-text report.
 ```
 
 See [tools/rti_doctor/README.md](rti_doctor/README.md).
+
+## rti_debug_game
+
+DDS troubleshooting scenarios with editable generated participant scripts and a
+Textual Mission Contract view. Use Admin Console on game-owned domain `42` to
+inspect the intended fault, repair the generated script, and run a verification
+round.
+
+```bash
+./tools/rti_debug_game/run_rti_debug_game.sh
+./tools/rti_debug_game/run_rti_debug_game.sh --run --level L01
+```
+
+See [rti_debug_game/README.md](rti_debug_game/README.md).

@@ -1,0 +1,7 @@
+run/
+run_history/
+.state/
+test_output/
+__pycache__/
+rti_debug_game/__pycache__/
+test/__pycache__/

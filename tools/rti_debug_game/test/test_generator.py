@@ -8,6 +8,7 @@ from unittest.mock import patch
 from rti_debug_game.generator import generate
 from rti_debug_game.levels import L01, L02, L03
 from rti_debug_game.app import DebugGameApp
+from rti_debug_game.control import ParticipantState, summarize
 
 
 class GeneratorTests(unittest.TestCase):
@@ -64,6 +65,18 @@ class GeneratorTests(unittest.TestCase):
         mission = DebugGameApp("L03")._mission_text()
         self.assertIn("L03: Guidance channel has the wrong identity", mission)
         self.assertIn("navi_route_planner", mission)
+
+    def test_control_summary_keeps_the_latest_state_for_each_process(self):
+        summary = summarize((
+            ParticipantState("writer", "run-1", "created"),
+            ParticipantState("reader", "run-1", "created"),
+            ParticipantState("writer", "run-1", "matched", matched_count=1),
+            ParticipantState("reader", "run-1", "passed", received_count=10),
+        ))
+        self.assertEqual("matched", summary["writer"]["lifecycle"])
+        self.assertEqual(1, summary["writer"]["matched_count"])
+        self.assertEqual("passed", summary["reader"]["lifecycle"])
+        self.assertEqual(10, summary["reader"]["received_count"])
 
 
 if __name__ == "__main__":

@@ -35,8 +35,7 @@ from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static, TabbedContent, TabPane
 
-from .. import (engine as engine_mod, livedata, paths, probe as probe_mod,
-                report as report_mod, vendors)
+from .. import livedata, paths, probe as probe_mod, report as report_mod, vendors
 
 
 class PublishConsentScreen(Screen):

@@ -349,6 +349,7 @@ Expected result: ${expected}
 EOF
     start_rxo_endpoint "$reader_vendor" reader "$mode" &
     reader_pid=$!
+    trap_scenario_cleanup "$reader_pid"
     sleep 1
     start_rxo_endpoint "$writer_vendor" writer "$mode" &
     writer_pid=$!
@@ -430,6 +431,7 @@ EOF
         start_fastdds_endpoint "$reader_container" reader "$reader_reliability" &
     fi
     reader_pid=$!
+    trap_scenario_cleanup "$reader_pid" -- "$reader_container"
     sleep 1
     if [[ "$writer_vendor" == "connext" ]]; then
         start_connext_fastdds_endpoint writer "$writer_reliability" &

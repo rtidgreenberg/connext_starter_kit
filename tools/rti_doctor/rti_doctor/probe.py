@@ -248,6 +248,13 @@ def build_reader_qos(endpoint):
       elif name == "latency_budget":
         qos.latency_budget.duration = policy.duration
         applied[name] = str(policy.duration)
+      elif name == "liveliness":
+        qos.liveliness.kind = policy.kind
+        lease_duration = compat.get(policy, "lease_duration", None)
+        if lease_duration is not None:
+          qos.liveliness.lease_duration = lease_duration
+        applied[name] = (f"{policy.kind}, lease_duration={lease_duration}"
+                         if lease_duration is not None else str(policy.kind))
       else:
         getattr(qos, name).kind = policy.kind
         applied[name] = str(policy.kind)
@@ -343,6 +350,13 @@ def build_writer_qos(endpoint):
       elif name == "latency_budget":
         qos.latency_budget.duration = policy.duration
         applied[name] = str(policy.duration)
+      elif name == "liveliness":
+        qos.liveliness.kind = policy.kind
+        lease_duration = compat.get(policy, "lease_duration", None)
+        if lease_duration is not None:
+          qos.liveliness.lease_duration = lease_duration
+        applied[name] = (f"{policy.kind}, lease_duration={lease_duration}"
+                         if lease_duration is not None else str(policy.kind))
       else:
         getattr(qos, name).kind = policy.kind
         applied[name] = str(policy.kind)

@@ -7,12 +7,16 @@ untestable.
 """
 
 import logging
+import threading
 import time
 
 import rti.connextdds as dds
 
 from . import compat, records
 from .records import EndpointRecord, ParticipantRecord
+
+
+_PARTICIPANT_FACTORY_QOS_LOCK = threading.Lock()
 
 
 class DiscoveryRegistry:
@@ -311,14 +315,8 @@ def create_participant(domain_id, name="RTI DOCTOR", registry=None,
   shared-memory transports. Doctor does not narrow the transport policy, whether
   or not participant capture is enabled.
   """
-  previous_factory_qos = dds.DomainParticipant.participant_factory_qos
-  factory_qos = dds.DomainParticipantFactoryQos()
-  for policy_name in ("entity_factory", "monitoring", "system_resource_limits"):
-    setattr(factory_qos, policy_name, getattr(previous_factory_qos, policy_name))
-  factory_qos.entity_factory.autoenable_created_entities = False
-  dds.DomainParticipant.participant_factory_qos = factory_qos
-
   qos = dds.DomainParticipantQos()
+  qos.entity_factory.autoenable_created_entities = True
   try:
     qos.participant_name.name = name
   except Exception:
@@ -332,7 +330,17 @@ def create_participant(domain_id, name="RTI DOCTOR", registry=None,
 
   participant = None
   try:
-    participant = dds.DomainParticipant(domain_id, qos=qos)
+    with _PARTICIPANT_FACTORY_QOS_LOCK:
+      previous_factory_qos = dds.DomainParticipant.participant_factory_qos
+      factory_qos = dds.DomainParticipantFactoryQos()
+      for policy_name in ("entity_factory", "monitoring", "system_resource_limits"):
+        setattr(factory_qos, policy_name, getattr(previous_factory_qos, policy_name))
+      factory_qos.entity_factory.autoenable_created_entities = False
+      try:
+        dds.DomainParticipant.participant_factory_qos = factory_qos
+        participant = dds.DomainParticipant(domain_id, qos=qos)
+      finally:
+        dds.DomainParticipant.participant_factory_qos = previous_factory_qos
     if registry is not None:
       participant.publication_reader.set_listener(
           PublicationListener(registry), dds.StatusMask.DATA_AVAILABLE)
@@ -346,8 +354,6 @@ def create_participant(domain_id, name="RTI DOCTOR", registry=None,
       except Exception:
         pass
     raise
-  finally:
-    dds.DomainParticipant.participant_factory_qos = previous_factory_qos
 
   return participant, type_lookup_settings
 

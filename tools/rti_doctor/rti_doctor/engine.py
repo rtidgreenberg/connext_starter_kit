@@ -268,6 +268,7 @@ class Session:
 
     probe_result = None
     participant_evidence = None
+    discovery_evidence = None
     participant_capture = None
     # The probe's own participant, and the reason it may differ from ours.
     # `ignore_datawriter` / `ignore_datareader` have no inverse and last for the
@@ -325,6 +326,10 @@ class Session:
                                 if endpoint.is_writer else None),
               reader_entity_id=(wire.endpoint_entity_id(endpoint)
                                 if not endpoint.is_writer else None))
+          if not participant_evidence.get("error"):
+            discovery_evidence = wire.inspect_discovery_pcap(
+                participant_evidence["source"])
+            self.record_wire_discovery(discovery_evidence)
         # Last, and after `participant_capture.finish()` above: that call stops
         # a Network Capture scoped to this very participant. Closing it is also
         # what makes the probe's ignores expire, so nothing here may skip it -
@@ -340,7 +345,8 @@ class Session:
     context = self._context(endpoint=endpoint,
                             participant_record=participant_record,
                 probe_result=probe_result,
-                type_information_observed=None,
+          type_information_observed=_type_information_observed(
+            endpoint, discovery_evidence),
                 participant_evidence=participant_evidence)
     # Two passes, not one concatenated list, so each finding is stamped with
     # whose reader it is about. They must stay separable all the way to the
@@ -370,6 +376,7 @@ class Session:
         participant=participant_record,
         type_lookup_settings=self.type_lookup_settings,
         topology=self._topology(),
+        discovery_evidence=discovery_evidence,
         participant_evidence=participant_evidence,
     )
 

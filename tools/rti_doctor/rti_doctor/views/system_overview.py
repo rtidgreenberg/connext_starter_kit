@@ -788,6 +788,7 @@ class TopicEndpointsScreen(Screen):
     self.table = DataTable()
     self.legend = None
     self.selected_key = None
+    self.endpoints_by_row_key = {}
 
   def compose(self):
     yield Header()
@@ -828,12 +829,18 @@ class TopicEndpointsScreen(Screen):
 
   def _add_endpoint(self, section, endpoint, detail, severity):
     participant = self.session.registry.participant_for(endpoint)
+    row_key = endpoint.key
+    duplicate = 2
+    while row_key in self.endpoints_by_row_key:
+      row_key = f"{endpoint.key}#{duplicate}"
+      duplicate += 1
+    self.endpoints_by_row_key[row_key] = endpoint
     self.table.add_row(*issue_marks.cells(
       (endpoint.kind,
          participant.name if participant and participant.name else "(unnamed)",
        endpoint.vendor_name, endpoint.type_name or "(none)",
        f"{section}: {detail}"), severity),
-        key=endpoint.key)
+        key=row_key)
 
   async def on_data_table_row_highlighted(self, event):
     self.selected_key = event.row_key.value if event.row_key else None
@@ -843,7 +850,7 @@ class TopicEndpointsScreen(Screen):
     self.action_debug()
 
   def _endpoint(self):
-    return self.session.registry.endpoints.get(self.selected_key) if self.selected_key else None
+    return self.endpoints_by_row_key.get(self.selected_key) if self.selected_key else None
 
   def action_debug(self):
     endpoint = self._endpoint()

@@ -74,7 +74,12 @@ class PublishConsentScreen(Screen):
         f"The subscribed application will receive up to "
         f"{probe_mod.PROBE_SAMPLE_COUNT} synthetic sample(s) and cannot tell "
         f"them from production data. Nothing else rti_doctor does writes to the "
-        f"system under test.")
+      f"system under test."
+      + (" This topic uses EXCLUSIVE ownership; the temporary writer may "
+         "participate in ownership arbitration."
+         if "EXCLUSIVE" in str(getattr(
+           getattr(self.endpoint, "ownership", None), "kind", "")).upper()
+         else ""))
     yield Static(
         "Declining still reports the match and the reliable handshake from the "
         "probe writer's own counters - it just cannot prove delivery.")

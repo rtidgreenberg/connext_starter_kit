@@ -3253,6 +3253,25 @@ class TestIssueEndpointsAreMarked(unittest.TestCase):
     self.assertEqual(styles.get("Reader"), "")
     self.assertIn("1 of 2", str(screen.legend.render()))
 
+  def test_the_topic_endpoint_list_allows_a_reader_in_multiple_writer_groups(self):
+    writer_one = FakeEndpoint("w1", "Writer", topic_name="Telemetry")
+    writer_two = FakeEndpoint("w2", "Writer", topic_name="Telemetry")
+    reader = FakeEndpoint("r1", "Reader", topic_name="Telemetry")
+    session = self._session_with(
+        {item.key: item for item in (writer_one, writer_two, reader)}, [])
+    relationship = system_scan.TopicRelationship(
+        "Telemetry", findings.Severity.WARN,
+        (system_scan.TopicWriterGroup(writer_one, (reader,)),
+         system_scan.TopicWriterGroup(writer_two, (reader,))), (), ())
+
+    with mock.patch.object(system_scan, "topic_relationship", return_value=relationship):
+      screen = self._drive(
+          system_overview.TopicEndpointsScreen(session, "Telemetry"))
+
+    self.assertEqual(len(screen.table.rows), 4)
+    self.assertEqual(len(screen.endpoints_by_row_key), 4)
+    self.assertEqual(list(screen.endpoints_by_row_key.values()).count(reader), 2)
+
 
 class TestAPassiveReportCanBeProbedOnDemand(unittest.TestCase):
   """`p` on a report that was opened without probing.

@@ -170,7 +170,9 @@ def parse_args(argv=None):
                            "endpoint is a reader, to verify delivery end to end. The "
                            "real subscriber receives them and cannot distinguish them "
                            "from production data, so this is off unless asked for. In "
-                           "the TUI, press w and confirm instead")
+              "the TUI, press w and confirm instead. On an EXCLUSIVE "
+              "ownership topic, this also acknowledges that the temporary "
+              "writer may participate in ownership arbitration")
   parser.add_argument("-i", "--interval", type=float, default=2.0,
                       help="UI refresh interval in seconds (default: 2.0)")
   parser.add_argument("--theme", default=None,
@@ -543,8 +545,19 @@ def main(argv=None):
   configure_logging(args.debug_log)
 
   headless = is_headless(args)
+  args.network_capture_active = False
   try:
     compat.configure_rti_environment()
+
+    # Must be the first native Connext operation in this process. In
+    # particular, native logging and the XTypes compliance mask also call into
+    # Connext, so starting capture after either one is too late.
+    if args.network_capture:
+      started, reason = netcapture.enable()
+      args.network_capture_active = started
+      if not started:
+        print(f"RTI Network Capture could not be enabled: {reason}",
+              file=sys.stderr)
 
     # Native Connext diagnostics include middleware parsing failures that cannot
     # be observed through Python's logging module. Configure them before the
@@ -557,18 +570,6 @@ def main(argv=None):
     # default in an isolated child process. What was actually applied is recorded
     # in every report.
     compliance = compat.configure_xtypes_mask(args.xtypes_compliance)
-
-    # Before the mask and before the participant, because the binding requires
-    # it before every other Connext call. The resolved answer is stashed on
-    # `args` rather than re-derived later: a run that asked for network capture
-    # and did not get it must not go on to relax its transport as though it had.
-    args.network_capture_active = False
-    if args.network_capture:
-      started, reason = netcapture.enable()
-      args.network_capture_active = started
-      if not started:
-        print(f"RTI Network Capture could not be enabled: {reason}",
-              file=sys.stderr)
 
     domain_id, active_domains, scanned = resolve_domain_id(
         args.domain,
@@ -624,6 +625,8 @@ def main(argv=None):
     if tui_ran:
       _sweep_captures(session)
     _close_participant(participant)
+    if args.network_capture_active:
+      netcapture.disable()
 
 
 def _sweep_captures(session):

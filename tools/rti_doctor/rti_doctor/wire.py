@@ -9,10 +9,7 @@ import os
 import re
 import shutil
 import subprocess
-import time
 from xml.etree import ElementTree
-
-from . import compat, records
 
 #: Ceiling on a one-shot tshark read of an existing capture. An unbounded
 #: subprocess.run over an arbitrarily large PCAP hangs the whole report.

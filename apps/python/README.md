@@ -52,6 +52,10 @@ apps/python/
 │   ├── incompatible_qos_listener.py
 │   ├── run.sh              # Run script
 │   └── README.md           # Documentation
+├── distributed_logger_publisher/ # Distributed logger message publisher
+│   ├── distributed_logger_publisher.py
+│   ├── run.sh              # Run script
+│   └── README.md           # Documentation
 ├── README.md               # This file
 ├── install.sh              # Installation script (called by run.sh if needed)
 └── requirements.txt        # Common dependencies
@@ -81,6 +85,14 @@ connext_dds_env/            # Shared virtual environment (at repository root)
   - Status propagation DataReader -> Subscriber -> DomainParticipant
   - Selectable mismatch: reliability, durability, deadline, or ownership
   - Self-checking reproducer: exits 0 when the callback fires, 1 otherwise
+
+### distributed_logger_publisher
+
+- **Publishes:** RTI Distributed Logger messages on `rti/distlog`
+- **Features:**
+   - Configurable domain ID, category, level, interval, and message count
+   - Remote administration enabled for changing the logger filter level
+   - Compatible with RTI Admin Console and `rti_spy`
 
 ---
 
@@ -220,7 +232,7 @@ The `example_io_app` follows these organizational patterns:
 - **Command Publisher**: Publishes `example_types.Command` data with command types and destinations
 - **Button Publisher**: Publishes `example_types.Button` data with button states and press counts
 - **Position Subscriber**: Asynchronously receives and processes `example_types.Position` data
-- **RTI Distributed Logger**: Integrated distributed logging for remote monitoring and debugging - external visibility of logs over DDS with infrastructure services or your own apps
+- **RTI Distributed Logger**: The `distributed_logger_publisher` example sends log records over DDS for remote monitoring and debugging.
 - **Command-Line Interface**: Full argument parsing with domain ID and verbosity control
 - **Infinite Publisher Loop**: Continuous operation with incrementing data publication
 - **Configurable DDS Verbosity**: 6-level logging control for debugging and monitoring

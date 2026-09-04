@@ -1,6 +1,6 @@
 #!/bin/bash
 # Launcher for rs_gui.
-# - Defaults to GUI mode
+# - Starts the GUI by default
 # - Ensures repo virtualenv Python exists
 # - Synchronizes Python packages from requirements.txt
 # - Auto-detects RTI license file
@@ -21,7 +21,7 @@ source "$REPO_ROOT/scripts/python_env.sh"
 
 usage() {
     cat <<'EOF'
-Usage: ./run_rs_gui.sh [launcher-options] [app-mode]
+Usage: ./run_rs_gui.sh [launcher-options] [app-options]
 
 Launcher options:
     --prepare-dds        Run setup.sh before launch and require Connext checks
@@ -30,8 +30,7 @@ Launcher options:
     --debug              Keep debug logging enabled explicitly (default)
     --no-debug           Disable debug logging for this run
 
-App modes:
-    --gui                Launch the Tk Record/Replay shell (default)
+App options:
     --mock-gui           Launch the Tk shell with explicit mock/demo data
     --mock-gui-check     Build mock GUI session-backed data, then exit
     --headless-check     Start and stop app core only, then exit
@@ -41,11 +40,11 @@ Examples:
 ./run_rs_gui.sh --mock-gui
 ./run_rs_gui.sh --mock-gui-check
 ./run_rs_gui.sh --headless-check
-./run_rs_gui.sh --prepare-dds --gui
-./run_rs_gui.sh --debug --prepare-dds --gui
-./run_rs_gui.sh --no-debug --gui
-./run_rs_gui.sh --diagnostics-only --gui
-./run_rs_gui.sh --skip-diagnostics --gui
+./run_rs_gui.sh --prepare-dds
+./run_rs_gui.sh --debug --prepare-dds
+./run_rs_gui.sh --no-debug
+./run_rs_gui.sh --diagnostics-only
+./run_rs_gui.sh --skip-diagnostics
 EOF
 }
 
@@ -78,10 +77,6 @@ for arg in "$@"; do
             ;;
     esac
 done
-
-if [[ ${#APP_ARGS[@]} -eq 0 ]]; then
-    APP_ARGS=(--gui)
-fi
 
 python_env_resolve_nddshome
 python_env_ensure_venv

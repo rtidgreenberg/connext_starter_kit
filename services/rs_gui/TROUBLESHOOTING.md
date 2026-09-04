@@ -6,7 +6,7 @@ This guide covers common startup issues detected by `run_rs_gui.sh` diagnostics.
 
 ```bash
 cd services/rs_gui
-./run_rs_gui.sh --diagnostics-only --gui
+./run_rs_gui.sh --diagnostics-only
 ```
 
 ## Common Issues
@@ -108,5 +108,5 @@ Useful checks:
 Use this only for short-term local debugging:
 
 ```bash
-./run_rs_gui.sh --skip-diagnostics --gui
+./run_rs_gui.sh --skip-diagnostics
 ```

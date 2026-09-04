@@ -42,11 +42,6 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="run the Tk shell with explicit mock/demo data",
     )
     parser.add_argument(
-        "--gui",
-        action="store_true",
-        help="run the Tk shell without mock/demo data",
-    )
-    parser.add_argument(
         "--tk-gui-check",
         action="store_true",
         help="build the minimal Tk shell scaffold, then exit",
@@ -95,10 +90,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 2
         finally:
             asyncio.run(session.runtime.shutdown())
-    if args.gui or args.mock_gui:
+    if args.mock_gui:
         try:
-            mode = GuiShellSessionMode.MOCK if args.mock_gui else GuiShellSessionMode.LIVE
-            session = build_default_gui_shell_session(GuiShellSessionFactoryConfig(mode=mode))
+            session = build_default_gui_shell_session(GuiShellSessionFactoryConfig(
+                mode=GuiShellSessionMode.MOCK,
+            ))
             if session.runtime.event_log_path:
                 if is_debug():
                     print(f"[DEBUG] RS GUI log: {log_path()}", flush=True)
@@ -107,7 +103,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             dbg(
                 "app",
                 "rs_gui starting",
-                mode="mock" if args.mock_gui else "live",
+                mode="mock",
                 event_log=session.runtime.event_log_path,
                 ui="tk",
             )
@@ -124,8 +120,26 @@ def main(argv: Optional[List[str]] = None) -> int:
         except TkinterUnavailable as exc:
             print(str(exc))
             return 2
-    _parse_args(["--help"])
-    return 0
+    try:
+        session = build_default_gui_shell_session(GuiShellSessionFactoryConfig(
+            mode=GuiShellSessionMode.LIVE,
+        ))
+        if session.runtime.event_log_path:
+            if is_debug():
+                print(f"[DEBUG] RS GUI log: {log_path()}", flush=True)
+            else:
+                print(f"[DEBUG] Event log: {session.runtime.event_log_path}", flush=True)
+        dbg(
+            "app",
+            "rs_gui starting",
+            mode="live",
+            event_log=session.runtime.event_log_path,
+            ui="tk",
+        )
+        return run_tk_session_shell(session)
+    except TkinterUnavailable as exc:
+        print(str(exc))
+        return 2
 
 
 if __name__ == "__main__":

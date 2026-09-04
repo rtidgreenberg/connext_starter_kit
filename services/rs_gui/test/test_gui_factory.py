@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -160,6 +161,12 @@ class TestGuiShellFactory(unittest.TestCase):
 
 
 class TestGuiFactoryEntrypoint(unittest.TestCase):
+    def test_default_entrypoint_launches_live_session(self):
+        with patch("rs_gui_app.run_tk_session_shell", return_value=0) as run_shell:
+            self.assertEqual(main([]), 0)
+
+        self.assertEqual(run_shell.call_args.args[0].runtime.lifecycle, LifecyclePhase.RUNNING)
+
     def test_mock_gui_check_uses_factory_session(self):
         self.assertEqual(main(["--mock-gui-check"]), 0)
 

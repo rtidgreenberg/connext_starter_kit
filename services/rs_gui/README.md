@@ -50,6 +50,11 @@ Use the **Replay** tab to play a Recording Service database back into DDS.
 	process that needs escalation.
 - List recorded tags and select a tag window to focus playback on the associated
 	time interval.
+- Replay writers use the `DataPatternsLibrary::replay_writer_transient_local`
+	QoS profile by default. Its `TRANSIENT_LOCAL` durability retains samples in
+	the replay writer for compatible late-joining readers. The **Transient Local
+	Writer** setting is enabled by default; clear it and select a writer QoS
+	profile when the replayed topic requires different QoS.
 
 ### Debug
 

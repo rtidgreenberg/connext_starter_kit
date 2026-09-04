@@ -117,6 +117,24 @@ def _apply_dark_theme(root, ttk) -> None:
               foreground=[("selected", DARK_THEME["text"]), ("active", DARK_THEME["text"])])
 
 
+def _apply_rti_window_icon(root, tk) -> None:
+    """Keep the image referenced so Tk retains the window icon."""
+
+    try:
+        icon = tk.PhotoImage(width=32, height=32)
+        icon.put("#004b87", to=(0, 0, 32, 32))
+        # Compact RS lettermark: the white strokes remain legible in desktop panels.
+        for rectangle in (
+                (4, 6, 6, 26), (7, 6, 12, 8), (7, 15, 12, 17), (11, 8, 13, 15), (11, 17, 13, 26),
+            (17, 6, 27, 8), (17, 15, 27, 17), (17, 24, 27, 26), (17, 8, 19, 15), (25, 17, 27, 24),
+        ):
+            icon.put("#ffffff", to=rectangle)
+        root._rti_window_icon = icon
+        root.iconphoto(True, root._rti_window_icon)
+    except Exception:
+        dbg_exc("tk", "RTI window icon unavailable")
+
+
 @dataclass
 class TkPlaceholderWindow:
     """Small wrapper around a Record/Replay/Debug Tk window."""
@@ -141,6 +159,7 @@ class TkPlaceholderWindow:
             raise TkinterUnavailable(str(exc)) from exc
 
         _apply_dark_theme(root, ttk)
+        _apply_rti_window_icon(root, tk)
 
         root.title(f"{self.workspace_name} - Tk Preview")
         root.geometry("960x860")

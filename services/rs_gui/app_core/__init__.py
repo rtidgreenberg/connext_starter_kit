@@ -46,6 +46,19 @@ from .discovery import (
     TopicSelectionState,
 )
 from .runtime import AppRuntime, RuntimeConfig
+from .recorded_discovery import (
+    RecordedDiscovery,
+    RecordedDiscoverySchemaError,
+    RecordedEndpointLifetime,
+    RecordedParticipant,
+    load_recorded_discovery,
+)
+from .historical_qos_analysis import (
+    HistoricalQosAnalysis,
+    HistoricalQosIssue,
+    analyze_discovery,
+    analyze_recorded_discovery,
+)
 from .services import (
     AdminReadiness,
     AdminReadinessStatus,
@@ -133,6 +146,12 @@ __all__ = [
     "PlotUpdateResult",
     "RuntimeConfig",
     "RuntimeCounters",
+    "RecordedDiscovery",
+    "RecordedDiscoverySchemaError",
+    "RecordedEndpointLifetime",
+    "RecordedParticipant",
+    "HistoricalQosAnalysis",
+    "HistoricalQosIssue",
     "OperatorDiagnostic",
     "SampleCache",
     "SampleEnvelope",
@@ -161,6 +180,9 @@ __all__ = [
     "TypeResolution",
     "TypeSource",
     "load_workspace",
+    "load_recorded_discovery",
+    "analyze_discovery",
+    "analyze_recorded_discovery",
     "migrate_workspace_dict",
     "save_workspace",
     "WORKSPACE_SCHEMA_VERSION",

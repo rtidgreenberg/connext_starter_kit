@@ -36,6 +36,7 @@ _REPLAY_MONITORING_ROWS = (_REPLAY_MONITORING_FIELDS.__len__() + 1) // 2
 _TAGS_FOUND_COLOR = "#7fd38d"
 _TAGS_NONE_COLOR = DARK_THEME["muted"]
 _TAGS_ERROR_COLOR = DARK_THEME["danger"]
+_QOS_ANALYSIS_COMPLETE_COLOR = "#7fd38d"
 _DEFAULT_TRANSIENT_LOCAL_WRITER_QOS = "DataPatternsLibrary::replay_writer_transient_local"
 _TAG_TIME_TOKEN_RE = re.compile(
     r"(?:\d{2}:\d{2}:\d{2}(?:\.\d+)?|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)"
@@ -162,13 +163,13 @@ class TkReplayTab:
             button.grid(row=0, column=index, sticky="w", padx=(0, 8))
             self.action_buttons[action_id] = button
         self.next_tag_button = ttk.Button(actions, text="Go To", command=self._on_go_to_tag_clicked)
-        self.next_tag_button.grid(row=0, column=5, sticky="w", padx=(0, 8))
+        self.next_tag_button.grid(row=0, column=6, sticky="w", padx=(0, 8))
         self.go_to_tag_var = tk.StringVar(value="")
-        ttk.Label(actions, text="Tag").grid(row=0, column=6, sticky="w", padx=(8, 6))
+        ttk.Label(actions, text="Tag").grid(row=0, column=7, sticky="w", padx=(8, 6))
         self.go_to_tag_combo = ttk.Combobox(actions, textvariable=self.go_to_tag_var, state="readonly", width=24)
         self.go_to_tag_combo.grid(
             row=0,
-            column=7,
+            column=8,
             sticky="w",
         )
 
@@ -196,7 +197,7 @@ class TkReplayTab:
         self.config_paths_var = tk.StringVar(value="")
         self.writer_qos_summary_var = tk.StringVar(value="")
 
-        ttk.Label(launch, text="Playback file / directory").grid(row=0, column=0, columnspan=4, sticky="w")
+        ttk.Label(launch, text="Playback data database").grid(row=0, column=0, columnspan=4, sticky="w")
         db_path_frame = ttk.Frame(launch)
         db_path_frame.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(4, 0))
         db_path_frame.columnconfigure(0, weight=1)
@@ -282,6 +283,21 @@ class TkReplayTab:
         )
         self.launch_preview_text.grid(row=8, column=1, columnspan=3, sticky="ew", padx=(8, 0), pady=(8, 0))
         self.launch_preview_text.grid_remove()
+        self.qos_analysis_button = ttk.Button(
+            launch,
+            text="Analyze QoS",
+            command=lambda: self._on_action_clicked("analyze_qos"),
+        )
+        self.qos_analysis_button.grid(row=9, column=0, sticky="w", pady=(12, 0))
+        self.qos_analysis_status_var = tk.StringVar(value="")
+        self.qos_analysis_status_label = tk.Label(
+            launch,
+            textvariable=self.qos_analysis_status_var,
+            anchor="w",
+            background=DARK_THEME["panel"],
+            foreground=DARK_THEME["muted"],
+        )
+        self.qos_analysis_status_label.grid(row=9, column=1, sticky="w", padx=(12, 0), pady=(12, 0))
         self.launch_button = ttk.Button(launch, text="Launch Replay Service", command=self._on_launch_clicked)
         self.launch_button.grid(row=9, column=3, sticky="e", pady=(12, 0))
 
@@ -347,10 +363,24 @@ class TkReplayTab:
 
         ttk.Label(summary, textvariable=self.error_var, wraplength=860, justify="left").grid(row=6, column=0, sticky="w", pady=(6, 0))
 
+        analysis = ttk.LabelFrame(frame, text="Recorded QoS Analysis", padding=12)
+        analysis.grid(row=3, column=0, sticky="ew", padx=12, pady=6)
+        analysis.columnconfigure(0, weight=1)
+        self.qos_analysis_summary_var = tk.StringVar(value="QoS analysis: not run")
+        ttk.Label(analysis, textvariable=self.qos_analysis_summary_var, wraplength=860, justify="left").grid(row=0, column=0, sticky="w")
+        self.qos_analysis_list = tk.Listbox(analysis, height=5)
+        self.qos_analysis_list.configure(
+            background=DARK_THEME["panel_alt"], foreground=DARK_THEME["text"],
+            selectbackground=DARK_THEME["selection"], selectforeground=DARK_THEME["text"],
+            highlightbackground=DARK_THEME["border"], highlightcolor=DARK_THEME["accent"],
+            borderwidth=1, relief="solid",
+        )
+        self.qos_analysis_list.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+
         diagnostics = ttk.LabelFrame(frame, text="Replay Diagnostics", padding=12)
-        diagnostics.grid(row=3, column=0, sticky="nsew", padx=12, pady=(6, 12))
+        diagnostics.grid(row=4, column=0, sticky="nsew", padx=12, pady=(6, 12))
         diagnostics.columnconfigure(0, weight=1)
-        frame.rowconfigure(3, weight=1)
+        frame.rowconfigure(4, weight=1)
 
         self.diagnostics_list = tk.Listbox(diagnostics, height=6)
         self.diagnostics_list.configure(
@@ -378,6 +408,7 @@ class TkReplayTab:
         self._render_targets(view)
         self._render_launch_form(view.launch)
         self._render_actions(view)
+        self._render_qos_analysis(view)
         self._render_diagnostics(view)
 
     def _render_targets(self, view: ReplayTabViewModel) -> None:
@@ -426,7 +457,14 @@ class TkReplayTab:
                 button.state(["disabled"])
             else:
                 button.state(["!disabled"])
+        self._refresh_qos_analysis_button_state()
         self._refresh_next_tag_button_state()
+
+    def _refresh_qos_analysis_button_state(self) -> None:
+        if not _has_recorded_discovery(self.database_path_var.get()):
+            self.qos_analysis_button.state(["disabled"])
+        else:
+            self.qos_analysis_button.state(["!disabled"])
 
     def _refresh_next_tag_button_state(self) -> None:
         if self._has_tags and self._tag_names:
@@ -450,6 +488,21 @@ class TkReplayTab:
         items = list(view.diagnostics) or [f"Observed state: {view.observed_state}"]
         for item in items[:6]:
             self.diagnostics_list.insert(self._tk.END, item)
+
+    def _render_qos_analysis(self, view: ReplayTabViewModel) -> None:
+        analysis = view.qos_analysis
+        self.qos_analysis_summary_var.set(f"QoS analysis ({analysis.status}): {analysis.summary}")
+        if analysis.status == "complete":
+            self.qos_analysis_status_var.set("Analysis complete, see output below")
+            self.qos_analysis_status_label.configure(foreground=_QOS_ANALYSIS_COMPLETE_COLOR)
+        elif analysis.status == "running":
+            self.qos_analysis_status_var.set("Analysis running...")
+            self.qos_analysis_status_label.configure(foreground=DARK_THEME["muted"])
+        else:
+            self.qos_analysis_status_var.set("")
+        self.qos_analysis_list.delete(0, self._tk.END)
+        for issue in analysis.issues:
+            self.qos_analysis_list.insert(self._tk.END, issue)
 
     def _set_monitoring_text(self, value: str) -> None:
         self.monitoring_text.configure(state="normal")
@@ -550,6 +603,7 @@ class TkReplayTab:
             return
         self._refresh_writer_qos_summary()
         self._set_launch_preview_text(self._build_launch_preview_from_form())
+        self._refresh_qos_analysis_button_state()
 
     def _build_launch_preview_from_form(self) -> str:
         data_domain = self.data_domain_var.get().strip() or "0"
@@ -711,7 +765,7 @@ class TkReplayTab:
         start_dir = _resolve_database_dialog_initialdir(self.database_path_var.get().strip())
         selected = filedialog.askopenfilename(
             parent=self.frame,
-            title="Select replay database file",
+            title="Select replay data database",
             initialdir=start_dir or None,
             filetypes=(("SQLite DB", "*.db"), ("All files", "*")),
         )
@@ -724,7 +778,11 @@ class TkReplayTab:
         if self._adapter is None or self._view is None:
             return
         try:
-            accepted = self._adapter.queue_action(action_id, self._view)
+            replay_view = replace(
+                self._view,
+                database_path=_normalize_replay_database_path(self.database_path_var.get().strip()),
+            )
+            accepted = self._adapter.queue_action(action_id, replay_view)
             self.error_var.set(f"{action_id} queued" if accepted else f"{action_id} command dropped")
         except Exception as exc:
             self.error_var.set(str(exc))
@@ -862,6 +920,7 @@ class TkReplayTab:
             if errors:
                 details = (details + "\n\n" if details else "") + errors
             self._set_tags_text(details or f"Command failed with exit code {result.returncode}.")
+        self._refresh_qos_analysis_button_state()
 
 
 def _normalize_replay_database_path(path: str) -> str:
@@ -869,9 +928,20 @@ def _normalize_replay_database_path(path: str) -> str:
     if not value:
         return ""
     base = os.path.basename(value).lower()
-    if base == "metadata.db" or (base.startswith("data_") and base.endswith(".db")):
+    if base in {"metadata.db", "discovery.db"} or (base.startswith("data_") and base.endswith(".db")):
         return os.path.dirname(value) or value
     return value
+
+
+def _has_recorded_discovery(path: str) -> bool:
+    """Require the discovery database beside the selected replay data database."""
+
+    directory = _normalize_replay_database_path(path)
+    if not directory:
+        return False
+    if not os.path.isabs(directory):
+        directory = os.path.join(_repo_root(), directory)
+    return os.path.isfile(os.path.join(os.path.normpath(directory), "discovery.db"))
 
 
 def _resolve_database_dialog_initialdir(path: str) -> str:

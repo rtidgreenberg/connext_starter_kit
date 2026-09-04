@@ -1,11 +1,12 @@
 """Replay tab controller for GUI command routing and local service launches."""
 
 from dataclasses import dataclass, field, replace
+import asyncio
 import os
 import time
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
-from app_core import AppCommand, CommandResult, CommandStatus
+from app_core import AppCommand, CommandResult, CommandStatus, RecordedDiscoverySchemaError, analyze_recorded_discovery
 from app_core.connext_environment import detect_nddshome, ensure_rti_license
 from app_core.services.rti_admin import (
     ACTION_UPDATE,
@@ -37,6 +38,7 @@ from app_core.services import (
 from .replay_tab import (
     ReplayLaunchViewModel,
     ReplayTabViewModel,
+    ReplayQosAnalysisView,
     ReplayTargetRow,
     ReplayTimelineRow,
     build_mock_replay_tab_view_model,
@@ -176,6 +178,7 @@ class ReplayTabController:
         self._last_monitoring_updates: Tuple[MonitoringSnapshot, ...] = ()
         self._latest_monitoring: Tuple[MonitoringSnapshot, ...] = ()
         self._graceful_shutdown_failed = False
+        self._qos_analysis = ReplayQosAnalysisView()
 
     @classmethod
     def mock(
@@ -246,6 +249,32 @@ class ReplayTabController:
             target_id = str(payload.get("target_id") or command.target)
             target = self.select_target(target_id)
             return _command_result(command, f"Selected Replay target {target.control_name}", target)
+        if command.command_type == "replay.analyze_qos":
+            database_path = str(payload.get("database_path") or self._config.database_path).strip()
+            if not database_path:
+                raise ValueError("replay.analyze_qos requires a recording database path")
+            self._qos_analysis = ReplayQosAnalysisView(status="running", summary="Analyzing recorded discovery QoS...")
+            try:
+                analysis = await asyncio.to_thread(analyze_recorded_discovery, _workspace_launch_path(database_path))
+            except RecordedDiscoverySchemaError as error:
+                self._qos_analysis = ReplayQosAnalysisView(status="unavailable", summary=str(error))
+                return CommandResult(command.command_id, CommandStatus.FAILED, str(error), created_at=command.created_at)
+            issue_rows = tuple(
+                f"Topic: {issue.topic_name} | Domain: {issue.domain_id if issue.domain_id is not None else '?'} | "
+                f"{issue.writer_participant_name} ({issue.writer_process}) -> "
+                f"{issue.reader_participant_name} ({issue.reader_process}): "
+                f"{', '.join(item.name for item in issue.mismatches)}"
+                for issue in analysis.issues
+            )
+            summary = (
+                f"{len(analysis.issues)} mismatched pair(s) across {analysis.comparison_count} overlapping comparison(s)."
+            )
+            self._qos_analysis = ReplayQosAnalysisView(status="complete", summary=summary, issues=issue_rows)
+            return CommandResult(
+                command.command_id, CommandStatus.ACKNOWLEDGED, summary,
+                payload={"issue_count": len(analysis.issues), "comparison_count": analysis.comparison_count},
+                created_at=command.created_at,
+            )
         if command.command_type == "replay.start":
             target = self._apply_action_payload(payload)
             if self._admin_facade is not None:
@@ -570,6 +599,7 @@ class ReplayTabController:
             writer_qos_profile=self._config.writer_qos_profile,
             launch=self._launch_view(),
             timeline=self._timeline,
+            qos_analysis=self._qos_analysis,
             diagnostics=self._diagnostics,
         )
         if view.selected_target_id != self._config.selected_target_id:

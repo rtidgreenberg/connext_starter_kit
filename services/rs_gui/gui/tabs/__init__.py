@@ -26,6 +26,7 @@ from .record_tab import (
 from .replay_tab import (
     ReplayActionView,
     ReplayLaunchViewModel,
+    ReplayQosAnalysisView,
     ReplayTargetRow,
     ReplayTabViewModel,
     ReplayTimelineRow,
@@ -86,6 +87,7 @@ __all__ = [
     "RecordTabViewModel",
     "ReplayActionView",
     "ReplayLaunchViewModel",
+    "ReplayQosAnalysisView",
     "ReplayTargetRow",
     "ReplayTabController",
     "ReplayTabControllerConfig",

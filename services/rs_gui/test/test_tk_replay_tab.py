@@ -3,6 +3,7 @@
 
 import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
@@ -14,9 +15,14 @@ if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
 from gui import build_mock_shell_view_model
+from gui.tabs.replay_tab import ReplayQosAnalysisView, build_replay_tab_view_model
 from tk_gui.main_window import TkinterUnavailable, _tk_modules
 from tk_gui.tabs import ReplayTabAdapter, TkReplayTab
-from tk_gui.tabs.replay_tab import _extract_tag_windows, _resolve_database_dialog_initialdir
+from tk_gui.tabs.replay_tab import (
+    _extract_tag_windows,
+    _normalize_replay_database_path,
+    _resolve_database_dialog_initialdir,
+)
 
 
 class TestTkReplayTab(unittest.TestCase):
@@ -33,6 +39,37 @@ tag_beta: 00:01:10 -> 00:01:12
                 ("00:01:10", "00:01:12", "tag_beta"),
             ),
         )
+
+    def test_replay_database_file_paths_normalize_to_recording_directory(self):
+        self.assertEqual(
+            _normalize_replay_database_path("/tmp/recording/data_0.db"),
+            "/tmp/recording",
+        )
+        self.assertEqual(
+            _normalize_replay_database_path("/tmp/recording/discovery.db"),
+            "/tmp/recording",
+        )
+
+    def test_qos_analysis_enables_when_selected_data_database_has_discovery_sibling(self):
+        tk, ttk = _tk_modules()
+        try:
+            root = tk.Tk()
+        except tk.TclError as exc:
+            self.skipTest(str(exc))
+        root.withdraw()
+        recording = tempfile.TemporaryDirectory()
+        self.addCleanup(recording.cleanup)
+        open(os.path.join(recording.name, "data_0.db"), "w", encoding="utf-8").close()
+        open(os.path.join(recording.name, "discovery.db"), "w", encoding="utf-8").close()
+        try:
+            widget = TkReplayTab(root, ttk, tk)
+            widget.render(build_replay_tab_view_model())
+
+            widget.database_path_var.set(os.path.join(recording.name, "data_0.db"))
+
+            self.assertTrue(widget.qos_analysis_button.instate(("!disabled",)))
+        finally:
+            root.destroy()
 
     def test_extract_tag_windows_parses_multiline_begin_end_format(self):
         output = """
@@ -80,6 +117,7 @@ tag_name    timestamp_ms   tag_description
             self.assertEqual(widget.content_frame.grid_slaves(row=0, column=0)[0]["text"], "Launch Replay Service")
             self.assertEqual(widget.content_frame.grid_slaves(row=1, column=0)[0]["text"], "Targets And Actions")
             self.assertEqual(widget.content_frame.grid_slaves(row=2, column=0)[0]["text"], "Replay Status")
+            self.assertEqual(widget.content_frame.grid_slaves(row=3, column=0)[0]["text"], "Recorded QoS Analysis")
             self.assertEqual(int(widget.monitoring_text.cget("height")), 5)
             self.assertIn("request+reply matched", widget.readiness_var.get())
             self.assertIn("State: stopped", widget.state_var.get())
@@ -91,6 +129,29 @@ tag_name    timestamp_ms   tag_description
             self.assertIn("Robot run", monitoring_text)
             self.assertTrue(widget.action_buttons["start"].instate(("!disabled",)))
             self.assertFalse(widget.action_buttons["pause"].instate(("!disabled",)))
+            self.assertFalse(widget.qos_analysis_button.instate(("!disabled",)))
+        finally:
+            root.destroy()
+
+    def test_replay_tab_shows_completion_message_beside_qos_button(self):
+        tk, ttk = _tk_modules()
+        try:
+            root = tk.Tk()
+        except tk.TclError as exc:
+            self.skipTest(str(exc))
+        root.withdraw()
+        try:
+            widget = TkReplayTab(root, ttk, tk)
+            view = build_replay_tab_view_model(qos_analysis=ReplayQosAnalysisView(
+                status="complete",
+                summary="1 mismatched pair.",
+                issues=("Topic: Telemetry | Domain: 42 | writer -> reader: reliability",),
+            ))
+
+            widget.render(view)
+
+            self.assertEqual(widget.qos_analysis_status_var.get(), "Analysis complete, see output below")
+            self.assertIn("Topic: Telemetry", widget.qos_analysis_list.get(0))
         finally:
             root.destroy()
 
@@ -106,6 +167,10 @@ tag_name    timestamp_ms   tag_description
             command_sink=lambda command: captured["launch" if command.command_type == "service.launch_replay" else "action"].append(command) or True,
             select_target=lambda target_id: captured["select"].append(target_id) or target_id,
         )
+        recording = tempfile.TemporaryDirectory()
+        self.addCleanup(recording.cleanup)
+        open(os.path.join(recording.name, "data_0.db"), "w", encoding="utf-8").close()
+        open(os.path.join(recording.name, "discovery.db"), "w", encoding="utf-8").close()
         try:
             widget = TkReplayTab(root, ttk, tk, adapter=adapter)
             view = build_mock_shell_view_model().replay_tab
@@ -120,9 +185,11 @@ tag_name    timestamp_ms   tag_description
             widget.data_domain_var.set("7")
             widget.admin_domain_var.set("8")
             widget.monitoring_domain_var.set("9")
+            widget.database_path_var.set(os.path.join(recording.name, "data_0.db"))
             widget._on_target_selected()
             widget.launch_button.invoke()
             widget.action_buttons["start"].invoke()
+            widget.qos_analysis_button.invoke()
 
             self.assertTrue(captured["select"])
             self.assertEqual(captured["launch"][0].command_type, "service.launch_replay")
@@ -135,6 +202,7 @@ tag_name    timestamp_ms   tag_description
             self.assertEqual(captured["launch"][0].payload["admin_domain_id"], 8)
             self.assertEqual(captured["launch"][0].payload["monitoring_domain_id"], 9)
             self.assertEqual(captured["action"][0].command_type, "replay.start")
+            self.assertEqual(captured["action"][1].command_type, "replay.analyze_qos")
         finally:
             root.destroy()
 

@@ -36,6 +36,7 @@ class TestReplayTabViewModel(unittest.TestCase):
         self.assertEqual(view.timeline[0].label, "Robot run")
         self.assertTrue(view.action_by_id["start"].enabled)
         self.assertFalse(view.action_by_id["pause"].enabled)
+        self.assertTrue(view.action_by_id["analyze_qos"].enabled)
         self.assertEqual(view.action_by_id["pause"].reason, "not running")
         self.assertEqual(view.diagnostics, ())
 
@@ -121,6 +122,12 @@ class TestReplayTabViewModel(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             build_replay_action_command("rewind", view)
+
+    def test_qos_analysis_action_preserves_recording_path(self):
+        command = build_replay_action_command("analyze_qos", build_mock_replay_tab_view_model())
+
+        self.assertEqual(command.command_type, "replay.analyze_qos")
+        self.assertEqual(command.payload["database_path"], "services/replay_input/robot_run_03")
 
     def test_replay_next_tag_command_preserves_target_and_tag_name(self):
         view = build_mock_replay_tab_view_model()

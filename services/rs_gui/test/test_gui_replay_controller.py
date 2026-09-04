@@ -180,6 +180,21 @@ class TestReplayTabController(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(view.action_by_id["start"].enabled)
         self.assertFalse(view.action_by_id["pause"].enabled)
 
+    async def test_qos_analysis_reports_unsupported_recording_without_starting_replay(self):
+        controller = ReplayTabController.mock(clock=lambda: 10.0)
+        empty = tempfile.TemporaryDirectory()
+        self.addCleanup(empty.cleanup)
+
+        result = await controller.handle_command(AppCommand(
+            "replay.analyze_qos", payload={"database_path": empty.name},
+            command_id="analyze-qos", created_at=1.0,
+        ))
+        view = await controller.refresh_view()
+
+        self.assertFalse(result.ok)
+        self.assertEqual(view.qos_analysis.status, "unavailable")
+        self.assertIn("discovery.db", view.qos_analysis.summary)
+
     async def test_start_pause_resume_and_stop_update_replay_state(self):
         controller = ReplayTabController.mock(clock=lambda: 10.0)
 

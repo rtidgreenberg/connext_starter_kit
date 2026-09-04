@@ -106,6 +106,15 @@ class ReplayTimelineRow:
 
 
 @dataclass(frozen=True)
+class ReplayQosAnalysisView:
+    """Read-only historical QoS analysis state displayed by the Replay tab."""
+
+    status: str = "not run"
+    summary: str = "Select a recording with discovery.db to analyze QoS."
+    issues: Tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
 class ReplayTabViewModel:
     """Immutable Replay-tab snapshot consumed by the GUI renderer."""
 
@@ -122,6 +131,7 @@ class ReplayTabViewModel:
     launch: ReplayLaunchViewModel = field(default_factory=ReplayLaunchViewModel)
     targets: Tuple[ReplayTargetRow, ...] = field(default_factory=tuple)
     timeline: Tuple[ReplayTimelineRow, ...] = field(default_factory=tuple)
+    qos_analysis: ReplayQosAnalysisView = field(default_factory=ReplayQosAnalysisView)
     actions: Tuple[ReplayActionView, ...] = field(default_factory=tuple)
     diagnostics: Tuple[str, ...] = field(default_factory=tuple)
 
@@ -132,6 +142,8 @@ class ReplayTabViewModel:
             object.__setattr__(self, "launch", ReplayLaunchViewModel(**self.launch))
         object.__setattr__(self, "targets", tuple(self.targets))
         object.__setattr__(self, "timeline", tuple(self.timeline))
+        if not isinstance(self.qos_analysis, ReplayQosAnalysisView):
+            object.__setattr__(self, "qos_analysis", ReplayQosAnalysisView(**self.qos_analysis))
         object.__setattr__(self, "actions", tuple(self.actions))
         object.__setattr__(self, "diagnostics", tuple(str(item) for item in self.diagnostics))
 
@@ -163,6 +175,7 @@ def build_replay_tab_view_model(
     qos_file_path: str = "",
     participant_qos_profile: str = "",
     writer_qos_profile: str = "DataPatternsLibrary::replay_writer_transient_local",
+    qos_analysis: ReplayQosAnalysisView = None,
         launch: ReplayLaunchViewModel = None,
         timeline: Iterable[ReplayTimelineRow] = (),
         diagnostics: Iterable[str] = (),
@@ -206,6 +219,7 @@ def build_replay_tab_view_model(
         ),
         targets=targets,
         timeline=tuple(timeline),
+        qos_analysis=qos_analysis or ReplayQosAnalysisView(),
         actions=_replay_actions(selected_target, database_path, observed_state),
         diagnostics=diagnostics,
     )
@@ -279,6 +293,7 @@ def build_replay_action_command(
         "resume": "replay.resume",
         "stop": "replay.stop",
         "shutdown": "replay.shutdown",
+        "analyze_qos": "replay.analyze_qos",
     }
     if action_id not in action_to_command:
         raise ValueError(f"Unsupported Replay tab action: {action_id}")
@@ -407,6 +422,10 @@ def _replay_actions(
         ReplayActionView(
             "shutdown", "Shutdown", has_target and not conflict,
             "duplicate replay target" if conflict else "no Replay Service selected",
+        ),
+        ReplayActionView(
+            "analyze_qos", "Analyze QoS", has_database,
+            "recording database required" if not has_database else "",
         ),
     )
 

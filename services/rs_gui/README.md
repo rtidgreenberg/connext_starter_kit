@@ -13,6 +13,23 @@ From the repository root:
 
 This defaults to `--gui`, which launches the Tk Record/Replay shell.
 
+## Recorded QoS Analysis Prototype
+
+The Replay tab's recorded QoS analysis is a very coarse prototype example for
+reference only. It does not cover all DDS matching behavior or the lifecycle,
+type-compatibility, security, transport, data-representation, and other edge
+cases described by the analysis output. It must not be used as an authoritative
+record of endpoint matching.
+
+Select a playback data database from a Recording Service log directory. The
+prototype locates and reads the sibling `discovery.db` without modifying the
+recording, then reports candidate writer/reader QoS mismatches observed by that
+Recording Service instance. A recording without `discovery.db` cannot be
+analyzed.
+
+We will add supported QoS mismatch analysis in an upcoming Connext Studio
+release.
+
 ## What the Launcher Does
 
 `run_rs_gui.sh` uses the shared repository Python environment in
@@ -83,7 +100,7 @@ Re-run `setup.sh` after switching `NDDSHOME` to a different Connext install.
 From `services/rs_gui`:
 
 ```bash
-../../connext_dds_env/bin/python rs_gui_app.py --gui
+./run_rs_gui.sh --gui
 ```
 
 ## Testing
@@ -91,7 +108,8 @@ From `services/rs_gui`:
 Run the main test suite from `services/rs_gui`:
 
 ```bash
-../../connext_dds_env/bin/python test/run_all_tests.py -v
+export VENV_PYTHON=$(ls -d ../../connext_dds_env_*py311/bin/python | head -1)
+"$VENV_PYTHON" test/run_all_tests.py -v
 ```
 
 For environment and startup issues, see `TROUBLESHOOTING.md`.

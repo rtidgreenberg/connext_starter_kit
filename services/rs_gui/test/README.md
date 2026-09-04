@@ -7,7 +7,8 @@ implementation modules.
 Run from `services/rs_gui`:
 
 ```bash
-../../connext_dds_env/bin/python test/run_all_tests.py -v
+export VENV_PYTHON=$(ls -d ../../connext_dds_env_*py311/bin/python | head -1)
+"$VENV_PYTHON" test/run_all_tests.py -v
 ```
 
 Current layers:
@@ -38,6 +39,12 @@ Current layers:
   duplicate-target diagnostics, and command intents
 - `test_gui_replay_controller.py`: fake-first Replay-tab controller state
   transitions and `replay.*` command handling before live Replay Service wiring
+- `test_recorded_discovery.py`: read-only Recording Service discovery-database
+  schema validation and endpoint lifetime reconstruction
+- `test_recorded_qos_analysis.py`: prototype QoS policy comparisons and
+  unevaluated-value handling
+- `test_historical_qos_analysis.py`: historical writer/reader candidate pairing
+  and recorded participant/process attribution
 - `test_gui_topics_controller.py`: Topics-tab controller wiring from the
   discovery facade and data-session snapshots into shell snapshots, including
   fake discovery scans, command-driven selection/subscription state,
@@ -129,3 +136,8 @@ shutdown acknowledgment should be a hard pass/fail criterion.
 
 Future layers will add broader Tk integration coverage and additional live
 service restart fixtures.
+
+The recorded QoS-analysis tests cover a coarse reference prototype only. They
+do not establish authoritative DDS matching behavior or cover all discovery
+lifecycle, type, security, transport, data-representation, and other edge
+cases.

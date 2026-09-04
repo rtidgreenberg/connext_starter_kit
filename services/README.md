@@ -37,6 +37,13 @@ Use the GUI when you want an operator-friendly workflow for live capture and pla
 - Send tags to Recording Service so operators can mark items or time ranges of interest while data is being captured.
 - Launch Replay Service against recorded databases, choose playback settings, and control replay start/pause/resume/stop/shutdown from the Replay tab.
 - Inspect replay readiness, playback status, database path, progress, and monitoring details while replay is running.
+- Run a coarse, read-only recorded QoS mismatch prototype from the Replay tab
+  when the selected recording has a sibling `discovery.db`.
+
+The recorded QoS analysis is a reference prototype, not an authoritative DDS
+matching history. It does not cover all lifecycle, type-compatibility,
+security, transport, data-representation, or related edge cases. Supported QoS
+mismatch analysis is planned for an upcoming Connext Studio release.
 
 **Running**:
 ```bash

@@ -28,7 +28,8 @@ each time: see [Verifying Delivery to a Reader](#verifying-delivery-to-a-reader-
 - [Verifying Delivery to a Reader](#verifying-delivery-to-a-reader-w---write-samples)
 - [Cross-Vendor Compatibility Matrix](#cross-vendor-compatibility-matrix-x)
 - [The Visibility Ladder](#the-visibility-ladder)
-- [CLI](#cli)
+- [Operator Manual](#operator-manual)
+- [Command-Line Reference](CLI_REFERENCE.md)
 - [Manual Scenarios](#manual-scenarios)
 - [The Shareable Report](#the-shareable-report)
 - [Reading a Verdict](#reading-a-verdict)
@@ -151,6 +152,47 @@ The endpoint lists mark in **orange** any endpoint a system finding names at
 WARNING or above, on both sides of a pair. Notes (INFO) are not marked: a
 healthy single-writer domain always reports `qos.no_counterpart` as a note, so
 marking those would paint a healthy system orange.
+
+## Operator Manual
+
+### Assess a DDS System
+
+Start Doctor without arguments, select a domain, and use the system overview to
+decide where to investigate. It reports discovered participants, topics, and
+endpoint relationships, plus findings grouped by severity. Use **Topology** to
+inspect the participant, reader, writer, or topic inventory; use **Topics** to
+start from a topic and see its observed writer-reader relationships.
+
+Every view is a stable snapshot. Press `r` when you want a new observation;
+this avoids changing the evidence while you are reading it. Press `f` in the
+Topology view to open findings connected to the selected row.
+
+### Diagnose an Endpoint
+
+Open a participant or topic, select an endpoint, and press `Enter` to run its
+report. Doctor first evaluates discovery, offered/requested QoS, type metadata,
+and the local observer configuration. By default it then creates a temporary,
+isolated probe matching only the selected endpoint, observes it for delivery and
+deserialization evidence, and closes it when the report completes.
+
+Use `p` to run a passive report's probe later. In a writer report, open the
+**Data** tab to view samples through a temporary DynamicData reader; leaving the
+tab closes that reader. In a reader report, `w` requests explicit confirmation
+before publishing synthetic samples, because those samples reach the real
+application.
+
+### Gather and Share Evidence
+
+Press `s` to save the current system or endpoint report as plain text. For a
+noninteractive workflow, run a system assessment first, then diagnose the one
+topic that needs attention. A nonzero exit code from a completed report means it
+found an ERROR-severity issue, which makes that workflow suitable for CI.
+
+Packet evidence is enabled for probes by default and captures only Doctor's own
+temporary participant traffic. It can confirm RTPS handshake behavior, sample
+representation, and Fast DDS version details that discovery data cannot show.
+See [CLI_REFERENCE.md](CLI_REFERENCE.md) for headless reports, output files,
+packet capture, and advanced probe controls.
 
 ## Deploy With an Activated Wheel
 
@@ -432,102 +474,6 @@ It does **not** diagnose multicast reachability. Whether multicast works between
 two hosts is not observable from either side's participant QoS, and a finding
 derived from rti_doctor's own defaults would describe the diagnostic, not the
 system it was pointed at.
-
-## CLI
-
-```text
--d, --domain          DDS domain ID (prompts on startup; 1 when non-interactive)
-    --system          Headless: assess the DDS system and exit (stage one)
--t, --topic TOPIC     Headless: diagnose one topic and exit (stage two)
--o, --output PATH     Write the report to PATH instead of stdout
-    --probe-timeout   Seconds to observe a probed reader (default: 10.0)
-    --type-wait       Seconds to wait for remote type resolution (default: 5.0)
-    --settle          Seconds to let discovery settle first (default: 3.0)
-    --scan-timeout    Seconds to listen for active domains (default: 32.0)
-    --no-domain-scan  Skip the active-domain scan before prompting
-    --no-probe        Static checks only; create no endpoint of our own
-    --isolate-probe   Probe on a disposable participant that ignores every other
-                      endpoint on the target topic (default)
-    --no-isolate-probe
-                      Probe the topic as it is, sharing it with every other
-                      endpoint on it
-    --probe-default   In the TUI, probe endpoint reports automatically (default)
-    --no-probe-default
-              In the TUI, open endpoint reports passively until `p`
-    --type-object-v1-only
-          Advertise TypeObject v1 and disable TypeLookup v2 for an experiment
-    --xtypes-compliance {default,vendor}
-                      Observer XTypes compliance mask (default: vendor)
-    --pcap PATH       Analyze RTPS user-data packets in an existing capture (with --topic)
-    --network-capture Record our own participant with RTI Network Capture
-          (default)
-    --no-network-capture
-          Disable RTI Network Capture for our own participant
-    --write-samples   Let the probe PUBLISH synthetic samples when the selected
-              endpoint is a reader. Consent, not a default - see below
-    --ready-file PATH Write PATH once the participant exists (test hook)
-    --ready-after-participants N
-              Wait for N remote participants before proceeding (test hook)
-    --ready-timeout   Seconds to wait for the above (default: 15.0)
--i, --interval        UI refresh interval (default: 2.0)
-    --theme NAME      Initial Textual theme for the TUI, the same flag rti_spy
-              takes (for example: textual-light). An unknown name is
-              rejected before Doctor joins a domain, with the list
-    --debug-log PATH  Discovery/probe log output
-    --connext-log PATH
-          Native Connext middleware diagnostics, including discovery parsing
-    --connext-verbosity LEVEL
-          silent (default) | exception | warning | status-local | status-remote | status-all
-```
-
-Headless work is two stages: assess the DDS system, then diagnose one endpoint.
-Stage one is cheap and answers whether the system is visible and healthy at all.
-Stage two is deliberately focused, because a full diagnosis probes, waits for
-type resolution and can start a capture - work that scales linearly with the
-number of writers and should be spent on the one you chose.
-
-```bash
-# Stage one - the system: discovery, topology and our own configuration
-./tools/rti_doctor/run_rti_doctor.sh --domain 1 --system -o system.txt
-
-# The TUI in a light palette, as rti_spy takes it
-./tools/rti_doctor/run_rti_doctor.sh --domain 1 --theme textual-light
-
-# Stage two - one topic, report to stdout
-./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData
-
-# Inspect direct RTPS packet evidence from a saved capture
-./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData --pcap session.pcapng
-
-# Preserve native Connext discovery/TypeLookup diagnostics for later parsing.
-# status-all includes the Fast DDS TypeInformation deserialization failure.
-./tools/rti_doctor/run_rti_doctor.sh --domain 1 --topic SensorData --no-probe \
-  --connext-log tools/rti_doctor/test_output/rti_doctor_connext.log \
-  --connext-verbosity status-all
-```
-
-### Exit status
-
-Usable directly in CI. No finding is excluded from that decision by a causal
-guess about another finding.
-
-| Code | Meaning |
-|---|---|
-| `0` | A diagnosis ran and reported no ERROR-severity finding |
-| `1` | A diagnosis ran and reported at least one ERROR-severity finding |
-| `2` | The named topic was not found |
-| `3` | `--ready-after-participants` was not met before `--ready-timeout` |
-| `4` | Doctor could not run: no license, an unusable domain, a failed startup |
-| `130` | Interrupted (`Ctrl-C`) |
-
-`1` means one thing only: **a diagnosis completed and found an error**. A
-startup failure used to reach the shell as `1` too, by way of an uncaught
-traceback, so a CI job could not tell "your system has an error" from "Doctor
-never ran". A `4` prints one line on stderr saying what failed; the traceback
-goes to `--debug-log`.
-
-Rejected arguments exit `4`, so CI can distinguish a missing topic from a
-command line that Doctor could not run.
 
 ## Manual Scenarios
 

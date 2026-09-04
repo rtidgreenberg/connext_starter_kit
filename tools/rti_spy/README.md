@@ -19,6 +19,37 @@ Scanning" below). If you choose to listen, it then prompts for a domain,
 defaulting to the lowest domain ID it found; press Enter to accept the
 default. In non-interactive runs it falls back to domain `1` without prompting.
 
+## Operator Manual
+
+### Explore a DDS Domain
+
+Start Spy and choose a domain, either by entering its ID or by letting the tool
+listen for active-domain announcements. The first screen lists discovered
+participants and their host addresses. Select a participant and press `Enter`
+to inspect its readers and writers.
+
+Select an endpoint and press `Enter` to open its detail view. For a writer, Spy
+uses the discovered DynamicType and matching reader-side QoS to subscribe and
+render incoming DynamicData samples. It creates no generated type support and
+closes the temporary reader when you leave the detail screen. Reader endpoints
+remain inspectable, but cannot be subscribed to because they do not publish
+samples.
+
+### Inspect Distributed Logger Data
+
+Highlight a participant and press `l` to open its Distributed Logger dialog.
+When that participant exposes the required `rti/distlog` topics, the dialog
+shows its log messages and state and allows selecting a filter level. This sends
+an administration request to the selected participant, so use it only when you
+intend to modify that logger's filter threshold.
+
+### Refresh and Exit
+
+Discovery listeners update the participant and endpoint inventory while Spy is
+running. Use the Textual navigation keys to move through tables, `b` or `Esc` to
+return from a detail view, and `q` to close the tool. Provide `--debug-log` when
+you need a persistent discovery/subscription trace for troubleshooting.
+
 ## What the Launcher Does
 
 `run_rtispy.sh` auto-detects the Connext version from `NDDSHOME` and picks a
@@ -82,30 +113,8 @@ the launcher skips reinstalling on subsequent runs.
 selected automatically to match `NDDSHOME`. The Textual UI dependencies are
 still listed there.
 
-## CLI
-
-The app entrypoint accepts:
-
-```text
--d, --domain          DDS domain ID
--i, --interval        Refresh interval in seconds (default: 10)
---debug-log           Optional log file for discovery/subscription events
---scan-timeout        Seconds to scan for active domains before prompting (default: 32.0)
---no-domain-scan      Skip scanning for active domains before prompting
---theme               Initial Textual theme name (for example: textual-light)
-```
-
-To start in a light palette:
-
-```bash
-./tools/rti_spy/run_rtispy.sh --domain 1 --theme textual-light
-```
-
-Direct invocation:
-
-```bash
-./connext_dds_env/bin/python tools/rti_spy/rtispy.py --domain 1
-```
+For command-line options, direct invocation, and startup troubleshooting, see
+[CLI_REFERENCE.md](CLI_REFERENCE.md).
 
 ## Active Domain Scanning
 

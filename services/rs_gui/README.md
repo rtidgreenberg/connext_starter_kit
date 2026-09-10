@@ -77,10 +77,10 @@ analysis is planned for an upcoming Connext Studio release.
 
 ## Requirements
 
-- Python 3.11 available locally
+- Python 3.10 or newer available locally
 - RTI Connext DDS 7.7.x available through `NDDSHOME`
 - Tkinter available in that Python installation
-- A valid RTI license file
+- An RTI license file when using the public PyPI Python API package
 
 ## DDS XML Setup
 
@@ -89,7 +89,7 @@ Connext installation:
 
 ```bash
 cd services/rs_gui
-./setup.sh
+./run_rs_gui.sh --prepare-dds
 ```
 
 ## Testing
@@ -97,8 +97,7 @@ cd services/rs_gui
 Run the main suite from `services/rs_gui`:
 
 ```bash
-export VENV_PYTHON=$(ls -d ../../connext_dds_env_*py311/bin/python | head -1)
-"$VENV_PYTHON" test/run_all_tests.py -v
+./test/run_tests.sh -v
 ```
 
 See [CLI_REFERENCE.md](CLI_REFERENCE.md) for launcher switches, mock and

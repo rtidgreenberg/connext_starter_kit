@@ -1,4 +1,13 @@
 #!/bin/bash
+# (c) Copyright, Real-Time Innovations, 2026.  All rights reserved.
+# RTI grants Licensee a license to use, modify, compile, and create derivative
+# works of the software solely for use with RTI Connext DDS. Licensee may
+# redistribute copies of the software provided that all such copies are subject
+# to this license. The software is provided "as is", with no warranty of any
+# type, including any warranty for fitness for any purpose. RTI is under no
+# obligation to maintain or support the software. RTI shall not be liable for
+# any incidental or consequential damages arising out of the use or inability
+# to use the software.
 # Generate XML DynamicData type files used by rs_gui Connext adapters.
 
 set -e
@@ -138,11 +147,15 @@ ls -1 "$XML_OUT_DIR"/*.xml
 echo "Wrote metadata stamp: $STAMP_FILE"
 
 if [ "$INSTALL_PYTHON_DEPS" = true ]; then
-    VENV_PYTHON="$SCRIPT_DIR/../../connext_dds_env/bin/python"
+    VENV_PYTHON="${VENV_PYTHON:-}"
     REQUIREMENTS_FILE="$SCRIPT_DIR/requirements.txt"
 
     if [ -f "$REQUIREMENTS_FILE" ]; then
-        if [ -x "$VENV_PYTHON" ]; then
+        if [ -z "$VENV_PYTHON" ]; then
+            echo
+            echo "WARNING: No resolved repository Python environment was provided."
+            echo "Run ./run_rs_gui.sh --prepare-dds to install rs_gui dependencies."
+        elif [ -x "$VENV_PYTHON" ]; then
             echo
             echo "Installing rs_gui Python dependencies from: $REQUIREMENTS_FILE"
             "$VENV_PYTHON" -m pip install -r "$REQUIREMENTS_FILE"
@@ -150,7 +163,7 @@ if [ "$INSTALL_PYTHON_DEPS" = true ]; then
             echo
             echo "WARNING: Repository virtual environment not found at $VENV_PYTHON"
             echo "Skipping Python dependency installation."
-            echo "Run apps/python/install.sh, then rerun ./setup.sh"
+            echo "Run ./run_rs_gui.sh --prepare-dds"
         fi
     fi
 fi

@@ -41,14 +41,12 @@ For example:
 
 ## Direct App Entrypoint
 
-The launcher should be preferred because it resolves the repository Python
-environment, RTI installation, license, and dependencies. When that environment
-is already active, the direct entrypoint accepts the same development/check
-options:
+The launcher resolves the repository Python environment, RTI installation,
+license, and dependencies:
 
 ```bash
-./connext_dds_env_7.7_py311/bin/python services/rs_gui/rs_gui_app.py --headless-check
+./services/rs_gui/run_rs_gui.sh --headless-check
 ```
 
-The direct entrypoint also retains `--tk-gui` and `--tk-gui-check` for minimal
-Tk-scaffold compatibility checks.
+When the environment is already active, the direct entrypoint also accepts
+`--tk-gui` and `--tk-gui-check` for minimal Tk-scaffold compatibility checks.

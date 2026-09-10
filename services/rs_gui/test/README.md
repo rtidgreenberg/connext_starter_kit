@@ -4,11 +4,11 @@ The current test suite covers the headless app core and the Tk Record/Replay
 shell. It does not import DDS UI bindings, legacy renderer code, or any legacy-GUI
 implementation modules.
 
-Run from `services/rs_gui`:
+Run from `services/rs_gui`. The runner generates the required XML types before
+starting the suite:
 
 ```bash
-export VENV_PYTHON=$(ls -d ../../connext_dds_env_*py311/bin/python | head -1)
-"$VENV_PYTHON" test/run_all_tests.py -v
+./test/run_tests.sh -v
 ```
 
 Current layers:
@@ -104,7 +104,7 @@ Current layers:
 Live fixture gate:
 
 ```bash
-../../connext_dds_env/bin/python test/live_soak.py --duration-sec 10 --publish-rate-hz 100
+./test/run_python.sh test/live_soak.py --duration-sec 10 --publish-rate-hz 100
 ```
 
 `live_soak.py` is intentionally not named `test_*.py`: it uses the real RTI
@@ -113,7 +113,7 @@ Connext Python API, creates live DDS participants, and writes its report under
 run the live gate explicitly when validating Milestone L soak behavior.
 
 ```bash
-../../connext_dds_env/bin/python test/discovery_churn.py --iterations 3
+./test/run_python.sh test/discovery_churn.py --iterations 3
 ```
 
 `discovery_churn.py` is explicit-only: it creates unique live DynamicData topics
@@ -123,7 +123,7 @@ topics. It enables bounded stale-endpoint pruning because Connext 7.6 built-in
 readers in this environment may not deliver endpoint delete samples.
 
 ```bash
-../../connext_dds_env/bin/python test/service_churn.py --iterations 2
+./test/run_python.sh test/service_churn.py --iterations 2
 ```
 
 `service_churn.py` is also explicit-only: it starts live Recording Service

@@ -1,3 +1,12 @@
+# (c) Copyright, Real-Time Innovations, 2026.  All rights reserved.
+# RTI grants Licensee a license to use, modify, compile, and create derivative
+# works of the software solely for use with RTI Connext DDS. Licensee may
+# redistribute copies of the software provided that all such copies are subject
+# to this license. The software is provided "as is", with no warranty of any
+# type, including any warranty for fitness for any purpose. RTI is under no
+# obligation to maintain or support the software. RTI shall not be liable for
+# any incidental or consequential damages arising out of the use or inability
+# to use the software.
 """Dear PyGui application shell for rti_view."""
 
 from dataclasses import dataclass, replace
@@ -295,7 +304,7 @@ class RtiViewShell:
         topic_names = registry.topics_for_participant(participant_key) if participant_key else ()
         self._topic_endpoints = registry.writer_by_topic_for_participant(participant_key) if participant_key else {}
         topic_empty_label = "Select a process"
-        if not participant_key and self._direct_target:
+        if self._direct_target:
             direct_endpoint, _diagnostics = registry.select_writer_for_topic(self._selection.topic_name)
             if direct_endpoint is not None:
                 self._topic_endpoints = {direct_endpoint.topic_name: direct_endpoint}
@@ -705,6 +714,7 @@ class RtiViewShell:
 
     def _topic_callback(self, dpg):
         def _callback(_sender=None, app_data=None, _user_data=None):
+            self._close_subscription()
             self._set_selection(dpg, replace(self._selection, topic_name=str(app_data or ""), field_path=""))
             self._update_discovery_view(dpg, force=True)
         return _callback

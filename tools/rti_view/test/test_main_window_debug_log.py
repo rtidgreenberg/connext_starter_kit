@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+# (c) Copyright, Real-Time Innovations, 2026.  All rights reserved.
+# RTI grants Licensee a license to use, modify, compile, and create derivative
+# works of the software solely for use with RTI Connext DDS. Licensee may
+# redistribute copies of the software provided that all such copies are subject
+# to this license. The software is provided "as is", with no warranty of any
+# type, including any warranty for fitness for any purpose. RTI is under no
+# obligation to maintain or support the software. RTI shall not be liable for
+# any incidental or consequential damages arising out of the use or inability
+# to use the software.
 """Debug log behavior tests for rti_view main window."""
 
 import os
@@ -21,6 +30,7 @@ from rti_view.views.main_window import (
     MESSAGE_DATA_TAG,
     PLOT_SERIES_TAG,
     STATUS_TEXT_TAG,
+    ActiveSubscription,
     RtiViewShell,
     _field_tree,
 )
@@ -196,6 +206,41 @@ class TestMainWindowDebugLog(unittest.TestCase):
         setup_reader.assert_called_once_with(shell._participant, endpoint)
         self.assertIn("Subscribed to Telemetry.pose.position.x", dpg.values[STATUS_TEXT_TAG])
 
+    def test_topic_change_closes_active_subscription(self):
+        class Closable:
+            def __init__(self):
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        dpg = FakeDpg()
+        shell = RtiViewShell(initial_domain=0, dpg_module=dpg)
+        reader = Closable()
+        subscriber = Closable()
+        shell._subscription = ActiveSubscription(
+            endpoint=DiscoveredEndpoint(
+                key="writer-status",
+                participant_key="participant-1",
+                topic_name="Status",
+                type_name="StatusType",
+                dynamic_type=object(),
+                kind="Writer",
+            ),
+            field_path="value",
+            reader=reader,
+            subscriber=subscriber,
+            buffer=object(),
+            started_at=0.0,
+        )
+
+        shell._topic_callback(dpg)(app_data="Telemetry")
+
+        self.assertTrue(reader.closed)
+        self.assertTrue(subscriber.closed)
+        self.assertIsNone(shell._subscription)
+        self.assertEqual(shell.selection.topic_name, "Telemetry")
+
     def test_pump_subscription_updates_message_and_plot_values(self):
         dpg = FakeDpg()
         shell = RtiViewShell(initial_domain=0, dpg_module=dpg)
@@ -289,7 +334,7 @@ class TestMainWindowDebugLog(unittest.TestCase):
         self.assertEqual(shell.selection.mode, "text")
         self.assertIn("Telemetry.pose.position.x = 12", dpg.values[MESSAGE_DATA_TAG])
 
-    def test_direct_launch_target_auto_subscribes_without_process_selection(self):
+    def test_direct_launch_target_auto_subscribes_from_nonselected_participant(self):
         dpg = FakeDpg()
         shell = RtiViewShell(
             initial_domain=5,
@@ -300,10 +345,19 @@ class TestMainWindowDebugLog(unittest.TestCase):
             dpg_module=dpg,
         )
         shell._participant = object()
-        registry.add_participant(DiscoveredParticipant(key="participant-1", name="TelemetryPublisher", ip="127.0.0.1"))
+        registry.add_participant(DiscoveredParticipant(key="participant-1", name="StatusPublisher", ip="127.0.0.1"))
+        registry.add_participant(DiscoveredParticipant(key="participant-2", name="TelemetryPublisher", ip="127.0.0.2"))
+        registry.add_endpoint(DiscoveredEndpoint(
+            key="writer-status",
+            participant_key="participant-1",
+            topic_name="Status",
+            type_name="StatusType",
+            dynamic_type=object(),
+            kind="Writer",
+        ))
         endpoint = DiscoveredEndpoint(
             key="writer-a",
-            participant_key="participant-1",
+            participant_key="participant-2",
             topic_name="Telemetry",
             type_name="TelemetryType",
             dynamic_type=FakeDynamicType("STRUCTURE_TYPE", "TelemetryType", (

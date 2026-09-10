@@ -1,3 +1,12 @@
+# (c) Copyright, Real-Time Innovations, 2026.  All rights reserved.
+# RTI grants Licensee a license to use, modify, compile, and create derivative
+# works of the software solely for use with RTI Connext DDS. Licensee may
+# redistribute copies of the software provided that all such copies are subject
+# to this license. The software is provided "as is", with no warranty of any
+# type, including any warranty for fitness for any purpose. RTI is under no
+# obligation to maintain or support the software. RTI shall not be liable for
+# any incidental or consequential damages arising out of the use or inability
+# to use the software.
 import glob
 import os
 import sys
@@ -1399,7 +1408,7 @@ def main():
 
   parser = argparse.ArgumentParser(description="Discover all readers and writers on a DDS domain.")
   parser.add_argument("-d", "--domain", type=int, default=None, help="DDS domain ID (prompts on startup; defaults to 1 when non-interactive)")
-  parser.add_argument("-i", "--interval", type=float, default=10, help="Refresh interval in seconds (default: 2.0)")
+  parser.add_argument("-i", "--interval", type=float, default=10, help="Refresh interval in seconds (default: 10)")
   parser.add_argument("--debug-log", default=os.environ.get("RTI_SPY_DEBUG_LOG"), help="Optional path for discovery/subscription log output")
   parser.add_argument("--scan-timeout", type=float, default=32.0, help="Seconds to listen for default domain announcements before prompting for a domain (default: 32.0, just over the 30s default announcement period)")
   parser.add_argument("--no-domain-scan", action="store_true", help="Skip scanning for active domains before prompting")

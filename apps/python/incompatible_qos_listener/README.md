@@ -10,19 +10,15 @@ interoperate over the wire.
 
 ## Quick Start
 
-1. **Get an RTI license** - Visit https://www.rti.com/get-connext
+Use the container setup in the [Python applications guide](../README.md#quick-start),
+then run:
 
-2. **Check your email** - You'll receive an automated email with `rti_license.dat` within minutes
+```bash
+./run.sh --domain_id 1
+```
 
-3. **Set the license environment variable:**
-   ```bash
-   export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
-   ```
-
-4. **Run the application:**
-   ```bash
-   ./run.sh --domain_id 1
-   ```
+For a native Connext 7.7 installation, set `RTI_PYTHON_SOURCE=pypi` and
+`RTI_LICENSE_FILE` before starting the launcher.
 
 The app forces a QoS mismatch, waits for the callback, prints the status, and exits `0` on
 success or `1` if the callback never arrived.

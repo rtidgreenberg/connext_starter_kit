@@ -4,22 +4,16 @@ Python implementation demonstrating minimal DDS middleware setup with RTI Connex
 
 ## Quick Start
 
-1. **Get an RTI license** - Visit https://www.rti.com/get-connext
+Use the container setup in the [Python applications guide](../README.md#quick-start),
+then run:
 
-2. **Check your email** - You'll receive an automated email with `rti_license.dat` within minutes
+```bash
+./run.sh --domain_id 1
+```
 
-3. **Set the license environment variable:**
-   ```bash
-   export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
-   ```
-
-4. **Run the application:**
-   ```bash
-   ./run.sh --domain_id 1
-   ```
-
-The launcher uses the shared repository virtual environment at `connext_dds_env/`
-and supports Python 3.10+, matching the other Python tools in this repo.
+The launcher creates its versioned virtual environment and installs the Python
+dependencies automatically. For a native Connext 7.7 installation, set
+`RTI_PYTHON_SOURCE=pypi` and `RTI_LICENSE_FILE` before running it.
 
 ---
 

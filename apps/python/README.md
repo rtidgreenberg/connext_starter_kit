@@ -4,22 +4,31 @@ Python applications demonstrating RTI Connext DDS capabilities with example data
 
 ## Quick Start
 
-1. **Get an RTI license** - Visit https://www.rti.com/get-connext
+First complete the supported container setup in the [repository Quick Start](../../README.md#quick-start).
+Then run an example from the repository root:
 
-2. **Check your email** - You'll receive an automated email with `rti_license.dat` within minutes
+```bash
+docker compose -f docker-compose.connext-7.7.yml run --rm connext \
+   bash -lc 'cp -a /workspace/. /tmp/connext-workspace && \
+   cd /tmp/connext-workspace && \
+   apps/python/example_io_app/run.sh --domain_id 1'
+```
 
-3. **Set the license environment variable:**
-   ```bash
-   export RTI_LICENSE_FILE=/path/to/downloaded/rti_license.dat
-   ```
+The launcher creates its virtual environment, installs `rti.connext==7.7.0`
+and application dependencies from PyPI, generates type support, and starts the
+app.
 
-4. **Run an application:**
-   ```bash
-   cd apps/python/example_io_app
-   ./run.sh --domain_id 1
-   ```
+For a native Connext 7.7 installation, set the license and choose PyPI before
+calling the same launcher:
 
-That's it! The `run.sh` script automatically handles NDDSHOME detection, virtual environment setup, and dependency installation.
+```bash
+export RTI_PYTHON_SOURCE=pypi
+export RTI_LICENSE_FILE=/path/to/rti_license.dat
+./run.sh --domain_id 1
+```
+
+The first native launch also requires `rtiddsgen` from `NDDSHOME` to generate
+the application's DDS type support.
 
 ---
 

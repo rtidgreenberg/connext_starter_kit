@@ -112,5 +112,5 @@ parameters:
 
 ## Dependencies
 
-- RTI Connext DDS 7.3.0+
+- RTI Connext DDS 7.7.0
 - yaml-cpp (auto-downloaded by CMake if not installed)

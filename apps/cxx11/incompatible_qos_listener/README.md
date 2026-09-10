@@ -70,7 +70,7 @@ only DataReaders will never have an offered-incompatible-qos status, no matter w
 listener implements — that status belongs to the remote writer's participant.
 
 Masking the wrong one is silent: nothing fires, and there is no warning. Same participant,
-same mismatch, only the mask changed (measured against Connext 7.3.1):
+same mismatch, only the mask changed (measured against Connext 7.7.0):
 
 | Participant listener mask | Result |
 | --- | --- |
@@ -235,7 +235,7 @@ writer), so a single command reproduces the callback end to end.
 
 ## Status object API notes
 
-Verified against the **Connext 7.3.1** Modern C++ headers. Every member is a method:
+Verified against the **Connext 7.7.0** Modern C++ headers. Every member is a method:
 
 | Member | Type |
 | --- | --- |

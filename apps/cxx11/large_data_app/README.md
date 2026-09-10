@@ -17,9 +17,9 @@ This application publishes and subscribes to Image data using the `LARGE_DATA_PA
 
 ## Prerequisites
 
-- RTI Connext DDS 7.3.0+
+- RTI Connext DDS 7.7.0
 - CMake 3.12+
-- C++14 compiler (GCC 7.3.0+)
+- C++14 compiler (the Ubuntu 24.04 container provides GCC 13)
 - DDS types generated (see Building section)
 
 ## Building
@@ -214,7 +214,7 @@ See [fixed_image_flat_zc](../fixed_image_flat_zc/README.md) for zero-copy implem
 - **[DDS Layer](../../../dds/README.md)** - Data models and QoS profiles
 - **[Zero-Copy Large Data](../fixed_image_flat_zc/README.md)** - FlatData zero-copy implementation
 - **[Python Large Data App](../../python/large_data_app/README.md)** - Python equivalent
-- **[RTI Shared Memory Transport](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/manuals/connext_dds_professional/html_files/RTI_ConnextDDS_CoreLibraries_UsersManual/Content/UsersManual/SHMEM_Transport.htm)**
+- **[RTI Shared Memory Transport](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/html_files/RTI_ConnextDDS_CoreLibraries_UsersManual/Content/UsersManual/SHMEM_Transport.htm)**
 
 ## Next Steps
 

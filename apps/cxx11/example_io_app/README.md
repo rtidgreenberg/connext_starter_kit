@@ -42,7 +42,7 @@ All interfaces use `qos_profiles::ASSIGNER` profile for runtime XML-based QoS re
 
 ```bash
 # Set environment
-export NDDSHOME=/path/to/rti_connext_dds-7.3.0
+export NDDSHOME=/path/to/rti_connext_dds-7.7.0
 source $NDDSHOME/resource/scripts/rtisetenv_<target>.bash
 
 # Build from top-level (builds DDS library and all apps)
@@ -158,7 +158,7 @@ The application includes proper initialization and cleanup:
 
 ## Dependencies
 
-- RTI Connext DDS 7.3.0+ with distributed logger
+- RTI Connext DDS 7.7.0 with distributed logger
 - C++14 compiler (tested with GCC 9.4.0)
 - CMake 3.12+ for build configuration
 - Generated C++ bindings:

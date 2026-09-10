@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+# (c) Copyright, Real-Time Innovations, 2026.  All rights reserved.
+# RTI grants Licensee a license to use, modify, compile, and create derivative
+# works of the software solely for use with RTI Connext DDS. Licensee may
+# redistribute copies of the software provided that all such copies are subject
+# to this license. The software is provided "as is", with no warranty of any
+# type, including any warranty for fitness for any purpose. RTI is under no
+# obligation to maintain or support the software. RTI shall not be liable for
+# any incidental or consequential damages arising out of the use or inability
+# to use the software.
 """Run all rs_gui Python tests."""
 
 import os
@@ -9,19 +18,6 @@ import unittest
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PARENT_DIR = os.path.dirname(SCRIPT_DIR)
 REPO_ROOT = os.path.normpath(os.path.join(PARENT_DIR, "..", ".."))
-VENV_PYTHON = os.path.join(REPO_ROOT, "connext_dds_env", "bin", "python")
-
-
-def _reexec_with_repo_venv() -> None:
-    if not os.path.isfile(VENV_PYTHON):
-        return
-    if os.path.realpath(sys.executable) == os.path.realpath(VENV_PYTHON):
-        return
-    os.environ["PYTHONNOUSERSITE"] = "1"
-    os.execv(VENV_PYTHON, [VENV_PYTHON] + sys.argv)
-
-
-_reexec_with_repo_venv()
 
 if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)

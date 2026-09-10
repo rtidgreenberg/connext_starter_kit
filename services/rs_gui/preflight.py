@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+# (c) Copyright, Real-Time Innovations, 2026.  All rights reserved.
+# RTI grants Licensee a license to use, modify, compile, and create derivative
+# works of the software solely for use with RTI Connext DDS. Licensee may
+# redistribute copies of the software provided that all such copies are subject
+# to this license. The software is provided "as is", with no warranty of any
+# type, including any warranty for fitness for any purpose. RTI is under no
+# obligation to maintain or support the software. RTI shall not be liable for
+# any incidental or consequential damages arising out of the use or inability
+# to use the software.
 """Startup diagnostics for rs_gui launcher hardening."""
 
 from __future__ import annotations
@@ -90,7 +99,7 @@ class Preflight:
             self._record_connext(
                 "RTI_IMPORT_FAILED",
                 "Cannot import rti.connextdds in the active Python environment.",
-                "Activate connext_dds_env and install the RTI Python package for this interpreter.",
+                "Run ./services/rs_gui/run_rs_gui.sh to resolve the repository environment and install the RTI Python package.",
             )
 
         if self._check_import("rti.request"):

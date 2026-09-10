@@ -35,7 +35,7 @@ This application publishes and subscribes to Image data (~900 KB per sample) usi
 ## Prerequisites
 
 - RTI Connext DDS Python API 7.7.0, installed from PyPI as `rti.connext==7.7.0`
-- Python 3.10
+- Python 3.10+
 - Virtual environment configured (see [apps/python/README.md](../README.md))
 
 ## Usage
@@ -181,7 +181,7 @@ image_writer_qos = qos_provider.set_topic_datawriter_qos(
 - **[Python Applications Guide](../README.md)** - Python setup and development
 - **[DDS Layer](../../../dds/README.md)** - Data models and QoS profiles
 - **[Large Data C++ Example](../../cxx11/fixed_image_flat_zc/README.md)** - Zero-copy FlatData implementation
-- **[RTI Shared Memory Transport](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/manuals/connext_dds_professional/html_files/RTI_ConnextDDS_CoreLibraries_UsersManual/Content/UsersManual/SHMEM_Transport.htm)**
+- **[RTI Shared Memory Transport](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/html_files/RTI_ConnextDDS_CoreLibraries_UsersManual/Content/UsersManual/SHMEM_Transport.htm)**
 
 ## Next Steps
 

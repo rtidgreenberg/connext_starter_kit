@@ -29,9 +29,9 @@ Examples:
 
 ## Direct Invocation
 
-Prefer the launcher because it selects the matching Connext Python environment
-and resolves the license. When that environment is already available, run:
+The launcher selects the matching Connext 7.7 Python environment and resolves
+the license:
 
 ```bash
-./connext_dds_env_7.7_py311/bin/python tools/rti_spy/rtispy.py --domain 1
+./tools/rti_spy/run_rtispy.sh --domain 1
 ```

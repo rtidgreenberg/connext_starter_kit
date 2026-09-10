@@ -2,14 +2,14 @@
 
 ## Overview
 
-This C++ application demonstrates **runtime modification of Domain Participant Partitions** using the [PARTITION QoSPolicy](https://community.rti.com/static/documentation/connext-dds/7.6.0/doc/manuals/connext_dds_professional/users_manual/users_manual/PARTITION_QosPolicy.htm) in RTI Connext DDS for **test environment isolation and dynamic message traffic segmentation**.  
+This C++ application demonstrates **runtime modification of Domain Participant Partitions** using the [PARTITION QoSPolicy](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/users_manual/users_manual/PARTITION_QosPolicy.htm) in RTI Connext DDS for **test environment isolation and dynamic message traffic segmentation**.
 Each instance generates a unique Application ID (App-XXXX) and can dynamically change Domain Participant partitions at runtime, enabling sophisticated testing scenarios including unit test isolation, failover testing, and multi-instance communication verification.
 
 The application both publishes and subscribes to the `Command` topic while accepting user input from the terminal to change partition names on-the-fly. This allows you to spin up multiple instances and test partition-based communication isolation, verify failover scenarios, and validate message routing in distributed systems.
 
 ## What are Domain Participant Partitions?
 
-The [PARTITION QoSPolicy](https://community.rti.com/static/documentation/connext-dds/7.6.0/doc/manuals/connext_dds_professional/users_manual/users_manual/PARTITION_QosPolicy.htm) provides a way to control which DDS entities will match and communicate with each other. Partitions create logical "visibility planes" within a DDS domain - only entities with matching partitions can communicate, even if they're on the same topic and domain.
+The [PARTITION QoSPolicy](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/users_manual/users_manual/PARTITION_QosPolicy.htm) provides a way to control which DDS entities will match and communicate with each other. Partitions create logical "visibility planes" within a DDS domain - only entities with matching partitions can communicate, even if they're on the same topic and domain.
 
 **Domain Participant partitions** are particularly useful in large, WAN, distributed systems because DomainParticipants without matching partitions will not exchange information about their DataWriters and DataReaders. While Simple Participant Discovery still occurs, **Simple Endpoint Discovery is eliminated** for DomainParticipants that do not have a matching partition. This reduces network, CPU, and memory utilization by preventing unnecessary endpoint discovery traffic.
 
@@ -47,7 +47,7 @@ The [PARTITION QoSPolicy](https://community.rti.com/static/documentation/connext
 
 ### Prerequisites
 
-- RTI Connext DDS 7.3.0+
+- RTI Connext DDS 7.7.0
 - CMake 3.12+
 - C++14 compiler
 - DDS types already generated (Command type)
@@ -369,7 +369,7 @@ This provides maximum flexibility for both automated and manual testing scenario
 
 ### Partition Matching Rules
 
-According to the [PARTITION QoSPolicy documentation](https://community.rti.com/static/documentation/connext-dds/7.6.0/doc/manuals/connext_dds_professional/users_manual/users_manual/PARTITION_QosPolicy.htm), a DataWriter will communicate with a DataReader if:
+According to the [PARTITION QoSPolicy documentation](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/users_manual/users_manual/PARTITION_QosPolicy.htm), a DataWriter will communicate with a DataReader if:
 
 1. They belong to DomainParticipants with the same domain ID, domain tag, and **at least one matching DomainParticipant partition**
 2. They have matching Topics (same name and compatible data type)
@@ -404,7 +404,7 @@ According to the [PARTITION QoSPolicy documentation](https://community.rti.com/s
 
 ### Mutable QoS Policy
 
-The [PARTITION QoSPolicy](https://community.rti.com/static/documentation/connext-dds/7.6.0/doc/manuals/connext_dds_professional/users_manual/users_manual/PARTITION_QosPolicy.htm) **can be modified at any time** (it is mutable). This makes it ideal for:
+The [PARTITION QoSPolicy](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/users_manual/users_manual/PARTITION_QosPolicy.htm) **can be modified at any time** (it is mutable). This makes it ideal for:
 - Dynamic test environment switching
 - Failover scenarios
 - Runtime access control changes
@@ -486,13 +486,13 @@ When testing partition isolation:
 
 ### Official RTI Documentation
 
-- **[PARTITION QoSPolicy](https://community.rti.com/static/documentation/connext-dds/7.6.0/doc/manuals/connext_dds_professional/users_manual/users_manual/PARTITION_QosPolicy.htm)** - Primary reference for partition behavior
-- [Domain Participant Partitions](https://community.rti.com/static/documentation/connext-dds/7.6.0/doc/manuals/connext_dds_professional/users_manual/users_manual/Creating_ParticipantPartitions.htm) - Isolating DomainParticipants and Endpoints
-- [Partition Changes](https://community.rti.com/static/documentation/connext-dds/7.6.0/doc/manuals/connext_dds_professional/users_manual/users_manual/PARTITION_QosPolicy.htm#PARTITION_QosPolicy_1991854096_PartitionChanges) - Behavior when changing partitions at runtime
-- [Pattern Matching for Partition Names](https://community.rti.com/static/documentation/connext-dds/7.6.0/doc/manuals/connext_dds_professional/users_manual/users_manual/PARTITION_QosPolicy.htm#PARTITION_QosPolicy_1991854096_PatternMatchingForPARTITIONNames) - Using regular expressions
-- [Modern C++ API - QoS Policies](https://community.rti.com/static/documentation/connext-dds/7.6.0/doc/api/connext_dds/api_cpp2/group__DDSQosModule.html)
-- [Restricting Communication - Ignoring Entities](https://community.rti.com/static/documentation/connext-dds/7.6.0/doc/manuals/connext_dds_professional/users_manual/users_manual/Restricting_Communication_Ignoring_Entit.htm)
-- [QoS Profiles with Environment Variables](https://community.rti.com/static/documentation/connext-dds/7.6.0/doc/manuals/connext_dds_professional/users_manual/users_manual/XMLConfiguration.htm)
+- **[PARTITION QoSPolicy](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/users_manual/users_manual/PARTITION_QosPolicy.htm)** - Primary reference for partition behavior
+- [Domain Participant Partitions](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/users_manual/users_manual/Creating_ParticipantPartitions.htm) - Isolating DomainParticipants and Endpoints
+- [Partition Changes](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/users_manual/users_manual/PARTITION_QosPolicy.htm#PARTITION_QosPolicy_1991854096_PartitionChanges) - Behavior when changing partitions at runtime
+- [Pattern Matching for Partition Names](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/users_manual/users_manual/PARTITION_QosPolicy.htm#PARTITION_QosPolicy_1991854096_PatternMatchingForPARTITIONNames) - Using regular expressions
+- [Modern C++ API - QoS Policies](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/api/connext_dds/api_cpp2/group__DDSQosModule.html)
+- [Restricting Communication - Ignoring Entities](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/users_manual/users_manual/Restricting_Communication_Ignoring_Entit.htm)
+- [QoS Profiles with Environment Variables](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/users_manual/users_manual/XMLConfiguration.htm)
 
 ## Key Takeaways
 

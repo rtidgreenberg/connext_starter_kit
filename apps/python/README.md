@@ -100,7 +100,7 @@ connext_dds_env/            # Shared virtual environment (at repository root)
 
 ### Prerequisites
 - RTI Connext DDS Python API 7.7.0, installed from PyPI as `rti.connext==7.7.0`
-- Python 3.10
+- Python 3.10+ (the Docker container uses Python 3.12)
 - RTI license file
 
 #### Getting an RTI License
@@ -163,7 +163,7 @@ cd apps/python
 
 The install script:
 - Auto-detects `NDDSHOME` when native type-generation tooling is available
-- Creates a shared Python 3.10 virtual environment at the repository root (`connext_dds_env/`)
+- Creates a repository-local virtual environment using the newest supported Python 3.10+ interpreter
 - Installs dependencies from `requirements.txt`
 - Selects the RTI Connext DDS Python API from PyPI or an activated local wheel
 
@@ -489,7 +489,7 @@ cd <path-to-connext_starter_kit>/build/apps/cxx11/example_io_app && ./example_io
 # Terminal 2 (Python Application on Domain 5)  
 cd <path-to-connext_starter_kit>/apps/python
 source connext_dds_env/bin/activate
-export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
+export NDDSHOME="$HOME/rti_connext_dds-7.7.0"
 cd example_io_app
 python3 example_io_app.py --domain_id 5 --verbosity 1
 ```
@@ -510,7 +510,7 @@ Test the application step-by-step:
 # 1. Set up environment
 cd <path-to-connext_starter_kit>/apps/python
 source connext_dds_env/bin/activate
-export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
+export NDDSHOME="$HOME/rti_connext_dds-7.7.0"
 
 # 2. Ensure setup is complete (run once)
 ./install.sh
@@ -536,7 +536,7 @@ build/example_io_app -d 1 -v 1
 # Terminal 2: Start Python application  
 cd <path-to-connext_starter_kit>/apps/python
 source connext_dds_env/bin/activate
-export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
+export NDDSHOME="$HOME/rti_connext_dds-7.7.0"
 cd example_io_app
 python3 example_io_app.py --domain_id 1 --verbosity 2
 ```
@@ -558,7 +558,7 @@ python3 example_io_app.py --domain_id 1 --verbosity 2
    ```
    **Solution**: Either set `NDDSHOME` environment variable or ensure RTI Connext DDS is installed at `~/rti_connext_dds-*`:
    ```bash
-   export NDDSHOME="$HOME/rti_connext_dds-7.3.0"
+   export NDDSHOME="$HOME/rti_connext_dds-7.7.0"
    ```
 
 2. **License file not found**
@@ -616,7 +616,7 @@ cd apps/python/example_io_app
 ```
 
 ## License
-Copyright (c) Real-Time Innovations, 2025. All rights reserved.
+Copyright (c) Real-Time Innovations, 2026. All rights reserved.
 RTI grants Licensee a license to use, modify, compile, and create derivative works of the software solely for use with RTI Connext DDS.
 
 ---

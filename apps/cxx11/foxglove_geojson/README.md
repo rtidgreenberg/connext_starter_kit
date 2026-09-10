@@ -28,7 +28,7 @@ You can modify these types by including **keys and extra members** and Foxglove 
 Build from the repository root (this also generates the DDS types library):
 
 ```bash
-export NDDSHOME=/path/to/rti_connext_dds-7.3.0
+export NDDSHOME=/path/to/rti_connext_dds-7.7.0
 source $NDDSHOME/resource/scripts/rtisetenv_<target>.bash
 
 cd /path/to/connext_starter_kit

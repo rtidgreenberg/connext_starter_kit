@@ -19,7 +19,7 @@ Python implementation demonstrating minimal DDS middleware setup with RTI Connex
    ```
 
 The launcher uses the shared repository virtual environment at `connext_dds_env/`
-and standardizes on Python 3.10, matching the other Python tools in this repo.
+and supports Python 3.10+, matching the other Python tools in this repo.
 
 ---
 
@@ -116,7 +116,7 @@ cd ../../../../apps/cxx11/example_io_app/build
 # Terminal 2: Start Python application  
 cd ../../../../apps/python
 source connext_dds_env/bin/activate
-export NDDSHOME=/path/to/rti_connext_dds-7.3.0
+export NDDSHOME=/path/to/rti_connext_dds-7.7.0
 cd example_io_app
 python example_io_app/example_io_app.py --domain_id 1 --verbosity 2
 ```
@@ -144,7 +144,7 @@ DEFAULT_CONFIG_DESTINATION = "config_target"   # Modify config targets
 ## Dependencies
 
 - **RTI Connext DDS Python API 7.7.0**, installed from PyPI as `rti.connext==7.7.0`
-- **Python 3.10**
+- **Python 3.10+**
 - **Generated Python DDS types** (ExampleTypes.py, Definitions.py)
 - **QoS profile XML file** (DDS_QOS_PROFILES.xml)
 - **Virtual environment** (recommended for RTI API isolation)

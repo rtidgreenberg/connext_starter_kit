@@ -1,4 +1,13 @@
 #!/bin/bash
+# (c) Copyright, Real-Time Innovations, 2026.  All rights reserved.
+# RTI grants Licensee a license to use, modify, compile, and create derivative
+# works of the software solely for use with RTI Connext DDS. Licensee may
+# redistribute copies of the software provided that all such copies are subject
+# to this license. The software is provided "as is", with no warranty of any
+# type, including any warranty for fitness for any purpose. RTI is under no
+# obligation to maintain or support the software. RTI shall not be liable for
+# any incidental or consequential damages arising out of the use or inability
+# to use the software.
 # Launcher for rs_gui.
 # - Starts the GUI by default
 # - Ensures repo virtualenv Python exists
@@ -103,7 +112,7 @@ fi
 if [[ "$PREPARE_DDS" == true ]]; then
     python_env_log_step "Preparing DDS XML type artifacts"
     echo "Preparing DDS XML types using setup.sh..."
-    bash "$SCRIPT_DIR/setup.sh"
+    VENV_PYTHON="$PYTHON_ENV_VENV_PYTHON" bash "$SCRIPT_DIR/setup.sh"
     REQUIRE_CONNEXT_DIAGNOSTICS=true
 
     # Validate generated types metadata against the active NDDSHOME.

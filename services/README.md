@@ -270,8 +270,8 @@ GUI-specific tests (unit, widget, integration, E2E tags) live in
 
 ## Prerequisites
 
-- RTI Connext DDS 7.3.0+ with Recording, Replay, and Converter Services for command-line scripts
-- Python 3.10 and `rti.connext==7.7.0` from PyPI for the `rs_gui` Python GUI
+- RTI Connext DDS 7.7.0 with Recording, Replay, and Converter Services for command-line scripts
+- Python 3.10+ and `rti.connext==7.7.0` from PyPI for the `rs_gui` Python GUI
 - Set `NDDSHOME` environment variable pointing to your RTI Connext installation
 
 ## Directory Structure
@@ -301,10 +301,9 @@ services/
 
 ## Resources
 
-- [RTI Recording Service Manual (7.3.0)](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/manuals/connext_dds_professional/services/recording_service/)
-- [RTI Recording Service Manual (7.6.0)](https://community.rti.com/static/documentation/connext-dds/7.6.0/doc/manuals/connext_dds_professional/services/recording_service/index.html)
-- [RTI Replay Service Manual](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/manuals/connext_dds_professional/services/replay_service/)
-- [RTI Converter Service Manual](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/manuals/connext_dds_professional/services/converter_service/)
+- [RTI Recording Service Manual (7.7.0)](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/services/recording_service/)
+- [RTI Replay Service Manual (7.7.0)](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/services/replay_service/)
+- [RTI Converter Service Manual (7.7.0)](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/services/converter_service/)
 
 ---
 

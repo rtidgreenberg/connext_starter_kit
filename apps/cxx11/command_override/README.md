@@ -107,10 +107,10 @@ command_override/
 
 ## Related Documentation
 
-- [RTI Connext DDS User's Manual](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/manuals/connext_dds_professional/users_manual/index.htm)
-- [C++ API Reference](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/api/connext_dds/api_cpp2/index.html)
-- [QoS Provider Guide](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/manuals/connext_dds_professional/users_manual/index.htm#users_manual/QoS_Provider.htm)
-- [Ownership QoS Policy](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/manuals/connext_dds_professional/users_manual/index.htm#users_manual/OWNERSHIP_QosPolicy.htm)
+- [RTI Connext DDS User's Manual](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/users_manual/index.htm)
+- [C++ API Reference](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/api/connext_dds/api_cpp2/index.html)
+- [QoS Provider Guide](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/users_manual/index.htm#users_manual/QoS_Provider.htm)
+- [Ownership QoS Policy](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/users_manual/index.htm#users_manual/OWNERSHIP_QosPolicy.htm)
 
 ---
 

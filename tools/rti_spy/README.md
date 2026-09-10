@@ -52,25 +52,24 @@ you need a persistent discovery/subscription trace for troubleshooting.
 
 ## What the Launcher Does
 
-`run_rtispy.sh` auto-detects the Connext version from `NDDSHOME` and picks a
-matching, isolated Python environment and `rti.connext` version:
+`run_rtispy.sh` uses the supported Connext 7.7 environment from `NDDSHOME` and
+picks an isolated Python environment:
 
-| NDDSHOME version | Python  | venv                    | rti.connext |
-|-------------------|---------|-------------------------|-------------|
-| 7.3.x              | 3.9     | `connext_dds_env_7.3/`  | 7.3.1       |
-| 7.7.x (default)    | newest installed 3.10-3.14 | `connext_dds_env/` for 3.10; `connext_dds_env_7.7_py<XY>/` otherwise | 7.7.0 |
+| NDDSHOME version | Python | venv | rti.connext |
+|---|---|---|---|
+| 7.7.0 | newest installed Python 3.10+ | repository-local isolated venv | 7.7.0 |
 
 It will:
 
 - detect `NDDSHOME` (or use `$NDDSHOME` if already set/exported)
-- detect the Connext version and select the matching Python/venv/`rti.connext` above; when a bundled activated wheel is available, prefer the newest installed Python with a matching wheel
+- select Python/venv/`rti.connext==7.7.0`; when a bundled activated wheel is available, prefer it
 - detect `RTI_LICENSE_FILE`
 - create or rebuild the matching versioned virtual environment if needed
 - install the matching `rti.connext` version, then the rest of `tools/rti_spy/requirements.txt`
 - start `rtispy.py`
 
-Switching between a Connext 7.3.x and 7.7.x install (via `NDDSHOME`) reuses each
-version's own venv, so no rebuild/reinstall is needed when switching back and forth.
+The supported Docker workflow provides Ubuntu 24.04, Connext 7.7.0, and Python
+3.12 without requiring a host Connext installation.
 
 ## Installing the RTI Connext Python API
 
@@ -103,15 +102,12 @@ the launcher skips reinstalling on subsequent runs.
 
 ## Requirements
 
-- RTI Connext DDS 7.3.x or 7.7.x available locally
-- Python 3.10 available as `python3.10` (for 7.7.x), and/or Python 3.9 available
-  as `python3.9` (for 7.3.x). If missing, the launcher prints the exact
-  `sudo apt install python3.9 python3.9-venv` command needed and stops.
+- RTI Connext DDS 7.7.0 available locally, or use the Ubuntu 24.04 Docker container
+- Python 3.10+ available. If missing, the launcher prints the exact remediation.
 - A valid RTI license file
 
-`tools/rti_spy/requirements.txt` no longer pins `rti.connext`; the version is
-selected automatically to match `NDDSHOME`. The Textual UI dependencies are
-still listed there.
+`tools/rti_spy/requirements.txt` no longer pins `rti.connext`; the launcher
+installs `rti.connext==7.7.0` and the Textual UI dependencies listed there.
 
 For command-line options, direct invocation, and startup troubleshooting, see
 [CLI_REFERENCE.md](CLI_REFERENCE.md).
@@ -150,11 +146,11 @@ The normal launcher remains the easiest way to run `rti_spy` on a development
 machine. Use these steps to create a compressed PyInstaller folder bundle for a
 compatible Linux target.
 
-1. Install the build prerequisites. For a Connext 7.3 `cp39` RTI Python wheel
-  on Debian/Ubuntu:
+1. Install the build prerequisites. For a Connext 7.7 `cp312` RTI Python wheel
+  on Ubuntu 24.04:
 
   ```bash
-  sudo apt install python3.9 python3.9-venv libpython3.9
+  sudo apt install python3.12 python3.12-venv libpython3.12
   ```
 
   Package names vary by distribution.
@@ -163,7 +159,7 @@ compatible Linux target.
   under `$NDDSHOME/resource/python_api/`, for example:
 
   ```text
-  $NDDSHOME/resource/python_api/rti_connext_activated-7.3.1-cp39-*.whl
+  $NDDSHOME/resource/python_api/rti_connext_activated-7.7.0-cp312-*.whl
   ```
 
 3. Prepare the connected build environment. This one-time step needs network
@@ -171,7 +167,7 @@ compatible Linux target.
 
   ```bash
   ./scripts/prepare_rti_spy_bundle_env.sh \
-    --wheel "$NDDSHOME"/resource/python_api/rti_connext_activated-7.3.1-cp39-*.whl
+    --wheel "$NDDSHOME"/resource/python_api/rti_connext_activated-7.7.0-cp312-*.whl
   ```
 
 4. Create the deployment package. This reuses the RTI Python wheel recorded
@@ -203,11 +199,11 @@ compatible Linux target.
 Run the startup tests:
 
 ```bash
-PYTHONPATH=tools/rti_spy ./connext_dds_env/bin/python -m unittest tools/rti_spy/test/test_startup_live.py
+./tools/rti_spy/run_tests.sh startup
 ```
 
 Run the discovery/subscription integration test:
 
 ```bash
-PYTHONPATH=tools/rti_spy ./connext_dds_env/bin/python -m unittest tools/rti_spy/test/test_live_e2e_integration.py
+./tools/rti_spy/run_tests.sh live
 ```

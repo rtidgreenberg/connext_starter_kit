@@ -115,15 +115,15 @@ Instead of blocking on acknowledgments, increase the writer's loaned sample allo
 
 ### Prerequisites
 
-- RTI Connext DDS 7.3.0+ installed and licensed
-- C++14 compiler (GCC 7.3.0+)
+- RTI Connext DDS 7.7.0 installed and licensed
+- C++14 compiler (the Ubuntu 24.04 container provides GCC 13)
 - CMake 3.12+
 
 ### Environment Setup
 
 ```bash
 # Set RTI Connext DDS environment
-export NDDSHOME=/path/to/rti_connext_dds-7.3.0
+export NDDSHOME=/path/to/rti_connext_dds-7.7.0
 source $NDDSHOME/resource/scripts/rtisetenv_<target>.bash
 ```
 
@@ -284,7 +284,6 @@ struct FinalFlatImage {
 - `@final`: Maximum performance - requires only fixed-size types (no strings/sequences)
 - `@language_binding(FLAT_DATA)`: Enables FlatData API with direct memory access
 - `@transfer_mode(SHMEM_REF)`: Enables zero-copy via shared memory references
-
 ### Design Notes
 - **@final vs @mutable**: `@final` provides best performance but requires fixed-size types only (primitives, fixed arrays)
 - **Endianness**: Inter-host communication requires matching byte order
@@ -320,7 +319,7 @@ When designing systems that use both FlatData/Zero-Copy and RTI services:
 ## Resources
 
 ### RTI Documentation
-- [Sending Large Data](https://community.rti.com/static/documentation/connext-dds/7.3.1/doc/manuals/connext_dds_professional/users_manual/users_manual/SendingLargeData.htm) - Best practices for large data transfer in RTI Connext DDS
+- [Sending Large Data](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/users_manual/users_manual/SendingLargeData.htm) - Best practices for large data transfer in RTI Connext DDS
 
 ### RTI Examples
 - [FlatData API Example](https://github.com/rticommunity/rticonnextdds-examples/tree/release/7.1.0/examples/connext_dds/flat_data_api/c%2B%2B11) - Complete FlatData API usage examples

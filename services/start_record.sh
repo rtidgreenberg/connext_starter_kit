@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# (c) Copyright, Real-Time Innovations, 2025.  All rights reserved.
+# (c) Copyright, Real-Time Innovations, 2026.  All rights reserved.
 # RTI grants Licensee a license to use, modify, compile, and create derivative
 # works of the software solely for use with RTI Connext DDS. Licensee may
 # redistribute copies of the software provided that all such copies are subject
@@ -32,8 +32,9 @@ if [[ -z "${RTI_LICENSE_FILE:-}" ]]; then
 fi
 
 
-# Converter Service configuration file
-xml="./recording_service_config.xml"
+# Recording Service configuration file
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+xml="$SCRIPT_DIR/recording_service_config.xml"
 
 if [ "$1" == "deploy" ] || [ "$1" == "debug" ] ; then
   config=$1

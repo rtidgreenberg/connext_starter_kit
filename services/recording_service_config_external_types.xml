@@ -5,7 +5,7 @@
 
 
     <types>
-      <include file="../dds/build/xml_gen/ExampleTypes.xml"/>
+    <include file="../build/dds/xml_gen/ExampleTypes.xml"/>
     </types>
 
     <!-- QoS profiles for Remote Administration are loaded from the

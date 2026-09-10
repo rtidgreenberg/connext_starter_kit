@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# (c) Copyright, Real-Time Innovations, 2025.  All rights reserved.
+# (c) Copyright, Real-Time Innovations, 2026.  All rights reserved.
 # RTI grants Licensee a license to use, modify, compile, and create derivative
 # works of the software solely for use with RTI Connext DDS. Licensee may
 # redistribute copies of the software provided that all such copies are subject
@@ -33,11 +33,11 @@ fi
 
 
 # Converter Service configuration file
-xml="./converter_service_config.xml"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+xml="$SCRIPT_DIR/converter_service_config.xml"
 
 # QoS XML file — listed for reference; converter does not use DDS QoS
 # profiles since it is a file-to-file tool (not a DDS application).
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 qos_file="$REPO_ROOT/dds/qos/DDS_QOS_PROFILES.xml"
 

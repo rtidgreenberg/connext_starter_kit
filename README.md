@@ -13,26 +13,36 @@ Cross-language DDS system/application templates to accelerate development.
 
 ## Quick Start
 
-1. **Set RTI environment:**
-   ```bash
-   export NDDSHOME=/path/to/rti_connext_dds-7.7.0
-   ```
-
-2. **Clone with submodules:**
+1. **Clone with submodules:**
    ```bash
    git clone --recurse-submodules <repository-url>
    cd connext_starter_kit
    ```
 
-3. **Configure your target environment:**
+2. **Build and enter the supported container:**
+   ```bash
+   export RTI_LICENSE_HOST_PATH="${RTI_LICENSE_HOST_PATH:-$HOME/rti_license.dat}"
+   test -r "$RTI_LICENSE_HOST_PATH"
+   mkdir -p shared
+   install -m 600 "$RTI_LICENSE_HOST_PATH" shared/rti_license.dat
+   docker compose -f docker-compose.connext-7.7.yml build
+   docker compose -f docker-compose.connext-7.7.yml run --rm connext
+   ```
+
+3. **Or configure a native Connext installation:**
+   ```bash
+   export NDDSHOME=/path/to/rti_connext_dds-7.7.0
+   ```
+
+4. **Configure your target environment:**
    Source the helper script for your target architecture:
    ```bash
    source $NDDSHOME/resource/scripts/rtisetenv_x64Linux4gcc8.5.0.bash
    ```
    
-   The supported container workflow below provides the tested Ubuntu 24.04 environment.
+   The supported container workflow above provides the tested Ubuntu 24.04 environment.
 
-4. **Build the project:**
+5. **Build the project:**
    ```bash
    mkdir -p build && cd build
    cmake ..

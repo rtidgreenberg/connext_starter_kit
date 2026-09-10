@@ -36,7 +36,7 @@ list(APPEND CMAKE_MODULE_PATH
 
 # Find RTI Connext DDS
 find_package(RTIConnextDDS
-    "7.3.0"
+    "7.7.0"
     REQUIRED
     COMPONENTS
         core

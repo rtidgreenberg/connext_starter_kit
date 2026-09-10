@@ -62,50 +62,48 @@ class LiveFixtureTest(unittest.TestCase):
   TYPE_WAIT = 4.0
   PROBE_TIMEOUT = 6.0
 
-  @classmethod
-  def setUpClass(cls):
+  def setUp(self):
     compat.configure_rti_environment()
-    cls.domain = _domain()
+    self.domain = _domain()
     env = dict(os.environ)
     env["PYTHONPATH"] = TOOL_DIR + os.pathsep + env.get("PYTHONPATH", "")
-    cls.publisher = subprocess.Popen(
-        [sys.executable, FIXTURE, "--mode", cls.MODE, "--domain", str(cls.domain),
-         "--topic", cls.TOPIC, "--duration", "60"],
+    self.publisher = subprocess.Popen(
+        [sys.executable, FIXTURE, "--mode", self.MODE, "--domain", str(self.domain),
+         "--topic", self.TOPIC, "--duration", "60"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
     time.sleep(4.0)
 
-    cls.registry = discovery.DiscoveryRegistry(type_wait=cls.TYPE_WAIT)
-    cls.participant, settings = discovery.create_participant(
-        cls.domain, name="RTI DOCTOR TEST", registry=cls.registry)
-    cls.session = engine.Session(
-        participant=cls.participant, registry=cls.registry,
-        own_qos=cls.participant.qos, type_lookup_settings=settings,
-        domain_id=cls.domain, type_wait=cls.TYPE_WAIT,
-        probe_timeout=cls.PROBE_TIMEOUT)
+    self.registry = discovery.DiscoveryRegistry(type_wait=self.TYPE_WAIT)
+    self.participant, settings = discovery.create_participant(
+        self.domain, name="RTI DOCTOR TEST", registry=self.registry)
+    self.session = engine.Session(
+        participant=self.participant, registry=self.registry,
+        own_qos=self.participant.qos, type_lookup_settings=settings,
+        domain_id=self.domain, type_wait=self.TYPE_WAIT,
+        probe_timeout=self.PROBE_TIMEOUT)
 
     deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:
-      discovery.refresh_participants(cls.participant, cls.registry)
-      writer = cls.registry.find_writer(cls.TOPIC)
+      discovery.refresh_participants(self.participant, self.registry)
+      writer = self.registry.find_writer(self.TOPIC)
       if writer is not None and writer.type is not None:
         break
-      cls.registry.expire_type_waits()
+      self.registry.expire_type_waits()
       if writer is not None and writer.type_state == records.TYPE_UNAVAILABLE:
         break
       time.sleep(0.25)
-    cls.registry.expire_type_waits()
+    self.registry.expire_type_waits()
 
-  @classmethod
-  def tearDownClass(cls):
+  def tearDown(self):
     try:
-      cls.participant.close()
+      self.participant.close()
     except Exception:
       pass
-    cls.publisher.terminate()
+    self.publisher.terminate()
     try:
-      cls.publisher.wait(timeout=10)
+      self.publisher.wait(timeout=10)
     except subprocess.TimeoutExpired:  # pragma: no cover
-      cls.publisher.kill()
+      self.publisher.kill()
 
   def diagnose(self, probe=True):
     writer = self.registry.find_writer(self.TOPIC)

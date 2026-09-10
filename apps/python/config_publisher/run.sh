@@ -29,4 +29,5 @@ python_env_ensure_versioned_types
 
 # --- Run ---
 echo "Starting config_publisher..."
+cd "$SCRIPT_DIR"
 python "$SCRIPT_DIR/config_publisher.py" "$@"

@@ -98,6 +98,9 @@ Options:
 ./run.sh --target robot1
 ```
 
+After completing its list, get, and set requests, the client remains running to
+receive parameter-event broadcasts. Stop it with Ctrl+C.
+
 ## YAML Format
 
 ```yaml

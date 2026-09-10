@@ -26,6 +26,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         git \
         gnupg \
+        gstreamer1.0-libav \
+        gstreamer1.0-plugins-bad \
+        gstreamer1.0-plugins-good \
+        libgstreamer-plugins-base1.0-dev \
+        libgstreamer1.0-dev \
+        libpython3.12 \
         pkg-config \
         python3 \
         python3-pip \

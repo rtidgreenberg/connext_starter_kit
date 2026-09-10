@@ -60,7 +60,7 @@ apps/python/
 ├── install.sh              # Installation script (called by run.sh if needed)
 └── requirements.txt        # Common dependencies
 
-connext_dds_env/            # Shared virtual environment (at repository root)
+connext_dds_env_7.7_py<version>/  # Resolver-managed virtual environment (at repository root)
 ```
 
 ## Current Applications

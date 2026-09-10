@@ -1,3 +1,12 @@
+# (c) Copyright, Real-Time Innovations, 2026.  All rights reserved.
+# RTI grants Licensee a license to use, modify, compile, and create derivative
+# works of the software solely for use with RTI Connext DDS. Licensee may
+# redistribute copies of the software provided that all such copies are subject
+# to this license. The software is provided "as is", with no warranty of any
+# type, including any warranty for fitness for any purpose. RTI is under no
+# obligation to maintain or support the software. RTI shall not be liable for
+# any incidental or consequential damages arising out of the use or inability
+# to use the software.
 cmake_minimum_required(VERSION 3.12)
 project(ConnextStarterKit VERSION 1.0.0 LANGUAGES CXX)
 
@@ -13,11 +22,11 @@ if(NOT DEFINED CONNEXTDDS_ARCH AND NOT DEFINED ENV{CONNEXTDDS_ARCH})
         "\ninstallation directory, typically found at:"
         "\n  <install_dir>/resource/scripts/rtisetenv_<target>.bash"
         "\nExamples:"
-        "\n  source /opt/rti_connext_dds-7.3.0/resource/scripts/rtisetenv_x64Linux4gcc7.3.0.bash"
+        "\n  source /opt/rti.com/rti_connext_dds-7.7.0/resource/scripts/rtisetenv_x64Linux4gcc8.5.0.bash"
         "\nOr set it manually:"
-        "\n  export CONNEXTDDS_ARCH=x64Linux4gcc7.3.0"
+        "\n  export CONNEXTDDS_ARCH=x64Linux4gcc8.5.0"
         "\nOr pass it to cmake:"
-        "\n  cmake .. -DCONNEXTDDS_ARCH=x64Linux4gcc7.3.0"
+        "\n  cmake .. -DCONNEXTDDS_ARCH=x64Linux4gcc8.5.0"
         "\n========================================================================"
     )
 endif()
@@ -45,8 +54,9 @@ list(APPEND CMAKE_MODULE_PATH
 # ============================================================================
 # Find RTI Connext DDS
 # ============================================================================
+set(CONNEXTDDS_VERSION "7.7.0" CACHE STRING "RTI Connext DDS version")
 find_package(RTIConnextDDS
-    "7.3.0"
+    "${CONNEXTDDS_VERSION}"
     REQUIRED
     COMPONENTS
         core
@@ -57,6 +67,13 @@ find_package(RTIConnextDDS
 # Build DDS Types Library
 # ============================================================================
 add_subdirectory(dds)
+
+if(NOT GENERATE_CXX11_TYPES OR NOT GENERATE_DEFINITIONS OR NOT BUILD_CXX_TYPES_LIBRARY)
+    message(FATAL_ERROR
+        "C++ applications require GENERATE_CXX11_TYPES, GENERATE_DEFINITIONS, "
+        "and BUILD_CXX_TYPES_LIBRARY to be ON."
+    )
+endif()
 
 # ============================================================================
 # Build Example Applications

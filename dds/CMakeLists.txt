@@ -1,3 +1,12 @@
+# (c) Copyright, Real-Time Innovations, 2026.  All rights reserved.
+# RTI grants Licensee a license to use, modify, compile, and create derivative
+# works of the software solely for use with RTI Connext DDS. Licensee may
+# redistribute copies of the software provided that all such copies are subject
+# to this license. The software is provided "as is", with no warranty of any
+# type, including any warranty for fitness for any purpose. RTI is under no
+# obligation to maintain or support the software. RTI shall not be liable for
+# any incidental or consequential damages arising out of the use or inability
+# to use the software.
 cmake_minimum_required(VERSION 3.12)
 project(DDSTypeSupport VERSION 1.0.0 LANGUAGES CXX)
 
@@ -10,7 +19,7 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
         "Please build from the top-level directory:\n"
         "  cd <path-to-connext_starter_kit>\n"
         "  mkdir -p build && cd build\n"
-        "  cmake .. -DCONNEXTDDS_ARCH=x64Linux4gcc7.3.0\n"
+        "  cmake .. -DCONNEXTDDS_ARCH=x64Linux4gcc8.5.0\n"
         "  cmake --build ."
     )
 endif()
@@ -49,7 +58,7 @@ file(MAKE_DIRECTORY ${XML_OUTPUT_DIR})
 # ============================================================================
 # Find RTI Connext DDS
 # ============================================================================
-find_package(RTIConnextDDS "7.3.0" REQUIRED COMPONENTS core)
+find_package(RTIConnextDDS "7.7.0" REQUIRED COMPONENTS core)
 include(ConnextDdsCodegen)
 
 # ============================================================================
@@ -81,6 +90,8 @@ set(ALL_CXX11_HEADERS)
 set(ALL_PYTHON_FILES)
 set(ALL_XML_FILES)
 set(ALL_CODEGEN_TIMESTAMPS)
+set(CONNEXTDDS_CXX11_STANDARD "DDS_PSM_Cxx" CACHE STRING
+    "C++11 mapping passed to rtiddsgen")
 
 # ============================================================================
 # Generate Type Support for Each IDL File (excluding Definitions)
@@ -95,6 +106,7 @@ foreach(IDL_FILE ${TYPE_SUPPORT_IDL_FILES})
         connextdds_rtiddsgen_run(
             UNBOUNDED
             LANG "C++11"
+            EXTRA_ARGS "-standard" "${CONNEXTDDS_CXX11_STANDARD}"
             OUTPUT_DIRECTORY ${CXX11_OUTPUT_DIR}
             IDL_FILE ${IDL_FILE}
             VAR ${IDL_BASENAME}_cxx
@@ -156,6 +168,7 @@ if(GENERATE_DEFINITIONS AND EXISTS ${DEFINITIONS_IDL})
         connextdds_rtiddsgen_run(
             UNBOUNDED
             LANG "C++11"
+            EXTRA_ARGS "-standard" "${CONNEXTDDS_CXX11_STANDARD}"
             OUTPUT_DIRECTORY ${CXX11_OUTPUT_DIR}
             IDL_FILE ${DEFINITIONS_IDL}
             VAR definitions_cxx

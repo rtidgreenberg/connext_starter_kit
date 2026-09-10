@@ -41,7 +41,7 @@ dds/
         ├── DDSReaderSetup.hpp      # Template reader interface
         └── DDSWriterSetup.hpp      # Template writer interface
 
-Note: The top-level build directory (../../build/) is where the CMake build system 
+Note: The top-level build directory (`../build/`) is where the CMake build system
 generates all DDS types, builds the DDS library, and compiles application binaries:
 
 ```
@@ -200,17 +200,17 @@ Profile names are centralized in `Definitions.idl` (qos_profiles module) for cro
 ## Building
 
 ### Prerequisites
-- **RTI Connext DDS 7.3.0+** installed and licensed
+- **RTI Connext DDS 7.7.0** installed and licensed, or use the Ubuntu 24.04 Docker container
 - **CMake 3.12+** for build automation
-- **C++14 compiler** (GCC 7.3+, Clang, MSVC)
-- **Python 3.10** with RTI Connext DDS Python API 7.7.0 from PyPI (`rti.connext==7.7.0`) for Python apps/tools
+- **C++14 compiler** (the container provides GCC 13)
+- **Python 3.10+** with RTI Connext DDS Python API 7.7.0 from PyPI (`rti.connext==7.7.0`) for Python apps/tools
 
 ### Quick Start
 
 ```bash
 # Set RTI environment variable and architecture
-export NDDSHOME=/path/to/rti_connext_dds-7.3.0
-source $NDDSHOME/resource/scripts/rtisetenv_<target>.bash
+export NDDSHOME=/path/to/rti_connext_dds-7.7.0
+source $NDDSHOME/resource/scripts/rtisetenv_x64Linux4gcc8.5.0.bash
 
 # Build from top-level (automatically builds all type support)
 cd /path/to/connext_starter_kit
@@ -324,9 +324,9 @@ writer = dds.DataWriter(
 ## 📖 Related Documentation
 
 - **Application READMEs**: `../apps/cxx11/README.md`, `../apps/python/README.md`
-- **RTI Documentation**: [RTI Connext DDS User Manual](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/manuals/connext_dds_professional/html_files/RTI_ConnextDDS_CoreLibraries_UsersManual/)
+- **RTI Documentation**: [RTI Connext DDS User Manual](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/html_files/RTI_ConnextDDS_CoreLibraries_UsersManual/)
 - **IDL Specification**: [OMG IDL 4.2](https://www.omg.org/spec/IDL/4.2/)
-- **QoS Guide**: [RTI Connext DDS QoS Reference](https://community.rti.com/static/documentation/connext-dds/7.3.0/doc/manuals/connext_dds_professional/html_files/RTI_ConnextDDS_CoreLibraries_QoS_Reference_Guide/)
+- **QoS Guide**: [RTI Connext DDS QoS Reference](https://community.rti.com/static/documentation/connext-dds/7.7.0/doc/manuals/connext_dds_professional/html_files/RTI_ConnextDDS_CoreLibraries_QoS_Reference_Guide/)
 
 ---
 

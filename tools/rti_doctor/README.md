@@ -46,11 +46,10 @@ each time: see [Verifying Delivery to a Reader](#verifying-delivery-to-a-reader-
 bootstrap to find or install it. See [Supported Connext
 Versions](#supported-connext-versions).
 
-**Python** — nothing to install by hand. The launcher creates the matching
-repository-local virtual environment and synchronizes its runtime dependencies
-on every launch. 7.3 uses `connext_dds_env_7.3/`; 7.7 uses
-`connext_dds_env/` for Python 3.10 or `connext_dds_env_7.7_py<python>/` for a
-newer supported Python version.
+**Python** — nothing to install by hand. The launcher creates a repository-local
+virtual environment using the newest supported Python 3.10+ interpreter and
+synchronizes its runtime dependencies on every launch. The Ubuntu 24.04 Docker
+container uses Python 3.12.
 
 **tshark — optional, and only for packet analysis.** Doctor runs fully without
 it: RTI Network Capture and `--pcap` use it to analyze existing PCAP files. Install
@@ -222,14 +221,14 @@ Linux target. The target does not need Python, pip, the source repository, or
 the RTI Python wheel.
 
 1. Install the build prerequisites for the wheel's Python version, including
-  its shared library. For example, a Connext 7.3 `cp39` wheel on Debian/Ubuntu
-  needs `python3.9`, `python3.9-venv`, and `libpython3.9`.
+  its shared library. For example, a Connext 7.7 `cp312` wheel on Ubuntu 24.04
+  needs `python3.12`, `python3.12-venv`, and `libpython3.12`.
 
 2. Prepare the connected build environment with an activated RTI wheel:
 
   ```bash
   ./scripts/prepare_rti_doctor_bundle_env.sh \
-    --wheel "$NDDSHOME"/resource/python_api/rti_connext_activated-<version>-cp<python>-*.whl
+    --wheel "$NDDSHOME"/resource/python_api/rti_connext_activated-7.7.0-cp312-*.whl
   ```
 
 3. Build the archive. This reuses the prepared environment and downloads
@@ -603,21 +602,11 @@ Findings have stable, greppable ids. The ones that matter most:
 
 | Version | Status |
 |---|---|
-| 7.7.x | **Verified** — full check catalog, all tests pass |
-| 7.3.x | **Verified** — all tests pass; `request_types_filter` is unavailable, which the report records explicitly |
-| 6.1.2 | **Feature-detected but not verified here** — no 6.1.2 install was available to test against |
-
-For Connext 7.3.x, RTI Doctor supports Python 3.9. The launcher selects the
-matching Python 3.9 virtual environment and Connext API wheel automatically.
+| 7.7.0 | **Verified** — full check catalog and unit suite pass |
 
 Every version-sensitive field goes through `rti_doctor/compat.py`, which reports a
 missing field rather than assuming a value. The known differences are documented
 in that module's docstring.
-
-On 7.3.x, `DiscoveryConfig.request_types_filter` does not exist. That setting is
-what makes Connext fetch a remote type for which it has no local matching reader,
-so on 7.3.x a `type.no_type_info` finding is *less* conclusive — the report names
-our own missing filter as the first candidate cause rather than blaming the peer.
 
 ## XTypes Compliance Mask
 
@@ -726,8 +715,7 @@ pip install -r tools/rti_doctor/requirements.txt \
 ```
 
 ```bash
-export VENV_PYTHON=$(printf '%s\n' connext_dds_env_*_py311/bin/python \
-  connext_dds_env_*/bin/python | head -1)
+export VENV_PYTHON=$(find . -path './connext_dds_env_*/bin/python' -type f -executable | sort -V | tail -n 1)
 ```
 
 Run the static gate with that environment:

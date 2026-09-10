@@ -4,10 +4,10 @@ Cross-language DDS system/application templates to accelerate development.
 
 ## Prerequisites
 
-- **RTI Connext DDS 7.3.0+** [installed and licensed](https://community.rti.com/static/documentation/connext-dds/current/doc/manuals/connext_dds_professional/installation_guide/index.html) for C++ apps, DDS type support, and command-line services
+- **RTI Connext DDS 7.7.0** [installed and licensed](https://community.rti.com/static/documentation/connext-dds/current/doc/manuals/connext_dds_professional/installation_guide/index.html) for C++ apps, DDS type support, and command-line services
 - **RTI Connext DDS Python API** for Python apps and Python GUI/tools. Launchers can install the public PyPI package with an RTI license file, or use an activated wheel from an RTI Connext installation.
-- **C++14 compiler** (GCC 7.3.0+ or equivalent) for C++ apps
-- **Python 3.10** with virtual environment support for Python apps and tools
+- **C++14 compiler** (the Ubuntu 24.04 container provides GCC 13) for C++ apps
+- **Python 3.10+** with virtual environment support for Python apps and tools. The Docker workflow uses Python 3.12.
 - **CMake 3.12+** for build configuration
 - **Git submodules**: Clone with `--recurse-submodules` or run `git submodule update --init --recursive`
 
@@ -15,7 +15,7 @@ Cross-language DDS system/application templates to accelerate development.
 
 1. **Set RTI environment:**
    ```bash
-   export NDDSHOME=/path/to/rti_connext_dds-7.3.0
+   export NDDSHOME=/path/to/rti_connext_dds-7.7.0
    ```
 
 2. **Clone with submodules:**
@@ -27,15 +27,10 @@ Cross-language DDS system/application templates to accelerate development.
 3. **Configure your target environment:**
    Source the helper script for your target architecture:
    ```bash
-   source $NDDSHOME/resource/scripts/rtisetenv_<target>.bash
+   source $NDDSHOME/resource/scripts/rtisetenv_x64Linux4gcc8.5.0.bash
    ```
    
-   Examples:
-   ```bash
-   source $NDDSHOME/resource/scripts/rtisetenv_x64Linux4gcc7.3.0.bash
-   source $NDDSHOME/resource/scripts/rtisetenv_x64Win64VS2019.bash
-   source $NDDSHOME/resource/scripts/rtisetenv_x64Darwin20clang12.0.0.bash
-   ```
+   The supported container workflow below provides the tested Ubuntu 24.04 environment.
 
 4. **Build the project:**
    ```bash
@@ -64,6 +59,54 @@ Cross-language DDS system/application templates to accelerate development.
    source is available; unattended runs must set one of the variables above.
    
    Get a free trial license at https://www.rti.com/get-connext
+
+## Container Runtime Testing
+
+Run runtime tests in the provided Ubuntu 24.04 Connext 7.7.0 container. It
+installs the Connext Debian packages from RTI's official APT repository and
+`rti.connext==7.7.0` from PyPI. Do not use a host virtual environment for
+runtime validation that loads RTI libraries or services.
+
+Initialize the repository submodule before building:
+
+```bash
+git submodule update --init --recursive
+```
+
+Copy the host license file into the ignored `shared/` bind-mount directory.
+The container reads it as `/shared/rti_license.dat`:
+
+```bash
+export RTI_LICENSE_HOST_PATH="${RTI_LICENSE_HOST_PATH:-$HOME/rti_license.dat}"
+test -r "$RTI_LICENSE_HOST_PATH"
+mkdir -p shared
+install -m 600 "$RTI_LICENSE_HOST_PATH" shared/rti_license.dat
+docker compose -f docker-compose.connext-7.7.yml build
+docker compose -f docker-compose.connext-7.7.yml run --rm connext
+```
+
+The repository is mounted read-only at `/workspace`. Copy it to `/tmp` for
+builds and tests that create repository-relative artifacts. Run the C++ build
+and RTI Doctor unit suite with:
+
+```bash
+docker compose -f docker-compose.connext-7.7.yml run --rm connext \
+   bash -lc 'cp -a /workspace/. /tmp/connext-workspace && \
+   cd /tmp/connext-workspace && \
+   cmake -S . -B /tmp/connext-build \
+      -DCONNEXTDDS_VERSION=7.7.0 \
+      -DCONNEXTDDS_ARCH=x64Linux4gcc8.5.0 \
+      -DCONNEXTDDS_CXX11_STANDARD=DDS_PSM_Cxx && \
+   cmake --build /tmp/connext-build -j"$(nproc)" && \
+   ./tools/rti_doctor/run_tests.sh unit'
+```
+
+Use the same form for live tests, for example:
+
+```bash
+docker compose -f docker-compose.connext-7.7.yml run --rm connext \
+   ./tools/rti_doctor/run_tests.sh live
+```
 
 ## Table of Contents - What Do You Want to Do?
 

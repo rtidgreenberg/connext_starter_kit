@@ -1,4 +1,13 @@
 #!/bin/bash
+# (c) Copyright, Real-Time Innovations, 2026.  All rights reserved.
+# RTI grants Licensee a license to use, modify, compile, and create derivative
+# works of the software solely for use with RTI Connext DDS. Licensee may
+# redistribute copies of the software provided that all such copies are subject
+# to this license. The software is provided "as is", with no warranty of any
+# type, including any warranty for fitness for any purpose. RTI is under no
+# obligation to maintain or support the software. RTI shall not be liable for
+# any incidental or consequential damages arising out of the use or inability
+# to use the software.
 # Common Python environment bootstrap helpers for repository launchers.
 
 python_env_init() {
@@ -210,9 +219,7 @@ python_env_select_python_for_connext_77() {
 }
 
 # Selects the Python interpreter, venv directory, and rti.connext pip version
-# to use based on the detected NDDSHOME Connext version. Connext 7.3.x keeps
-# its verified Python 3.9 environment, while 7.7.x selects the newest locally
-# installed supported Python version.
+# for the supported Connext 7.7 environment.
 python_env_configure_for_connext_version() {
     local nddshome="${1-}"
     local full_version
@@ -230,17 +237,12 @@ python_env_configure_for_connext_version() {
     version_mm="${full_version%.*}"
     PYTHON_ENV_CONNEXT_VERSION="$version_mm"
 
-    case "$version_mm" in
-        7.3)
-            PYTHON_ENV_REQUIRED_PYTHON_BIN="python3.9"
-            PYTHON_ENV_REQUIRED_PYTHON_VERSION="3.9"
-            PYTHON_ENV_RTI_CONNEXT_PIP_VERSION="7.3.1"
-            PYTHON_ENV_VENV_DIR="${PYTHON_ENV_REPO_ROOT}/connext_dds_env_7.3"
-            ;;
-        *)
-            PYTHON_ENV_RTI_CONNEXT_PIP_VERSION="7.7.0"
-            ;;
-    esac
+    if [[ -n "$version_mm" && "$version_mm" != "7.7" ]]; then
+        echo "ERROR: Connext $full_version is not supported; this repository requires Connext 7.7.x."
+        return 1
+    fi
+
+    PYTHON_ENV_RTI_CONNEXT_PIP_VERSION="7.7.0"
 
     # Prefer the exact patch version reported by NDDSHOME itself over the
     # hardcoded per-bucket default above, so the fallback PyPI install and the
@@ -250,19 +252,17 @@ python_env_configure_for_connext_version() {
         PYTHON_ENV_RTI_CONNEXT_PIP_VERSION="$full_version"
     fi
 
-    if [[ "$version_mm" != "7.3" ]]; then
-        if ! python_env_select_python_for_connext_77; then
-            # Preserve the existing error path when no supported interpreter
-            # is installed; python_env_ensure_venv reports the remediation.
-            PYTHON_ENV_REQUIRED_PYTHON_BIN="python3.10"
-            PYTHON_ENV_REQUIRED_PYTHON_VERSION="3.10"
-        fi
+    if ! python_env_select_python_for_connext_77; then
+        # Preserve the existing error path when no supported interpreter
+        # is installed; python_env_ensure_venv reports the remediation.
+        PYTHON_ENV_REQUIRED_PYTHON_BIN="python3.10"
+        PYTHON_ENV_REQUIRED_PYTHON_VERSION="3.10"
+    fi
 
-        if [[ "$PYTHON_ENV_REQUIRED_PYTHON_VERSION" == "3.10" ]]; then
-            PYTHON_ENV_VENV_DIR="${PYTHON_ENV_REPO_ROOT}/connext_dds_env"
-        else
-            PYTHON_ENV_VENV_DIR="${PYTHON_ENV_REPO_ROOT}/connext_dds_env_7.7_py${PYTHON_ENV_REQUIRED_PYTHON_VERSION//./}"
-        fi
+    if [[ "$PYTHON_ENV_REQUIRED_PYTHON_VERSION" == "3.10" ]]; then
+        PYTHON_ENV_VENV_DIR="${PYTHON_ENV_REPO_ROOT}/connext_dds_env"
+    else
+        PYTHON_ENV_VENV_DIR="${PYTHON_ENV_REPO_ROOT}/connext_dds_env_7.7_py${PYTHON_ENV_REQUIRED_PYTHON_VERSION//./}"
     fi
     PYTHON_ENV_VENV_PYTHON="${PYTHON_ENV_VENV_DIR}/bin/python"
 }
@@ -332,7 +332,9 @@ python_env_resolve_nddshome() {
     export NDDSHOME="$detected_nddshome"
     echo "NDDSHOME: $NDDSHOME"
 
-    python_env_configure_for_connext_version "$NDDSHOME"
+    if ! python_env_configure_for_connext_version "$NDDSHOME"; then
+        return 1
+    fi
     if [[ -n "$PYTHON_ENV_CONNEXT_VERSION" ]]; then
         echo "Detected Connext version: $PYTHON_ENV_CONNEXT_VERSION"
     else
@@ -444,9 +446,8 @@ PY
 }
 
 # Installs the rti.connext Python API version matching the detected NDDSHOME
-# Connext version (set by python_env_configure_for_connext_version). Call this
-# after python_env_activate_venv so both Connext 7.3.x (Python 3.9) and
-# Connext 7.7.x (Python 3.10) get the correct wheel automatically.
+# Connext 7.7 version (set by python_env_configure_for_connext_version). Call
+# this after python_env_activate_venv so the matching wheel is installed.
 #
 # Prefers the "rti.connext.activated" wheel bundled with the local NDDSHOME
 # install (under $NDDSHOME/resource/python_api/) since it is pre-activated

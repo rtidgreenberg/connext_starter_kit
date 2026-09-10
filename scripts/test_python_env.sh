@@ -1,4 +1,13 @@
 #!/bin/bash
+# (c) Copyright, Real-Time Innovations, 2026.  All rights reserved.
+# RTI grants Licensee a license to use, modify, compile, and create derivative
+# works of the software solely for use with RTI Connext DDS. Licensee may
+# redistribute copies of the software provided that all such copies are subject
+# to this license. The software is provided "as is", with no warranty of any
+# type, including any warranty for fitness for any purpose. RTI is under no
+# obligation to maintain or support the software. RTI shall not be liable for
+# any incidental or consequential damages arising out of the use or inability
+# to use the software.
 # Focused tests for source selection in scripts/python_env.sh.
 
 set -euo pipefail
@@ -53,7 +62,7 @@ python_env_is_interactive() {
 }
 
 reset_environment() {
-    unset NDDSHOME RTI_PYTHON_WHEEL TEST_ACTIVATED_VERSION TEST_PUBLIC_VERSION TEST_BUNDLED_WHEEL TEST_BUNDLED_PYTHON_TAGS TEST_AVAILABLE_PYTHONS TEST_INTERACTIVE
+    unset NDDSHOME RTI_LICENSE_FILE RTI_PYTHON_WHEEL TEST_ACTIVATED_VERSION TEST_PUBLIC_VERSION TEST_BUNDLED_WHEEL TEST_BUNDLED_PYTHON_TAGS TEST_AVAILABLE_PYTHONS TEST_INTERACTIVE
     RTI_PYTHON_SOURCE=auto
     python_env_init "test" "$SCRIPT_DIR/.."
 }
@@ -75,9 +84,9 @@ assert_equals "/test/python3.11" "$PYTHON_ENV_REQUIRED_PYTHON_BIN" "a matching b
 
 reset_environment
 TEST_AVAILABLE_PYTHONS="3.10,3.12"
-python_env_configure_for_connext_version "/opt/rti_connext_dds-7.3.1"
-assert_equals "python3.9" "$PYTHON_ENV_REQUIRED_PYTHON_BIN" "Connext 7.3 should retain its Python 3.9 policy"
-assert_equals "$SCRIPT_DIR/../connext_dds_env_7.3" "$PYTHON_ENV_VENV_DIR" "Connext 7.3 should retain its existing venv"
+if python_env_configure_for_connext_version "/opt/rti_connext_dds-7.3.1" >/dev/null 2>&1; then
+    fail "Connext 7.3 should be rejected"
+fi
 
 reset_environment
 TEST_ACTIVATED_VERSION="7.7.0"

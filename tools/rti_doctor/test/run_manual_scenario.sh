@@ -53,7 +53,7 @@ Options:
   -d, --domain ID             DDS domain (default: 42).
   -t, --topic NAME            Topic for single-fixture scenarios (default: DoctorManual).
   -p, --topic-prefix PREFIX   Topic prefix for RxO scenarios (default: ManualRxO).
-      --duration SECONDS      Fixture lifetime (default: 300).
+            --duration SECONDS      Fixture lifetime (default: 900).
       --mixed-seed N          mixed-qos-topology: replay a previous run's
                               scenario. Omitted, the fixture draws a fresh seed
                               and prints it.
@@ -65,7 +65,7 @@ scenario=""
 domain=42
 topic="DoctorManual"
 topic_prefix="ManualRxO"
-duration=300
+duration=900
 # Empty means "let the fixture draw one and print it". A randomized scenario is
 # only usable if a run that found something can be replayed, and this scenario
 # is the main way anyone runs the mixed_qos fixture by hand - so the passthrough

@@ -21,13 +21,12 @@ Cross-language DDS system/application templates to accelerate development.
 
 2. **Build and enter the supported container:**
    ```bash
-   export RTI_LICENSE_HOST_PATH="${RTI_LICENSE_HOST_PATH:-$HOME/rti_license.dat}"
-   test -r "$RTI_LICENSE_HOST_PATH"
-   mkdir -p shared
-   install -m 600 "$RTI_LICENSE_HOST_PATH" shared/rti_license.dat
-   docker compose -f docker-compose.connext-7.7.yml build
-   docker compose -f docker-compose.connext-7.7.yml run --rm connext
+   ./scripts/run_connext_container.sh
    ```
+
+   Set `RTI_LICENSE_HOST_PATH` when the license is not at
+   `$HOME/rti_license.dat`. Arguments are passed into the container, for
+   example `./scripts/run_connext_container.sh bash`.
 
 3. **Or configure a native Connext installation:**
    ```bash
